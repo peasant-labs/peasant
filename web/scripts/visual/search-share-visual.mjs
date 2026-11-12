@@ -10,6 +10,9 @@ import { fileURLToPath } from 'node:url'
 import YAML from 'yaml'
 import { SurfaceGate } from './surface-gate.mjs'
 import { applyDeterminism } from './determinism.mjs'
+import { ownedServerSandbox } from './lib/owned-server-sandbox.mjs'
+import { startOwnedServer } from './lib/owned-server-start.mjs'
+import { groupedSyncPayload } from './grouped-sync-payload.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE, '../../..')
@@ -31,7 +34,11 @@ const FEATURE_BYTES = Object.freeze({
 const THEMES = ['dark', 'light']
 const VIEWPORTS = [{ id: 'desktop', width: 1440, height: 1000 }, { id: 'mobile', width: 390, height: 844 }]
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
-const fail = (message) => { throw new Error(`Search/share visual harness failed: ${message}`) }
+const fail = (message, exit = false) => {
+  const detail = `Search/share visual harness failed: ${message}`
+  if (exit) { console.error(`ERROR [search-share-visual] ${detail}`); process.exit(2) }
+  throw new Error(detail)
+}
 
 // Parse an absolute M/L path into its ordered vertices. Returns an error string
 // if the path uses anything other than a single subpath of straight segments.
@@ -201,41 +208,6 @@ function assertProvenance() {
 }
 function response(body) { return { status: 200, contentType: 'application/json', body: JSON.stringify(body) } }
 const VISUAL_PROJECT_HASH = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
-// The share chooser reads the grouped sync route. Build the grouped envelope
-// from the same flat session rows so the harness stays a thin transport mock:
-// the route, shell, chooser, hierarchy and helper-group code remain real.
-function groupedSyncPayload(sessions) {
-  const items = sessions.map((session) => ({
-    kind: 'transcript',
-    transcript: {
-      session,
-      sync: {
-        id: session.id,
-        harness: session.harness,
-        projectName: session.project,
-        projectHash: session.projectHash,
-        hostSlug: 'visual-host',
-        startTime: session.startTime,
-        durationMs: Math.round(session.durationMins * 60000),
-        totalTokens: session.totalTokens,
-        turnCount: session.turnCount,
-        model: 'visual-model',
-        syncStatus: 'new',
-        previouslyPushed: false,
-      },
-    },
-    helperGroups: (session.helperGroups || []).map((group) => ({ ...group, purpose: 'helper_review' })),
-  }))
-  return {
-    items,
-    page: 1,
-    limit: items.length,
-    totalItems: items.length,
-    ordinarySessionTotal: sessions.length,
-    helperThreadTotal: sessions.reduce((total, session) => total + (session.helperGroups || []).reduce((count, group) => count + group.helperThreadCount, 0), 0),
-  }
-}
-
 // The palette reads the opt-in grouped search view. Each flat fixture hit
 // becomes the owner transcript's own match, exactly how the grouped route
 // carries an ordinary result; the palette flattens it back for annotations.
@@ -622,14 +594,14 @@ const fixture = readFixture()
 const chunks = assertProvenance()
 mkdirSync(OUT, { recursive: true })
 const puppeteer = (await import(process.env.PUPPETEER_CORE || 'puppeteer-core')).default
-const server = spawn(BIN, ['web', 'start', '--port', PORT, '--foreground', '--no-browser', '--mock-data-store=web,sessions,search'], { cwd: REPO, stdio: ['ignore', 'ignore', 'pipe'] })
-let serverError = ''
-server.stderr.on('data', (data) => { serverError += data.toString() })
+// The server's configuration, data, state and cache directories and its HOME are a throwaway root of this run,
+// so it never opens the store of the person running the script. The mock data store supplies what it serves.
+const sandbox = ownedServerSandbox('search-share-visual')
+// It is started only when nothing answers on the port yet, and the wait ends when it answers or has exited,
+// so the pages are never driven against a server this run did not start.
+const server = await startOwnedServer({ port: PORT, portVariable: 'PEASANT_SEARCH_SHARE_PORT', start: () => spawn(BIN, ['web', 'start', '--port', PORT, '--foreground', '--no-browser', ...sandbox.args, '--mock-data-store=web,sessions,search'], { cwd: REPO, env: sandbox.env, stdio: ['ignore', 'ignore', 'pipe'] }) }).catch((error) => fail(error.message, true))
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: null })
 try {
-  let healthy = false
-  for (let i = 0; i < 40 && !healthy; i++) { healthy = (await fetch(`${ORIGIN}/api/v1/health`).catch(() => null))?.status === 200; if (!healthy) await pause(250) }
-  if (!healthy) fail(`real binary did not become healthy on ${ORIGIN}: ${serverError.trim()}`)
   for (const chunk of chunks) {
     const chunkPath = `/_next/static/chunks/${relative(join(WEB, 'out/_next/static/chunks'), chunk.path).split('\\').join('/')}`
     const served = await fetch(`${ORIGIN}${chunkPath}`)

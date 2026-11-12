@@ -93,7 +93,7 @@ cases:
               toolCallKey: call-a1
               toolResult: parser.go:12 plus fixture long output
         want:
-          turnCount: 4
+          turnCount: 3
           inputSubmissionCount: 1
           titleRefs: [e_u1]
           main:
@@ -166,7 +166,7 @@ cases:
               toolCallKey: call-9
               toolResult: parser.go:12
         want:
-          turnCount: 3
+          turnCount: 2
           inputSubmissionCount: 1
           titleRefs: [e_u1]
           main:
@@ -1818,7 +1818,7 @@ cases:
                 limitBytes: 8000
                 toolCallId: toolu_omitted_1
         want:
-          turnCount: 2
+          turnCount: 1
           inputSubmissionCount: 0
           titleRefs: []
           main:

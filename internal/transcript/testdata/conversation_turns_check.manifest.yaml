@@ -1,0 +1,7 @@
+requiredNames:
+  - presence
+  - continuity
+  - continuity-negative-count
+  - canonical
+  - canonical-overcount
+  - sound

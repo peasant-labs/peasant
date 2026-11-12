@@ -1,6 +1,7 @@
 requiredNames:
   - v72-compact-identity-facts
   - v75-image-attachments
+  - v77-turn-count-recount-marker
   - v74-conversation-turn-count
   - v70-parent-state
   - v71-derived-lookups
@@ -75,7 +76,7 @@ requiredNames:
   - v67-latest-attempt-pointer
   - v73-harness-check-widening
   - v76-search-trigger-repair
-  - v77-import-profile-and-outcome-reasons
+  - v78-import-profile-and-outcome-reasons
 requiredGuardNames:
   - deleted-required-slot
   - shared-needle

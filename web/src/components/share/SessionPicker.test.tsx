@@ -38,7 +38,7 @@ function loadLargeHistory(): ShareHierarchySession[] {
             id: `session-${project}-${location}-${branch}-${index}`,
             provider: 'claude-code', projectName: `project-${project}`, projectHash: `hash-${project}`,
             hostSlug: 'fixture-host', startTime: '2026-08-12T00:00:00Z', durationMins: 1,
-            totalTokens: ordinal + 1, turnCount: 1, model: 'fixture-model',
+            totalTokens: ordinal + 1, conversationTurns: 1, model: 'fixture-model',
             shareStatus: ordinal % config.unavailableEvery === 0 ? 'shared' : 'new', preview: `fixture prompt ${ordinal}`,
             locationLabel: `workspace-${project}-${location}`, repositoryLocationId: `location-${project}-${location}`,
             branch: `branch-${branch}`,

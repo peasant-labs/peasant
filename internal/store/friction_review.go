@@ -52,7 +52,7 @@ func (s *Store) ListFrictionReviewSessions(ctx context.Context) ([]FrictionRevie
 // review queue reports the same count as the session list and the transcript.
 const sqlFrictionReviewSessions = `SELECT
 	COALESCE(ats.session_id, ate.session_id) as sid,
-	COALESCE(` + sqlSessionTurnCount + `, 0),
+	COALESCE(` + sqlSessionConversationTurnCount + `, 0),
 	COALESCE(p.canonical_cwd, p.project_hash, ''),
 	SUM(CASE WHEN ak.name = 'agent' THEN 1 ELSE 0 END) as agent_count,
 	SUM(CASE WHEN ak.name = 'human' THEN 1 ELSE 0 END) as human_count

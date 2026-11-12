@@ -180,7 +180,7 @@ cases:
     role: assistant
     parts:
       - '{"id":"prt_reason_only","type":"reasoning","text":"thinking with no tool call"}'
-    want_message_entry_type: text
+    want_message_entry_type: thinking
     want_message_role: assistant
     want_turns:
       - role: assistant

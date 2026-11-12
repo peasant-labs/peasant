@@ -19,13 +19,15 @@ func TestComputeClaudeToolCarriers(t *testing.T) {
 		Cases         []struct {
 			Name    string `yaml:"name"`
 			Entries []struct {
-				Index   int            `yaml:"index"`
-				Harness schema.Harness `yaml:"harness"`
-				Role    schema.Role    `yaml:"role"`
-				Depth   int            `yaml:"depth"`
-				Parent  *int           `yaml:"parent"`
-				Tools   string         `yaml:"tools"`
-				Call    string         `yaml:"call"`
+				Index      int            `yaml:"index"`
+				Harness    schema.Harness `yaml:"harness"`
+				Role       schema.Role    `yaml:"role"`
+				Depth      int            `yaml:"depth"`
+				Parent     *int           `yaml:"parent"`
+				EntryType  string         `yaml:"type"`
+				HasToolUse bool           `yaml:"hasToolUse"`
+				Tools      string         `yaml:"tools"`
+				Call       string         `yaml:"call"`
 			} `yaml:"entries"`
 			Tools     int `yaml:"tools"`
 			Subagents int `yaml:"subagents"`
@@ -45,6 +47,19 @@ func TestComputeClaudeToolCarriers(t *testing.T) {
 			entries := make([]schema.SessionEntry, len(c.Entries))
 			for i, source := range c.Entries {
 				entry := schema.SessionEntry{SessionID: sid, EntryIndex: source.Index, Harness: source.Harness, Role: source.Role, Depth: source.Depth, ParentIndex: source.Parent, EntryType: ingest.EntryTypeText}
+				if source.EntryType != "" {
+					switch source.EntryType {
+					case "text":
+						entry.EntryType = ingest.EntryTypeText
+					case "tool_use":
+						entry.EntryType = ingest.EntryTypeToolUse
+					default:
+						t.Fatalf("entry %d names unknown type %q; a carrier is text, a call is tool_use", source.Index, source.EntryType)
+					}
+				}
+				if source.HasToolUse {
+					entry.HasToolUse = true
+				}
 				if source.Tools != "" {
 					tools := source.Tools
 					entry.ToolNamesCSV = &tools
@@ -54,6 +69,15 @@ func TestComputeClaudeToolCarriers(t *testing.T) {
 				if source.Call != "" {
 					call := source.Call
 					entry.ToolCallID = &call
+				}
+				if entry.Harness == ingest.HarnessPi {
+					// Pi rows carry their typed evidence marker; without it
+					// the metrics read refuses the row before counting.
+					extra, err := ingest.EncodePiExtra(ingest.PiExtra{Kind: ingest.PiExtraState, Harness: ingest.HarnessPi})
+					if err != nil {
+						t.Fatalf("encode pi evidence: %v", err)
+					}
+					entry.Extra = extra
 				}
 				entries[i] = entry
 			}

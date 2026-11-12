@@ -55,16 +55,19 @@ func FoldEntriesWithImages(entries []schema.SessionEntry, evidence map[int]PiExt
 	return foldEntries(entries, evidence, facts)
 }
 
-// ConversationTurnCount counts the projected turns that are conversation: every
-// turn whose rendered role is not system. System rows stay served (a reader can
-// reveal them and search can land on them), but they are harness state, not
-// turns of the conversation, so every count surface excludes them. It is
-// computed once during indexing and carried to the store and the wire, so the
-// local list, detail, export and publication cannot disagree about a turn.
+// ConversationTurnCount counts the folded turns that are conversation turns
+// under the contract's allowed list (schema.IsConversationTurn): a top-level
+// turn whose role and entry type are user or assistant text or image. System
+// rows, tool rows and thinking-only replies stay served, but they are not the
+// turns a reader counts. The rule reads the role, the entry type and the depth
+// of the folded turn and never its content. It is computed once during
+// indexing and carried to the store and the wire, so the local list, detail,
+// export and publication cannot disagree about a turn. The number of folded
+// turns itself, len(turns), is the session's turnCount.
 func ConversationTurnCount(turns []Turn) int {
 	count := 0
 	for _, turn := range turns {
-		if turn.Role != schema.RoleSystem {
+		if schema.IsConversationTurn(turn.Role, turn.EntryType, turn.Depth) {
 			count++
 		}
 	}

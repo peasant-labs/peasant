@@ -68,8 +68,11 @@ func TestExportSession_CarriesControlKind(t *testing.T) {
 	if len(kinds) != 1 || kinds[1] != "mode" {
 		t.Fatalf("exported control kinds = %v, want only turn 1 = mode", kinds)
 	}
-	if payload.TurnCount != 2 {
-		t.Fatalf("exported turnCount = %d, want 2 conversation turns", payload.TurnCount)
+	if payload.TurnCount != 3 {
+		t.Fatalf("exported turnCount = %d, want the 3 folded turns", payload.TurnCount)
+	}
+	if payload.ConversationTurnCount == nil || *payload.ConversationTurnCount != 2 {
+		t.Fatalf("exported conversationTurnCount = %v, want 2 conversation turns", payload.ConversationTurnCount)
 	}
 	if err := schema.ValidateSessionDetailPayload(*payload); err != nil {
 		t.Fatalf("exported payload is invalid: %v", err)

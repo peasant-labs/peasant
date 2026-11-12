@@ -1,7 +1,4 @@
 requiredNames:
   - window-ten-assistants-each-side
-  - window-span-one
   - window-snaps-lower-user-turn
-  - window-snaps-higher-before-first-user
   - window-at-transcript-end
-  - window-near-first-user-turn

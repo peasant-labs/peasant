@@ -80,7 +80,8 @@ slots:
   - {name: v74-conversation-turn-count, slot: 74, needle: "conversation_turn_count INTEGER NOT NULL DEFAULT 0"}
   - {name: v75-image-attachments, slot: 75, needle: "CREATE TABLE session_attachments ("}
   - {name: v76-search-trigger-repair, slot: 76, needle: "SELECT 'rebuild' WHERE"}
-  - {name: v77-import-profile-and-outcome-reasons, slot: 77, needle: "CREATE TABLE ingest_outcome_reasons ("}
+  - {name: v77-turn-count-recount-marker, slot: 77, needle: "CREATE TABLE pending_recounts ("}
+  - {name: v78-import-profile-and-outcome-reasons, slot: 78, needle: "CREATE TABLE ingest_outcome_reasons ("}
 guards:
   - name: deleted-required-slot
     operation: delete-required-slot

@@ -1,8 +1,10 @@
 # The abandoned classifier counts conversation turns through the ingest fold,
 # never the retired metrics turn count. The divergent metricsTurnCount values
 # prove the stored/raw number cannot flip the verdict.
-expectedCaseCount: 4
+expectedCaseCount: 6
 requiredNames:
+  - one-prompt-one-text-reply
+  - one-prompt-thinking-only-reply
   - zero_tools_and_one_conversation_turn_is_abandoned
   - zero_tools_and_three_conversation_turns_is_not_abandoned
   - system_rows_do_not_make_a_second_conversation_turn
@@ -36,3 +38,22 @@ cases:
     entries:
       - {index: 0, role: user, content: "find the parser"}
     wantAbandoned: false
+  # A prompt answered with prose is two conversation turns.
+  - name: one-prompt-one-text-reply
+    toolCalls: 0
+    metricsTurnCount: 7
+    entries:
+      - {index: 0, role: user, content: "what does the parser do"}
+      - {index: 1, role: assistant, content: "it reads one record per line"}
+    conversationTurns: 2
+    wantAbandoned: false
+  # A prompt answered only by thinking is one conversation turn: the thinking
+  # row is served but is not on the allowed list. Abandoned is intended.
+  - name: one-prompt-thinking-only-reply
+    toolCalls: 0
+    metricsTurnCount: 7
+    entries:
+      - {index: 0, role: user, content: "what does the parser do"}
+      - {index: 1, role: assistant, entryType: thinking, content: "weighing how to explain it"}
+    conversationTurns: 1
+    wantAbandoned: true

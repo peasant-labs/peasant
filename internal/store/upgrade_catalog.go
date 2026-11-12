@@ -144,7 +144,8 @@ var upgradeStepCatalog = map[int]upgradeCatalogEntry{
 	74: {title: "add the conversation turn count and fill it for stored sessions", cost: UpgradeCostScalesWithRows, counts: UpgradeUnitSessions},
 	75: {title: "add image entries and rebuild the search index", cost: UpgradeCostScalesWithText, disk: entryTableRebuildDiskNeed},
 	76: {title: searchRepairQuickTitle, cost: UpgradeCostQuick},
-	77: {title: "store the import profile and give run outcomes stable ids", cost: UpgradeCostQuick},
+	77: {title: "mark the stored turn counts for a recount", cost: UpgradeCostQuick},
+	78: {title: "store the import profile and give run outcomes stable ids", cost: UpgradeCostQuick},
 }
 
 const (

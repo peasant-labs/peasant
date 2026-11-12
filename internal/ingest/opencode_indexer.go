@@ -550,9 +550,17 @@ func (idx *OpenCodeIndexer) indexRetainedSemanticMessages(sessionID SessionID, m
 		} else if inspection.skillName != "" {
 			extra := `{"command_name":"` + jsonEscapeString(inspection.skillName) + `"}`
 			entry.Extra = &extra
-		} else if inspection.toolPartCount > 0 && entry.Role == RoleAssistant {
-			entry.HasToolUse = true
-			entry.EntryType = EntryTypeToolUse
+		} else if entry.Role == RoleAssistant {
+			// Every assistant message types through the one prose rule, not
+			// only messages with a tool part: a reasoning-only message used
+			// to type as text and now types as thinking.
+			hasProse := strings.TrimSpace(extractOpenCodePreview(message.Data.Content)) != "" || inspection.hasProse
+			hasToolUse := inspection.toolPartCount > 0
+			hasThinking := inspection.hasReasoning
+			if hasToolUse {
+				entry.HasToolUse = true
+			}
+			entry.EntryType = assistantEntryType(hasProse, hasToolUse, hasThinking)
 		}
 		if entry.Role != RoleAssistant {
 			entry.Extra = removeThinkingLevelObservation(removeModelObservation(entry.Extra))
@@ -902,6 +910,11 @@ func inspectOpenCodeSemanticParts(parts []openCodeSemanticPart) partInspection {
 			// Prose and thinking parts carry no tool call. Counting them here
 			// would relabel an ordinary assistant message as a tool turn and
 			// hide its text behind an empty tool card.
+			if part.Data.Type == "reasoning" {
+				result.hasReasoning = true
+			} else if strings.TrimSpace(part.Data.Text) != "" {
+				result.hasProse = true
+			}
 		default:
 			result.toolPartCount++
 		}
@@ -1262,6 +1275,13 @@ type partInspection struct {
 	// Used for HasToolUse / EntryTypeToolUse refinement when neither
 	// isSystemEntry nor skillName is set.
 	toolPartCount int
+
+	// hasProse is true when a part carries non-blank model prose: a text
+	// part with non-blank text. A preview filled from a tool result is not
+	// prose. Reasoning parts are not prose either; hasReasoning records
+	// them so a reasoning-only message types as thinking, not text.
+	hasProse     bool
+	hasReasoning bool
 }
 
 // buildExtraJSON builds the Extra JSON string from message fields.

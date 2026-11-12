@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/schema"
 )
 
@@ -185,6 +186,22 @@ func Layouts() []Layout {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Tool < out[j].Tool })
 	return out
+}
+
+// LayoutOnly returns harnesses with at least one layout and no adapter, once
+// each in the contract's known order. It reads only the supplied slices.
+func LayoutOnly(layouts []Layout, harvestable []schema.Harness) []schema.Harness {
+	excluded := make(map[schema.Harness]bool, len(harvestable))
+	for _, harness := range harvestable {
+		excluded[harness] = true
+	}
+	var harnesses []schema.Harness
+	for _, layout := range layouts {
+		if !excluded[layout.Harness] {
+			harnesses = append(harnesses, layout.Harness)
+		}
+	}
+	return defaults.InKnownOrder(harnesses)
 }
 
 // NewTool validates a raw tool name against the registered layouts.

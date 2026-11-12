@@ -1,0 +1,8 @@
+requiredNames:
+  - harness-with-a-layout-and-no-adapter-is-layout-only
+  - harness-with-a-layout-and-an-adapter-is-not-layout-only
+  - harness-with-an-adapter-and-no-layout-is-not-layout-only
+  - two-tools-of-one-harness-give-one-entry
+  - result-is-in-known-order-for-reversed-layouts
+  - empty-layouts-give-an-empty-result
+  - unrecognised-layouts-follow-known-values-in-name-order

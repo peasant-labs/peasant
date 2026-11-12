@@ -57,7 +57,7 @@ was tagged but not published links to its tag instead.
   step if there is not enough. If free space is unknown, it warns before a long
   step and continues. Ctrl-C rolls back the running step and keeps the finished
   steps; run `peasant migrate --schema-only` to resume.
-- Migration 77 stores a profile of every import. `ingest_run_stages` holds one
+- Migration 78 stores a profile of every import. `ingest_run_stages` holds one
   row per pipeline stage per run (duration, counts, bytes, time spent waiting
   for the write lane), kept for the latest 100 runs, and `index_log` gains
   `parse_ms`, `write_ms` and `bytes`. `ingest_run_outcomes` now holds a
@@ -66,6 +66,29 @@ was tagged but not published links to its tag instead.
   reason with a stable id. A query that read `kind` or `reason_code` must join
   those tables; `docs/harvest-audit.md` has the new queries. The upgrade
   rebuilds that one small table and keeps every row of the latest 100 runs.
+
+## [0.17.0] - 2026-11-12
+
+### Added
+- Load-more boundaries in a long transcript, the scrubber ticks and the jump
+  alert name conversation turn ranges, such as "turns 20–43 of 77", in place
+  of segment and byte sizes.
+
+### Changed
+- Session lists, the transcript header, analytics and exports show a session's
+  conversation turns: the user and assistant turns that hold text or an image.
+  System and tool rows are no longer counted, so the number shown for a
+  session can drop, for example from 69 to 60. In the API, `turnCount` again
+  counts every folded turn and the new `conversationTurnCount` carries the
+  conversation count. This requires a Village deployed with schema 0.51.0;
+  deploy Village first.
+- An assistant reply is typed by whether it holds prose, for cursor, opencode
+  and Claude sessions (closes #959).
+
+### Database
+- Migration 77 recounts both turn counts of every stored session, once, the
+  first time the store is opened after the upgrade. A session with no stored
+  entries keeps the counts it had.
 
 ## [0.16.2] - 2026-11-12
 
@@ -1302,6 +1325,7 @@ Second public release. See the
 Initial public release. See the
 [v0.1.0 release](https://github.com/peasant-labs/peasant/releases/tag/v0.1.0).
 
+[0.17.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.17.0
 [0.16.2]: https://github.com/peasant-labs/peasant/releases/tag/v0.16.2
 [0.16.1]: https://github.com/peasant-labs/peasant/releases/tag/v0.16.1
 [0.16.0]: https://github.com/peasant-labs/peasant/tree/v0.16.0

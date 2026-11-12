@@ -232,16 +232,17 @@ func (p *StoreDataProvider) summariesFromRows(ctx context.Context, rows []store.
 			return nil, fmt.Errorf("store adapter: session summary %q has invalid stored project hash %q while mapping the sessions wire payload: %w; run `peasant ingest verify` and repair the store before retrying", row.SessionID, row.ProjectHash, hashErr)
 		}
 		s := SessionSummary{
-			ID:            row.SessionID,
-			Harness:       defaults.Harness(row.ModelHarness),
-			StartTime:     time.UnixMilli(row.StartMs).UTC(),
-			DurationMins:  row.DurationMinutes,
-			TotalTokens:   row.TokensTotal,
-			TurnCount:     row.TurnCount,
-			ToolCallCount: row.ToolCalls,
-			Project:       displayProjectName(row.CanonicalRemote, row.ProjectName),
-			ProjectHash:   projectHash,
-			Preview:       previews[row.SessionID],
+			ID:                    row.SessionID,
+			Harness:               defaults.Harness(row.ModelHarness),
+			StartTime:             time.UnixMilli(row.StartMs).UTC(),
+			DurationMins:          row.DurationMinutes,
+			TotalTokens:           row.TokensTotal,
+			TurnCount:             row.TurnCount,
+			ConversationTurnCount: conversationTurnCountWire(row.ConversationTurnCount),
+			ToolCallCount:         row.ToolCalls,
+			Project:               displayProjectName(row.CanonicalRemote, row.ProjectName),
+			ProjectHash:           projectHash,
+			Preview:               previews[row.SessionID],
 			// The producer's declaration travels with the summary, so a consumer
 			// reads a decision instead of re-deriving one from turn shapes.
 			SessionOrigin: schema.SessionOrigin(row.SessionOrigin),
@@ -435,7 +436,7 @@ func (p *StoreDataProvider) DashboardMetrics(ctx context.Context) (*DashboardPay
 	for i := range rows {
 		row := &rows[i]
 		totalTokens += row.TokensTotal
-		totalTurns += row.TurnCount
+		totalTurns += row.ConversationTurnCount
 		totalDuration += row.DurationMinutes
 		harnessBreakdown[defaults.Harness(row.ModelHarness)]++
 	}
@@ -772,6 +773,7 @@ func sessionRowToSession(row *store.SessionRow) ingest.Session {
 			TurnCount:     row.TurnCount,
 			ToolCallCount: row.ToolCalls,
 		},
+		ConversationTurnCount: conversationTurnCountWire(row.ConversationTurnCount),
 	}
 	s.GitBranch = ""
 	if row.GitBranch != nil {
@@ -790,6 +792,14 @@ func sessionRowToSession(row *store.SessionRow) ingest.Session {
 	s.ThinkingLevelRaw = row.ThinkingLevelRaw
 	s.ThinkingLevelHistory = row.ThinkingLevelHistory
 	return s
+}
+
+// conversationTurnCountWire carries a stored conversation turn count to the
+// optional wire field. A stored row always holds the count, so the field is
+// always present on a row read from the store.
+func conversationTurnCountWire(count int) *int64 {
+	wire := int64(count)
+	return &wire
 }
 
 // hasQuality reports whether a session row carries any computed quality
@@ -841,25 +851,26 @@ func rowToQualityMetrics(row *store.SessionRow) *schema.QualityMetrics {
 // sessionRowToQuality maps a store.SessionRow to a QualitySession.
 func sessionRowToQuality(row *store.SessionRow) QualitySession {
 	qs := QualitySession{
-		ID:                   row.SessionID,
-		Date:                 time.UnixMilli(row.StartMs).UTC().Format("2006-01-02"),
-		Project:              displayProjectName(row.CanonicalRemote, row.ProjectName),
-		TotalTokens:          row.TokensTotal,
-		InputTokens:          row.InputTokens,
-		OutputTokens:         row.OutputTokens,
-		TurnCount:            row.TurnCount,
-		ToolCalls:            row.ToolCalls,
-		DurationMinutes:      row.DurationMinutes,
-		FilesTouched:         row.FilesTouched,
-		LinesChanged:         row.LinesChanged,
-		RetryLoops:           row.RetryLoops,
-		RetryTokensWasted:    row.RetryTokensWasted,
-		WithinSessionReverts: row.WithinSessionReverts,
-		SignalDensity:        row.SignalDensity,
-		SpecQualityScore:     row.SpecQualityScore,
-		ExplorationRatio:     row.ExplorationRatio,
-		ScopeBreadth:         row.ScopeBreadth,
-		DiscoveryTurns:       row.DiscoveryTurns,
+		ID:                    row.SessionID,
+		Date:                  time.UnixMilli(row.StartMs).UTC().Format("2006-01-02"),
+		Project:               displayProjectName(row.CanonicalRemote, row.ProjectName),
+		TotalTokens:           row.TokensTotal,
+		InputTokens:           row.InputTokens,
+		OutputTokens:          row.OutputTokens,
+		TurnCount:             row.TurnCount,
+		ConversationTurnCount: conversationTurnCountWire(row.ConversationTurnCount),
+		ToolCalls:             row.ToolCalls,
+		DurationMinutes:       row.DurationMinutes,
+		FilesTouched:          row.FilesTouched,
+		LinesChanged:          row.LinesChanged,
+		RetryLoops:            row.RetryLoops,
+		RetryTokensWasted:     row.RetryTokensWasted,
+		WithinSessionReverts:  row.WithinSessionReverts,
+		SignalDensity:         row.SignalDensity,
+		SpecQualityScore:      row.SpecQualityScore,
+		ExplorationRatio:      row.ExplorationRatio,
+		ScopeBreadth:          row.ScopeBreadth,
+		DiscoveryTurns:        row.DiscoveryTurns,
 	}
 	if row.Title != nil {
 		qs.Title = *row.Title

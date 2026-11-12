@@ -1,0 +1,151 @@
+# A script that starts its own server gives it every directory it reads or writes, so the
+# person's store is never opened, and it drives only the server it started.
+requiredNames:
+  - server-sandbox-owns-every-directory
+  - server-sandbox-keeps-a-named-config-dir-and-still-owns-the-data
+  - server-sandbox-uses-a-data-dir-only-when-the-caller-names-it
+  - server-sandbox-treats-an-empty-name-as-not-named
+  - server-sandbox-never-keeps-an-inherited-directory
+  - server-sandbox-drops-inherited-database-paths
+  - server-sandbox-refuses-a-relative-root
+  - server-sandbox-refuses-a-relative-config-dir
+  - server-sandbox-refuses-a-relative-data-dir
+  - owned-server-sandbox-is-removed-when-the-script-exits
+  - owned-server-sandbox-is-removed-when-the-script-ends-normally
+  - owned-server-sandbox-is-removed-when-the-script-throws
+  - owned-server-sandbox-keeps-a-named-directory
+  - owned-server-sandbox-leaves-no-root-when-the-layout-is-refused
+  - owned-server-sandbox-refuses-a-name-that-is-not-a-slug
+  - named-directory-is-resolved-against-the-working-directory
+  - named-directory-stays-absolute
+  - named-directory-unset-or-empty-names-nothing
+  - owned-server-start-refuses-an-occupied-port
+  - owned-server-start-ends-the-wait-when-the-server-exits
+  - owned-server-start-returns-the-server-that-answers
+  - owned-server-start-refuses-an-answer-from-a-server-that-then-exits
+  - owned-server-start-stops-a-server-that-never-answers
+  - every-script-that-starts-the-binary-is-sandboxed-or-exempt
+cases:
+  # mode layout: `named` are the directories the caller names itself ($ROOT and $OTHER are
+  # throwaway directories of the test); every path in `expect` is relative to $ROOT unless it
+  # starts with $OTHER. `inherited` is the script's own environment; `kept` must be passed on
+  # unchanged and `dropped` must not reach the binary.
+  - name: server-sandbox-owns-every-directory
+    mode: layout
+    named: {}
+    expect: {configDir: config, dataDir: data, stateDir: state, home: home, cache: cache}
+  - name: server-sandbox-keeps-a-named-config-dir-and-still-owns-the-data
+    mode: layout
+    named: {configDir: $OTHER/their-config}
+    expect: {configDir: $OTHER/their-config, dataDir: data, stateDir: state, home: home, cache: cache}
+  - name: server-sandbox-uses-a-data-dir-only-when-the-caller-names-it
+    mode: layout
+    named: {configDir: $OTHER/their-config, dataDir: $OTHER/their-data}
+    expect: {configDir: $OTHER/their-config, dataDir: $OTHER/their-data, stateDir: state, home: home, cache: cache}
+  - name: server-sandbox-treats-an-empty-name-as-not-named
+    mode: layout
+    named: {configDir: "", dataDir: ""}
+    expect: {configDir: config, dataDir: data, stateDir: state, home: home, cache: cache}
+  - name: server-sandbox-never-keeps-an-inherited-directory
+    mode: layout
+    named: {}
+    inherited: {HOME: /home/someone, XDG_CONFIG_HOME: /home/someone/.config, XDG_DATA_HOME: /home/someone/.local/share, XDG_STATE_HOME: /home/someone/.local/state, XDG_CACHE_HOME: /home/someone/.cache, PATH: /usr/bin}
+    kept: {PATH: /usr/bin}
+    expect: {configDir: config, dataDir: data, stateDir: state, home: home, cache: cache}
+  - name: server-sandbox-drops-inherited-database-paths
+    mode: layout
+    named: {}
+    inherited: {OPENCODE_DB: /home/someone/.local/share/opencode/opencode.db, OPENCODE_DISABLE_CHANNEL_DB: "1", PATH: /usr/bin}
+    kept: {PATH: /usr/bin}
+    dropped: [OPENCODE_DB, OPENCODE_DISABLE_CHANNEL_DB]
+    expect: {configDir: config, dataDir: data, stateDir: state, home: home, cache: cache}
+  # mode refused-layout: `root` and `named` as given ($ROOT is an absolute throwaway directory).
+  - {name: server-sandbox-refuses-a-relative-root, mode: refused-layout, root: sandbox, named: {}, error: "its root is \"sandbox\", not an absolute path"}
+  - {name: server-sandbox-refuses-a-relative-config-dir, mode: refused-layout, root: $ROOT, named: {configDir: config}, error: "the configuration directory the caller named is \"config\", not an absolute path"}
+  - {name: server-sandbox-refuses-a-relative-data-dir, mode: refused-layout, root: $ROOT, named: {dataDir: ./data}, error: "the data directory the caller named is \"./data\", not an absolute path"}
+  # mode owned: a real script process makes its sandbox, writes into it as a server would, and
+  # leaves in each way listed in `ends` (a number is process.exit with that status). The root is
+  # in the temporary directory, named for the script, and gone once the process has exited.
+  # `named` directories ($OTHER is outside the root) get a marker file each and must survive.
+  - {name: owned-server-sandbox-is-removed-when-the-script-exits, mode: owned, script: share-geometry, ends: [0, 3]}
+  - {name: owned-server-sandbox-is-removed-when-the-script-ends-normally, mode: owned, script: full-app-smoke, ends: [last-line]}
+  - {name: owned-server-sandbox-is-removed-when-the-script-throws, mode: owned, script: search-share-visual, ends: [uncaught-error]}
+  - name: owned-server-sandbox-keeps-a-named-directory
+    mode: owned
+    script: offline-gate
+    named: {configDir: $OTHER/their-config, dataDir: $OTHER/their-data}
+    ends: [0, 3]
+  - name: owned-server-sandbox-leaves-no-root-when-the-layout-is-refused
+    mode: owned-refused
+    script: offline-gate
+    named: {dataDir: relative/data}
+    error: not an absolute path
+  - name: owned-server-sandbox-refuses-a-name-that-is-not-a-slug
+    mode: owned-name
+    names: ["", "Share Geometry", "../escape"]
+    error: lowercase letters, digits and dashes
+  # mode named-directory: what an environment variable of the script names, run in $CWD.
+  - {name: named-directory-is-resolved-against-the-working-directory, mode: named-directory, value: captures/config, expect: $CWD/captures/config}
+  - {name: named-directory-stays-absolute, mode: named-directory, value: /srv/their-config, expect: /srv/their-config}
+  - {name: named-directory-unset-or-empty-names-nothing, mode: named-directory, values: [null, ""], expect: null}
+  # mode start: the port is `occupied` by another process that answers the health route, or free.
+  # `server` is what the script's own start does: answers (the health route), exits (with
+  # `status`), silent (runs and never listens), or answers-elsewhere (another process answers
+  # after the pre-check while the started process exits). `started` says whether start was called.
+  - name: owned-server-start-refuses-an-occupied-port
+    mode: start
+    occupied: true
+    server: answers
+    started: false
+    error: something already answers
+    errorNames: [PEASANT_EXAMPLE_PORT, "ss -ltnp"]
+  - name: owned-server-start-ends-the-wait-when-the-server-exits
+    mode: start
+    occupied: false
+    server: exits
+    status: 7
+    withinMs: 15000
+    endsWithinMs: 5000
+    started: true
+    error: exited with status 7 before it answered
+  - name: owned-server-start-returns-the-server-that-answers
+    mode: start
+    occupied: false
+    server: answers
+    started: true
+  - name: owned-server-start-refuses-an-answer-from-a-server-that-then-exits
+    mode: start
+    occupied: false
+    server: answers-elsewhere
+    status: 7
+    exitAfterAnswerMs: 0
+    started: true
+    error: exited with status 7 before it answered
+  - name: owned-server-start-stops-a-server-that-never-answers
+    mode: start
+    occupied: false
+    server: silent
+    withinMs: 700
+    started: true
+    stopped: true
+    error: did not answer
+# Every script under web/scripts that starts `peasant web start`. A required script makes its
+# sandbox with ownedServerSandbox, starts through startOwnedServer, and passes both
+# `...sandbox.args` and `env: sandbox.env` on the spawn. An exempt script isolates its server in
+# its own way, stated here; a new script that starts the binary is in neither list and fails.
+scripts:
+  required:
+    - scripts/visual/shell-nav-default-gate.mjs
+    - scripts/visual/full-app-smoke.mjs
+    - scripts/visual/context-navigation-shoot.mjs
+    - scripts/visual/search-share-visual.mjs
+    - scripts/visual/publish-states-shoot.mjs
+    - scripts/visual/share-geometry.mjs
+    - scripts/visual/grouped-list-visual.mjs
+  exempt:
+    - {path: scripts/visual/home-pages-visual.mjs, reason: "sets HOME and the config, data, state and cache XDG variables to one temp root of its own"}
+    - {path: scripts/visual/root-page-visual.mjs, reason: "sets HOME and the config, data, state and cache XDG variables to one temp root per server"}
+    - {path: scripts/visual/settings-shoot.mjs, reason: "builds a temp HOME with git repositories and sets the config, data and state XDG variables under it; the cache variable is inherited"}
+    - {path: scripts/visual/transcript-segments-shoot.mjs, reason: "passes --data-dir, --config-dir and --state-dir of a seeded temp store; HOME and the cache variable are inherited"}
+    - {path: scripts/journey/api-binary.test.mjs, reason: "sets HOME and the config, data and state XDG variables under its owned lifecycle root; the cache variable is inherited"}
+    - {path: scripts/journey/run-collective-observations.mjs, reason: "sets HOME and the config, data and state XDG variables under its owned lifecycle root; the cache variable is inherited"}

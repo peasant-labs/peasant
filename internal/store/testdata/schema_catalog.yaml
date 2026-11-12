@@ -55,6 +55,7 @@ tables:
   - models
   - opencode_session_seq_cursor
   - pending_annotations
+  - pending_recounts
   - projects
   - publication_attempt_diagnostics
   - pulled_annotations

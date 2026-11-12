@@ -82,8 +82,8 @@ func TestOpenCodeIndexer_FullDepthPartDecomposition(t *testing.T) {
 	if e0.Role != ingest.RoleAssistant {
 		t.Errorf("e0 role: expected %s, got %s", ingest.RoleAssistant, e0.Role)
 	}
-	if e0.EntryType != ingest.EntryTypeToolUse {
-		t.Errorf("e0 type: expected %s (parts exist), got %s", ingest.EntryTypeToolUse, e0.EntryType)
+	if e0.EntryType != ingest.EntryTypeText {
+		t.Errorf("e0 type: expected %s (prose with tool calls), got %s", ingest.EntryTypeText, e0.EntryType)
 	}
 	if !e0.HasToolUse {
 		t.Error("e0 has_tool_use: expected true")
@@ -315,9 +315,10 @@ func TestOpenCodeIndexer_V1Compat(t *testing.T) {
 	if e.Depth != 0 {
 		t.Errorf("depth: expected 0, got %d", e.Depth)
 	}
-	// Parts exist, so tool_use refinement still applies.
-	if e.EntryType != ingest.EntryTypeToolUse {
-		t.Errorf("type: expected %s, got %s", ingest.EntryTypeToolUse, e.EntryType)
+	// Parts exist and the message holds prose, so the parent types as text
+	// with its tool calls flagged.
+	if e.EntryType != ingest.EntryTypeText {
+		t.Errorf("type: expected %s, got %s", ingest.EntryTypeText, e.EntryType)
 	}
 	if !e.HasToolUse {
 		t.Error("has_tool_use: expected true (parts exist)")
@@ -533,9 +534,9 @@ func TestOpenCodeIndexer_ContentPreviewFromParts(t *testing.T) {
 	if e.Role != ingest.RoleAssistant {
 		t.Errorf("role: expected %s, got %s", ingest.RoleAssistant, e.Role)
 	}
-	// Parts exist, so type should be tool_use.
-	if e.EntryType != ingest.EntryTypeToolUse {
-		t.Errorf("type: expected %s (parts exist), got %s", ingest.EntryTypeToolUse, e.EntryType)
+	// The message holds prose, so it types as text with its tool calls flagged.
+	if e.EntryType != ingest.EntryTypeText {
+		t.Errorf("type: expected %s (prose with tool calls), got %s", ingest.EntryTypeText, e.EntryType)
 	}
 	// ContentPreview should come from the first text-type part file.
 	if e.ContentPreview == nil {
@@ -577,12 +578,13 @@ func TestOpenCodeIndexer_PartDirPathRegression(t *testing.T) {
 	}
 
 	e := entries[0]
-	// Parts are under the correct path → tool_use refinement must fire.
+	// Parts are under the correct path → the tool-call flag must be set, and
+	// the message holds prose so it types as text.
 	if !e.HasToolUse {
 		t.Error("has_tool_use: expected true — part file at correct path not found (sessionID segment reintroduced?)")
 	}
-	if e.EntryType != ingest.EntryTypeToolUse {
-		t.Errorf("entry_type: expected %s, got %s — part file at correct path not found", ingest.EntryTypeToolUse, e.EntryType)
+	if e.EntryType != ingest.EntryTypeText {
+		t.Errorf("entry_type: expected %s, got %s — part file at correct path not found", ingest.EntryTypeText, e.EntryType)
 	}
 }
 

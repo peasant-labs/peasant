@@ -1,7 +1,12 @@
 package store
 
 import (
+	"bytes"
+	"context"
 	_ "embed"
+	"errors"
+	"io"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,303 +18,537 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-//go:embed testdata/migration_v77_outcome_reasons.yaml
-var migrationV77YAML []byte
+//go:embed testdata/turn_count_recount.yaml
+var turnCountRecountYAML []byte
 
-//go:embed testdata/migration_v77_outcome_reasons.manifest.yaml
-var migrationV77ManifestYAML []byte
-
-// migrationV77Row is one schema-76 outcome row and the reason id migration 77
-// must give it.
-type migrationV77Row struct {
-	Name         string  `yaml:"name"`
-	ID           int64   `yaml:"id"`
-	Run          int64   `yaml:"run"`
-	Session      *string `yaml:"session"`
-	Kind         string  `yaml:"kind"`
-	Code         string  `yaml:"code"`
-	CreatedAt    int64   `yaml:"createdAt"`
-	WantReasonID int64   `yaml:"wantReasonId"`
+type turnCountRecountWant struct {
+	WantTurnCount             int `yaml:"wantTurnCount"`
+	WantConversationTurnCount int `yaml:"wantConversationTurnCount"`
 }
 
-type migrationV77Fixtures struct {
-	Runs  int               `yaml:"runs"`
-	Rows  []migrationV77Row `yaml:"rows"`
-	Cases []struct {
-		Name string `yaml:"name"`
-	} `yaml:"cases"`
+type turnCountRecountSession struct {
+	Name                        string `yaml:"name"`
+	SessionID                   string `yaml:"sessionID"`
+	ActiveGeneration            bool   `yaml:"activeGeneration"`
+	StoredTurnCount             int    `yaml:"storedTurnCount"`
+	StoredConversationTurnCount int    `yaml:"storedConversationTurnCount"`
+	MissingBodyIndex            *int   `yaml:"missingBodyIndex"`
+	NoStatsRow                  bool   `yaml:"noStatsRow"`
+	Entries                     []struct {
+		Index     int    `yaml:"index"`
+		Role      string `yaml:"role"`
+		EntryType string `yaml:"entryType"`
+		Depth     int    `yaml:"depth"`
+		Content   string `yaml:"content"`
+	} `yaml:"entries"`
+	Report                    string                `yaml:"report"`
+	WantTurnCount             int                   `yaml:"wantTurnCount"`
+	WantConversationTurnCount int                   `yaml:"wantConversationTurnCount"`
+	FromV73                   *turnCountRecountWant `yaml:"fromV73"`
 }
 
-func LoadMigrationV77Fixtures(t *testing.T) migrationV77Fixtures {
+type turnCountRecountFixture struct {
+	RequiredSessions     []string                  `yaml:"requiredSessions"`
+	RequiredRows         []string                  `yaml:"requiredRows"`
+	Sessions             []turnCountRecountSession `yaml:"sessions"`
+	InterruptedFirstOpen struct {
+		FailAfterSessions             int `yaml:"failAfterSessions"`
+		SentinelTurnCount             int `yaml:"sentinelTurnCount"`
+		SentinelConversationTurnCount int `yaml:"sentinelConversationTurnCount"`
+	} `yaml:"interruptedFirstOpen"`
+}
+
+const (
+	turnCountRecountReportRecounted  = "recounted"
+	turnCountRecountReportEntryLess  = "entry-less"
+	turnCountRecountReportUnreadable = "unreadable"
+)
+
+// turnCountRecountRows binds each fixture row name to the test that runs it,
+// so a row cannot be listed without a test or tested without being listed.
+var turnCountRecountRows = map[string]func(*testing.T, turnCountRecountFixture){
+	"from-v75":               runTurnCountRecountFromV75,
+	"from-v73":               runTurnCountRecountFromV73,
+	"interrupted-first-open": runTurnCountRecountInterruptedFirstOpen,
+	"new-store":              runTurnCountRecountNewStore,
+}
+
+func loadTurnCountRecountFixture(t *testing.T) turnCountRecountFixture {
 	t.Helper()
-	var fixtures migrationV77Fixtures
-	decoder := yaml.NewDecoder(strings.NewReader(string(migrationV77YAML)))
+	var fixture turnCountRecountFixture
+	decoder := yaml.NewDecoder(bytes.NewReader(turnCountRecountYAML))
 	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixtures); err != nil {
-		t.Fatalf("decode migration_v77_outcome_reasons.yaml: %v", err)
-	}
-	var manifest struct {
-		RequiredNames []string `yaml:"requiredNames"`
-		RequiredRows  []string `yaml:"requiredRows"`
-	}
-	manifestDecoder := yaml.NewDecoder(strings.NewReader(string(migrationV77ManifestYAML)))
-	manifestDecoder.KnownFields(true)
-	if err := manifestDecoder.Decode(&manifest); err != nil {
-		t.Fatalf("decode migration_v77_outcome_reasons manifest: %v", err)
-	}
-	if len(manifest.RequiredNames) == 0 || len(manifest.RequiredRows) == 0 {
-		t.Fatal("migration_v77_outcome_reasons manifest declares no required names")
-	}
-	caseNames := make([]string, 0, len(fixtures.Cases))
-	for _, c := range fixtures.Cases {
-		caseNames = append(caseNames, c.Name)
-	}
-	if err := validateRecoveryRequiredNames(manifest.RequiredNames, caseNames, "v77 outcome reason cases"); err != nil {
+	if err := decoder.Decode(&fixture); err != nil {
 		t.Fatal(err)
 	}
-	rowNames := make([]string, 0, len(fixtures.Rows))
-	for _, row := range fixtures.Rows {
-		rowNames = append(rowNames, row.Name)
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		t.Fatalf("turn count recount fixture must contain exactly one document: %v", err)
 	}
-	if err := validateRecoveryRequiredNames(manifest.RequiredRows, rowNames, "v77 outcome reason rows"); err != nil {
-		t.Fatal(err)
+	required := make(map[string]bool, len(fixture.RequiredSessions))
+	for _, name := range fixture.RequiredSessions {
+		if strings.TrimSpace(name) == "" || required[name] {
+			t.Fatalf("turn count recount fixture has a blank or repeated required session %q", name)
+		}
+		required[name] = true
 	}
-	return fixtures
+	seen := make(map[string]bool, len(fixture.Sessions))
+	for _, session := range fixture.Sessions {
+		if !required[session.Name] || seen[session.Name] {
+			t.Fatalf("turn count recount fixture has unlisted or repeated session %q", session.Name)
+		}
+		seen[session.Name] = true
+		if session.NoStatsRow && (session.Report != turnCountRecountReportRecounted || session.StoredTurnCount != 0 || session.StoredConversationTurnCount != 0 || session.FromV73 != nil) {
+			t.Fatalf("session %q has no stats row: it must be recounted, state no stored counts and state no fromV73 result", session.Name)
+		}
+		switch session.Report {
+		case turnCountRecountReportRecounted:
+			if session.WantTurnCount == session.WantConversationTurnCount {
+				t.Fatalf("session %q expects equal counts; the two counts must differ so a swapped column fails", session.Name)
+			}
+			if session.WantTurnCount == session.StoredTurnCount || session.WantConversationTurnCount == session.StoredConversationTurnCount {
+				t.Fatalf("session %q stores a count the fold also produces; a skipped recount would pass", session.Name)
+			}
+		case turnCountRecountReportEntryLess, turnCountRecountReportUnreadable:
+			if session.WantTurnCount != session.StoredTurnCount || session.WantConversationTurnCount != session.StoredConversationTurnCount {
+				t.Fatalf("session %q is reported %s and must keep its stored counts", session.Name, session.Report)
+			}
+		default:
+			t.Fatalf("session %q has unknown report %q", session.Name, session.Report)
+		}
+	}
+	for name := range required {
+		if !seen[name] {
+			t.Fatalf("turn count recount fixture is missing required session %q", name)
+		}
+	}
+	rows := make(map[string]bool, len(fixture.RequiredRows))
+	for _, name := range fixture.RequiredRows {
+		if _, ok := turnCountRecountRows[name]; !ok || rows[name] {
+			t.Fatalf("turn count recount fixture names row %q with no test bound to it, or repeats it", name)
+		}
+		rows[name] = true
+	}
+	for name := range turnCountRecountRows {
+		if !rows[name] {
+			t.Fatalf("turn count recount test row %q is not listed in requiredRows", name)
+		}
+	}
+	return fixture
 }
 
-// openMigrationV77Store builds a schema-76 store on the frozen chain with the
-// given number of audit runs.
-func openMigrationV77Store(t *testing.T, runs int) *sqlite.Conn {
+// seedTurnCountRecountStore builds a database at the given frozen schema
+// version and seeds the fixture sessions with their stored counts. A V73 store
+// has no conversation column, so only the legacy turn_count is seeded there and
+// a session with no fromV73 expectation is left out.
+func seedTurnCountRecountStore(t *testing.T, fixture turnCountRecountFixture, version int) string {
 	t.Helper()
-	conn, err := sqlite.OpenConn(filepath.Join(t.TempDir(), "audit.db"), sqlite.OpenReadWrite, sqlite.OpenCreate)
+	path := filepath.Join(t.TempDir(), "upgrade.db")
+	conn, err := sqlite.OpenConn(path, sqlite.OpenReadWrite, sqlite.OpenCreate)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { conn.Close() })
-	if err := sqlitemigration.Migrate(t.Context(), conn, frozenSchema(76)); err != nil {
+	if err := sqlitemigration.Migrate(t.Context(), conn, frozenSchema(version)); err != nil {
 		t.Fatal(err)
 	}
-	if err := sqlitex.ExecuteTransient(conn, `PRAGMA foreign_keys=ON;`, nil); err != nil {
-		t.Fatal(err)
-	}
-	for run := 1; run <= runs; run++ {
-		if err := sqlitex.Execute(conn, `INSERT INTO ingest_log(id, started_at) VALUES(?, ?)`, &sqlitex.ExecOptions{Args: []any{run, run}}); err != nil {
-			t.Fatal(err)
+	legacy := conversationTurnCountMigrationFixture{}
+	var seeded []turnCountRecountSession
+	for _, session := range fixture.Sessions {
+		if version < 74 && session.FromV73 == nil {
+			continue
 		}
+		stored := session.StoredTurnCount
+		legacy.Sessions = append(legacy.Sessions, conversationTurnCountMigrationSession{
+			Name: session.Name, SessionID: session.SessionID, ActiveGeneration: session.ActiveGeneration,
+			LegacyTurnCount: &stored, Entries: session.Entries,
+		})
+		seeded = append(seeded, session)
 	}
-	return conn
-}
-
-func insertMigrationV77Row(t *testing.T, conn *sqlite.Conn, row migrationV77Row) {
-	t.Helper()
-	var session any
-	if row.Session != nil {
-		session = *row.Session
-	}
-	if err := sqlitex.Execute(conn, `INSERT INTO ingest_run_outcomes(id, run_id, session_id, kind, reason_code, created_at) VALUES(?,?,?,?,?,?)`, &sqlitex.ExecOptions{Args: []any{row.ID, row.Run, session, row.Kind, row.Code, row.CreatedAt}}); err != nil {
-		t.Fatalf("seed row %s: %v", row.Name, err)
-	}
-}
-
-type migratedOutcomeRow struct {
-	run       int64
-	session   *string
-	reasonID  int64
-	createdAt int64
-}
-
-func readMigratedOutcomeRows(t *testing.T, conn *sqlite.Conn) map[int64]migratedOutcomeRow {
-	t.Helper()
-	rows := make(map[int64]migratedOutcomeRow)
-	queryV62Row(t, conn, `SELECT id, run_id, session_id, reason_id, created_at FROM ingest_run_outcomes`, nil, func(stmt *sqlite.Stmt) {
-		row := migratedOutcomeRow{run: stmt.ColumnInt64(1), reasonID: stmt.ColumnInt64(3), createdAt: stmt.ColumnInt64(4)}
-		if stmt.ColumnType(2) != sqlite.TypeNull {
-			session := stmt.ColumnText(2)
-			row.session = &session
-		}
-		rows[stmt.ColumnInt64(0)] = row
-	})
-	return rows
-}
-
-func TestMigrationV77OutcomeReasons(t *testing.T) {
-	fixtures := LoadMigrationV77Fixtures(t)
-	byName := make(map[string]migrationV77Row, len(fixtures.Rows))
-	for _, row := range fixtures.Rows {
-		byName[row.Name] = row
-	}
-	// The fixture must hold one row for every (kind, code) pair a build before
-	// the migration could write: every reason that is not a refresh, with the
-	// worker-error capture failure under its old spelling.
-	covered := make(map[int64]bool, len(fixtures.Rows))
-	for _, row := range fixtures.Rows {
-		covered[row.WantReasonID] = true
-	}
-	for _, reason := range ingest.AllOutcomeReasons {
-		if reason.Kind() != ingest.OutcomeKindRefresh && !covered[int64(reason)] {
-			t.Fatalf("migration_v77_outcome_reasons.yaml has no row that lands on reason %d (%s); add one named row for its (kind, code) pair", reason, reason.Code())
-		}
-	}
-
-	conn := openMigrationV77Store(t, fixtures.Runs)
-	for _, row := range fixtures.Rows {
-		insertMigrationV77Row(t, conn, row)
-	}
-	if err := sqlitex.ExecuteScript(conn, `INSERT INTO index_log(session_id, provider, outcome, index_version, entries_count, started_at) VALUES('77000000-0000-4000-8000-000000000001', 'claude-code', 'indexed', 1, 3, 5);`, nil); err != nil {
-		t.Fatalf("seed a schema-76 index_log row: %v", err)
-	}
-	var sequenceBefore int64
-	queryV62Row(t, conn, `SELECT seq FROM sqlite_sequence WHERE name='ingest_run_outcomes'`, nil, func(stmt *sqlite.Stmt) { sequenceBefore = stmt.ColumnInt64(0) })
-	// Push the sequence past the highest surviving id, as pruning of a newer
-	// row would leave it.
-	if err := sqlitex.ExecuteScript(conn, `UPDATE sqlite_sequence SET seq = seq + 40 WHERE name='ingest_run_outcomes';`, nil); err != nil {
-		t.Fatal(err)
-	}
-	sequenceBefore += 40
-
-	if err := sqlitemigration.Migrate(t.Context(), conn, frozenSchema(77)); err != nil {
-		t.Fatalf("migration 77: %v", err)
-	}
-	migrated := readMigratedOutcomeRows(t, conn)
-
-	runners := map[string]func(t *testing.T){
-		"every-existing-row-lands-on-its-reason-id": func(t *testing.T) {
-			for _, row := range fixtures.Rows {
-				got, ok := migrated[row.ID]
-				if !ok {
-					t.Fatalf("row %s (id %d) was not copied", row.Name, row.ID)
-				}
-				if got.reasonID != row.WantReasonID {
-					t.Errorf("row %s: reason id = %d, want %d", row.Name, got.reasonID, row.WantReasonID)
-				}
-				sameSession := (got.session == nil) == (row.Session == nil) && (got.session == nil || *got.session == *row.Session)
-				if got.run != row.Run || got.createdAt != row.CreatedAt || !sameSession {
-					t.Errorf("row %s: run, session or created_at changed: %+v", row.Name, got)
-				}
-			}
-		},
-		"worker-error-refresh-unavailable-rows-become-adapter-capture-failed": func(t *testing.T) {
-			for _, name := range []string{"worker-error-adapter-refresh-unavailable", "both-rows-worker-error"} {
-				if got := migrated[byName[name].ID].reasonID; got != int64(ingest.OutcomeReasonAdapterCaptureFailed) {
-					t.Errorf("row %s: reason id = %d, want adapter_capture_failed (%d)", name, got, ingest.OutcomeReasonAdapterCaptureFailed)
-				}
-			}
-		},
-		"diagnostic-refresh-unavailable-rows-keep-their-code": func(t *testing.T) {
-			for _, name := range []string{"diagnostic-adapter-refresh-unavailable", "both-rows-diagnostic"} {
-				if got := migrated[byName[name].ID].reasonID; got != int64(ingest.OutcomeReasonAdapterRefreshUnavailable) {
-					t.Errorf("row %s: reason id = %d, want adapter_refresh_unavailable (%d)", name, got, ingest.OutcomeReasonAdapterRefreshUnavailable)
-				}
-			}
-		},
-		"one-session-with-both-rows-gets-two-different-ids": func(t *testing.T) {
-			worker, diagnostic := byName["both-rows-worker-error"], byName["both-rows-diagnostic"]
-			if *worker.Session != *diagnostic.Session {
-				t.Fatal("fixture rows both-rows-* must share one session")
-			}
-			if migrated[worker.ID].reasonID == migrated[diagnostic.ID].reasonID {
-				t.Fatal("one session's worker error and diagnostic collapsed onto one reason id")
-			}
-		},
-		"run-wide-diagnostic-keeps-its-null-session": func(t *testing.T) {
-			row := byName["run-wide-diagnostic"]
-			if row.Session != nil {
-				t.Fatal("fixture row run-wide-diagnostic must have a null session")
-			}
-			if got, ok := migrated[row.ID]; !ok || got.session != nil {
-				t.Fatalf("run-wide diagnostic = %+v, want a NULL session", got)
-			}
-		},
-		"unlisted-stored-code-is-seeded-once-as-retired-above-the-fixed-range": func(t *testing.T) {
-			first, second := byName["unlisted-code-first"], byName["unlisted-code-second"]
-			seeded := 0
-			queryV62Row(t, conn, `SELECT r.id, k.name, r.retired FROM ingest_outcome_reasons r JOIN ingest_outcome_kinds k ON k.id=r.kind_id WHERE r.code=?`, []any{first.Code}, func(stmt *sqlite.Stmt) {
-				seeded++
-				if stmt.ColumnInt64(0) < ingest.OutcomeReasonLocalIDBase || stmt.ColumnText(1) != first.Kind || stmt.ColumnInt(2) != 1 {
-					t.Errorf("unlisted code seeded as id %d kind %s retired %d; want an id at or above %d, the kind of its lowest row (%s), retired", stmt.ColumnInt64(0), stmt.ColumnText(1), stmt.ColumnInt(2), ingest.OutcomeReasonLocalIDBase, first.Kind)
-				}
-			})
-			if seeded != 1 {
-				t.Fatalf("unlisted code seeded %d times, want once", seeded)
-			}
-			if migrated[first.ID].reasonID != migrated[second.ID].reasonID || migrated[first.ID].reasonID < ingest.OutcomeReasonLocalIDBase {
-				t.Fatalf("unlisted rows landed on %d and %d", migrated[first.ID].reasonID, migrated[second.ID].reasonID)
-			}
-			queryV62Row(t, conn, `SELECT count(*) FROM ingest_outcome_reasons WHERE id >= ?`, []any{ingest.OutcomeReasonLocalIDBase}, func(stmt *sqlite.Stmt) {
-				if stmt.ColumnInt(0) != 1 {
-					t.Errorf("%d store-local reasons seeded, want only the one unlisted code", stmt.ColumnInt(0))
-				}
-			})
-		},
-		"row-count-is-the-same-before-and-after": func(t *testing.T) {
-			if len(migrated) != len(fixtures.Rows) {
-				t.Fatalf("%d rows after the migration, %d before", len(migrated), len(fixtures.Rows))
-			}
-		},
-		"index-log-rows-read-as-not-measured": func(t *testing.T) {
-			queryV62Row(t, conn, `SELECT count(*) FROM index_log WHERE parse_ms IS NULL AND write_ms IS NULL AND bytes IS NULL`, nil, func(stmt *sqlite.Stmt) {
-				if stmt.ColumnInt(0) != 1 {
-					t.Error("a row written before the migration does not read as not measured")
-				}
-			})
-			if err := sqlitex.ExecuteScript(conn, `INSERT INTO index_log(session_id, provider, outcome, index_version, entries_count, started_at, parse_ms) VALUES('x', 'claude-code', 'indexed', 1, 0, 5, -1);`, nil); err == nil {
-				t.Fatal("index_log admitted a negative parse time")
-			}
-		},
-		"autoincrement-sequence-survives-the-rebuild": func(t *testing.T) {
-			queryV62Row(t, conn, `SELECT seq FROM sqlite_sequence WHERE name='ingest_run_outcomes'`, nil, func(stmt *sqlite.Stmt) {
-				if stmt.ColumnInt64(0) != sequenceBefore {
-					t.Errorf("sequence = %d after the rebuild, want %d: a pruned id could be reused", stmt.ColumnInt64(0), sequenceBefore)
-				}
-			})
-			queryV62Row(t, conn, `SELECT count(*) FROM sqlite_sequence WHERE name='ingest_run_outcomes_v2'`, nil, func(stmt *sqlite.Stmt) {
-				if stmt.ColumnInt(0) != 0 {
-					t.Error("the rebuild left a sequence row under the temporary table name")
-				}
-			})
-		},
-		"rows-of-runs-older-than-the-retained-window-are-not-copied": func(t *testing.T) {
-			old := openMigrationV77Store(t, IngestOutcomeRetainedRuns+2)
-			session := "77000000-0000-4000-8000-000000000001"
-			insertMigrationV77Row(t, old, migrationV77Row{Name: "outside-window", ID: 1, Run: 2, Session: &session, Kind: "worker_error", Code: "error", CreatedAt: 1})
-			insertMigrationV77Row(t, old, migrationV77Row{Name: "oldest-retained", ID: 2, Run: 3, Session: &session, Kind: "worker_error", Code: "error", CreatedAt: 2})
-			insertMigrationV77Row(t, old, migrationV77Row{Name: "newest", ID: 3, Run: int64(IngestOutcomeRetainedRuns + 2), Session: &session, Kind: "worker_error", Code: "error", CreatedAt: 3})
-			if err := sqlitemigration.Migrate(t.Context(), old, frozenSchema(77)); err != nil {
-				t.Fatalf("migration 77: %v", err)
-			}
-			copied := readMigratedOutcomeRows(t, old)
-			if _, kept := copied[1]; kept || len(copied) != 2 {
-				t.Fatalf("copied rows = %+v, want only the rows of the newest %d runs", copied, IngestOutcomeRetainedRuns)
-			}
-			queryV62Row(t, old, `SELECT count(*) FROM ingest_log`, nil, func(stmt *sqlite.Stmt) {
-				if stmt.ColumnInt(0) != IngestOutcomeRetainedRuns+2 {
-					t.Error("the migration deleted an audit run row")
-				}
-			})
-		},
-		// Last: it deletes the audit runs.
-		"rebuilt-table-keeps-the-cascade-and-the-run-index": func(t *testing.T) {
-			if sql := v62ObjectSQL(t, conn, "index", "idx_ingest_run_outcomes_run"); !strings.Contains(sql, "ingest_run_outcomes(run_id, id)") {
-				t.Fatalf("run index after the rebuild = %q", sql)
-			}
-			if sql := v62ObjectSQL(t, conn, "table", "ingest_run_outcomes_v2"); sql != "" {
-				t.Fatal("the temporary table survived the rebuild")
-			}
-			if err := sqlitex.ExecuteScript(conn, `INSERT INTO ingest_run_stages(run_id, stage, duration_ms) VALUES(1, 'INDEX', 4); DELETE FROM ingest_log;`, nil); err != nil {
+	seedConversationTurnCountSessions(t, conn, legacy)
+	for _, session := range seeded {
+		if version >= 74 {
+			if err := sqlitex.ExecuteTransient(conn, `UPDATE session_captured_stats SET conversation_turn_count = ? WHERE session_id = ?`,
+				&sqlitex.ExecOptions{Args: []any{session.StoredConversationTurnCount, session.SessionID}}); err != nil {
 				t.Fatal(err)
 			}
-			queryV62Row(t, conn, `SELECT (SELECT count(*) FROM ingest_run_outcomes) + (SELECT count(*) FROM ingest_run_stages)`, nil, func(stmt *sqlite.Stmt) {
-				if stmt.ColumnInt(0) != 0 {
-					t.Error("outcome or stage rows survived the deletion of their audit run")
-				}
-			})
-		},
-	}
-	for _, c := range fixtures.Cases {
-		run, ok := runners[c.Name]
-		if !ok {
-			t.Fatalf("migration_v77_outcome_reasons.yaml: case %q has no runner; add it to the runner", c.Name)
 		}
-		t.Run(c.Name, run)
+		if session.NoStatsRow {
+			if err := sqlitex.ExecuteTransient(conn, `DELETE FROM session_captured_stats WHERE session_id = ?`,
+				&sqlitex.ExecOptions{Args: []any{session.SessionID}}); err != nil {
+				t.Fatal(err)
+			}
+			if conn.Changes() != 1 {
+				t.Fatalf("session %q: deleting its stats row removed %d rows, want 1", session.Name, conn.Changes())
+			}
+		}
+		if session.MissingBodyIndex != nil {
+			if err := sqlitex.ExecuteTransient(conn, `DELETE FROM session_entry_bodies WHERE session_id = ? AND entry_index = ?`,
+				&sqlitex.ExecOptions{Args: []any{session.SessionID, *session.MissingBodyIndex}}); err != nil {
+				t.Fatal(err)
+			}
+			if conn.Changes() != 1 {
+				t.Fatalf("session %q: deleting body %d removed %d rows, want 1", session.Name, *session.MissingBodyIndex, conn.Changes())
+			}
+		}
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+type storedTurnCounts struct{ turnCount, conversationTurnCount int }
+
+// requireUnrecountedState fails unless every session still holds exactly what
+// was seeded: its stored counts, or no stats row at all.
+func requireUnrecountedState(t *testing.T, fixture turnCountRecountFixture, counts map[string]storedTurnCounts) {
+	t.Helper()
+	for _, session := range fixture.Sessions {
+		got, hasRow := counts[session.SessionID]
+		if session.NoStatsRow {
+			if hasRow {
+				t.Errorf("%s: the failed open left a stats row %+v, want none", session.Name, got)
+			}
+			continue
+		}
+		if want := (storedTurnCounts{session.StoredTurnCount, session.StoredConversationTurnCount}); !hasRow || got != want {
+			t.Errorf("%s: the failed open wrote counts %+v (row present: %t), want the stored %+v", session.Name, got, hasRow, want)
+		}
+	}
+}
+
+// readStatsUpdatedAtMs reads one session's stats update time from the raw file.
+func readStatsUpdatedAtMs(t *testing.T, path, sessionID string) int64 {
+	t.Helper()
+	conn, err := sqlite.OpenConn(path, sqlite.OpenReadWrite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	updatedAtMs, rows := int64(-1), 0
+	if err := sqlitex.ExecuteTransient(conn, `SELECT updated_at_ms FROM session_captured_stats WHERE session_id = ?`,
+		&sqlitex.ExecOptions{Args: []any{sessionID}, ResultFunc: func(stmt *sqlite.Stmt) error {
+			updatedAtMs = stmt.ColumnInt64(0)
+			rows++
+			return nil
+		}}); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 1 {
+		t.Fatalf("session %s has %d stats rows, want 1", sessionID, rows)
+	}
+	return updatedAtMs
+}
+
+// readTurnCountRecountState reads the stored counts, the marker and the schema
+// version from the raw file, without Open, so reading never runs the recount.
+func readTurnCountRecountState(t *testing.T, path string) (counts map[string]storedTurnCounts, markerPending bool, version int64) {
+	t.Helper()
+	conn, err := sqlite.OpenConn(path, sqlite.OpenReadWrite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	counts = make(map[string]storedTurnCounts)
+	if err := sqlitex.ExecuteTransient(conn, `SELECT session_id, COALESCE(turn_count, -1), conversation_turn_count FROM session_captured_stats`,
+		&sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error {
+			counts[stmt.ColumnText(0)] = storedTurnCounts{stmt.ColumnInt(1), stmt.ColumnInt(2)}
+			return nil
+		}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlitex.ExecuteTransient(conn, `SELECT 1 FROM pending_recounts WHERE name = 'turn_counts'`,
+		&sqlitex.ExecOptions{ResultFunc: func(*sqlite.Stmt) error { markerPending = true; return nil }}); err != nil {
+		t.Fatal(err)
+	}
+	version, err = readPragmaInt(conn, "PRAGMA user_version")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return counts, markerPending, version
+}
+
+func openAndCloseForRecount(t *testing.T, path string, options ...OpenOption) error {
+	t.Helper()
+	s, err := Open(path, append([]OpenOption{WithPoolSize(1)}, options...)...)
+	if err != nil {
+		return err
+	}
+	return s.Close()
+}
+
+// TestMigrationV77RecountsTurnCounts runs every fixture row through the real
+// Open on a database file at an older schema version.
+func TestMigrationV77RecountsTurnCounts(t *testing.T) {
+	t.Parallel()
+	fixture := loadTurnCountRecountFixture(t)
+	for _, name := range fixture.RequiredRows {
+		run := turnCountRecountRows[name]
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			run(t, fixture)
+		})
+	}
+}
+
+func runTurnCountRecountFromV75(t *testing.T, fixture turnCountRecountFixture) {
+	path := seedTurnCountRecountStore(t, fixture, 75)
+	if err := openAndCloseForRecount(t, path); err != nil {
+		t.Fatalf("open the V75 store: %v", err)
+	}
+	counts, pending, version := readTurnCountRecountState(t, path)
+	if version != 77 {
+		t.Fatalf("schema version = %d, want 77", version)
+	}
+	if pending {
+		t.Fatal("the recount marker is still set after a completed open")
+	}
+	for _, session := range fixture.Sessions {
+		want := storedTurnCounts{session.WantTurnCount, session.WantConversationTurnCount}
+		if got := counts[session.SessionID]; got != want {
+			t.Errorf("%s: stored counts = %+v, want %+v", session.Name, got, want)
+		}
+		// A row the recount created carries update time 0; a row it only
+		// updated keeps the seeded time.
+		wantUpdatedAtMs := int64(1)
+		if session.NoStatsRow {
+			wantUpdatedAtMs = 0
+		}
+		if got := readStatsUpdatedAtMs(t, path, session.SessionID); got != wantUpdatedAtMs {
+			t.Errorf("%s: stats update time = %d, want %d", session.Name, got, wantUpdatedAtMs)
+		}
+	}
+
+	// The report is read from the recount itself, on a second store brought to
+	// head by the migration chain alone so the marker is still pending.
+	reportPath := seedTurnCountRecountStore(t, fixture, 75)
+	conn, err := sqlite.OpenConn(reportPath, sqlite.OpenReadWrite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlitemigration.Migrate(t.Context(), conn, dbSchema); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	pool, err := sqlitex.NewPool(reportPath, sqlitex.PoolOptions{PoolSize: 1, PrepareConn: preparePragmas})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	report, ran, err := recountTurnCounts(pool, nil, logger)
+	if err != nil || !ran {
+		t.Fatalf("recount ran = %t, err = %v; want a completed run", ran, err)
+	}
+	var wantEntryLess, wantUnreadable []ingest.SessionID
+	wantRecounted := 0
+	for _, session := range fixture.Sessions {
+		switch session.Report {
+		case turnCountRecountReportRecounted:
+			wantRecounted++
+		case turnCountRecountReportEntryLess:
+			wantEntryLess = append(wantEntryLess, ingest.SessionID(session.SessionID))
+		case turnCountRecountReportUnreadable:
+			wantUnreadable = append(wantUnreadable, ingest.SessionID(session.SessionID))
+		}
+	}
+	if report.SessionsUpdated != wantRecounted {
+		t.Errorf("report recounted %d sessions, want %d", report.SessionsUpdated, wantRecounted)
+	}
+	if !equalSessionIDs(report.EntryLessSessions, wantEntryLess) {
+		t.Errorf("report entry-less = %v, want %v", report.EntryLessSessions, wantEntryLess)
+	}
+	if !equalSessionIDs(report.UnreadableSessions, wantUnreadable) {
+		t.Errorf("report unreadable = %v, want %v", report.UnreadableSessions, wantUnreadable)
+	}
+	logTurnCountRecount(logger, report)
+	logged := logs.String()
+	for _, fragment := range []string{
+		"recounting turn counts for every stored session",
+		"sessions=7",
+		"could not be read during the turn count recount",
+		"session_id=" + string(wantUnreadable[0]),
+		"turn count recount complete",
+		"sessions_recounted=4",
+		"entry_less=2",
+		"unreadable=1",
+	} {
+		if !strings.Contains(logged, fragment) {
+			t.Errorf("recount log lacks %q:\n%s", fragment, logged)
+		}
+	}
+	if _, ranAgain, err := recountTurnCounts(pool, nil, logger); err != nil || ranAgain {
+		t.Fatalf("second recount ran = %t, err = %v; want no run once the marker is cleared", ranAgain, err)
+	}
+}
+
+func equalSessionIDs(got, want []ingest.SessionID) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func runTurnCountRecountFromV73(t *testing.T, fixture turnCountRecountFixture) {
+	path := seedTurnCountRecountStore(t, fixture, 73)
+	if err := openAndCloseForRecount(t, path); err != nil {
+		t.Fatalf("open the V73 store: %v", err)
+	}
+	counts, pending, version := readTurnCountRecountState(t, path)
+	if version != 77 {
+		t.Fatalf("schema version = %d, want 77", version)
+	}
+	if pending {
+		t.Fatal("the recount marker is still set after a completed open")
+	}
+	seeded := 0
+	for _, session := range fixture.Sessions {
+		if session.FromV73 == nil {
+			continue
+		}
+		seeded++
+		want := storedTurnCounts{session.FromV73.WantTurnCount, session.FromV73.WantConversationTurnCount}
+		if got := counts[session.SessionID]; got != want {
+			t.Errorf("%s: stored counts = %+v, want %+v", session.Name, got, want)
+		}
+	}
+	if seeded == 0 || len(counts) != seeded {
+		t.Fatalf("store holds %d stats rows for %d seeded sessions", len(counts), seeded)
+	}
+	// Neither upgrade fold runs again: a value written after the upgrade
+	// survives the next open.
+	sentinel := storedTurnCounts{fixture.InterruptedFirstOpen.SentinelTurnCount, fixture.InterruptedFirstOpen.SentinelConversationTurnCount}
+	writeTurnCountSentinel(t, path, fixture.Sessions[0].SessionID, sentinel)
+	if err := openAndCloseForRecount(t, path); err != nil {
+		t.Fatalf("reopen the upgraded store: %v", err)
+	}
+	counts, _, _ = readTurnCountRecountState(t, path)
+	if got := counts[fixture.Sessions[0].SessionID]; got != sentinel {
+		t.Fatalf("a reopen folded again: stored counts = %+v, want the written %+v", got, sentinel)
+	}
+}
+
+func writeTurnCountSentinel(t *testing.T, path, sessionID string, sentinel storedTurnCounts) {
+	t.Helper()
+	conn, err := sqlite.OpenConn(path, sqlite.OpenReadWrite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err := sqlitex.ExecuteTransient(conn, `UPDATE session_captured_stats SET turn_count = ?, conversation_turn_count = ? WHERE session_id = ?`,
+		&sqlitex.ExecOptions{Args: []any{sentinel.turnCount, sentinel.conversationTurnCount, sessionID}}); err != nil {
+		t.Fatal(err)
+	}
+	if conn.Changes() != 1 {
+		t.Fatalf("sentinel write changed %d rows, want 1", conn.Changes())
+	}
+}
+
+func runTurnCountRecountInterruptedFirstOpen(t *testing.T, fixture turnCountRecountFixture) {
+	path := seedTurnCountRecountStore(t, fixture, 75)
+	failAfter := fixture.InterruptedFirstOpen.FailAfterSessions
+	interrupted := errors.New("fixture interruption")
+	handled := 0
+	err := openAndCloseForRecount(t, path, func(o *openOptions) {
+		o.turnCountRecountHook = func(done int, _ ingest.SessionID) error {
+			handled = done
+			if done == failAfter {
+				return interrupted
+			}
+			return nil
+		}
+	})
+	if !errors.Is(err, interrupted) {
+		t.Fatalf("interrupted open returned %v, want the hook's error", err)
+	}
+	if handled != failAfter {
+		t.Fatalf("the recount handled %d sessions before stopping, want %d", handled, failAfter)
+	}
+	for _, fragment := range []string{"turn count recount stopped after 2 of 7 sessions", "the recount stays pending", "reopen the store"} {
+		if !strings.Contains(err.Error(), fragment) {
+			t.Errorf("interrupted open error lacks %q: %v", fragment, err)
+		}
+	}
+	counts, pending, version := readTurnCountRecountState(t, path)
+	if version != 77 {
+		t.Fatalf("schema version after the failed open = %d, want 77: the version cannot say the recount is owed", version)
+	}
+	if !pending {
+		t.Fatal("the failed open cleared the recount marker; the next open would not recount")
+	}
+	requireUnrecountedState(t, fixture, counts)
+
+	if err := openAndCloseForRecount(t, path); err != nil {
+		t.Fatalf("reopen after the interrupted open: %v", err)
+	}
+	counts, pending, _ = readTurnCountRecountState(t, path)
+	if pending {
+		t.Fatal("the reopen left the recount marker set")
+	}
+	for _, session := range fixture.Sessions {
+		want := storedTurnCounts{session.WantTurnCount, session.WantConversationTurnCount}
+		if got := counts[session.SessionID]; got != want {
+			t.Errorf("%s: counts after the reopen = %+v, want %+v", session.Name, got, want)
+		}
+	}
+
+	sentinel := storedTurnCounts{fixture.InterruptedFirstOpen.SentinelTurnCount, fixture.InterruptedFirstOpen.SentinelConversationTurnCount}
+	writeTurnCountSentinel(t, path, fixture.Sessions[0].SessionID, sentinel)
+	hookCalls := 0
+	if err := openAndCloseForRecount(t, path, func(o *openOptions) {
+		o.turnCountRecountHook = func(int, ingest.SessionID) error { hookCalls++; return nil }
+	}); err != nil {
+		t.Fatalf("third open: %v", err)
+	}
+	if hookCalls != 0 {
+		t.Fatalf("the third open folded %d sessions, want none", hookCalls)
+	}
+	counts, _, _ = readTurnCountRecountState(t, path)
+	if got := counts[fixture.Sessions[0].SessionID]; got != sentinel {
+		t.Fatalf("the third open changed stored counts to %+v, want the written %+v", got, sentinel)
+	}
+}
+
+func runTurnCountRecountNewStore(t *testing.T, _ turnCountRecountFixture) {
+	path := filepath.Join(t.TempDir(), "new.db")
+	hookCalls := 0
+	if err := openAndCloseForRecount(t, path, func(o *openOptions) {
+		o.turnCountRecountHook = func(int, ingest.SessionID) error { hookCalls++; return nil }
+	}); err != nil {
+		t.Fatalf("open a new store: %v", err)
+	}
+	counts, pending, version := readTurnCountRecountState(t, path)
+	if version != 77 {
+		t.Fatalf("new store schema version = %d, want 77", version)
+	}
+	if pending {
+		t.Fatal("a new store holds a pending recount after its first open")
+	}
+	if hookCalls != 0 || len(counts) != 0 {
+		t.Fatalf("a new store folded %d sessions over %d stats rows, want none", hookCalls, len(counts))
+	}
+	// A store with no sessions that reaches V77 through the migration chain
+	// owes no recount either.
+	chainPath := filepath.Join(t.TempDir(), "chain.db")
+	conn, err := sqlite.OpenConn(chainPath, sqlite.OpenReadWrite, sqlite.OpenCreate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlitemigration.Migrate(context.Background(), conn, dbSchema); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, pending, _ := readTurnCountRecountState(t, chainPath); pending {
+		t.Fatal("an empty store migrated through the chain holds a pending recount")
 	}
 }

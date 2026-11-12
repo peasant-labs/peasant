@@ -914,6 +914,12 @@ func (s *Store) upsertMigrateStats(ctx context.Context, oracle *migrateOracle) e
 	endFn := sqlitex.Transaction(conn)
 	defer endFn(&txnErr)
 	stats := oracle.statsRaw
+	// The retained document's turn numbers are in whatever unit its producer
+	// used. The two count columns come only from the index-time fold and the
+	// upgrade recount, so this lane writes neither and cannot overwrite a
+	// recounted value.
+	stats.TurnCount = nil
+	stats.ConversationTurnCount = nil
 	stats.SessionID = oracle.sessionID
 	stats.UpdatedAtMs = oracle.statsCaptureTime
 	if _, err := upsertCapturedStatsOnConn(conn, stats); err != nil {

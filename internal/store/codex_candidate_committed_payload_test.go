@@ -187,8 +187,11 @@ func openCodexCommittedPayloadStore(t *testing.T, dir string) *store.Store {
 
 func assertCodexCommittedPayload(t *testing.T, label string, payload *schema.SessionDetailPayload, fixture codexCommittedPayloadFixture) {
 	t.Helper()
-	if payload.TurnCount != fixture.Expected.ConversationTurnCount {
-		t.Errorf("%s turn count = %d, want %d conversation turns", label, payload.TurnCount, fixture.Expected.ConversationTurnCount)
+	if payload.TurnCount != fixture.Expected.TurnCount {
+		t.Errorf("%s turn count = %d, want %d folded turns", label, payload.TurnCount, fixture.Expected.TurnCount)
+	}
+	if payload.ConversationTurnCount == nil || *payload.ConversationTurnCount != int64(fixture.Expected.ConversationTurnCount) {
+		t.Errorf("%s conversation turn count = %v, want %d conversation turns", label, payload.ConversationTurnCount, fixture.Expected.ConversationTurnCount)
 	}
 	if len(payload.Turns) != len(fixture.Expected.Main) {
 		t.Fatalf("%s turns = %d, want %d", label, len(payload.Turns), len(fixture.Expected.Main))

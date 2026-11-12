@@ -1,5 +1,6 @@
 'use client';
 
+import { displayedTurnCount } from '@/lib/sessions/displayedTurnCount';
 import { useCallback, useState, type ReactNode } from 'react';
 import {
   HelperGroup,
@@ -83,7 +84,7 @@ function rowPresentation(
     title: groupedRowTitle(row),
     provider: row.session.harness,
     inputSubmissionCount: row.session.inputSubmissionCount,
-    turnCount: row.session.turnCount,
+    turnCount: displayedTurnCount(row.session),
     href: projectHash ? transcriptHref(projectHash, row.session.id) : undefined,
   };
 }

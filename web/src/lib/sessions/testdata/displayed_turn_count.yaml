@@ -1,0 +1,31 @@
+# The turn count a session list prints. `turnCount` is every folded turn of the
+# session, system and tool rows included; `conversationTurnCount` is the count a
+# reader is shown and is `absent` on a session measured before the field
+# existed. `want` is the number printed and `printed` its grouped text. In every
+# measured row the two counts differ, so a list that reads the wrong field
+# fails; no row's unwanted count may appear in the rendered row.
+cases:
+  - name: the conversation count is printed when the two counts differ
+    turnCount: 41
+    conversationTurnCount: 17
+    want: 17
+    printed: '17'
+    notPrinted: '41'
+  - name: a measured zero is printed as zero
+    turnCount: 5
+    conversationTurnCount: 0
+    want: 0
+    printed: '0'
+    notPrinted: '5'
+  - name: a session measured before the field prints its folded count
+    turnCount: 9
+    conversationTurnCount: absent
+    want: 9
+    printed: '9'
+    notPrinted: null
+  - name: a large conversation count is grouped
+    turnCount: 4087
+    conversationTurnCount: 1312
+    want: 1312
+    printed: '1,312'
+    notPrinted: '4,087'

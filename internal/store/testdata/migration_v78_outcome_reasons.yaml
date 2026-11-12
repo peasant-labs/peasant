@@ -1,5 +1,5 @@
-# Rows of a schema-76 ingest_run_outcomes table and the reason id each must
-# carry after migration 77. There is one named row for every (kind, code) pair
+# Rows of a schema-77 ingest_run_outcomes table and the reason id each must
+# carry after migration 78. There is one named row for every (kind, code) pair
 # a build before the migration could write, so no pair can be dropped. The
 # special rows pin the split of adapter_refresh_unavailable by kind, the
 # run-wide diagnostic, and a stored code no build lists.

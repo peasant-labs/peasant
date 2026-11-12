@@ -138,7 +138,7 @@ func (m DashboardModel) computeMetrics() dashMetrics {
 		key := d.Format("2006-01-02")
 		for _, s := range days[key] {
 			dayData[i].tokens += s.Metadata.TotalTokens
-			dayData[i].turns += s.Metadata.TurnCount
+			dayData[i].turns += s.ReaderTurnCount()
 			dayData[i].turnCount++
 			if s.Metadata.Quality != nil {
 				q := s.Metadata.Quality
@@ -173,7 +173,7 @@ func (m DashboardModel) computeMetrics() dashMetrics {
 
 	for _, s := range m.sessions {
 		totalTokens += s.Metadata.TotalTokens
-		totalTurns += s.Metadata.TurnCount
+		totalTurns += s.ReaderTurnCount()
 		if s.Metadata.Quality != nil {
 			q := s.Metadata.Quality
 			if derefOutcome(q.Outcome) == ingest.OutcomeResolved {

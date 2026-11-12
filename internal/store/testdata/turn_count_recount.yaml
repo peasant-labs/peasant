@@ -1,0 +1,127 @@
+# The V77 upgrade folds every stored session once and writes both turn counts:
+# turnCount is the number of folded turns, conversationTurnCount is the folded
+# turns on the allowed list. Every session carries stored counts the fold does
+# not produce, so a row that was not recounted, or was recounted when it should
+# have been kept, fails. The two expected counts of a session always differ.
+#
+# report says what the recount does with the session:
+#   recounted   both columns take the folded literals
+#   entry-less  no stored entries; both stored values are kept, and it is reported
+#   unreadable  its entries cannot be read; both stored values are kept, and it is reported
+#
+# fromV73 states the result when the store starts at V73, where only the legacy
+# turn_count exists. The V74 backfill runs first and copies that legacy value
+# into the conversation column of an entry-less session; the recount then keeps
+# both. The V74 backfill refuses a store with an unreadable generation, so that
+# session is seeded only on the V75 store.
+#
+# noStatsRow removes the session's stats row after seeding. The recount then
+# creates the row with the folded counts and update time 0, so any later
+# measurement outranks it. Such a session states no stored counts and is
+# seeded only on the V75 store.
+requiredSessions:
+  - unmanaged-session
+  - managed-session
+  - unmanaged-entry-less
+  - managed-entry-less
+  - stale-counts
+  - unreadable-generation
+  - no-stats-row
+requiredRows:
+  - from-v75
+  - from-v73
+  - interrupted-first-open
+  - new-store
+sessions:
+  - name: unmanaged-session
+    sessionID: 10000000-0000-4000-8000-000000000001
+    activeGeneration: false
+    storedTurnCount: 50
+    storedConversationTurnCount: 40
+    entries:
+      - {index: 0, role: user, entryType: text, depth: 0, content: "run the checks"}
+      - {index: 1, role: system, entryType: system, depth: 0, content: "Build finished in 12s"}
+      - {index: 2, role: assistant, entryType: tool_use, depth: 0, content: "rg parser"}
+      - {index: 3, role: assistant, entryType: text, depth: 0, content: "the checks pass"}
+    report: recounted
+    wantTurnCount: 4
+    wantConversationTurnCount: 2
+    fromV73: {wantTurnCount: 4, wantConversationTurnCount: 2}
+  - name: managed-session
+    sessionID: 20000000-0000-4000-8000-000000000002
+    activeGeneration: true
+    storedTurnCount: 9
+    storedConversationTurnCount: 8
+    entries:
+      - {index: 0, role: user, entryType: text, depth: 0, content: "explain the parser"}
+      - {index: 1, role: system, entryType: text, depth: 0, content: "mode: normal"}
+      - {index: 2, role: assistant, entryType: text, depth: 0, content: "it reads one record per line"}
+    report: recounted
+    wantTurnCount: 3
+    wantConversationTurnCount: 2
+    fromV73: {wantTurnCount: 3, wantConversationTurnCount: 2}
+  - name: unmanaged-entry-less
+    sessionID: 30000000-0000-4000-8000-000000000003
+    activeGeneration: false
+    storedTurnCount: 6
+    storedConversationTurnCount: 5
+    report: entry-less
+    wantTurnCount: 6
+    wantConversationTurnCount: 5
+    fromV73: {wantTurnCount: 6, wantConversationTurnCount: 6}
+  - name: managed-entry-less
+    sessionID: 40000000-0000-4000-8000-000000000004
+    activeGeneration: true
+    storedTurnCount: 8
+    storedConversationTurnCount: 7
+    report: entry-less
+    wantTurnCount: 8
+    wantConversationTurnCount: 7
+    fromV73: {wantTurnCount: 8, wantConversationTurnCount: 8}
+  - name: stale-counts
+    sessionID: 50000000-0000-4000-8000-000000000005
+    activeGeneration: false
+    storedTurnCount: 99
+    storedConversationTurnCount: 98
+    entries:
+      - {index: 0, role: user, entryType: text, depth: 0, content: "first prompt"}
+      - {index: 1, role: assistant, entryType: thinking, depth: 0, content: "weighing two options"}
+      - {index: 2, role: assistant, entryType: text, depth: 0, content: "first reply"}
+      - {index: 3, role: user, entryType: text, depth: 0, content: "second prompt"}
+      - {index: 4, role: system, entryType: system, depth: 0, content: "Build finished in 3s"}
+    report: recounted
+    wantTurnCount: 5
+    wantConversationTurnCount: 3
+    fromV73: {wantTurnCount: 5, wantConversationTurnCount: 3}
+  - name: unreadable-generation
+    sessionID: 60000000-0000-4000-8000-000000000006
+    activeGeneration: true
+    storedTurnCount: 12
+    storedConversationTurnCount: 11
+    # One mapped body of this generation is deleted after seeding, so the
+    # generation read refuses to emit a partial transcript.
+    missingBodyIndex: 1
+    entries:
+      - {index: 0, role: user, entryType: text, depth: 0, content: "a prompt"}
+      - {index: 1, role: assistant, entryType: text, depth: 0, content: "a reply whose body is gone"}
+    report: unreadable
+    wantTurnCount: 12
+    wantConversationTurnCount: 11
+  - name: no-stats-row
+    sessionID: 70000000-0000-4000-8000-000000000007
+    activeGeneration: false
+    noStatsRow: true
+    entries:
+      - {index: 0, role: user, entryType: text, depth: 0, content: "list the files"}
+      - {index: 1, role: assistant, entryType: tool_use, depth: 0, content: "ls"}
+      - {index: 2, role: assistant, entryType: text, depth: 0, content: "three files"}
+    report: recounted
+    wantTurnCount: 3
+    wantConversationTurnCount: 2
+interruptedFirstOpen:
+  # The per-session hook fails after this many sessions.
+  failAfterSessions: 2
+  # A later open must not fold again: these values are written after the
+  # recount finished and must survive the third open.
+  sentinelTurnCount: 77
+  sentinelConversationTurnCount: 66

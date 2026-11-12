@@ -1251,12 +1251,15 @@ type PushSessionRow struct {
 	GitBranch      *string
 	GitRemote      string // git remote URL from host_slugs (empty if unknown); used for branch-aware selection
 	ToolVersion    *string
-	TurnCount      int
-	ToolCalls      int
-	InputTokens    int
-	OutputTokens   int
-	TokensTotal    int
-	DurationMs     int64
+	// TurnCount is the number of folded turns; it feeds the wire turnCount.
+	TurnCount int
+	// ConversationTurnCount is the conversation turn count a reader is shown.
+	ConversationTurnCount int
+	ToolCalls             int
+	InputTokens           int
+	OutputTokens          int
+	TokensTotal           int
+	DurationMs            int64
 	// SessionOrigin is who drove the session, read from the
 	// sessions.session_origin column. It reaches the push wire through the transcript
 	// document, so a Village consumer reads the producer's decision instead of

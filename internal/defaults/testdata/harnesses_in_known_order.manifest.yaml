@@ -1,0 +1,6 @@
+requiredNames:
+  - reversed-known-values-return-in-known-order
+  - duplicate-values-collapse-to-one
+  - single-value
+  - empty-input
+  - unrecognised-value-sorts-after-known-values-by-name

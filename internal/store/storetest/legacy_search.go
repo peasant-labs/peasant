@@ -63,7 +63,7 @@ func SeedLegacySearchIndex(t *testing.T, s *store.Store) {
 	}
 }
 
-// undoImportProfileScript undoes what the migration after v76 adds, so a store
+// undoImportProfileScript undoes what migration v78 adds, so a store
 // built from the current schema can be stamped as an earlier version and have
 // that migration applied to it again: the index_log timing columns, the stage
 // table, the outcome lookup tables, and the reason-id shape of
@@ -94,10 +94,12 @@ CREATE INDEX idx_ingest_run_outcomes_run ON ingest_run_outcomes(run_id, id);
 // exactly what migration v76 changes - it re-creates the retired
 // session_entries_fts index with the v75 definition, points the three
 // session_entries triggers back at it, rebuilds it from session_entries so
-// both search indexes agree, undoes the later import-profile migration, and
-// stamps user_version 75. Migration v76 only
-// re-points those triggers and drops that index, so the result is the v75
-// schema with no residue: opening it runs v76 on the targeted-insert path.
+// both search indexes agree, undoes the two later migrations, and stamps
+// user_version 75. Migration v76 only re-points those triggers and drops that
+// index, so the result is the v75 schema with no residue: upgrading it runs
+// v76 on the targeted-insert path. Undoing the later migrations drops
+// pending_recounts (v77) and the import profile tables and columns (v78), so
+// the chain from 75 creates them again instead of colliding.
 func BuildCleanV75Store(t *testing.T, path string) {
 	t.Helper()
 	s, err := store.Open(path)
@@ -121,6 +123,7 @@ func BuildCleanV75Store(t *testing.T, path string) {
 	}()
 	if err := sqlitex.ExecuteScript(conn, legacySearchIndexScript+undoImportProfileScript+`
 INSERT INTO session_entries_fts(session_entries_fts) VALUES('rebuild');
+DROP TABLE pending_recounts;
 PRAGMA user_version = 75;`, nil); err != nil {
 		t.Fatalf("restore the v75 search index shape: %v", err)
 	}

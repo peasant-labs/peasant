@@ -280,20 +280,28 @@ WHERE g.session_id = ? AND g.generation_id = ?`, &sqlitex.ExecOptions{
 	if latestAttemptStats, ok, err := readLatestAttemptStatsOnConn(conn, sessionID, generationID); err != nil {
 		return metadata, session, err
 	} else if ok {
+		// A producer stats document recorded before the conversation turn
+		// count existed has no such key. The session's stored count stands in
+		// for it, the same fallback the available detail row applies, so both
+		// reads of one session agree.
+		if latestAttemptStats.ConversationTurnCount == nil {
+			latestAttemptStats.ConversationTurnCount = metadata.Stats.ConversationTurnCount
+		}
 		metadata.Stats = latestAttemptStats
 	}
 	session = schema.SessionDetailPayload{
-		ID:                   string(sessionID),
-		Harness:              metadata.ModelHarness,
-		StartTime:            time.UnixMilli(metadata.Timestamp.Start),
-		EndTime:              time.UnixMilli(metadata.Timestamp.End),
-		TurnCount:            metadata.Stats.TurnCount,
-		InputSubmissionCount: metadata.Stats.InputSubmissionCount,
-		ToolCallCount:        metadata.Stats.ToolCallCount,
-		ParentSessionID:      snapshotLogicalParent(metadata),
-		RootSessionID:        metadata.RootSessionID,
-		Purpose:              metadata.Purpose,
-		Relationships:        metadata.Relationships,
+		ID:                    string(sessionID),
+		Harness:               metadata.ModelHarness,
+		StartTime:             time.UnixMilli(metadata.Timestamp.Start),
+		EndTime:               time.UnixMilli(metadata.Timestamp.End),
+		TurnCount:             metadata.Stats.TurnCount,
+		ConversationTurnCount: metadata.Stats.ConversationTurnCount,
+		InputSubmissionCount:  metadata.Stats.InputSubmissionCount,
+		ToolCallCount:         metadata.Stats.ToolCallCount,
+		ParentSessionID:       snapshotLogicalParent(metadata),
+		RootSessionID:         metadata.RootSessionID,
+		Purpose:               metadata.Purpose,
+		Relationships:         metadata.Relationships,
 	}
 	return metadata, session, nil
 }

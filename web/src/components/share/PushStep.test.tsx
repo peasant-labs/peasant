@@ -30,7 +30,7 @@ function makeSession(id: string, totalTokens = 10000): ShareSession {
     startTime: '2026-02-24T09:00:00Z',
     durationMins: 30,
     totalTokens,
-    turnCount: 10,
+    conversationTurns: 10,
     model: 'claude-sonnet-4-6',
     shareStatus: 'new',
     preview: 'demo',

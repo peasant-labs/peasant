@@ -395,9 +395,9 @@ func TestClaudeIndexer_MixedContent(t *testing.T) {
 		t.Errorf("tool_names_csv: expected %q, got %v", "Edit", e.ToolNamesCSV)
 	}
 
-	// Entry type refined to tool_use (tool_use takes priority over thinking).
-	if e.EntryType != ingest.EntryTypeToolUse {
-		t.Errorf("type: expected %s, got %s", ingest.EntryTypeToolUse, e.EntryType)
+	// Entry type is text: prose wins over thinking and tool_use.
+	if e.EntryType != ingest.EntryTypeText {
+		t.Errorf("type: expected %s, got %s", ingest.EntryTypeText, e.EntryType)
 	}
 
 	// Role is assistant.

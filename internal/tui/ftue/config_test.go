@@ -8,6 +8,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/redact"
 	"gopkg.in/yaml.v3"
 )
@@ -92,9 +93,10 @@ func TestConfigSave_PersistsEnablementForEveryConfiguredHarness(t *testing.T) {
 	for _, harness := range selected {
 		selectedSet[harness] = true
 	}
-	for _, harness := range defaults.AllHarnesses {
+	for _, harness := range ingest.HarvestableHarnesses() {
 		source, ok := parsed.Sources.Provider(harness)
 		if !ok {
+			t.Errorf("harvestable harness %q has no source configuration, so the saved provider selection cannot enable or disable it", harness)
 			continue
 		}
 		wantEnabled := selectedSet[harness.String()]

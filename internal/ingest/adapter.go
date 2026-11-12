@@ -5,8 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
 )
@@ -430,4 +433,11 @@ var DefaultAdapterRegistry = map[Harness]AdapterFactory{
 	HarnessStrike: func(fs FileSystem, git GitResolver, s salt.Salt) SourceAdapter {
 		return NewStrikeAdapter(fs, git, s)
 	},
+}
+
+// HarvestableHarnesses returns the harnesses this build can harvest: the keys
+// of DefaultAdapterRegistry, in the contract's known order. The registry is
+// the owner. This function holds no list of its own.
+func HarvestableHarnesses() []Harness {
+	return defaults.InKnownOrder(slices.Collect(maps.Keys(DefaultAdapterRegistry)))
 }

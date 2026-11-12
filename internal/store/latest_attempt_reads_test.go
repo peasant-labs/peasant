@@ -27,17 +27,18 @@ import (
 // generation's counts cannot pass by coincidence. Only the count fields are
 // replaced: a complete generation must keep its input-submission count.
 var (
-	authorityStats     = countsFor(11, 22, 33, 66000)
-	latestAttemptStats = countsFor(44, 55, 66, 132000)
+	authorityStats     = countsFor(11, 9, 22, 33, 66000)
+	latestAttemptStats = countsFor(44, 41, 55, 66, 132000)
 )
 
 // countsFor builds a producer-stat document with the supplied counts.
-func countsFor(turnCount, toolCallCount, tokensOut int, durationMs int64) schema.SessionStats {
+func countsFor(turnCount int, conversationTurnCount int64, toolCallCount, tokensOut int, durationMs int64) schema.SessionStats {
 	return schema.SessionStats{
-		TurnCount:     turnCount,
-		ToolCallCount: toolCallCount,
-		TokensOut:     tokensOut,
-		DurationMs:    durationMs,
+		TurnCount:             turnCount,
+		ConversationTurnCount: &conversationTurnCount,
+		ToolCallCount:         toolCallCount,
+		TokensOut:             tokensOut,
+		DurationMs:            durationMs,
 	}
 }
 
@@ -45,6 +46,7 @@ func countsFor(turnCount, toolCallCount, tokensOut int, durationMs int64) schema
 // keeping the fields a complete generation must carry.
 func applyCounts(base, counts schema.SessionStats) schema.SessionStats {
 	base.TurnCount = counts.TurnCount
+	base.ConversationTurnCount = counts.ConversationTurnCount
 	base.ToolCallCount = counts.ToolCallCount
 	base.TokensOut = counts.TokensOut
 	base.DurationMs = counts.DurationMs
@@ -137,6 +139,9 @@ func TestLatestAttemptRefusesFullReadsUniformly(t *testing.T) {
 	snapshot, err := s.ReadSessionContentSelected(ctx, string(sid), ingest.SessionReadSelection{LastGood: true})
 	if err != nil {
 		t.Fatalf("ReadSessionContentSelected(LastGood): %v", err)
+	}
+	if int64(snapshot.Detail.ConversationTurnCount) != *authorityStats.ConversationTurnCount {
+		t.Fatalf("last-good conversation turn count = %d, want the authority's %d", snapshot.Detail.ConversationTurnCount, *authorityStats.ConversationTurnCount)
 	}
 	if snapshot.Detail.TurnCount != authorityStats.TurnCount || snapshot.Detail.ToolCalls != authorityStats.ToolCallCount {
 		t.Fatalf("last-good counts = %d/%d, want the authority's %d/%d", snapshot.Detail.TurnCount, snapshot.Detail.ToolCalls, authorityStats.TurnCount, authorityStats.ToolCallCount)
@@ -292,6 +297,9 @@ func TestLatestAttemptAvailableReadBindsLatestAttempt(t *testing.T) {
 	if first := snapshot.Entries[0]; first.ContentPreview == nil || !strings.Contains(*first.ContentPreview, "preview text") {
 		t.Fatalf("available entry 0 = %+v, want the latest attempt's own content", first.ContentPreview)
 	}
+	if int64(snapshot.Detail.ConversationTurnCount) != *latestAttemptStats.ConversationTurnCount {
+		t.Fatalf("available conversation turn count = %d, want the latest attempt's %d", snapshot.Detail.ConversationTurnCount, *latestAttemptStats.ConversationTurnCount)
+	}
 	if snapshot.Detail.TurnCount != latestAttemptStats.TurnCount || snapshot.Detail.ToolCalls != latestAttemptStats.ToolCallCount || snapshot.Detail.OutputTokens != latestAttemptStats.TokensOut {
 		t.Fatalf("available counts = %d/%d/%d, want the latest attempt's %d/%d/%d",
 			snapshot.Detail.TurnCount, snapshot.Detail.ToolCalls, snapshot.Detail.OutputTokens,
@@ -302,6 +310,29 @@ func TestLatestAttemptAvailableReadBindsLatestAttempt(t *testing.T) {
 	// detail row rather than reporting the raw value.
 	if want := float64(latestAttemptStats.DurationMs) / 60000.0; snapshot.Detail.DurationMinutes != want {
 		t.Fatalf("available duration minutes = %v, want %v", snapshot.Detail.DurationMinutes, want)
+	}
+}
+
+// TestLatestAttemptAvailableReadFallsBackForStatsWithoutConversationCount
+// proves a latest attempt whose producer stats document was recorded before
+// the conversation turn count existed reports the session's stored
+// conversation count, never 0, while its other counts stay the attempt's own.
+func TestLatestAttemptAvailableReadFallsBackForStatsWithoutConversationCount(t *testing.T) {
+	s, _ := openGenerationStore(t)
+	sid := schema.SessionID("44445555-6666-4777-8888-99990000aaaa")
+	seedLatestAttemptCoexistence(t, s, sid)
+	execGenerationSQL(t, s, `UPDATE sessions SET latest_attempt_stats_json = json_remove(latest_attempt_stats_json, '$.conversationTurnCount') WHERE session_id = '`+string(sid)+`';`)
+
+	snapshot, err := s.ReadSessionAvailable(context.Background(), ingest.SessionID(sid))
+	if err != nil {
+		t.Fatalf("ReadSessionAvailable: %v", err)
+	}
+	if int64(snapshot.Detail.ConversationTurnCount) != *authorityStats.ConversationTurnCount {
+		t.Fatalf("available conversation turn count = %d, want the session's stored %d: the attempt's stats document has no conversationTurnCount", snapshot.Detail.ConversationTurnCount, *authorityStats.ConversationTurnCount)
+	}
+	if snapshot.Detail.TurnCount != latestAttemptStats.TurnCount || snapshot.Detail.ToolCalls != latestAttemptStats.ToolCallCount {
+		t.Fatalf("available counts = %d/%d, want the latest attempt's %d/%d",
+			snapshot.Detail.TurnCount, snapshot.Detail.ToolCalls, latestAttemptStats.TurnCount, latestAttemptStats.ToolCallCount)
 	}
 }
 
@@ -330,6 +361,40 @@ func TestLatestAttemptPreviewSnapshotReportsLatestAttemptStats(t *testing.T) {
 	}
 	if snapshot.Session.TurnCount != latestAttemptStats.TurnCount {
 		t.Fatalf("preview session turns = %d, want the latest attempt's %d", snapshot.Session.TurnCount, latestAttemptStats.TurnCount)
+	}
+}
+
+// TestLatestAttemptPreviewSnapshotFallsBackForStatsWithoutConversationCount
+// proves the preview snapshot of a latest attempt whose producer stats
+// document was recorded before the conversation turn count existed reports the
+// session's stored conversation count, the same answer the available read
+// gives, while its other counts stay the attempt's own.
+func TestLatestAttemptPreviewSnapshotFallsBackForStatsWithoutConversationCount(t *testing.T) {
+	s, _ := openGenerationStore(t)
+	sid := schema.SessionID("44445555-6666-4777-8888-99990000bbbb")
+	seedLatestAttemptCoexistence(t, s, sid)
+	execGenerationSQL(t, s, `UPDATE sessions SET latest_attempt_stats_json = json_remove(latest_attempt_stats_json, '$.conversationTurnCount') WHERE session_id = '`+string(sid)+`';`)
+
+	var snapshot indexformat.ReadSnapshot
+	if err := s.WithSessionPreviewSnapshot(context.Background(), sid, func(s indexformat.ReadSnapshot) error {
+		snapshot = s
+		return nil
+	}); err != nil {
+		t.Fatalf("WithSessionPreviewSnapshot: %v", err)
+	}
+	if snapshot.GenerationID != "gen_preview_b" {
+		t.Fatalf("preview snapshot generation = %q, want the latest attempt", snapshot.GenerationID)
+	}
+	want := *authorityStats.ConversationTurnCount
+	if got := snapshot.Metadata.Stats.ConversationTurnCount; got == nil || *got != want {
+		t.Fatalf("preview stats conversation turn count = %v, want the session's stored %d: the attempt's stats document has no conversationTurnCount", got, want)
+	}
+	if got := snapshot.Session.ConversationTurnCount; got == nil || *got != want {
+		t.Fatalf("preview session conversation turn count = %v, want the session's stored %d: the attempt's stats document has no conversationTurnCount", got, want)
+	}
+	if snapshot.Session.TurnCount != latestAttemptStats.TurnCount || snapshot.Session.ToolCallCount != latestAttemptStats.ToolCallCount {
+		t.Fatalf("preview session counts = %d/%d, want the latest attempt's %d/%d",
+			snapshot.Session.TurnCount, snapshot.Session.ToolCallCount, latestAttemptStats.TurnCount, latestAttemptStats.ToolCallCount)
 	}
 }
 

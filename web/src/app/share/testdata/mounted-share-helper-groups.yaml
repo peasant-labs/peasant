@@ -86,7 +86,9 @@ owners:
       - { groupId: hg_nested_owner, helperThreadCount: 1, memberScope: scope-nested-owner }
 members:
   - { role: eligible-member, groupId: hg_owner1, id: eligible-member, preview: eligible helper, turnCount: 1, syncStatus: new }
-  - { role: other-member, groupId: hg_owner1, id: other-member, preview: other helper, turnCount: 1, syncStatus: new }
+  # The two counts differ on this row: the chooser prints the conversation
+  # count, never the folded turn count.
+  - { role: other-member, groupId: hg_owner1, id: other-member, preview: other helper, turnCount: 9, conversationTurnCount: 4, syncStatus: new }
   - { role: ineligible-member, groupId: hg_owner1, id: ineligible-member, preview: held helper, turnCount: 1, syncStatus: held }
   - { role: second-group-filler-01, groupId: hg_owner2, id: second-group-filler-01, preview: filler helper 1, turnCount: 1, syncStatus: new }
   - { role: second-group-filler-02, groupId: hg_owner2, id: second-group-filler-02, preview: filler helper 2, turnCount: 1, syncStatus: new }

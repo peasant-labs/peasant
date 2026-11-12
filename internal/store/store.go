@@ -327,6 +327,10 @@ type openOptions struct {
 	// immutable opens a read-only store with SQLite's immutable=1 so it
 	// needs no -shm file; see WithImmutableReadOnly.
 	immutable bool
+	// turnCountRecountHook is called after each session the upgrade recount
+	// handles. It is nil on every production open; a test sets it to stop
+	// the recount part way.
+	turnCountRecountHook turnCountRecountHook
 }
 
 // WithImmutableReadOnly makes OpenReadOnlyWithOptions open the database with
