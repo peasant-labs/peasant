@@ -525,8 +525,10 @@ func buildFTUEIngestRunnerWithProgress(cmd *cobra.Command, configPath string) (f
 			StalenessThreshold: staleness,
 			Parallelism:        0,
 			Write:              cfg.Write,
-			Progress:           progState,
-			AllowedSessionIDs:  allowedIDs,
+			// Always on: the pipeline stores the run's profile with its audit row.
+			IndexProfiler:     &ingest.IndexProfiler{},
+			Progress:          progState,
+			AllowedSessionIDs: allowedIDs,
 			// The wizard's allowlist is the user's selection.
 			AllowedSessionIDsIsSelection: true,
 		}
