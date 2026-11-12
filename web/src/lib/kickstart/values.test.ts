@@ -166,7 +166,16 @@ const CHECKS: Record<string, () => void> = {
   'no-literal-comparison-in-consumers': () => {
     const root = requireRecord(readFixture(PATH), PATH);
     const scan = requireRecord(root.consumerScan, `${PATH}.consumerScan`);
-    const wires = [...new Set(rows().flatMap((row) => row.wires))].map(escape).join('|');
+    // The refusal codes are the schema's own closed set, not a set of this module,
+    // so the scan reads their tokens from the schema's list.
+    const schemaLists = Array.isArray(scan.schemaLists) ? (scan.schemaLists as string[]) : [];
+    const schemaTokens = schemaLists.flatMap((name) => {
+      const list = schemaExports[name];
+      if (!Array.isArray(list)) throw new Error(`${PATH}: @peasant-labs/schema exports no list named ${name}`);
+      return list as string[];
+    });
+    expect(schemaTokens.length, 'the scan reads at least one schema list').toBeGreaterThan(0);
+    const wires = [...new Set([...rows().flatMap((row) => row.wires), ...schemaTokens])].map(escape).join('|');
     const quoted = `['"\`](?:${wires})['"\`]`;
     const comparison = new RegExp(`(?:[!=]==?\\s*${quoted})|(?:${quoted}\\s*[!=]==?)|(?:case\\s+${quoted}\\s*:)`);
     const offenders = productionFiles(scan.roots as string[], scan.definitionSite as string)

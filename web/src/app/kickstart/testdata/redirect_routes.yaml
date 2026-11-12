@@ -61,7 +61,7 @@ cases:
     redirects: false
     decision: open
   - name: failed-status-fetch-redirects-nothing
-    statusAnswer: {status: 500, body: {error: the server could not read its settings}}
+    statusAnswer: {status: 500, body: {code: kickstart_status_unreadable, error: the server could not read its settings}}
     pages: ["/", /settings, /map]
     redirects: false
     decision: open

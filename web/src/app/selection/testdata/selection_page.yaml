@@ -35,6 +35,7 @@ requiredNames:
   - unconfigured-selection-redirects-without-opening-a-session
   - a-failed-status-read-opens-the-page-without-redirecting
   - a-forest-with-a-bad-row-is-refused-whole-and-says-what-to-do
+  - a-preview-row-that-is-gone-says-so-and-the-session-goes-on
 cases:
   # The page opens a session of its own and draws only the stops the server
   # serves for it. Events of the wizard's session are not its own.
@@ -379,7 +380,7 @@ cases:
       "POST /api/v1/kickstart/sessions":
         - body: {$model: selection-scope}
         - status: 500
-          body: {error: peasant could not read the saved selection}
+          body: {code: kickstart_config_unreadable, error: peasant could not read the saved selection}
       "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
     steps:
       - push: {kind: closed, sessionId: ses-selection, revision: 2, reason: expired}
@@ -545,7 +546,7 @@ cases:
     kind: gate
     redirects: false
     server:
-      "GET /api/v1/kickstart/status": {status: 500, body: {error: the server could not read its settings}}
+      "GET /api/v1/kickstart/status": {status: 500, body: {code: kickstart_status_unreadable, error: the server could not read its settings}}
       "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
       "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
     steps:
@@ -580,3 +581,21 @@ cases:
       # No row is drawn, not even the one the contract accepts.
       - expectRows: []
       - expectNoCalls: "PATCH"
+
+  # A preview row that is gone is a refusal of its own code, not the end of the
+  # session: the preview says so in the server's words and the page goes on.
+  - name: a-preview-row-that-is-gone-says-so-and-the-session-goes-on
+    kind: page
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree/s-one/preview":
+        status: 404
+        body:
+          code: kickstart_preview_row_not_found
+          error: "No row has the id \"s-one\" in the forest of the selection session. Nothing was changed. Scan again, then choose a row."
+    steps:
+      - focus: fix the ledger rounding
+      - expectText: [No row has the id, "Scan again, then choose a row."]
+      - expectNoText: [this selection session timed out]
+      - expectControl: {role: button, name: continue, disabled: false}

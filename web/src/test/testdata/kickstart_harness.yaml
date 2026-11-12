@@ -28,6 +28,9 @@ requiredNames:
   - a-raw-frame-that-breaks-the-contract-is-refused
   - a-held-answer-waits-until-a-step-releases-it
   - releasing-a-route-nothing-holds-is-refused
+  - a-kickstart-refusal-with-a-code-the-contract-lists-is-played
+  - a-kickstart-refusal-with-an-unknown-code-is-refused
+  - a-kickstart-refusal-without-a-code-is-refused
 cases:
   - name: a-valid-case-is-played
     play:
@@ -162,3 +165,23 @@ cases:
       steps:
         - release: "GET /api/v1/kickstart/status"
     refuses: [releases GET /api/v1/kickstart/status, no scripted answer holds, "held: true"]
+  - name: a-kickstart-refusal-with-a-code-the-contract-lists-is-played
+    play:
+      server:
+        "POST /api/v1/kickstart/sessions/ses-full/commit": {status: 503, body: {code: kickstart_config_busy, error: another change holds the configuration file}}
+      steps:
+        - expectText: [hello]
+  - name: a-kickstart-refusal-with-an-unknown-code-is-refused
+    play:
+      server:
+        "POST /api/v1/kickstart/sessions/ses-full/commit": {status: 503, body: {code: kickstart_brand_new, error: a sentence}}
+      steps:
+        - expectText: [hello]
+    refuses: [breaks the Local API contract, code, malformed]
+  - name: a-kickstart-refusal-without-a-code-is-refused
+    play:
+      server:
+        "POST /api/v1/kickstart/sessions/ses-full/commit": {status: 500, body: {error: a sentence with no code}}
+      steps:
+        - expectText: [hello]
+    refuses: [breaks the Local API contract, code, malformed]

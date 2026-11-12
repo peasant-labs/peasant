@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { AllLocalKickstartErrorCodes } from '@peasant-labs/schema';
 import {
   acceptKickstartEvent,
   KickstartContractError,
+  parseKickstartErrorBody,
   parseKickstartEvent,
   parseKickstartTree,
 } from './model';
@@ -79,6 +81,30 @@ describe('the forest', () => {
       expect(failure, 'the contract must refuse this forest').toBeInstanceOf(KickstartContractError);
       for (const text of entry.refuses as string[]) expect((failure as Error).message).toContain(text);
       expect((failure as Error).message).toContain('GET /api/v1/kickstart/sessions/{id}/tree');
+    });
+  }
+});
+
+describe('the refusal body', () => {
+  const where = 'POST /api/v1/kickstart/sessions/ses-full/commit';
+  for (const entry of loadCases(PATH, 'errors')) {
+    it(entry.name, () => {
+      if (entry.accepts === 'every-code') {
+        expect(AllLocalKickstartErrorCodes.length, 'the contract lists refusal codes').toBeGreaterThan(0);
+        for (const code of AllLocalKickstartErrorCodes) {
+          expect(parseKickstartErrorBody({ code, error: `the sentence for ${code}` }, where), `the code ${code}`).toEqual({ code, error: `the sentence for ${code}` });
+        }
+        return;
+      }
+      let failure: unknown;
+      try {
+        parseKickstartErrorBody(entry.body, where);
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure, 'the contract must refuse this body').toBeInstanceOf(KickstartContractError);
+      expect((failure as Error).message).toContain(where);
+      for (const text of entry.refuses as string[]) expect((failure as Error).message).toContain(text);
     });
   }
 });

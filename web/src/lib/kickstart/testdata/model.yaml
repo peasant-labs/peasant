@@ -133,3 +133,36 @@ trees:
         nodes:
           - {id: p-ok, kind: project, state: none}
       refuses: ['row 1 (id p-ok)', 'has none for label']
+# The refusal body every kickstart route answers on 400, 404, 500 and 503:
+# `{error, code}` with the code from the contract's closed set, read by one
+# parser. `accepts: every-code` is played once for each code the schema lists;
+# `refuses` is text the actionable contract error must contain.
+errors:
+  requiredNames:
+    - every-code-the-contract-lists-is-accepted
+    - an-unknown-code-is-refused-and-says-what-to-do
+    - a-missing-code-is-refused
+    - an-empty-sentence-is-refused
+    - another-field-is-refused
+  cases:
+    - name: every-code-the-contract-lists-is-accepted
+      accepts: every-code
+    - name: an-unknown-code-is-refused-and-says-what-to-do
+      body: {code: kickstart_brand_new, error: something peasant says that this page has no code for}
+      refuses:
+        - 'names the code "kickstart_brand_new"'
+        - codes this page knows
+        - what went wrong cannot be told
+        - breaks the Local API contract
+        - nothing was changed
+        - same version
+        - reload
+    - name: a-missing-code-is-refused
+      body: {error: the server says what happened but not which refusal it is}
+      refuses: [names no code, codes this page knows, breaks the Local API contract]
+    - name: an-empty-sentence-is-refused
+      body: {code: kickstart_failed, error: ""}
+      refuses: [no sentence saying what went wrong]
+    - name: another-field-is-refused
+      body: {code: kickstart_failed, error: a sentence, detail: a field the contract does not have}
+      refuses: [detail, breaks the Local API contract]

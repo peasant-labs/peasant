@@ -14,6 +14,11 @@ requiredNames:
   - saving-a-session-the-server-forgot-ends-it
   - answering-a-session-the-server-forgot-ends-it
   - a-retry-after-a-refused-save-saves
+  - answering-while-the-session-is-being-saved-adds-what-the-page-does
+  - answering-a-hidden-field-adds-what-changed
+  - a-404-that-is-not-a-forgotten-session-does-not-end-it
+  - an-unknown-refusal-code-is-refused-with-the-contract-message
+  - a-refusal-without-a-code-is-refused-with-the-contract-message
 cases:
   - name: invalid-answer-is-shown-and-nothing-moves
     server:
@@ -135,7 +140,7 @@ cases:
   - name: an-envelope-with-no-reason-gets-a-sentence-that-says-what-to-do
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
-      "POST /api/v1/kickstart/sessions/ses-full/commit": {status: 500, body: {error: "   "}}
+      "POST /api/v1/kickstart/sessions/ses-full/commit": {status: 500, body: {code: kickstart_failed, error: "   "}}
     steps:
       - click: continue
       - click: continue
@@ -210,3 +215,106 @@ cases:
       - expectText: [your setup is saved]
       # The error of the refused save is gone with the refused save.
       - expectNoText: [another change holds the configuration file]
+
+  # The server's sentence is shown as it wrote it; the page adds one sentence
+  # only where it knows something the server's cannot say: here, that this page
+  # follows the save by itself, so there is nothing to reload.
+  - name: answering-while-the-session-is-being-saved-adds-what-the-page-does
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      "PATCH /api/v1/kickstart/sessions/ses-full":
+        status: 400
+        body:
+          code: kickstart_session_committing
+          error: "Setup session \"ses-full\" is being saved, so this request was not applied in internal/api.kickstartSessions. Nothing was changed. Wait for the save to finish, then reload the session."
+    steps:
+      - click: continue
+      - click: continue
+      - choose: plan to publish later
+      - expectText:
+          - is being saved, so this request was not applied
+          - Wait for the save to finish, then reload the session.
+          - "you do not need to reload: this page moves to the finish by itself when the save ends."
+      # The session is not over: nothing says it timed out, and the page stays where it is.
+      - expectNoText: [this setup session timed out, your setup is saved]
+      - expectControl: {role: button, name: open a new setup, present: false}
+
+  - name: answering-a-hidden-field-adds-what-changed
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      "PATCH /api/v1/kickstart/sessions/ses-full":
+        status: 400
+        body:
+          code: kickstart_field_hidden
+          error: "The answer for a hidden field was refused in internal/api.kickstartSessions.patch: publication-preference is shown only when village-connect is accept, and the full setup session does not meet that now. Nothing was changed. Answer a field the setup shows, or send the answer that reveals this one in the same request."
+    steps:
+      - click: continue
+      - click: continue
+      - choose: plan to publish later
+      - expectText:
+          - The answer for a hidden field was refused
+          - "another answer hides that question now. the page shows the questions that apply, so answer again there if it still asks."
+      - expectNoText: [this setup session timed out]
+
+  # What ends a session is the server saying it has none, by its own code. A 404
+  # that names another thing (a forest row that is gone) leaves the session open.
+  - name: a-404-that-is-not-a-forgotten-session-does-not-end-it
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      "PATCH /api/v1/kickstart/sessions/ses-full":
+        status: 404
+        body:
+          code: kickstart_preview_row_not_found
+          error: "No row has the id \"x\" in the forest of setup session \"ses-full\". Nothing was changed."
+    steps:
+      - click: continue
+      - click: continue
+      - choose: plan to publish later
+      - expectText: [No row has the id]
+      - expectNoText: [this setup session timed out]
+      - expectControl: {role: button, name: open a new setup, present: false}
+
+  # A refusal whose code is not in the contract's closed set is never shown as
+  # if it meant something: the page says that it cannot read it, and what to do.
+  - name: an-unknown-refusal-code-is-refused-with-the-contract-message
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      "POST /api/v1/kickstart/sessions/ses-full/commit":
+        status: 500
+        malformed: true
+        body:
+          code: kickstart_brand_new
+          error: something peasant says that this page has no code for
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: save and import
+      - expectText:
+          - breaks the Local API contract
+          - 'names the code "kickstart_brand_new"'
+          - same version
+          - reload
+      - expectNoText: [your setup is saved]
+      - expectControl: {role: button, name: save and import, disabled: false}
+
+  - name: a-refusal-without-a-code-is-refused-with-the-contract-message
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      "POST /api/v1/kickstart/sessions/ses-full/commit":
+        status: 503
+        malformed: true
+        body: {error: the server says what happened but not which refusal it is}
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: save and import
+      - expectText: [breaks the Local API contract, names no code, same version, reload]
+      - expectNoText: [your setup is saved]
