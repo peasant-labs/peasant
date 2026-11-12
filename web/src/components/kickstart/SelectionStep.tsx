@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState, type MouseEvent, type FocusEvent } from 'react';
 import { Button, FeedbackPanel, Progress, SelectionNodeKind, SelectionTree, Skeleton } from '@/lib/ft-ui';
-import type { KickstartField } from '@/lib/kickstart/model';
+import type { KickstartField, KickstartScan } from '@/lib/kickstart/model';
 import type { KickstartSessionApi } from '@/lib/kickstart/useKickstartSession';
 import { useKickstartPreview } from '@/lib/kickstart/usePreview';
 import { scanPercent, selectedIds } from '@/lib/kickstart/view';
@@ -63,6 +63,20 @@ function ScanProgress({ api }: { api: KickstartSessionApi }) {
   return null;
 }
 
+/**
+ * What a finished scan could not read, in the server's words. It is its own
+ * field on the scan, drawn once the scan is done; the progress line's `phase`
+ * is only for a scan that is still running and is never read after it ends.
+ */
+function ScanNotice({ scan }: { scan: KickstartScan | null }) {
+  if (scan === null || scan.state !== KickstartScanState.Done || scan.notice === null) return null;
+  return (
+    <p className="ks-help" role="status">
+      <span className="ks-field-label">note from the scan:</span> {scan.notice}
+    </p>
+  );
+}
+
 export function SelectionStep({ field, api }: { field: KickstartField; api: KickstartSessionApi }) {
   const { tree, scan, session } = api;
   const [highlighted, setHighlighted] = useState<string | null>(null);
@@ -91,6 +105,7 @@ export function SelectionStep({ field, api }: { field: KickstartField; api: Kick
     <div className="ks-field">
       {field.description !== null && <p className="ks-help">{field.description}</p>}
       <ScanProgress api={api} />
+      <ScanNotice scan={scan} />
       {scan !== null && scan.droppedSelections > 0 && (
         <p className="ks-help" role="status">
           <span className="ks-num">{countFormat.format(scan.droppedSelections)}</span> saved{' '}

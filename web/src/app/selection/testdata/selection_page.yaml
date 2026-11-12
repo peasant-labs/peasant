@@ -35,6 +35,12 @@ requiredNames:
   - unconfigured-selection-redirects-without-opening-a-session
   - a-failed-status-read-opens-the-page-without-redirecting
   - a-forest-with-a-bad-row-is-refused-whole-and-says-what-to-do
+  - a-done-scan-draws-its-notice-as-the-server-wrote-it
+  - a-done-scan-with-no-notice-draws-none
+  - a-phase-on-a-done-scan-is-not-drawn
+  - a-notice-is-drawn-only-once-the-scan-is-done
+  - a-preview-row-that-is-gone-says-so-and-the-session-goes-on
+  - saved-choices-no-longer-on-disk-name-their-labels
 cases:
   # The page opens a session of its own and draws only the stops the server
   # serves for it. Events of the wizard's session are not its own.
@@ -379,7 +385,7 @@ cases:
       "POST /api/v1/kickstart/sessions":
         - body: {$model: selection-scope}
         - status: 500
-          body: {error: peasant could not read the saved selection}
+          body: {code: kickstart_config_unreadable, error: peasant could not read the saved selection}
       "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
     steps:
       - push: {kind: closed, sessionId: ses-selection, revision: 2, reason: expired}
@@ -545,7 +551,7 @@ cases:
     kind: gate
     redirects: false
     server:
-      "GET /api/v1/kickstart/status": {status: 500, body: {error: the server could not read its settings}}
+      "GET /api/v1/kickstart/status": {status: 500, body: {code: kickstart_status_unreadable, error: the server could not read its settings}}
       "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
       "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
     steps:
@@ -580,3 +586,85 @@ cases:
       # No row is drawn, not even the one the contract accepts.
       - expectRows: []
       - expectNoCalls: "PATCH"
+
+  # A finished scan says what it could not read in its own field. The words are
+  # the server's, drawn as sent (their case and the folder names are not changed)
+  # under a lowercase label of the page's own.
+  - name: a-done-scan-draws-its-notice-as-the-server-wrote-it
+    kind: page
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+    steps:
+      - push: {kind: scan, sessionId: ses-selection, revision: 2, scan: {state: done, done: 2, total: 2, notice: "Could not read 1 of 2 harness folders: Codex (/home/ada/.codex/sessions: permission denied)."}}
+      - expectText:
+          - "note from the scan:"
+          - "Could not read 1 of 2 harness folders: Codex (/home/ada/.codex/sessions: permission denied)."
+      - expectOrder: ["note from the scan:", fix the ledger rounding]
+
+  - name: a-done-scan-with-no-notice-draws-none
+    kind: page
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+    steps:
+      - push: {kind: scan, sessionId: ses-selection, revision: 2, scan: {state: done, done: 2, total: 2}}
+      - expectText: [fix the ledger rounding]
+      - expectNoText: ["note from the scan:"]
+
+  # The progress line's phase is for a scan that is running. A phase left on a
+  # done scan is not drawn, and is not where the notice is read from.
+  - name: a-phase-on-a-done-scan-is-not-drawn
+    kind: page
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+    steps:
+      - push: {kind: scan, sessionId: ses-selection, revision: 2, scan: {state: done, done: 2, total: 2, phase: "reading sessions of claude code (1 folder could not be read)"}}
+      - expectText: [fix the ledger rounding]
+      - expectNoText: ["reading sessions of claude code", "folder could not be read", "note from the scan:"]
+      - push: {kind: scan, sessionId: ses-selection, revision: 3, scan: {state: done, done: 2, total: 2, phase: "reading sessions of claude code (1 folder could not be read)", notice: "Could not read 1 harness folder: Claude Code."}}
+      - expectText: ["note from the scan:", "Could not read 1 harness folder: Claude Code."]
+      - expectNoText: ["reading sessions of claude code"]
+
+  - name: a-notice-is-drawn-only-once-the-scan-is-done
+    kind: page
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+    steps:
+      - push: {kind: scan, sessionId: ses-selection, revision: 2, scan: {state: running, done: 1, total: 2, phase: reading sessions, notice: Could not read 1 harness folder.}}
+      - expectText: [reading sessions]
+      - expectNoText: ["note from the scan:", Could not read 1 harness folder.]
+      - push: {kind: scan, sessionId: ses-selection, revision: 3, scan: {state: done, done: 2, total: 2, notice: Could not read 1 harness folder.}}
+      - expectText: ["note from the scan:", Could not read 1 harness folder.]
+      - expectNoText: [reading sessions]
+
+  # A preview row that is gone is a refusal of its own code, not the end of the
+  # session: the preview says so in the server's words and the page goes on.
+  - name: a-preview-row-that-is-gone-says-so-and-the-session-goes-on
+    kind: page
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree/s-one/preview":
+        status: 404
+        body:
+          code: kickstart_preview_row_not_found
+          error: "No row has the id \"s-one\" in the forest of the selection session. Nothing was changed. Scan again, then choose a row."
+    steps:
+      - focus: fix the ledger rounding
+      - expectText: [No row has the id, "Scan again, then choose a row."]
+      - expectNoText: [this selection session timed out]
+      - expectControl: {role: button, name: continue, disabled: false}
+
+  # The saved choices a scan did not find are named. The server sends at most a
+  # few of their labels with the count, and the page draws them as sent.
+  - name: saved-choices-no-longer-on-disk-name-their-labels
+    kind: page
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+    steps:
+      - push: {kind: scan, sessionId: ses-selection, revision: 2, scan: {state: done, done: 2, total: 2, droppedSelections: 5, droppedLabels: [old-ledger, scratch, demo]}}
+      - expectText: ["saved choices are no longer on disk: old-ledger, scratch, demo."]

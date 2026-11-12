@@ -12,6 +12,7 @@
  * Chrome is lowercase, as the design system sets it.
  */
 
+import { LocalKickstartErrorCode } from '@peasant-labs/schema';
 import { KickstartScope } from './values';
 
 export interface KickstartCopy {
@@ -89,4 +90,26 @@ export function kickstartCopy(scope: KickstartScope): KickstartCopy {
     default:
       return unreachableScope(scope);
   }
+}
+
+/**
+ * What the page adds after the server's own sentence for a refusal, only where
+ * the page knows something the sentence cannot: what this page does by itself.
+ * Every other refusal is shown as the server wrote it, with nothing added. The
+ * keys are the contract's closed refusal codes, never strings.
+ */
+const REFUSAL_ADVICE: ReadonlyMap<LocalKickstartErrorCode, string> = new Map([
+  [
+    LocalKickstartErrorCode.SessionCommitting,
+    'you do not need to reload: this page moves to the finish by itself when the save ends.',
+  ],
+  [
+    LocalKickstartErrorCode.FieldHidden,
+    'another answer hides that question now. the page shows the questions that apply, so answer again there if it still asks.',
+  ],
+]);
+
+/** The sentence to add after the server's own for this refusal, or null when the server's says it all. */
+export function refusalAdvice(code: LocalKickstartErrorCode): string | null {
+  return REFUSAL_ADVICE.get(code) ?? null;
 }

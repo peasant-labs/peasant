@@ -42,6 +42,10 @@ forestValues:
   - {name: node-state, fairtrade: ALL_SELECTION_NODE_STATES, schemaAll: AllLocalKickstartNodeStates, wires: [none, some, all]}
 consumerScan:
   # Production code that reads these sets must compare members, never tokens.
+  # `schemaLists` are the schema's own lists of closed tokens that this module
+  # does not wrap (the refusal codes): their tokens are scanned for too.
+  schemaLists:
+    - AllLocalKickstartErrorCodes
   roots:
     - src/lib/kickstart
     - src/components/kickstart

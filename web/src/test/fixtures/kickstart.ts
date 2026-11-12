@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import {
   zLocalKickstartCommitRefusal,
   zLocalKickstartCommitted,
+  zLocalKickstartErrorResponse,
   zLocalKickstartEvent,
   zLocalKickstartPatchResult,
   zLocalKickstartPreview,
@@ -171,6 +172,9 @@ const ANY = '[^/]+';
  * is not checked; a route under the kickstart path that is missing here is an
  * error, so a new route cannot go unchecked.
  */
+const KICKSTART_REFUSAL_STATUSES: readonly number[] = [400, 404, 500, 503];
+
+/** `*` stands for any method. */
 const SERVED: readonly { method: string; path: RegExp; status: number; schema: Decoder }[] = [
   { method: 'GET', path: new RegExp(`^${KICKSTART_API}/status$`), status: 200, schema: zLocalKickstartStatus },
   { method: 'POST', path: new RegExp(`^${KICKSTART_API}/sessions$`), status: 200, schema: zLocalKickstartSession },
@@ -181,6 +185,8 @@ const SERVED: readonly { method: string; path: RegExp; status: number; schema: D
   { method: 'POST', path: new RegExp(`^${KICKSTART_API}/sessions/${ANY}/scan$`), status: 200, schema: zLocalKickstartScan },
   { method: 'POST', path: new RegExp(`^${KICKSTART_API}/sessions/${ANY}/commit$`), status: 200, schema: zLocalKickstartCommitted },
   { method: 'POST', path: new RegExp(`^${KICKSTART_API}/sessions/${ANY}/commit$`), status: 409, schema: zLocalKickstartCommitRefusal },
+  // Every other refusal of a kickstart route is the closed `{error, code}` body.
+  ...KICKSTART_REFUSAL_STATUSES.map((status) => ({ method: '*', path: new RegExp(`^${KICKSTART_API}/`), status, schema: zLocalKickstartErrorResponse })),
 ];
 
 function firstIssue(result: { error: { issues: readonly { path: PropertyKey[]; message: string }[] } }): string {
@@ -216,7 +222,7 @@ export function checkScriptedAnswer(route: string, answer: ScriptedAnswer): void
   if (unknown.length > 0) {
     throw new Error(`${where} has ${unknown.map((key) => JSON.stringify(key)).join(', ')}, which a scripted answer does not read; it reads ${ANSWER_KEYS.join(', ')}`);
   }
-  const served = SERVED.find((candidate) => candidate.method === method && candidate.path.test(path) && candidate.status === status);
+  const served = SERVED.find((candidate) => (candidate.method === '*' || candidate.method === method) && candidate.path.test(path) && candidate.status === status);
   if (answer.malformed === true) {
     if (served !== undefined && answer.text === undefined && served.schema.safeParse(answer.body).success) {
       throw new Error(`${where} is marked malformed: true, but the Local API contract accepts it; drop the mark`);

@@ -25,6 +25,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { LocalKickstartErrorCode } from '@peasant-labs/schema';
 import { useKickstartTopic } from '@/contexts/WebSocketContext';
 import {
   commitKickstartSession,
@@ -123,10 +124,12 @@ function asError(failure: unknown): Error {
 
 /**
  * Whether a refusal says the server no longer has this session: it timed out,
- * was saved elsewhere, or the server restarted. Every such request is a 404.
+ * was saved elsewhere, or the server restarted. The server names it with its
+ * own code; a 404 for another reason (a forest row that is gone) does not end
+ * the session.
  */
 function sessionIsGone(failure: unknown): boolean {
-  return failure instanceof KickstartRequestError && failure.status === 404;
+  return failure instanceof KickstartRequestError && failure.code === LocalKickstartErrorCode.SessionNotFound;
 }
 
 /**

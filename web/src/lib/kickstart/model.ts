@@ -13,8 +13,10 @@
  */
 
 import {
+  AllLocalKickstartErrorCodes,
   zLocalKickstartCommitRefusal,
   zLocalKickstartCommitted,
+  zLocalKickstartErrorResponse,
   zLocalKickstartEvent,
   zLocalKickstartPatchResult,
   zLocalKickstartPreview,
@@ -23,6 +25,8 @@ import {
   zLocalKickstartStatus,
   zLocalKickstartTree,
   type LocalKickstartCommitted as WireCommitted,
+  type LocalKickstartErrorCode,
+  type LocalKickstartErrorResponse as WireErrorBody,
   type LocalKickstartIngest as WireIngest,
   type LocalKickstartNode,
   type LocalKickstartScan as WireScan,
@@ -54,7 +58,7 @@ import {
   type KickstartStopKind,
 } from './values';
 
-export type { LocalSettingValue };
+export type { LocalKickstartErrorCode, LocalSettingValue };
 
 /** A body the generated contract refuses. It is never read as a guess. */
 export class KickstartContractError extends Error {
@@ -179,6 +183,8 @@ export interface KickstartConnect {
 export interface KickstartScan {
   readonly state: KickstartScanStateMember;
   readonly phase: string | null;
+  /** What a finished scan could not read, in the server's words; null when it read everything. */
+  readonly notice: string | null;
   readonly done: number;
   readonly total: number;
   readonly error: string | null;
@@ -269,6 +275,7 @@ function decodeScan(raw: WireScan, where: string): KickstartScan {
   return {
     state: parseKickstartScanState(raw.state, where),
     phase: raw.phase ?? null,
+    notice: raw.notice ?? null,
     done: raw.done,
     total: raw.total,
     error: raw.error ?? null,
@@ -370,6 +377,45 @@ export function parseKickstartPatchResult(raw: unknown): KickstartPatchResult {
 export function parseKickstartCommitted(raw: unknown): KickstartCommitted {
   const where = 'POST /api/v1/kickstart/sessions/{id}/commit';
   return decodeCommitted(decode(zLocalKickstartCommitted, raw, where), where);
+}
+
+/** What a refused kickstart request says: the server's sentence and the closed code that names the refusal. */
+export interface KickstartErrorBody {
+  readonly error: string;
+  readonly code: LocalKickstartErrorCode;
+}
+
+/**
+ * What is wrong with a refusal that breaks the contract: the code it carries,
+ * or that it carries none, and what the page does know. The codes are a closed
+ * set, so an unknown one is never shown as if it meant something else.
+ */
+const CODE_FIELD: keyof WireErrorBody = 'code';
+const SENTENCE_FIELD: keyof WireErrorBody = 'error';
+
+function describeRefusalIssues(raw: unknown, issues: readonly Issue[]): string {
+  const fields = typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const said = issues.slice(0, SHOWN_ISSUES).map((issue) => {
+    const [field] = issue.path;
+    if (field === CODE_FIELD) {
+      const held = CODE_FIELD in fields ? `names the code ${JSON.stringify(fields[CODE_FIELD])}` : 'names no code';
+      return `the refusal ${held}, which is not one of the ${AllLocalKickstartErrorCodes.length} codes this page knows, so what went wrong cannot be told`;
+    }
+    if (field === SENTENCE_FIELD) return 'the refusal has no sentence saying what went wrong';
+    return `${issue.path.map(String).join('.') || 'the refusal'}: ${issue.message}`;
+  });
+  return said.join('; ');
+}
+
+/**
+ * The body every kickstart route answers on 400, 404, 500 and 503: `{error,
+ * code}`, the code from the closed set. One parser for all of them, so a code
+ * the page does not know fails closed here with the contract message, and no
+ * caller compares a string.
+ */
+export function parseKickstartErrorBody(raw: unknown, where: string): KickstartErrorBody {
+  const body = decode(zLocalKickstartErrorResponse, raw, where, (issues) => describeRefusalIssues(raw, issues));
+  return { error: body.error, code: body.code };
 }
 
 /** The 409 body of a commit: the rows that blocked the save. Nothing was written. */

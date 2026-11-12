@@ -12,16 +12,20 @@
  *
  * Every body is read through `model.ts`, so a caller never sees a token it
  * cannot name. A refused request throws a {@link KickstartRequestError} that
- * says what the server said and how to retry; a 409 on commit throws the
- * {@link KickstartCommitRefused} subclass with the rows that blocked the save.
+ * says what the server said and carries the closed code that names the refusal;
+ * a 409 on commit throws the {@link KickstartCommitRefused} subclass with the
+ * rows that blocked the save. The refusal bodies are read by one parser, so a
+ * code the page does not know throws the contract error instead.
  */
 
 import { getApiBaseUrl } from '@/lib/api/base';
 import {
+  KickstartContractError,
   parseKickstartCommitRefusal,
   parseKickstartCommitted,
   parseKickstartPatchResult,
   parseKickstartPreview,
+  parseKickstartErrorBody,
   parseKickstartScan,
   parseKickstartSession,
   parseKickstartStatus,
@@ -29,6 +33,7 @@ import {
   type KickstartCommitted,
   type KickstartConflict,
   type KickstartLine,
+  type LocalKickstartErrorCode,
   type KickstartPatchResult,
   type KickstartScan,
   type KickstartSession,
@@ -36,6 +41,7 @@ import {
   type KickstartTree,
   type LocalSettingValue,
 } from './model';
+import { refusalAdvice } from './copy';
 import type { KickstartConnectAnswer, KickstartResolution, KickstartScope } from './values';
 
 export const KICKSTART_PATH = '/api/v1/kickstart';
@@ -47,10 +53,14 @@ const NO_REASON = 'the server gave no reason; retry, then check the peasant serv
 export class KickstartRequestError extends Error {
   readonly status: number;
   readonly path: string;
-  /** The server's machine code for the refusal (`kickstart_config_busy`, ...), when it sent one. */
-  readonly code: string | null;
+  /**
+   * The closed code the server named for the refusal. Null for a failure the
+   * kickstart contract has no code for: the page could not reach peasant, or
+   * something between them answered.
+   */
+  readonly code: LocalKickstartErrorCode | null;
 
-  constructor(path: string, status: number, message: string, code: string | null = null) {
+  constructor(path: string, status: number, message: string, code: LocalKickstartErrorCode | null = null) {
     super(message);
     this.name = 'KickstartRequestError';
     this.path = path;
@@ -70,28 +80,55 @@ export class KickstartCommitRefused extends KickstartRequestError {
   }
 }
 
-/** What a refusal says and its machine code: the server's own `{error, code}` envelope, else the text. */
-function reasonOf(text: string): { message: string; code: string | null } {
+/** The text of a refusal that is not the contract's: the server's `error` when it sent a sentence, else the body. */
+function plainReason(text: string): string {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
-    return { message: text.trim() || NO_REASON, code: null };
+    return text.trim() || NO_REASON;
   }
   if (parsed !== null && typeof parsed === 'object') {
-    const envelope = parsed as { error?: unknown; code?: unknown };
-    const code = typeof envelope.code === 'string' && envelope.code.trim() !== '' ? envelope.code.trim() : null;
-    if (typeof envelope.error === 'string' && envelope.error.trim() !== '') return { message: envelope.error.trim(), code };
+    const envelope = parsed as { error?: unknown };
     // An envelope with no usable reason: its JSON is not a sentence to show.
-    return { message: NO_REASON, code };
+    return typeof envelope.error === 'string' && envelope.error.trim() !== '' ? envelope.error.trim() : NO_REASON;
   }
-  return { message: text.trim() || NO_REASON, code: null };
+  return text.trim() || NO_REASON;
 }
 
-/** The error a refused request throws: the server's reason, its code, and the request it answered. */
-function refused(path: string, status: number, text: string): KickstartRequestError {
-  const { message, code } = reasonOf(text);
-  return new KickstartRequestError(path, status, message, code);
+/**
+ * The statuses on which a kickstart route answers with the contract's closed
+ * refusal body. Others (403 for a request that is not from this computer, a
+ * gateway's 502) are not the server's kickstart refusals and are shown as sent.
+ */
+const CONTRACT_REFUSAL_STATUSES: ReadonlySet<number> = new Set([400, 404, 500, 503]);
+
+/**
+ * The error a refused kickstart request throws. On a status the contract gives
+ * a closed body, the body is read by the one boundary parser: the server's own
+ * sentence (plus the one sentence the page knows to add for a few codes), and
+ * its code. A body that is not that, or a code outside the set, throws the
+ * contract error. Any other status is shown as the server sent it.
+ */
+function refused(method: string, path: string, status: number, text: string): KickstartRequestError | KickstartContractError {
+  if (!CONTRACT_REFUSAL_STATUSES.has(status)) return new KickstartRequestError(path, status, plainReason(text));
+  const where = `${method} ${path}`;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    const read = text.trim().slice(0, 120);
+    return new KickstartContractError(where, `a refusal (status ${status}) is not JSON${read === '' ? ' and is empty' : `; it reads ${JSON.stringify(read)}`}`);
+  }
+  try {
+    const { error, code } = parseKickstartErrorBody(raw, where);
+    const sentence = error.trim() === '' ? NO_REASON : error.trim();
+    const advice = refusalAdvice(code);
+    return new KickstartRequestError(path, status, advice === null ? sentence : `${sentence} ${advice}`, code);
+  } catch (failure) {
+    if (failure instanceof KickstartContractError) return failure;
+    throw failure;
+  }
 }
 
 /** The answer's JSON, or the failure that explains why there is none. */
@@ -120,7 +157,7 @@ function jsonOf(path: string, status: number, text: string): unknown {
 
 async function call<T>(method: string, path: string, read: (raw: unknown) => T, body?: unknown): Promise<T> {
   const { status, text } = await exchange(method, path, body);
-  if (status < 200 || status >= 300) throw refused(path, status, text);
+  if (status < 200 || status >= 300) throw refused(method, path, status, text);
   return read(jsonOf(path, status, text));
 }
 
@@ -186,7 +223,7 @@ export async function commitKickstartSession(id: string): Promise<KickstartCommi
     const refusal = parseKickstartCommitRefusal(jsonOf(path, status, text));
     throw new KickstartCommitRefused(path, refusal.error, refusal.conflicts);
   }
-  if (status < 200 || status >= 300) throw refused(path, status, text);
+  if (status < 200 || status >= 300) throw refused('POST', path, status, text);
   return parseKickstartCommitted(jsonOf(path, status, text));
 }
 
@@ -199,7 +236,7 @@ export async function startKickstartImport(): Promise<{ started: boolean }> {
   const { status, text } = await exchange('POST', INGEST_PATH);
   if (status === 409) return { started: false };
   if (status === 503) throw importUnavailable(text);
-  if (status < 200 || status >= 300) throw refused(INGEST_PATH, status, text);
+  if (status < 200 || status >= 300) throw new KickstartRequestError(INGEST_PATH, status, plainReason(text));
   return { started: true };
 }
 
@@ -209,12 +246,10 @@ export async function startKickstartImport(): Promise<{ started: boolean }> {
  * the person needs what failed, that nothing was imported, and what to do.
  */
 function importUnavailable(text: string): KickstartRequestError {
-  const { message, code } = reasonOf(text);
   return new KickstartRequestError(
     INGEST_PATH,
     503,
-    `the import did not start: peasant answered "${message}", so it has no saved settings to import under. ` +
+    `the import did not start: peasant answered "${plainReason(text)}", so it has no saved settings to import under. ` +
       'nothing was imported and your saved setup is unchanged. check that peasant\'s settings file is in place and can be read, then choose import now again.',
-    code,
   );
 }
