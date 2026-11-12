@@ -339,11 +339,6 @@ func buildDBCmd() *cobra.Command {
 }
 
 func dbVersion(path string) (int, error) {
-	// A non-interactive caller never runs migration v76's whole-index
-	// rebuild invisibly: refuse on residue instead of opening.
-	if err := refuseStaleSearchIndex(path); err != nil {
-		return 0, err
-	}
 	db, err := store.Open(path)
 	if err != nil {
 		return 0, err

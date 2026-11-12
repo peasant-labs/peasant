@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -11,23 +12,20 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
-	"github.com/peasant-labs/peasant/internal/store/storetest"
+	"github.com/peasant-labs/peasant/internal/store/storetest/residuefixture"
 )
 
 // seedSyncResidueDB builds the fixture store the web ingest gate reads: a
 // version-75 union/retired pair with residue when affected is true, and the
-// same pair with identical postings otherwise. It reuses the shared
-// storetest residue builder so the sync tests pin the same predicate the
-// store tests pin.
+// same pair with identical postings otherwise. It reuses the shared residue
+// fixture so the sync tests pin the same predicate the store tests pin.
 func seedSyncResidueDB(t *testing.T, dbPath string, affected bool) {
 	t.Helper()
-	union := storetest.CleanUnion
-	legacy := storetest.CleanLegacy
 	if affected {
-		union = storetest.AffectedUnion
-		legacy = storetest.AffectedLegacy
+		residuefixture.SeedAffected(t, dbPath)
+		return
 	}
-	storetest.SeedResidueDB(t, string(dbPath), 75, union, legacy)
+	residuefixture.SeedClean(t, dbPath)
 }
 
 func syncResidueHandler(t *testing.T, dataHome string, cfg *config.Config) *syncHandler {
@@ -41,7 +39,7 @@ func syncResidueHandler(t *testing.T, dataHome string, cfg *config.Config) *sync
 // TestSyncIngestRefusesResidue proves a web-triggered ingest never runs the
 // v76 whole-index rebuild inside the server: on an affected store the
 // pipeline constructor refuses with the actionable fix instead of opening
-// the database.
+// the database, and the database file is byte-identical afterwards.
 func TestSyncIngestRefusesResidue(t *testing.T) {
 	t.Parallel()
 	dataHome := t.TempDir()
@@ -50,8 +48,12 @@ func TestSyncIngestRefusesResidue(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedSyncResidueDB(t, string(dbPath), true)
+	before, err := os.ReadFile(string(dbPath))
+	if err != nil {
+		t.Fatal(err)
+	}
 	h := syncResidueHandler(t, dataHome, nil)
-	_, _, _, err := h.newIngestPipeline(ingest.NewProgressState(), nil)
+	_, _, _, err = h.newIngestPipeline(ingest.NewProgressState(), nil)
 	if err == nil {
 		t.Fatal("web ingest opened an affected store; it must refuse instead of rebuilding in the server")
 	}
@@ -59,10 +61,17 @@ func TestSyncIngestRefusesResidue(t *testing.T) {
 	if !errors.As(err, &refusal) {
 		t.Fatalf("web ingest error = %v; want the actionable residue refusal", err)
 	}
-	for _, fragment := range []string{"peasant harvest", "web start", "0.16.1"} {
+	for _, fragment := range residuefixture.RefusalFragments {
 		if !strings.Contains(err.Error(), fragment) {
 			t.Errorf("refusal message misses %q:\n%s", fragment, err)
 		}
+	}
+	after, err := os.ReadFile(string(dbPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Error("refused web ingest modified the database file")
 	}
 }
 

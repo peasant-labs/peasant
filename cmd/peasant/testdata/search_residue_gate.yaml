@@ -29,3 +29,18 @@ cases:
     isTTY: false
     db: missing
     wantRefuse: false
+
+# Push callers on an affected store: every one is refused before any village
+# request and exits with the nothing-attempted status, so a generated hook
+# (with or without an auto-publish rule) prints its "nothing reached peasant
+# online" meaning and a script sees the nothing-attempted code. caller picks
+# the argument list: hook-with-rule and hook-without-rule are rendered by the
+# real hook generator (githooks.RepositoryArgv), script is a hand-written
+# non-interactive push.
+pushCases:
+  - name: push-hook-with-rule-nothing-attempted
+    caller: hook-with-rule
+  - name: push-hook-without-rule-nothing-attempted
+    caller: hook-without-rule
+  - name: push-script-nothing-attempted
+    caller: script

@@ -11,7 +11,7 @@ import (
 // stdinIsTerminal reports whether standard input is a terminal a user is
 // watching. It is a variable (not a direct term.IsTerminal call) so tests
 // can stub both sides without a PTY; production always uses the real
-// stdin check, the same detector the push and upgrade commands use.
+// stdin check.
 var stdinIsTerminal = func() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
 
 // refuseStaleSearchIndex reports whether opening the analytics store at

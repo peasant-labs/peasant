@@ -25,7 +25,7 @@ import (
 
 func buildKickstartJourneyRunner(cmd *cobra.Command, configPath string, loaded *config.Config, snapshot []byte, existed bool, ingestRunner ftue.IngestRunnerFunc) ftue.JourneyRunner {
 	return buildKickstartJourneyRunnerWithDeps(cmd, configPath, loaded, snapshot, existed, ingestRunner, kickstartJourneyDeps{
-		loadCredentials:  auth.LoadCredentialsFrom,
+		loadCredentials: auth.LoadCredentialsFrom,
 		// No residue gate: kickstart requires a terminal (cmd_kickstart.go
 		// mounts the wizard only there), so the repair runs visibly.
 		openReceiptStore: func(path string) (kickstartReceiptStore, error) { return store.Open(path) },

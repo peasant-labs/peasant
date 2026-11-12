@@ -10,7 +10,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/store"
-	"github.com/peasant-labs/peasant/internal/store/storetest"
+	"github.com/peasant-labs/peasant/internal/store/storetest/residuefixture"
 )
 
 // TestTUINamesAnUnreadableDatabase guards #686: with a corrupt analytics
@@ -70,7 +70,7 @@ func TestTUISkipsResidueRebuildWithoutTerminal(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	storetest.SeedResidueDB(t, dbPath, 75, storetest.AffectedUnion, storetest.AffectedLegacy)
+	residuefixture.SeedAffected(t, dbPath)
 	before, err := os.ReadFile(dbPath)
 	if err != nil {
 		t.Fatal(err)

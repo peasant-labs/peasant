@@ -4,8 +4,12 @@
 # stay byte-identical); clean is version-75 without residue (the gate passes;
 # a later open may still fail for unrelated missing-schema reasons on the
 # minimal fixture, but never with the residue refusal); current is a real
-# head-schema store (the open proceeds as usual). dbVersion is absent: db.go
-# is build-ignored dead code, so there is no compiled dbVersion to gate.
+# head-schema store (the open proceeds as usual); real-v75 is a real clean
+# version-75 store, and wantOpened requires the open to succeed and migrate it
+# to the build schema. confirm is --confirm for the migrate and reclaim
+# openers: without it a non-interactive run is refused before the open (it
+# would otherwise pay the rebuild unseen and then refuse at the prompt); with
+# it the user consented, so the gate is skipped.
 cases:
   - name: opendb-affected-refuses
     entry: openDB
@@ -75,11 +79,11 @@ cases:
     entry: runWebForeground
     store: clean
     wantRefuse: false
-  - name: ftuereunner-affected-refuses
+  - name: ftuerunner-affected-refuses
     entry: ftueRunner
     store: affected
     wantRefuse: true
-  - name: ftuereunner-clean-passes-gate
+  - name: ftuerunner-clean-passes-gate
     entry: ftueRunner
     store: clean
     wantRefuse: false
@@ -89,5 +93,36 @@ cases:
     wantRefuse: true
   - name: runverify-clean-passes-gate
     entry: runVerify
+    store: clean
+    wantRefuse: false
+  - name: opendb-real-v75-clean-opens-and-migrates
+    entry: openDB
+    store: real-v75
+    wantRefuse: false
+    wantOpened: true
+  - name: migratestore-affected-without-confirm-refuses
+    entry: openMigrateStore
+    store: affected
+    wantRefuse: true
+  - name: migratestore-affected-with-confirm-passes-gate
+    entry: openMigrateStore
+    store: affected
+    confirm: true
+    wantRefuse: false
+  - name: migratestore-clean-without-confirm-passes-gate
+    entry: openMigrateStore
+    store: clean
+    wantRefuse: false
+  - name: reclaimstore-affected-without-confirm-refuses
+    entry: openReclaimStore
+    store: affected
+    wantRefuse: true
+  - name: reclaimstore-affected-with-confirm-passes-gate
+    entry: openReclaimStore
+    store: affected
+    confirm: true
+    wantRefuse: false
+  - name: reclaimstore-clean-without-confirm-passes-gate
+    entry: openReclaimStore
     store: clean
     wantRefuse: false

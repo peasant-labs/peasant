@@ -7,3 +7,6 @@ requiredNames:
   - nonterminal-clean-proceeds
   - nonterminal-current-proceeds
   - nonterminal-missing-proceeds
+  - push-hook-with-rule-nothing-attempted
+  - push-hook-without-rule-nothing-attempted
+  - push-script-nothing-attempted

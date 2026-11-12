@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"crypto/sha256"
 	_ "embed"
 	"encoding/hex"
@@ -12,9 +11,10 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
-	"github.com/peasant-labs/peasant/internal/store/storetest"
+	"github.com/peasant-labs/peasant/internal/store/storetest/residuefixture"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -36,11 +36,26 @@ type searchResidueGateCase struct {
 	WantRefuse bool   `yaml:"wantRefuse"`
 }
 
+// searchResiduePushCase is one push caller on an affected store; caller
+// selects the argument list the runner builds.
+type searchResiduePushCase struct {
+	Name   string `yaml:"name"`
+	Caller string `yaml:"caller"`
+}
+
+type searchResidueGateFixtures struct {
+	Cases     []searchResidueGateCase `yaml:"cases"`
+	PushCases []searchResiduePushCase `yaml:"pushCases"`
+}
+
 func loadSearchResidueGateCases(t *testing.T) []searchResidueGateCase {
 	t.Helper()
-	var fixtures struct {
-		Cases []searchResidueGateCase `yaml:"cases"`
-	}
+	return loadSearchResidueGateFixtures(t).Cases
+}
+
+func loadSearchResidueGateFixtures(t *testing.T) searchResidueGateFixtures {
+	t.Helper()
+	var fixtures searchResidueGateFixtures
 	decoder := yaml.NewDecoder(strings.NewReader(string(searchResidueGateYAML)))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&fixtures); err != nil {
@@ -54,7 +69,7 @@ func loadSearchResidueGateCases(t *testing.T) []searchResidueGateCase {
 	if err := decoder.Decode(&manifest); err != nil {
 		t.Fatalf("decode search_residue_gate manifest: %v", err)
 	}
-	actual := make([]string, 0, len(fixtures.Cases))
+	actual := make([]string, 0, len(fixtures.Cases)+len(fixtures.PushCases))
 	actualSeen := map[string]bool{}
 	for _, c := range fixtures.Cases {
 		actual = append(actual, c.Name)
@@ -63,6 +78,15 @@ func loadSearchResidueGateCases(t *testing.T) []searchResidueGateCase {
 		case "affected", "clean", "current", "missing":
 		default:
 			t.Fatalf("search_residue_gate.yaml: case %q names store %q; add it to the runner", c.Name, c.DB)
+		}
+	}
+	for _, c := range fixtures.PushCases {
+		actual = append(actual, c.Name)
+		actualSeen[c.Name] = true
+		switch c.Caller {
+		case "hook-with-rule", "hook-without-rule", "script":
+		default:
+			t.Fatalf("search_residue_gate.yaml: push case %q names caller %q; add it to the runner", c.Name, c.Caller)
 		}
 	}
 	for _, name := range manifest.RequiredNames {
@@ -79,35 +103,27 @@ func loadSearchResidueGateCases(t *testing.T) []searchResidueGateCase {
 			t.Fatalf("search residue gate case %q is missing from the required-names manifest", name)
 		}
 	}
-	return fixtures.Cases
+	return fixtures
 }
 
 // seedGateFixtureStore builds the fixture store the gate matrix reads: a
 // version-75 union/retired pair with or without residue, or a current-schema
-// store. It reuses the shared storetest residue builder so the gate tests
-// pin the same predicate the store tests pin.
+// minimal store. It reuses the shared residue fixture so the gate tests pin
+// the same predicate the store tests pin.
 func seedGateFixtureStore(t *testing.T, kind string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "gate.db")
-	var version int
-	var union, legacy []storetest.ResidueTerm
 	switch kind {
 	case "affected":
-		version = 75
-		union = storetest.AffectedUnion
-		legacy = storetest.AffectedLegacy
+		residuefixture.SeedAffected(t, path)
 	case "clean":
-		version = 75
-		union = storetest.CleanUnion
-		legacy = storetest.CleanLegacy
+		residuefixture.SeedClean(t, path)
 	case "current":
-		version = 76
+		residuefixture.Seed(t, path, 76, nil, nil)
 	case "missing":
-		return path
 	default:
 		t.Fatalf("unknown gate fixture store %q", kind)
 	}
-	storetest.SeedResidueDB(t, path, version, union, legacy)
 	return path
 }
 
@@ -137,7 +153,7 @@ func TestSearchResidueGate(t *testing.T) {
 			if refusal.DBPath != path {
 				t.Errorf("refusal names %q, want the store that was checked", refusal.DBPath)
 			}
-			for _, fragment := range []string{"peasant harvest", "web start", "0.16.1"} {
+			for _, fragment := range residuefixture.RefusalFragments {
 				if !strings.Contains(err.Error(), fragment) {
 					t.Errorf("refusal message misses %q:\n%s", fragment, err)
 				}
@@ -209,10 +225,10 @@ func TestOpenRunStoreRefusesResidue(t *testing.T) {
 
 	t.Run("affected-nonterminal-refuses-unchanged", func(t *testing.T) {
 		dir := t.TempDir()
-		if err := os.MkdirAll(filepath.Join(dir, "peasant"), 0o700); err != nil {
+		if err := os.MkdirAll(filepath.Join(dir, string(defaults.AppName)), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		storetest.SeedResidueDB(t, resolveDB(dir), 75, storetest.AffectedUnion, storetest.AffectedLegacy)
+		residuefixture.SeedAffected(t, resolveDB(dir))
 		before := fileHash(t, resolveDB(dir))
 		_, err := openAt(t, dir, false)
 		var refusal *store.SearchResidueRebuildError
@@ -226,7 +242,7 @@ func TestOpenRunStoreRefusesResidue(t *testing.T) {
 
 	t.Run("clean-nonterminal-opens", func(t *testing.T) {
 		dir := t.TempDir()
-		if err := os.MkdirAll(filepath.Join(dir, "peasant"), 0o700); err != nil {
+		if err := os.MkdirAll(filepath.Join(dir, string(defaults.AppName)), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		// A current-schema store opens as usual; the refusal never fires.
@@ -246,7 +262,7 @@ func TestOpenRunStoreRefusesResidue(t *testing.T) {
 
 	t.Run("current-terminal-opens", func(t *testing.T) {
 		dir := t.TempDir()
-		if err := os.MkdirAll(filepath.Join(dir, "peasant"), 0o700); err != nil {
+		if err := os.MkdirAll(filepath.Join(dir, string(defaults.AppName)), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		seed, err := store.Open(resolveDB(dir))
@@ -264,108 +280,81 @@ func TestOpenRunStoreRefusesResidue(t *testing.T) {
 	})
 }
 
-// TestPushSkipsResidueWithExitZero drives the managed-hook path end to end:
-// `village push --non-interactive --auto-publish-event post-commit
-// --require-auto-publish-rule` on an affected store skips the publish with
-// the actionable message and exits 0 instead of blocking the push.
-// Credentials are stubbed (the gate fires before any village request), no
-// network is touched, and the database file is byte-identical afterwards.
-// The TTY detector is stubbed false so the test is TTY-independent.
-func TestPushSkipsResidueWithExitZero(t *testing.T) {
+// pushResidueArgs builds the argument list one push caller runs. The hook
+// callers come from the real hook generator, so the test runs exactly the
+// flags a generated hook passes; the leading program and subcommand words
+// are dropped because the test root mounts the push command directly.
+func pushResidueArgs(t *testing.T, caller string) []string {
+	t.Helper()
+	var binding githooks.Binding
+	switch caller {
+	case "script":
+		return []string{"--non-interactive"}
+	case "hook-with-rule":
+		binding = githooks.Binding{RequireAutoPublishRule: true, AutoPublishEvent: githooks.EventPostCommit}
+	case "hook-without-rule":
+		binding = githooks.Binding{}
+	default:
+		t.Fatalf("unknown push caller %q", caller)
+	}
+	argv := githooks.RepositoryArgv("", binding)
+	if len(argv) < 3 || argv[0] != "peasant" || argv[1] != "village" || argv[2] != "push" {
+		t.Fatalf("generated hook argv = %q; want it to start with peasant village push", argv)
+	}
+	return argv[3:]
+}
+
+// TestPushResidueRefusalIsNothingAttempted drives every push caller on an
+// affected store: a generated hook with an auto-publish rule, a generated
+// hook without one, and a script. Each is refused before any village
+// request with the residue refusal wrapped as nothing attempted, so the
+// process exits with the nothing-attempted status a generated hook maps to
+// "nothing reached peasant online". Credentials are stubbed (the gate fires
+// before any request), no network is touched, the database file is
+// byte-identical, and the store stays at version 75. The TTY detector is
+// stubbed false so the test is TTY-independent.
+func TestPushResidueRefusalIsNothingAttempted(t *testing.T) {
 	previous := stdinIsTerminal
 	stdinIsTerminal = func() bool { return false }
 	t.Cleanup(func() { stdinIsTerminal = previous })
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "peasant"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	dbPath := string(defaults.ResolveDBFilePathWith(dir))
-	storetest.SeedResidueDB(t, dbPath, 75, storetest.AffectedUnion, storetest.AffectedLegacy)
-	writeTestCredentials(t, dir)
-	before, err := os.ReadFile(dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, stderr, err := executeWithDataDirStreams(t, BuildPushCommand(), dir, []string{"--non-interactive", "--auto-publish-event", "post-commit", "--require-auto-publish-rule"})
-	if err != nil {
-		t.Fatalf("hook push on affected store failed: %v\nstderr: %s", err, stderr)
-	}
-	for _, fragment := range []string{"0.16.1", "peasant harvest", "no files were changed"} {
-		if !strings.Contains(stderr, fragment) {
-			t.Errorf("hook output misses %q:\n%s", fragment, stderr)
-		}
-	}
-	after, err := os.ReadFile(dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(before) != string(after) {
-		t.Error("skipped hook push modified the database file")
-	}
-	if version, err := store.SchemaVersionAt(dbPath); err != nil || version != 75 {
-		t.Errorf("store version = %d, err = %v; want the un-migrated 75", version, err)
-	}
-}
-
-// TestPushRefusesResidueWithoutHookFlag proves a non-hook non-interactive
-// push does NOT exit 0 on an affected store: without --auto-publish-event the
-// refusal returns as a non-zero error and the database is untouched.
-func TestPushRefusesResidueWithoutHookFlag(t *testing.T) {
-	previous := stdinIsTerminal
-	stdinIsTerminal = func() bool { return false }
-	t.Cleanup(func() { stdinIsTerminal = previous })
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "peasant"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	dbPath := string(defaults.ResolveDBFilePathWith(dir))
-	storetest.SeedResidueDB(t, dbPath, 75, storetest.AffectedUnion, storetest.AffectedLegacy)
-	writeTestCredentials(t, dir)
-	before, err := os.ReadFile(dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _, err = executeWithDataDirStreams(t, BuildPushCommand(), dir, []string{"--non-interactive"})
-	if err == nil {
-		t.Fatal("non-hook push on affected store succeeded; want the residue refusal as a non-zero error")
-	}
-	var refusal *store.SearchResidueRebuildError
-	if !errors.As(err, &refusal) {
-		t.Fatalf("non-hook push err = %v; want the residue refusal", err)
-	}
-	after, readErr := os.ReadFile(dbPath)
-	if readErr != nil {
-		t.Fatal(readErr)
-	}
-	if string(before) != string(after) {
-		t.Error("refused push modified the database file")
-	}
-	if version, verr := store.SchemaVersionAt(dbPath); verr != nil || version != 75 {
-		t.Errorf("store version = %d, err = %v; want the un-migrated 75", version, verr)
-	}
-}
-
-// TestPushSkipForSearchResidue maps the residue refusal to the hook contract:
-// a hook run (--auto-publish-event set) skips the publish with the actionable
-// message and exits 0; any other caller gets the refusal as an error. Any
-// other error passes through unchanged.
-func TestPushSkipForSearchResidue(t *testing.T) {
-	t.Parallel()
-	cmd := &cobra.Command{}
-	var errBuf bytes.Buffer
-	cmd.SetErr(&errBuf)
-	if skipped := pushSkipForSearchResidue(cmd, &store.SearchResidueRebuildError{DBPath: "/tmp/x.db"}, "post-commit"); !skipped {
-		t.Fatal("residue refusal must skip the hook push")
-	}
-	if !strings.Contains(errBuf.String(), "peasant harvest") {
-		t.Errorf("skip must print the fix; got: %s", errBuf.String())
-	}
-	if skipped := pushSkipForSearchResidue(cmd, &store.SearchResidueRebuildError{DBPath: "/tmp/x.db"}, ""); skipped {
-		t.Fatal("residue refusal without the hook flag must not skip; it returns as an error")
-	}
-	sentinel := errors.New("boom")
-	if skipped := pushSkipForSearchResidue(cmd, sentinel, "post-commit"); skipped {
-		t.Fatal("ordinary errors must not skip the push")
+	for _, c := range loadSearchResidueGateFixtures(t).PushCases {
+		c := c
+		t.Run(c.Name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(dir, string(defaults.AppName)), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			dbPath := string(defaults.ResolveDBFilePathWith(dir))
+			residuefixture.SeedAffected(t, dbPath)
+			writeTestCredentials(t, dir)
+			before := fileHash(t, dbPath)
+			_, _, err := executeWithDataDirStreams(t, BuildPushCommand(), dir, pushResidueArgs(t, c.Caller))
+			if err == nil {
+				t.Fatal("push on an affected store succeeded; want the residue refusal")
+			}
+			var nothingAttempted *pushNothingAttemptedError
+			if !errors.As(err, &nothingAttempted) {
+				t.Fatalf("push err = %v; want it marked nothing attempted", err)
+			}
+			var refusal *store.SearchResidueRebuildError
+			if !errors.As(err, &refusal) {
+				t.Fatalf("push err = %v; want the residue refusal as its cause", err)
+			}
+			if got := exitCodeFor(err); got != defaults.ExitNothingAttempted {
+				t.Errorf("exit code = %d, want the nothing-attempted status %d", got, defaults.ExitNothingAttempted)
+			}
+			for _, fragment := range residuefixture.RefusalFragments {
+				if !strings.Contains(err.Error(), fragment) {
+					t.Errorf("refusal misses %q:\n%s", fragment, err)
+				}
+			}
+			if got := fileHash(t, dbPath); got != before {
+				t.Error("refused push modified the database file")
+			}
+			if version, verr := store.SchemaVersionAt(dbPath); verr != nil || version != 75 {
+				t.Errorf("store version = %d, err = %v; want the un-migrated 75", version, verr)
+			}
+		})
 	}
 }
 
@@ -377,11 +366,11 @@ func TestMaybePreopenStoreForWebStart(t *testing.T) {
 	seedAffected := func(t *testing.T) string {
 		t.Helper()
 		dir := t.TempDir()
-		if err := os.MkdirAll(filepath.Join(dir, "peasant"), 0o700); err != nil {
+		if err := os.MkdirAll(filepath.Join(dir, string(defaults.AppName)), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		dbPath := string(defaults.ResolveDBFilePathWith(dir))
-		storetest.SeedResidueDB(t, dbPath, 75, storetest.AffectedUnion, storetest.AffectedLegacy)
+		residuefixture.SeedAffected(t, dbPath)
 		return dbPath
 	}
 
@@ -412,11 +401,11 @@ func TestMaybePreopenStoreForWebStart(t *testing.T) {
 
 	t.Run("nonterminal-clean-proceeds", func(t *testing.T) {
 		dir := t.TempDir()
-		if err := os.MkdirAll(filepath.Join(dir, "peasant"), 0o700); err != nil {
+		if err := os.MkdirAll(filepath.Join(dir, string(defaults.AppName)), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		dbPath := string(defaults.ResolveDBFilePathWith(dir))
-		storetest.SeedResidueDB(t, dbPath, 75, storetest.CleanUnion, storetest.CleanLegacy)
+		residuefixture.SeedClean(t, dbPath)
 		if err := maybePreopenStoreForWebStart(false, dbPath); err != nil {
 			t.Fatalf("clean pre-open refused: %v", err)
 		}

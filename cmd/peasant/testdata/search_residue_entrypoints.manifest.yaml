@@ -18,7 +18,14 @@ requiredNames:
   - webpreopen-current-proceeds
   - webforeground-affected-refuses
   - webforeground-clean-passes-gate
-  - ftuereunner-affected-refuses
-  - ftuereunner-clean-passes-gate
+  - ftuerunner-affected-refuses
+  - ftuerunner-clean-passes-gate
   - runverify-affected-refuses
   - runverify-clean-passes-gate
+  - opendb-real-v75-clean-opens-and-migrates
+  - migratestore-affected-without-confirm-refuses
+  - migratestore-affected-with-confirm-passes-gate
+  - migratestore-clean-without-confirm-passes-gate
+  - reclaimstore-affected-without-confirm-refuses
+  - reclaimstore-affected-with-confirm-passes-gate
+  - reclaimstore-clean-without-confirm-passes-gate

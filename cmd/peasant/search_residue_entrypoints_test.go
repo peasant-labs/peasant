@@ -14,6 +14,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
+	"github.com/peasant-labs/peasant/internal/store/storetest/residuefixture"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -32,13 +33,18 @@ var searchResidueEntrypointsManifestYAML []byte
 // clean is version-75 without residue (the gate must pass; a later open may
 // still fail for unrelated missing-schema reasons on the minimal fixture,
 // but never with the residue refusal); current is a real head-schema store
-// (the open proceeds as usual). dbVersion has no case: db.go is
-// build-ignored dead code, so there is no compiled dbVersion to gate.
+// (the open proceeds as usual); real-v75 is a real clean version-75 store
+// (the open must succeed and migrate it to the build schema). confirm is the
+// --confirm flag for the migrate and reclaim openers, which skip the gate
+// when it is set. wantOpened requires err == nil and the build schema
+// version afterwards.
 type searchResidueEntryCase struct {
 	Name       string `yaml:"name"`
 	Entry      string `yaml:"entry"`
 	Store      string `yaml:"store"`
+	Confirm    bool   `yaml:"confirm,omitempty"`
 	WantRefuse bool   `yaml:"wantRefuse"`
+	WantOpened bool   `yaml:"wantOpened,omitempty"`
 }
 
 func loadSearchResidueEntryCases(t *testing.T) []searchResidueEntryCase {
@@ -64,12 +70,12 @@ func loadSearchResidueEntryCases(t *testing.T) []searchResidueEntryCase {
 	for _, c := range fixtures.Cases {
 		actualSeen[c.Name] = true
 		switch c.Entry {
-		case "openDB", "openRunStore", "openVerifyContentStore", "openKickstartStore", "webPreopen", "runWebForeground", "ftueRunner", "runVerify":
+		case "openDB", "openRunStore", "openVerifyContentStore", "openKickstartStore", "webPreopen", "runWebForeground", "ftueRunner", "runVerify", "openMigrateStore", "openReclaimStore":
 		default:
 			t.Fatalf("search_residue_entrypoints.yaml: case %q names entry %q; add it to the runner", c.Name, c.Entry)
 		}
 		switch c.Store {
-		case "affected", "clean", "current":
+		case "affected", "clean", "current", "real-v75":
 		default:
 			t.Fatalf("search_residue_entrypoints.yaml: case %q names store %q; add it to the runner", c.Name, c.Store)
 		}
@@ -90,7 +96,7 @@ func loadSearchResidueEntryCases(t *testing.T) []searchResidueEntryCase {
 
 // seedEntrypointStore materializes the fixture store the matrix reads: a
 // minimal v75 union/retired pair with (affected) or without (clean) residue,
-// or a real head-schema store (current).
+// a real head-schema store (current), or a real clean v75 store (real-v75).
 func seedEntrypointStore(t *testing.T, dir, kind string) string {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(dir, string(defaults.AppName)), 0o700); err != nil {
@@ -99,9 +105,11 @@ func seedEntrypointStore(t *testing.T, dir, kind string) string {
 	dbPath := string(defaults.ResolveDBFilePathWith(dir))
 	switch kind {
 	case "affected":
-		storetest.SeedResidueDB(t, dbPath, 75, storetest.AffectedUnion, storetest.AffectedLegacy)
+		residuefixture.SeedAffected(t, dbPath)
 	case "clean":
-		storetest.SeedResidueDB(t, dbPath, 75, storetest.CleanUnion, storetest.CleanLegacy)
+		residuefixture.SeedClean(t, dbPath)
+	case "real-v75":
+		storetest.BuildCleanV75Store(t, dbPath)
 	case "current":
 		db, err := store.Open(dbPath)
 		if err != nil {
@@ -226,15 +234,14 @@ func TestGatedEntryPointsRefuseResidue(t *testing.T) {
 			case "runWebForeground":
 				cfgPath := writeTestConfigFile(t, dir)
 				cmd := entrypointTestCmd(t, dir)
-				if !c.WantRefuse {
-					// The clean path passes the gate and would start the
-					// server (blocking) with a nil provider after the
-					// minimal-fixture open warns; bound it so the matrix
-					// proves gate-pass without serving.
-					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-					defer cancel()
-					cmd.SetContext(ctx)
-				}
+				// Every case is bounded: a passing gate starts the server
+				// (blocking) after the minimal-fixture open warns, and a
+				// broken gate on the affected case would do the same, so
+				// the short context turns either into a prompt return
+				// instead of a hang until the test binary's deadline.
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				cmd.SetContext(ctx)
 				err = runWebForeground(cmd, cfgPath, 0, false, "", false)
 			case "ftueRunner":
 				cfgPath := writeTestConfigFile(t, dir)
@@ -242,6 +249,18 @@ func TestGatedEntryPointsRefuseResidue(t *testing.T) {
 				_, err = runner(context.Background(), ftue.WizardAnswers{})
 			case "runVerify":
 				err = runVerify(entrypointTestCmd(t, dir), false, false, false)
+			case "openMigrateStore":
+				var closeDB func()
+				_, closeDB, err = openMigrateStore(entrypointTestCmd(t, dir), false, c.Confirm, t.TempDir(), dbPath)
+				if err == nil {
+					closeDB()
+				}
+			case "openReclaimStore":
+				var closeDB func()
+				_, closeDB, err = openReclaimStore(entrypointTestCmd(t, dir), false, c.Confirm, t.TempDir(), dbPath)
+				if err == nil {
+					closeDB()
+				}
 			}
 			var refusal *store.SearchResidueRebuildError
 			if c.WantRefuse {
@@ -260,6 +279,18 @@ func TestGatedEntryPointsRefuseResidue(t *testing.T) {
 			}
 			if errors.As(err, &refusal) {
 				t.Fatalf("%s on %s store refused: %v", c.Entry, c.Store, err)
+			}
+			if c.WantOpened {
+				if err != nil {
+					t.Fatalf("%s on %s store: err = %v; want a clean open", c.Entry, c.Store, err)
+				}
+				version, verr := store.SchemaVersionAt(dbPath)
+				if verr != nil {
+					t.Fatal(verr)
+				}
+				if version != store.CurrentSchemaVersion() {
+					t.Errorf("%s on %s store left user_version %d, want the build schema %d", c.Entry, c.Store, version, store.CurrentSchemaVersion())
+				}
 			}
 		})
 	}
