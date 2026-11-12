@@ -14,6 +14,7 @@ requiredNames:
   - selection-page-saves-only-selection
   - selection-page-names-the-chosen-branch
   - import-honours-the-recorded-branch
+  - stored-remote-matches-the-tree
   - computed-styles-and-themes
 cases:
   - {name: fresh-install-redirects-to-setup}
@@ -27,6 +28,7 @@ cases:
   - {name: selection-page-saves-only-selection}
   - {name: selection-page-names-the-chosen-branch}
   - {name: import-honours-the-recorded-branch}
+  - {name: stored-remote-matches-the-tree}
   - {name: computed-styles-and-themes}
 # The only requests the journey provokes the server to refuse: the deep links to a
 # project and a transcript that were never recorded, and the save that found a
