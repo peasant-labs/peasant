@@ -27,10 +27,14 @@ was tagged but not published links to its tag instead.
 - `peasant migrate` runs the schema upgrade as its first phase, before its
   session conversion phases. `peasant migrate --dry-run` prints the upgrade
   plan for a store that needs it without changing anything.
-- An import no longer rewrites an unchanged transcript or re-indexes it just
-  because its metadata changed. For example, an adapter version bump can
-  update only the metadata. An indexer upgrade or an explicit re-index can
-  still re-index the transcript.
+- An import no longer rewrites a transcript file whose bytes did not change.
+  For example, after an adapter version bump only the metadata file is
+  rewritten. A session stored in the older index format is also not
+  re-indexed when only its metadata changed. A session stored as a managed
+  generation, which is most sessions, is still re-indexed after a
+  metadata-only change, because the generation keeps a copy of that
+  metadata. An indexer upgrade or an explicit re-index re-indexes every
+  session.
 - Unreferenced image files are collected once at the end of an import instead
   of after every session. If a run stops early, the next completed run retries
   the collection.
