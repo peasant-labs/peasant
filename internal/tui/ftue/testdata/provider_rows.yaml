@@ -1,0 +1,68 @@
+# Subject: the first-run pages that list harnesses, built by their production
+# constructors from a literal inventory: NewProviderSelectPage and
+# NewProjectScopePage. A page lists exactly the harnesses this build can
+# harvest; a harness without an adapter is never listed, even when the
+# inventory reports sessions for it.
+#
+# page is a closed set in the test: provider-select or project-scope.
+# inventory gives the discovered session count per harness; every listed
+# discovery is enabled and ready. rows names a harness and how the page shows
+# it: listed-checked, listed-unchecked, or omitted. rendered holds literal text
+# the plain (ANSI-stripped) view must contain or must not contain.
+#
+# mutation names the change to the page that turns the case red.
+cases:
+  - name: provider-page-lists-a-harvestable-harness-with-sessions-checked
+    page: provider-select
+    inventory:
+      - harness: claude-code
+        sessions: 4
+    rows:
+      - harness: claude-code
+        want: listed-checked
+    rendered:
+      contains: ["[✓] Claude Code (4 sessions)"]
+    mutation: the page lists an empty harness set, or stops checking a harness that has sessions
+  - name: provider-page-lists-a-harvestable-harness-with-zero-sessions-unchecked
+    page: provider-select
+    inventory:
+      - harness: claude-code
+        sessions: 4
+    rows:
+      - harness: codex
+        want: listed-unchecked
+    rendered:
+      contains: ["[ ] Codex (0 sessions)"]
+    mutation: the page lists only the harnesses the inventory reports, instead of every harvestable harness
+  - name: provider-page-omits-archived-gemini-cli-even-when-the-inventory-reports-sessions
+    page: provider-select
+    inventory:
+      - harness: gemini-cli
+        sessions: 3
+      - harness: claude-code
+        sessions: 2
+    rows:
+      - harness: gemini-cli
+        want: omitted
+      - harness: claude-code
+        want: listed-checked
+    rendered:
+      contains: ["Claude Code (2 sessions)"]
+      omits: ["Gemini CLI"]
+    mutation: the page is left on the declared set (defaults.AllHarnesses)
+  - name: project-scope-page-omits-archived-gemini-cli-even-when-the-inventory-reports-sessions
+    page: project-scope
+    inventory:
+      - harness: gemini-cli
+        sessions: 3
+      - harness: claude-code
+        sessions: 2
+    rows:
+      - harness: gemini-cli
+        want: omitted
+      - harness: claude-code
+        want: listed-checked
+    rendered:
+      contains: ["[✓] Claude Code (2)"]
+      omits: ["Gemini CLI"]
+    mutation: the project scope page is left on the declared set (defaults.AllHarnesses)

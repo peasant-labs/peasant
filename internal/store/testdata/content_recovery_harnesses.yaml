@@ -1,0 +1,43 @@
+# Subject: Store.ListContentCaptureIncompleteSessionsAfter, the page the stored
+# content recovery walk reads. Only a harness this build can harvest is
+# eligible: recovery parses the session again with this build's code for its
+# harness, so a row of any other harness can never be recovered.
+#
+# Each case seeds session rows by literal harness value (none has a content
+# capture, so every row is incomplete), reads one page from the start of the
+# table with the given limit, and names the session ids expected back, in
+# order. Every seeded harness must be a known value, so the store's CHECK
+# accepts the row.
+#
+# mutation names the change to the recovery query that turns the case red.
+cases:
+  - name: recovery-walk-lists-a-harvestable-value
+    sessions:
+      - id: a7a7a7a7-0001-4000-8000-000000000001
+        harness: claude-code
+    limit: 10
+    want: [a7a7a7a7-0001-4000-8000-000000000001]
+    mutation: the query binds an empty harness set
+  - name: recovery-walk-excludes-the-archived-value
+    sessions:
+      - id: a7a7a7a7-0002-4000-8000-000000000001
+        harness: gemini-cli
+    limit: 10
+    want: []
+    mutation: the query is left on the declared set (AllHarnesses)
+  - name: recovery-walk-excludes-a-layout-only-value
+    sessions:
+      - id: a7a7a7a7-0003-4000-8000-000000000001
+        harness: kiro
+    limit: 10
+    want: []
+    mutation: the query is moved to the known set (Harnesses())
+  - name: recovery-page-is-not-consumed-by-excluded-rows
+    sessions:
+      - id: a7a7a7a7-0004-4000-8000-000000000001
+        harness: gemini-cli
+      - id: a7a7a7a7-0004-4000-8000-000000000002
+        harness: claude-code
+    limit: 1
+    want: [a7a7a7a7-0004-4000-8000-000000000002]
+    mutation: the exclusion is moved from the query to a filter after it, so the excluded row spends the page

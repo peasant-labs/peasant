@@ -1,0 +1,29 @@
+cases:
+  - name: harness-with-a-layout-and-no-adapter-is-layout-only
+    layouts: [{tool: kiro, harness: kiro}]
+    harvestable: []
+    want: [kiro]
+  - name: harness-with-a-layout-and-an-adapter-is-not-layout-only
+    layouts: [{tool: cursor-cli, harness: cursor}]
+    harvestable: [cursor]
+    want: []
+  - name: harness-with-an-adapter-and-no-layout-is-not-layout-only
+    layouts: [{tool: kiro, harness: kiro}]
+    harvestable: [claude-code]
+    want: [kiro]
+  - name: two-tools-of-one-harness-give-one-entry
+    layouts: [{tool: cursor-cli, harness: cursor}, {tool: cursor-ide-state, harness: cursor}]
+    harvestable: []
+    want: [cursor]
+  - name: result-is-in-known-order-for-reversed-layouts
+    layouts: [{tool: kiro-crew, harness: kiro-crew}, {tool: cline, harness: cline}, {tool: grok-build, harness: grok-build}]
+    harvestable: []
+    want: [grok-build, cline, kiro-crew]
+  - name: empty-layouts-give-an-empty-result
+    layouts: []
+    harvestable: [cursor]
+    want: []
+  - name: unrecognised-layouts-follow-known-values-in-name-order
+    layouts: [{tool: z, harness: future-z}, {tool: kiro, harness: kiro}, {tool: a, harness: future-a}]
+    harvestable: []
+    want: [kiro, future-a, future-z]

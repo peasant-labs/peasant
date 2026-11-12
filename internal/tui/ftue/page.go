@@ -13,6 +13,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/browser"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/onboarding"
 	"github.com/peasant-labs/peasant/internal/projectlabel"
 	"github.com/peasant-labs/peasant/internal/tui/mdrender"
@@ -290,10 +291,12 @@ type ProviderSelectPage struct {
 }
 
 // NewProviderSelectPage builds a provider selection page from discovered inventory.
-// All known providers are shown; those with 0 sessions are unchecked and dimmed.
+// Every harness this build can harvest is shown; those with 0 sessions are
+// unchecked and dimmed. A harness without an adapter is never listed, even when
+// the inventory reports sessions for it, because nothing could be imported.
 func NewProviderSelectPage(title, description string, inventory ProviderInventory) *ProviderSelectPage {
 	var entries []providerEntry
-	for _, p := range defaults.AllHarnesses {
+	for _, p := range ingest.HarvestableHarnesses() {
 		name := schema.HarnessDisplayName(p)
 		discovery := inventory[p]
 		checked := discovery.SessionCount > 0

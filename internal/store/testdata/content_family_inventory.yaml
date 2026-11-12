@@ -17,6 +17,7 @@ requiredNames:
   - annotation_targets_no_fk
   - schema_fresh_vs_migrated
   - stats_overflow
+  - content_recovery_harnesses
 families:
   - {name: content_model_parity, owner: TestContentModelParity}
   - {name: content_promotion, owner: TestContentPromotion}
@@ -36,3 +37,4 @@ families:
   - {name: annotation_targets_no_fk, owner: TestAnnotationTargetsNoFK}
   - {name: schema_fresh_vs_migrated, owner: 'TestSchemaFreshVsMigrated + TestGoldenTemplateBodyInsert'}
   - {name: stats_overflow, owner: TestStatsOverflowFamily}
+  - {name: content_recovery_harnesses, owner: TestContentRecoveryWalkListsOnlyHarvestableHarnesses}

@@ -1,0 +1,5 @@
+requiredNames:
+  - provider-page-lists-a-harvestable-harness-with-sessions-checked
+  - provider-page-lists-a-harvestable-harness-with-zero-sessions-unchecked
+  - provider-page-omits-archived-gemini-cli-even-when-the-inventory-reports-sessions
+  - project-scope-page-omits-archived-gemini-cli-even-when-the-inventory-reports-sessions

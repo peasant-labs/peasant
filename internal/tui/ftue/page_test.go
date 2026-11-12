@@ -14,6 +14,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
@@ -890,6 +891,28 @@ func enabledProviderInventory(counts map[defaults.Harness]int) ProviderInventory
 	return inventory
 }
 
+// assertProvidersAreTheAdapterRegistry holds the provider page's rows to the
+// owner of the harvestable set: one row per harness in the adapter registry,
+// and no other row.
+func assertProvidersAreTheAdapterRegistry(t *testing.T, p *ProviderSelectPage) {
+	t.Helper()
+	listed := make(map[defaults.Harness]bool, len(p.providers))
+	for _, entry := range p.providers {
+		if listed[entry.provider] {
+			t.Errorf("provider page lists %q twice", entry.provider)
+		}
+		listed[entry.provider] = true
+		if _, ok := ingest.DefaultAdapterRegistry[entry.provider]; !ok {
+			t.Errorf("provider page lists %q, which has no adapter in ingest.DefaultAdapterRegistry", entry.provider)
+		}
+	}
+	for harness := range ingest.DefaultAdapterRegistry {
+		if !listed[harness] {
+			t.Errorf("provider page omits %q, which has an adapter in ingest.DefaultAdapterRegistry", harness)
+		}
+	}
+}
+
 func TestProviderSelectPage_ShowsAllProvidersIncludingZeroCount(t *testing.T) {
 	t.Parallel()
 	inventory := enabledProviderInventory(map[defaults.Harness]int{
@@ -898,9 +921,7 @@ func TestProviderSelectPage_ShowsAllProvidersIncludingZeroCount(t *testing.T) {
 		defaults.HarnessGeminiCLI:  3,
 	})
 	p := NewProviderSelectPage("Select Providers", "desc", inventory)
-	if len(p.providers) != len(defaults.AllHarnesses) {
-		t.Fatalf("expected %d providers, got %d", len(defaults.AllHarnesses), len(p.providers))
-	}
+	assertProvidersAreTheAdapterRegistry(t, p)
 	// Providers with sessions should be checked; 0-count should not.
 	for _, e := range p.providers {
 		if e.sessionCount > 0 && !e.checked {
@@ -917,10 +938,8 @@ func TestProviderSelectPage_DefaultState(t *testing.T) {
 	inventory := enabledProviderInventory(map[defaults.Harness]int{defaults.HarnessClaudeCode: 10})
 	p := NewProviderSelectPage("title", "desc", inventory)
 
-	if len(p.providers) != len(defaults.AllHarnesses) {
-		t.Fatalf("expected %d providers, got %d", len(defaults.AllHarnesses), len(p.providers))
-	}
-	// Claude (first in AllProviders) should be checked with sessions.
+	assertProvidersAreTheAdapterRegistry(t, p)
+	// Claude Code (first in the known order) should be checked with sessions.
 	if !p.providers[0].checked {
 		t.Error("Claude should be checked by default (has sessions)")
 	}
@@ -940,9 +959,9 @@ func TestProviderSelectPage_DefaultState(t *testing.T) {
 
 func TestProviderSelectPage_DefaultsEveryOperationalHarnessSelected(t *testing.T) {
 	t.Parallel()
-	for _, enabledHarness := range defaults.AllHarnesses {
+	for _, enabledHarness := range ingest.HarvestableHarnesses() {
 		inventory := ProviderInventory{}
-		for _, harness := range defaults.AllHarnesses {
+		for _, harness := range ingest.HarvestableHarnesses() {
 			inventory[harness] = ProviderDiscovery{SessionCount: 1, Enabled: harness == enabledHarness}
 		}
 		p := NewProviderSelectPage("title", "desc", inventory)

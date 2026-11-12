@@ -316,7 +316,7 @@ type ProjectScopePage struct {
 
 func NewProjectScopePage(projects []ProjectCatalogEntry, inventory ProviderInventory, existing *config.SelectionConfig, rehydrateHarnesses bool) *ProjectScopePage {
 	page := &ProjectScopePage{viewHeight: 15, keymap: DefaultTreeKeyMap}
-	for _, harness := range defaults.AllHarnesses {
+	for _, harness := range ingest.HarvestableHarnesses() {
 		discovery := inventory[harness]
 		if discovery.SessionCount == 0 && discovery.State == DiscoveryReady {
 			continue

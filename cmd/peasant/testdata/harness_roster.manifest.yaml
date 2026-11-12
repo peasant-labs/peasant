@@ -1,0 +1,6 @@
+requiredNames:
+  - known
+  - declared
+  - harvestable
+  - layout-only
+  - archived

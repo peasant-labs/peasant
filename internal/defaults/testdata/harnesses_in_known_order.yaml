@@ -1,0 +1,37 @@
+# Subject: defaults.InKnownOrder, the one ordering rule for every harness set
+# peasant derives from a registry.
+#
+# A case gives its input and expected result either as literal harness values
+# or as a token. A token is resolved by a closed switch in the test:
+#   known          -> schema.Harnesses()
+#   known-reversed -> schema.Harnesses() reversed
+# The token keeps the fixture from restating the known roster, so a roster
+# change never edits this file.
+#
+# Every literal value must be a known harness unless the case lists it under
+# unrecognised; a typo in a known value therefore fails instead of silently
+# testing the unrecognised arm.
+#
+# mutation names the change to InKnownOrder that turns the case red.
+cases:
+  - name: reversed-known-values-return-in-known-order
+    inputToken: known-reversed
+    wantToken: known
+    mutation: InKnownOrder returns its input in input order
+  - name: duplicate-values-collapse-to-one
+    input: [codex, claude-code, codex, claude-code]
+    want: [claude-code, codex]
+    mutation: the seen-set check is removed, so a repeated value is kept twice
+  - name: single-value
+    input: [pi]
+    want: [pi]
+    mutation: InKnownOrder drops a value, or returns the known roster instead of its input
+  - name: empty-input
+    input: []
+    want: []
+    mutation: InKnownOrder ranges over the known roster instead of its input
+  - name: unrecognised-value-sorts-after-known-values-by-name
+    input: [zz-harness-from-a-later-build, strike, aa-harness-from-a-later-build, claude-code]
+    unrecognised: [zz-harness-from-a-later-build, aa-harness-from-a-later-build]
+    want: [claude-code, strike, aa-harness-from-a-later-build, zz-harness-from-a-later-build]
+    mutation: an unrecognised value is dropped, sorted before the known values, or left in input order

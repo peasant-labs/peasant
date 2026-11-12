@@ -17,6 +17,8 @@ The report records roots, shape, and metadata only. It does not store a session,
 and it does not make the tool a harness: a tool's harness identity is declared in
 bestiary and the schema, not observed here.
 
+Layout-only harnesses (no adapter): grok-build, devin-desktop, cline, kiro, kiro-cli, kiro-crew.
+
 ```
 peasant layout [flags]
 ```
