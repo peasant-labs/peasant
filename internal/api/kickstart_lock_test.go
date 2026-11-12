@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/discovery"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/onboarding"
@@ -258,5 +259,23 @@ func TestKickstartConflictChoicesReadTheFileOutsideTheStoreLock(t *testing.T) {
 	close(h.release)
 	if err := testwait.Receive(t, done, "the choice to be applied"); err != nil {
 		t.Fatalf("the choice was refused: %v", err)
+	}
+}
+
+// TestConfigLockWaitIsOneValue holds the two writers that take config.yaml's
+// lock to one wait: the setup save and the settings update default to
+// defaults.ConfigLockWait, and a wait a test sets is the one used.
+func TestConfigLockWaitIsOneValue(t *testing.T) {
+	t.Parallel()
+	save := kickstartEnv{}.withDefaults().lockWait
+	update := (&settingsHandler{}).lockWaitOrDefault()
+	if save != defaults.ConfigLockWait || update != defaults.ConfigLockWait {
+		t.Errorf("the setup save waits %s and the settings update waits %s for the configuration lock, both want defaults.ConfigLockWait (%s)", save, update, defaults.ConfigLockWait)
+	}
+	if got := (&settingsHandler{lockWait: time.Second}).lockWaitOrDefault(); got != time.Second {
+		t.Errorf("a settings update with its own wait waits %s, want 1s", got)
+	}
+	if got := (kickstartEnv{lockWait: time.Second}).withDefaults().lockWait; got != time.Second {
+		t.Errorf("a setup save with its own wait waits %s, want 1s", got)
 	}
 }

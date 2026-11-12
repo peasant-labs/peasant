@@ -70,10 +70,6 @@ const kickstartConnectKey = "connect"
 // before it is dropped.
 const defaultKickstartIdle = 30 * time.Minute
 
-// defaultKickstartLockWait is how long a save waits for the configuration lock
-// before it gives up and says another change holds it.
-const defaultKickstartLockWait = 10 * time.Second
-
 // defaultKickstartScanPush is the shortest interval between two pushed scan
 // progress ticks. A phase change and the end of a scan are always pushed.
 const defaultKickstartScanPush = 200 * time.Millisecond
@@ -153,7 +149,8 @@ type kickstartEnv struct {
 	// writeRetention writes Claude Code's cleanupPeriodDays after a save. Nil
 	// writes the real Claude settings file.
 	writeRetention func(days int) error
-	// lockWait bounds how long a save waits for the configuration lock.
+	// lockWait bounds how long a save waits for the configuration lock. Zero
+	// waits defaults.ConfigLockWait.
 	lockWait time.Duration
 	// review previews a save of a draft. It reads the configuration file, which
 	// is why it is never run under the store lock; a test holds it to prove that.
@@ -209,7 +206,7 @@ func (e kickstartEnv) withDefaults() kickstartEnv {
 		e.writeRetention = claudesettings.WriteCleanupDays
 	}
 	if e.lockWait <= 0 {
-		e.lockWait = defaultKickstartLockWait
+		e.lockWait = defaults.ConfigLockWait
 	}
 	if e.review == nil {
 		e.review = func(ctx context.Context, draft *onboarding.Draft, input onboarding.ReviewInput) (onboarding.ReviewResult, error) {
