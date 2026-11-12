@@ -8,9 +8,9 @@
 # legacy_goldens.yaml records the old wizard and is not edited. A captured
 # scenario whose project is chosen at project level is measured against its
 # entry here instead: the captured golden with the branch list the project
-# shows added to the project rule, and nothing else changed. The inventory's
-# claude-code project offers main and feature/x; its opencode project offers
-# main.
+# shows added to the project rule, and nothing else changed; the loader refuses an
+# entry that changes anything else. The inventory's claude-code project offers
+# main and feature/x; its opencode project offers main.
 #
 # requiredNames is the deletion guard: every captured scenario whose project is
 # chosen at project level must keep an entry.
@@ -18,7 +18,7 @@ requiredNames:
   - whole-project-auto-ingest-on
   - whole-project-auto-ingest-off
   - mixed-project-and-session
-scenarios:
+cases:
   - name: whole-project-auto-ingest-on
     reason: the project is chosen with both of its branches, so the rule lists them
     expected:

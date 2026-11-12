@@ -42,17 +42,13 @@ type checkoutRuleExpected struct {
 func TestDeriveCheckout(t *testing.T) {
 	t.Parallel()
 	var document checkoutRuleDocument
-	if err := testutil.DecodeFixtureYAML(checkoutRuleData, &document); err != nil {
+	if err := testutil.DecodeNamedFixtureYAML(checkoutRuleData, &document); err != nil {
 		t.Fatalf("decode testdata/checkout_rule.yaml: %v", err)
 	}
-	present := map[string]bool{}
 	for _, testCase := range document.Cases {
-		present[testCase.Name] = true
-	}
-	if err := testutil.RequireFixtureNames("testdata/checkout_rule.yaml", "case", document.RequiredNames, present); err != nil {
-		t.Fatal(err)
-	}
-	for _, testCase := range document.Cases {
+		if len(testCase.Sessions) == 0 {
+			t.Fatalf("checkout rule case %q has no sessions; a checkout with none proves nothing", testCase.Name)
+		}
 		t.Run(testCase.Name, func(t *testing.T) {
 			t.Parallel()
 			sessions := make([]onboarding.CheckoutSession, len(testCase.Sessions))
