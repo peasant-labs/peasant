@@ -41,6 +41,7 @@ requiredNames:
   - migrate-piped-long
   - migrate-piped-long-confirm
   - migrate-terminal-long-confirm
+  - server-refuses-to-start-and-names-the-terminal-command
   - server-long-confirm-still-refuses
   - hook-long-step-skips-and-exits-zero
   - piped-long-step-skips-and-exits-one

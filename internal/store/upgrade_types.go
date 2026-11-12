@@ -150,8 +150,9 @@ type UpgradePlan struct {
 	// meaningful only when FreeBytesKnown is true.
 	FreeBytes      int64
 	FreeBytesKnown bool
-	// RequiredFreeBytes is the free space the plan's long steps ask for. It
-	// is zero when every step is quick.
+	// RequiredFreeBytes is the free space the plan asks for: the database
+	// size times the largest disk factor among the planned steps. It is zero
+	// only when the plan has no steps.
 	RequiredFreeBytes int64
 }
 
@@ -243,7 +244,7 @@ func (e *SchemaBehindError) Error() string {
 		e.DBPath, e.From, e.To)
 }
 
-// UpgradeDiskError is the refusal of an upgrade whose long steps need more
+// UpgradeDiskError is the refusal of an upgrade whose planned steps need more
 // free disk than the filesystem reports. It is returned before the first
 // step, so nothing was changed.
 type UpgradeDiskError struct {
@@ -254,7 +255,7 @@ type UpgradeDiskError struct {
 
 func (e *UpgradeDiskError) Error() string {
 	return fmt.Sprintf("store: upgrade %s: the filesystem reports %d bytes free and the upgrade asks for %d, so the upgrade was refused. "+
-		"why: a long step writes its changes to the write-ahead log and the database before it can commit, and running out of disk inside a step would roll it back after the wait. "+
+		"why: a step writes its changes to the write-ahead log and the database before it can commit, and running out of disk inside a step would roll it back after the wait. "+
 		"where: free-disk check, before the first step. "+
 		"when: before any step ran; nothing was changed. "+
 		"meaning: the store stays at its current schema, and commands that need the new schema will not run. "+

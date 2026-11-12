@@ -88,7 +88,7 @@ func newStoreUpgradeAction(raw string) (storeUpgradeAction, error) {
 }
 
 // storeUpgradeDiskTight reports whether free disk is tight for the plan:
-// free space is known and below twice what the plan's long steps ask for.
+// free space is known and below twice what the plan asks for.
 func storeUpgradeDiskTight(plan store.UpgradePlan) bool {
 	return plan.FreeBytesKnown && plan.RequiredFreeBytes > 0 &&
 		plan.FreeBytes < defaults.StoreUpgradeTightDiskMultiple*plan.RequiredFreeBytes
@@ -281,7 +281,7 @@ func writeStoreUpgradePlan(w io.Writer, plan store.UpgradePlan) {
 	for i, step := range plan.Steps {
 		fmt.Fprintf(w, "  %d. %s (%s)\n", i+1, step.Title, storeUpgradeCostLabel(step.Cost))
 	}
-	if plan.RequiredFreeBytes == 0 {
+	if !plan.HasLongStep() && !storeUpgradeDiskTight(plan) {
 		return
 	}
 	free := "unknown"

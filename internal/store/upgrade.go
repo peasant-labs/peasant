@@ -156,10 +156,11 @@ func planUpgradeOnConn(conn *sqlite.Conn, dbPath string) (UpgradePlan, []string,
 	}
 
 	var notices []string
+	largestFactor := 0.0
 	for produced := plan.From + 1; produced <= head; produced++ {
 		entry, ok := upgradeStepCatalog[produced]
 		if !ok {
-			return UpgradePlan{}, nil, fmt.Errorf("store: plan the upgrade of %s: schema version %d has no entry in the upgrade step catalog; nothing was changed; this is a defect in this build: add a title and a cost for the migration to upgradeStepCatalog", dbPath, produced)
+			return UpgradePlan{}, nil, fmt.Errorf("store: plan the upgrade of %s: schema version %d has no entry in the upgrade step catalog; nothing was changed; this is a defect in this build: %s", dbPath, produced, missingCatalogEntryFix(produced))
 		}
 		step := UpgradeStep{Version: produced, Kind: UpgradeStepSchema, Title: entry.title, Cost: entry.cost, Counts: entry.counts}
 		if produced == searchRepairSchemaVersion && plan.From == searchRepairSchemaVersion-1 {
@@ -171,6 +172,14 @@ func planUpgradeOnConn(conn *sqlite.Conn, dbPath string) (UpgradePlan, []string,
 			if notice != "" {
 				notices = append(notices, notice)
 			}
+		}
+		factor := entry.diskFactor
+		if produced == searchRepairSchemaVersion && step.Cost.Long() {
+			// The repair rebuilds the whole search index on this store.
+			factor = defaults.StoreUpgradeSearchRebuildDiskFactor
+		}
+		if factor > largestFactor {
+			largestFactor = factor
 		}
 		plan.Steps = append(plan.Steps, step)
 	}
@@ -187,23 +196,17 @@ func planUpgradeOnConn(conn *sqlite.Conn, dbPath string) (UpgradePlan, []string,
 			plan.FreeBytes = int64(free)
 		}
 	}
-	for _, step := range plan.Steps {
-		plan.RequiredFreeBytes += int64(math.Ceil(float64(plan.StoreBytes) * upgradeDiskFactor(step.Cost)))
-	}
+	// Each step commits before the next starts, so the log space of one
+	// step is reused by the next: the plan needs room for its hungriest
+	// step, not for the sum.
+	plan.RequiredFreeBytes = int64(math.Ceil(float64(plan.StoreBytes) * largestFactor))
 	return plan, notices, nil
 }
 
-// upgradeDiskFactor is the share of the database size a step of the given
-// cost asks to be free. A quick step asks for nothing.
-func upgradeDiskFactor(cost UpgradeCost) float64 {
-	switch cost {
-	case UpgradeCostScalesWithText:
-		return defaults.StoreUpgradeTextStepDiskFactor
-	case UpgradeCostScalesWithRows:
-		return defaults.StoreUpgradeRowsStepDiskFactor
-	default:
-		return 0
-	}
+// missingCatalogEntryFix says exactly what to add for a migration that has
+// no catalog entry.
+func missingCatalogEntryFix(version int) string {
+	return fmt.Sprintf("add `%d: {title: \"<lowercase phrase>\", cost: <UpgradeCost...>, diskFactor: defaults.StoreUpgrade<...>DiskFactor}` to upgradeStepCatalog in internal/store/upgrade_catalog.go (and `counts:` when the step reports a count), and add `- \"%d\"` to requiredNames in internal/store/testdata/upgrade_step_catalog.manifest.yaml", version, version)
 }
 
 // searchRepairStep resolves the cost of the search trigger repair for a
@@ -347,8 +350,9 @@ func (p *upgradeStepProgress) count(done, of int64) {
 //
 // The upgrade holds the data directory's run lock for its whole run, so a
 // harvest or a second upgrade waits. It refuses before the first step when
-// the filesystem reports less free space than the plan's long steps ask
-// for; unknown free space warns and continues. Each step is one transaction:
+// the filesystem reports less free space than the plan asks for (the
+// database size times the largest disk factor among the planned steps);
+// unknown free space warns before a long step and continues. Each step is one transaction:
 // the migration's script, any data fill the step needs, and the version
 // stamp commit together. Cancelling ctx interrupts the running step, which
 // rolls back; the steps before it stay applied, and the error is an
@@ -449,6 +453,8 @@ func Upgrade(ctx context.Context, dbPath string, opts UpgradeOptions) (report Up
 	}
 	if plan.RequiredFreeBytes > 0 {
 		switch {
+		case !plan.FreeBytesKnown && !plan.HasLongStep():
+			// A quick plan needs next to nothing; no warning for it.
 		case !plan.FreeBytesKnown:
 			writeUpgradeNotice(opts.Notices, fmt.Sprintf("warning: could not read the free disk space for %s; the upgrade asks for about %d bytes free and continues without the check", filepath.Dir(dbPath), plan.RequiredFreeBytes))
 		case plan.FreeBytes < plan.RequiredFreeBytes:

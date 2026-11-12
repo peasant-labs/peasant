@@ -69,3 +69,31 @@ cases:
   - name: events-arrive-in-order-for-every-step
     kind: events
     from: 69
+  # Disk need. The plan asks for the database size times the largest disk
+  # factor among the steps planned for this store. wantFactorMin and
+  # wantFactorMax bound RequiredFreeBytes / StoreBytes. residue seeds stale
+  # search results into a schema-75 store, so its repair rebuilds the index.
+  - name: plan-with-the-entry-table-rebuild-asks-for-about-1.7-times-the-database
+    kind: disk-need
+    from: 69
+    wantFactorMin: 1.6
+    wantFactorMax: 1.8
+  - name: plan-of-light-steps-asks-for-the-small-share
+    kind: disk-need
+    from: 75
+    wantFactorMin: 0.0001
+    wantFactorMax: 0.02
+  - name: plan-with-a-search-rebuild-asks-for-its-own-share
+    kind: disk-need
+    from: 75
+    residue: true
+    wantFactorMin: 0.2
+    wantFactorMax: 0.6
+  - name: disk-need-is-the-largest-step-not-the-sum
+    kind: disk-need-largest
+    from: 69
+  - name: too-little-free-disk-for-light-steps-refuses-and-names-needed-and-free-bytes
+    kind: disk-insufficient
+    from: 75
+  - name: every-catalog-entry-has-a-disk-factor
+    kind: catalog

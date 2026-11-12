@@ -17,3 +17,9 @@ requiredNames:
   - precheck-missing-live-index-returns-the-actionable-error
   - notice-writer-is-an-open-option
   - events-arrive-in-order-for-every-step
+  - plan-with-the-entry-table-rebuild-asks-for-about-1.7-times-the-database
+  - plan-of-light-steps-asks-for-the-small-share
+  - plan-with-a-search-rebuild-asks-for-its-own-share
+  - disk-need-is-the-largest-step-not-the-sum
+  - too-little-free-disk-for-light-steps-refuses-and-names-needed-and-free-bytes
+  - every-catalog-entry-has-a-disk-factor

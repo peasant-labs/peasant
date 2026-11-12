@@ -31,9 +31,33 @@ store. The helper classes the entry point and applies this policy.
 | a server process (the web server, an import started from the web) | never upgrades; refuses a behind store | the same |
 | `peasant migrate` | the explicit upgrade | the explicit upgrade; `--confirm` skips the prompt |
 
+A server refuses to start on a behind store. Its message says what the store
+needs and names `peasant migrate --schema-only`, to run in a terminal.
+
 A terminal also asks first when free disk is tight: known, and below twice
-what the plan asks for. Below what the plan asks for, the upgrade refuses.
-Unknown free disk gives a warning and the upgrade continues.
+what the plan asks for. Below what the plan asks for, the upgrade refuses
+before any step runs, and the message names the bytes needed and the bytes
+free. Unknown free disk gives a warning before a long step and the upgrade
+continues.
+
+## Free disk
+
+Each step in the catalog carries a disk factor: the share of the database size
+it asks to be free. The plan asks for the database size times the largest
+factor among the steps planned for that store. Each step commits before the
+next starts, so the log space of one step is reused by the next.
+
+| factor | value | steps | evidence |
+|---|---|---|---|
+| entry table rebuild | 1.69 | 75 (and 11) | measured: log high-water 1.348 times the database, plus 0.340 growth |
+| search rebuild | 0.39 | 76 on a store with stale search results (and 35) | derived from the search index build estimate; not measured |
+| row-scaled | 0.01 | 70 to 74 and other row rewrites | measured: at most 0.0018 for one step, 0.0032 for five |
+| quick | 0.001 | everything else | measured: the quick step wrote nothing |
+
+The values and the measurement are in `internal/defaults/store_upgrade.go`.
+Step 75 uses 1.69 for every store. A store that keeps its text in the body
+table needs far less, but the plan cannot tell the two layouts apart without
+reading the whole entry table, so it takes the conservative value.
 
 A refusal names the command to run:
 
@@ -63,9 +87,10 @@ was stopped.
 
 ## The step catalog
 
-`internal/store/upgrade_catalog.go` gives every migration a title and a cost
-class: `quick`, `scales_with_rows`, or `scales_with_text`. Every cost except
-`quick` is a long step. A test fails when a migration has no entry, and
+`internal/store/upgrade_catalog.go` gives every migration a title, a disk
+factor and a cost class: `quick`, `scales_with_rows`, or `scales_with_text`. Every cost except
+`quick` is a long step. A test fails when a migration has no entry or an entry has no disk factor, and
+its message names the file and the fields to add.
 `testdata/upgrade_step_catalog.manifest.yaml` lists the versions by name. A new
 migration adds both.
 

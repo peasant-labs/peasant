@@ -279,6 +279,12 @@ policyCases:
     confirm: true
     want: ran
     exit: 0
+  - name: server-refuses-to-start-and-names-the-terminal-command
+    entry: web-foreground
+    mode: server
+    store: quick
+    want: refused
+    exit: 1
   - name: server-long-confirm-still-refuses
     entry: web-foreground
     mode: server

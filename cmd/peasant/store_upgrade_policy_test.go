@@ -340,6 +340,18 @@ func TestStoreUpgradePolicy(t *testing.T) {
 						t.Errorf("refusal misses %q:\n%s", part, err)
 					}
 				}
+				if mode == storeEntryServer {
+					for _, part := range []string{
+						"did not run", "needs an upgrade first",
+						"is at schema 75 and this build needs",
+						"a server process never upgrades the store",
+						"run `peasant migrate --schema-only` in a terminal",
+					} {
+						if !strings.Contains(err.Error(), part) {
+							t.Errorf("the server refusal misses %q:\n%s", part, err)
+						}
+					}
+				}
 				if mode == storeEntryHook && !strings.Contains(err.Error(), "your git command is not affected") {
 					t.Errorf("the hook refusal does not say git is unaffected:\n%s", err)
 				}

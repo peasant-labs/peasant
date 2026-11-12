@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/filelock"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
@@ -31,12 +33,15 @@ var storeUpgradeManifestYAML []byte
 var upgradeStepCatalogManifestYAML []byte
 
 type storeUpgradeCase struct {
-	Name        string `yaml:"name"`
-	Kind        string `yaml:"kind"`
-	From        int    `yaml:"from,omitempty"`
-	StopAt      int    `yaml:"stopAt,omitempty"`
-	Fault       string `yaml:"fault,omitempty"`
-	WantVersion int    `yaml:"wantVersion,omitempty"`
+	Name          string  `yaml:"name"`
+	Kind          string  `yaml:"kind"`
+	From          int     `yaml:"from,omitempty"`
+	StopAt        int     `yaml:"stopAt,omitempty"`
+	Fault         string  `yaml:"fault,omitempty"`
+	WantVersion   int     `yaml:"wantVersion,omitempty"`
+	Residue       bool    `yaml:"residue,omitempty"`
+	WantFactorMin float64 `yaml:"wantFactorMin,omitempty"`
+	WantFactorMax float64 `yaml:"wantFactorMax,omitempty"`
 }
 
 // LoadStoreUpgradeFixtures decodes the store upgrade cases and checks them
@@ -132,6 +137,8 @@ func TestStoreUpgrade(t *testing.T) {
 		"data-fill":                runUpgradeDataFillCase,
 		"disk-insufficient":        runUpgradeDiskInsufficientCase,
 		"disk-unknown":             runUpgradeDiskUnknownCase,
+		"disk-need":                runUpgradeDiskNeedCase,
+		"disk-need-largest":        runUpgradeDiskNeedLargestCase,
 		"wal-truncated":            runUpgradeWALTruncatedCase,
 		"run-lock":                 runUpgradeRunLockCase,
 		"catalog":                  runUpgradeCatalogCase,
@@ -469,6 +476,14 @@ func runUpgradeDiskInsufficientCase(t *testing.T, c storeUpgradeCase) {
 	if disk.FreeBytes != required-1 || disk.RequiredBytes != required {
 		t.Errorf("UpgradeDiskError = %+v, want free %d required %d", disk, required-1, required)
 	}
+	for _, part := range []string{
+		fmt.Sprintf("%d bytes free", required-1), fmt.Sprintf("asks for %d", required),
+		"why:", "where:", "when:", "meaning:", "fix:", "nothing was changed", "peasant migrate --schema-only",
+	} {
+		if !strings.Contains(err.Error(), part) {
+			t.Errorf("the disk refusal misses %q: %s", part, err)
+		}
+	}
 	if events != 0 {
 		t.Errorf("the refused upgrade reported %d events; it must refuse before the first step", events)
 	}
@@ -625,8 +640,14 @@ func runUpgradeCatalogCase(t *testing.T, _ storeUpgradeCase) {
 		chain = append(chain, strconv.Itoa(version))
 		entry, ok := upgradeStepCatalog[version]
 		if !ok {
-			t.Errorf("migration %d has no entry in upgradeStepCatalog; give it a title and a cost class", version)
+			t.Errorf("migration %d has no upgrade step catalog entry: %s", version, missingCatalogEntryFix(version))
 			continue
+		}
+		if entry.diskFactor <= 0 {
+			t.Errorf("the catalog entry for migration %d has no disk factor; set `diskFactor:` on entry %d of upgradeStepCatalog in internal/store/upgrade_catalog.go to one of the named factors in internal/defaults/store_upgrade.go (StoreUpgradeQuickStepDiskFactor, StoreUpgradeRowsStepDiskFactor, StoreUpgradeSearchRebuildDiskFactor, StoreUpgradeEntryTableRebuildDiskFactor)", version, version)
+		}
+		if entry.cost.Long() && entry.diskFactor > 0 && entry.diskFactor <= defaults.StoreUpgradeQuickStepDiskFactor {
+			t.Errorf("the catalog entry for migration %d is long (%s) but carries the quick disk factor; a long step rewrites rows or text and needs the rows factor or more", version, entry.cost)
 		}
 		if entry.title == "" || entry.title != strings.ToLower(entry.title) || strings.HasSuffix(entry.title, ".") {
 			t.Errorf("catalog title for migration %d = %q, want a lowercase reader-facing phrase with no final period", version, entry.title)
@@ -639,7 +660,7 @@ func runUpgradeCatalogCase(t *testing.T, _ storeUpgradeCase) {
 		}
 	}
 	if err := validateRecoveryRequiredNames(required, chain, "upgrade step catalog"); err != nil {
-		t.Errorf("the catalog manifest and the migration chain disagree: %v", err)
+		t.Errorf("the catalog manifest and the migration chain disagree: %v; for a new migration N, %s", err, missingCatalogEntryFix(len(dbSchema.Migrations)))
 	}
 	for version := range upgradeStepCatalog {
 		if version < 1 || version > len(dbSchema.Migrations) {
@@ -887,5 +908,54 @@ func TestOnlyUpgradeCallsTheMigrationEngine(t *testing.T) {
 	}
 	if len(callers) != 1 || callers[0] != "internal/store/upgrade.go" {
 		t.Fatalf("the migration engine is called from %v; want exactly one call, in internal/store/upgrade.go (applyUpgradeStep)", callers)
+	}
+}
+
+// buildDiskNeedStore builds the behind store of a disk-need case: the frozen
+// chain at c.From, or a schema-75 store with stale search results.
+func buildDiskNeedStore(t *testing.T, path string, c storeUpgradeCase) {
+	t.Helper()
+	if !c.Residue {
+		buildBehindStore(t, path, c.From, nil)
+		return
+	}
+	conn := buildV75Store(t, path, false)
+	applyMigrationV76Window(t, conn, "affected")
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func runUpgradeDiskNeedCase(t *testing.T, c storeUpgradeCase) {
+	path := filepath.Join(t.TempDir(), "behind.db")
+	buildDiskNeedStore(t, path, c)
+	plan := mustPlan(t, path)
+	if plan.From != c.From || len(plan.Steps) == 0 || plan.StoreBytes <= 0 {
+		t.Fatalf("plan = %+v, want steps from schema %d and a known database size", plan, c.From)
+	}
+	share := float64(plan.RequiredFreeBytes) / float64(plan.StoreBytes)
+	if share < c.WantFactorMin || share > c.WantFactorMax {
+		t.Errorf("the plan asks for %d bytes free for a %d-byte database, %.4f times its size; want between %.4f and %.4f", plan.RequiredFreeBytes, plan.StoreBytes, share, c.WantFactorMin, c.WantFactorMax)
+	}
+}
+
+func runUpgradeDiskNeedLargestCase(t *testing.T, c storeUpgradeCase) {
+	path := filepath.Join(t.TempDir(), "behind.db")
+	buildBehindStore(t, path, c.From, nil)
+	plan := mustPlan(t, path)
+	largest, sum := 0.0, 0.0
+	for _, step := range plan.Steps {
+		factor := upgradeStepCatalog[step.Version].diskFactor
+		sum += factor
+		if factor > largest {
+			largest = factor
+		}
+	}
+	if sum <= largest {
+		t.Fatalf("the plan from %d has one step with a disk factor; the case needs several", c.From)
+	}
+	want := int64(math.Ceil(float64(plan.StoreBytes) * largest))
+	if plan.RequiredFreeBytes != want {
+		t.Errorf("the plan asks for %d bytes, want %d: the database size times the largest factor among its steps (%.4f), not their sum (%.4f)", plan.RequiredFreeBytes, want, largest, sum)
 	}
 }
