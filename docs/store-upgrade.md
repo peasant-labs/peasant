@@ -62,8 +62,8 @@ next starts, so the log space of one step is reused by the next.
 
 | factor | value | steps | basis | evidence |
 |---|---|---|---|---|
-| entry table rebuild | 1.85 | 75 (override) | the entry table with its indexes, and the two search indexes the step rebuilds, on a store whose text is in the bodies; the whole database on a store whose text is in the entry rows | measured: the step used 1.760 times the entry table and search indexes with the text in the entry rows, 1.020 times with the text in the bodies |
-| entry table rebuild | 1.85 | 11 (override) | the entry table with its indexes; a store that old keeps its text in the entry rows, so the whole database | the same factor |
+| entry table rebuild | 2.0 | 75 (override) | the entry table with its indexes, and the two search indexes the step rebuilds, on a store whose text is in the bodies; the whole database on a store whose text is in the entry rows | measured: the step used 1.760 times the entry table and search indexes with the text in the entry rows, 1.020 times with the text in the bodies, and 1.848 times at the row bound; 2.0 leaves about 8% to spare |
+| entry table rebuild | 2.0 | 11 (override) | the entry table with its indexes; a store that old keeps its text in the entry rows, so the whole database | the same factor |
 | search rebuild | 0.39 | every `scales_with_text` step that copies no table: 35, and 76 on a store with stale search results | the database | derived from the search index build estimate; not measured |
 | row-scaled | 0.01 | every `scales_with_rows` step but 11 | the database | measured on 70 to 74: at most 0.0018 for one step, 0.0032 for five |
 | quick | 0.001 | every `quick` step | the database | measured: the quick step wrote nothing |
@@ -158,7 +158,7 @@ same.
 
 The incident store (43 GB, a 39 MiB entry table, 16.4 GiB of text in the
 bodies) left a log of 4.31 GB in step 75. The old rule asked it for 1.69 times
-43 GB; this one asks for 1.85 times its entry table and search indexes.
+43 GB; this one asks for 2.0 times its entry table and search indexes.
 
 A refusal names the command to run:
 

@@ -66,13 +66,15 @@ const (
 	// the store with its text in the entry rows (1.828 on a 16 MiB store of
 	// the same layout), 1.020 times on the store with its text in the
 	// bodies, and 1.848 times on a store whose text is in the bodies and
-	// whose entry table of page-sized rows sits at the read bound. 1.85
-	// covers the largest, with little room on the last. A store whose text
-	// is in the bodies asks for 1.85 times its search index and entry table,
-	// not for 1.85 times its database: the 43 GB store measured on 2026-11-11, with
+	// whose entry table of page-sized rows sits at the read bound. 2.0
+	// covers the largest with about 8% to spare; the measured 1.848 left
+	// under 1%. Asking too much only refuses earlier, while asking too
+	// little lets a step fill the disk and roll back. A store whose text
+	// is in the bodies asks for 2.0 times its search index and entry table,
+	// not for 2.0 times its database: the 43 GB store measured on 2026-11-11, with
 	// a 39 MiB entry table and 16.4 GiB of text in the bodies, left a log of
 	// 4.31 GB, about the size of its search index.
-	StoreUpgradeEntryTableRebuildDiskFactor = 1.85
+	StoreUpgradeEntryTableRebuildDiskFactor = 2.0
 
 	// StoreUpgradeSearchRebuildDiskFactor is for a step that builds or
 	// rebuilds a search index without copying a table. Not measured in the

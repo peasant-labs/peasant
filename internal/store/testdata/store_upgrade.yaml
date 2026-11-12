@@ -128,8 +128,8 @@ cases:
     meanEntryBytes: 1024
     wantBasisMin: 1.0
     wantBasisMax: 1.8
-    wantFactorMin: 1.84
-    wantFactorMax: 1.86
+    wantFactorMin: 1.99
+    wantFactorMax: 2.01
   # An entry table with more rows than the read bound (maxEntryRows) stops
   # the read one row past the bound and takes the whole database.
   - name: entry-table-estimate-reads-no-more-than-its-row-bound
