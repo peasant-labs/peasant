@@ -24,6 +24,10 @@ import (
 // LoadAvailableSessionEntries, not ListEntries, is the directory's source: the
 // latter always serves the 2 KB preview projection, so a directory measured
 // from it would declare a byte length the segment read can never match.
+//
+// Both reads return a managed generation's entries with their source refs
+// (ReadSessionEntries with GenerationRefs set), so the directory and a segment
+// fold the turns the session's stored turn counts count.
 type SegmentReader interface {
 	LoadAvailableSessionEntries(context.Context, ingest.SessionID) ([]schema.SessionEntry, error)
 	ReadSessionEntries(context.Context, ingest.SessionID, ingest.SessionEntryReadOptions) (ingest.SessionEntryReadPage, error)
@@ -354,6 +358,10 @@ func (s *Server) handleTranscriptSegment(w http.ResponseWriter, r *http.Request)
 		FromIndex:    ref.FirstTurn,
 		Limit:        limit,
 		SoftMaxBytes: softMax,
+		// The directory was folded from entries that keep their generation
+		// source refs; the segment must fold the same entries or it would
+		// drop a turn the directory counted.
+		GenerationRefs: true,
 	})
 	if err != nil {
 		writeTranscriptReadError(w, "read the stored entries for transcript segment", err)

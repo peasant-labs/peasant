@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -30,10 +31,6 @@ type turnCountInvariantCase struct {
 	StoredConversationTurnCount int    `yaml:"storedConversationTurnCount"`
 	WantTurnCount               int    `yaml:"wantTurnCount"`
 	WantConversationTurnCount   int    `yaml:"wantConversationTurnCount"`
-	// DirectoryTotalTurnsGap is set only on a row where the directory's
-	// totalTurns is known to differ from the detail's turnCount. It states the
-	// directory's literal, so the row fails as soon as the two agree.
-	DirectoryTotalTurnsGap *int `yaml:"directoryTotalTurnsGap"`
 }
 
 type turnCountInvariantFixture struct {
@@ -105,9 +102,9 @@ func assertCaptureHoldsUncountedRows(t *testing.T, entries []schema.SessionEntry
 	}
 }
 
-// servedTranscriptDirectory reads the segment directory through the real
-// server over the store.
-func servedTranscriptDirectory(t *testing.T, db *store.Store, sessionID string) (int, schema.TranscriptSegmentDirectory, string) {
+// startTranscriptServer serves the real transcript reads over the store and
+// returns the server's base URL.
+func startTranscriptServer(t *testing.T, db *store.Store) string {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	srv := api.NewServer(api.ServerConfig{Port: 0, Store: db})
@@ -120,10 +117,22 @@ func servedTranscriptDirectory(t *testing.T, db *store.Store, sessionID string) 
 	t.Cleanup(func() {
 		cancel()
 		if err := <-done; err != nil && err != context.Canceled {
-			t.Errorf("directory server shutdown: %v", err)
+			t.Errorf("transcript server shutdown: %v", err)
 		}
 	})
-	response, err := http.Get("http://" + srv.Addr().String() + "/api/v1/sessions/" + sessionID + "/transcript/segments")
+	return "http://" + srv.Addr().String()
+}
+
+// servedTranscriptDirectory reads the segment directory through the real
+// server over the store.
+func servedTranscriptDirectory(t *testing.T, db *store.Store, sessionID string) (int, schema.TranscriptSegmentDirectory, string) {
+	t.Helper()
+	return readTranscriptDirectory(t, startTranscriptServer(t, db), sessionID)
+}
+
+func readTranscriptDirectory(t *testing.T, base, sessionID string) (int, schema.TranscriptSegmentDirectory, string) {
+	t.Helper()
+	response, err := http.Get(base + "/api/v1/sessions/" + sessionID + "/transcript/segments")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,6 +145,31 @@ func servedTranscriptDirectory(t *testing.T, db *store.Store, sessionID string) 
 		}
 	}
 	return response.StatusCode, directory, string(body)
+}
+
+// servedSegmentTurns reads every segment the directory names and returns the
+// turns they serve, in order. A directory folded from other entries than its
+// segments fails here: the segment read refuses a range it cannot reproduce.
+func servedSegmentTurns(t *testing.T, base, sessionID string, directory schema.TranscriptSegmentDirectory) []schema.TranscriptTurn {
+	t.Helper()
+	var turns []schema.TranscriptTurn
+	for _, ref := range directory.Segments {
+		response, err := http.Get(fmt.Sprintf("%s/api/v1/sessions/%s/transcript/segments/%d", base, sessionID, ref.Index))
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("segment %d status = %d, body %s", ref.Index, response.StatusCode, body)
+		}
+		var segment schema.TranscriptSegment
+		if err := json.Unmarshal(body, &segment); err != nil {
+			t.Fatalf("decode segment %d: %v", ref.Index, err)
+		}
+		turns = append(turns, segment.Turns...)
+	}
+	return turns
 }
 
 // TestSessionTurnCountsAgreeWithTheSegmentDirectory proves the two equalities
@@ -228,9 +262,19 @@ func TestSessionTurnCountsAgreeWithTheSegmentDirectory(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read the session detail: %v", err)
 			}
-			status, directory, body := servedTranscriptDirectory(t, db, sessionID)
+			base := startTranscriptServer(t, db)
+			status, directory, body := readTranscriptDirectory(t, base, sessionID)
 			if status != http.StatusOK {
 				t.Fatalf("directory status = %d, body %s", status, body)
+			}
+			segmentTurns := servedSegmentTurns(t, base, sessionID, directory)
+			if len(segmentTurns) != c.WantTurnCount {
+				t.Errorf("the segments serve %d turns, want %d", len(segmentTurns), c.WantTurnCount)
+			}
+			for i := range segmentTurns {
+				if i < len(detail.Turns) && segmentTurns[i].Index != detail.Turns[i].Index {
+					t.Errorf("segment turn %d has identity %d, the detail's has %d", i, segmentTurns[i].Index, detail.Turns[i].Index)
+				}
 			}
 			stats, err := db.ReadCapturedStats(ctx, schema.SessionID(sid))
 			if err != nil {
@@ -239,15 +283,8 @@ func TestSessionTurnCountsAgreeWithTheSegmentDirectory(t *testing.T) {
 			if detail.TurnCount != c.WantTurnCount {
 				t.Errorf("detail turnCount = %d, want %d", detail.TurnCount, c.WantTurnCount)
 			}
-			wantDirectoryTurns := c.WantTurnCount
-			if c.DirectoryTotalTurnsGap != nil {
-				wantDirectoryTurns = *c.DirectoryTotalTurnsGap
-				if wantDirectoryTurns == c.WantTurnCount {
-					t.Fatalf("case %q states a directory gap equal to its turnCount; remove directoryTotalTurnsGap", c.Name)
-				}
-			}
-			if directory.TotalTurns != wantDirectoryTurns {
-				t.Errorf("directory totalTurns = %d, want %d", directory.TotalTurns, wantDirectoryTurns)
+			if directory.TotalTurns != c.WantTurnCount {
+				t.Errorf("directory totalTurns = %d, want %d", directory.TotalTurns, c.WantTurnCount)
 			}
 			if len(detail.Turns) != c.WantTurnCount {
 				t.Errorf("detail serves %d turns, want %d", len(detail.Turns), c.WantTurnCount)

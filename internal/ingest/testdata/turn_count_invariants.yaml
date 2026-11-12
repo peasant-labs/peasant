@@ -37,14 +37,6 @@ cases:
     path: managed
     wantTurnCount: 7
     wantConversationTurnCount: 3
-    # Known gap, not the intended state. The detail and the stored count fold
-    # the generation's own entries and serve the prose-less tool carrier as a
-    # turn. The segment directory folds the mirror rows, where that carrier has
-    # no source ref and no preview, and drops it. So totalTurns reads 6 while
-    # turnCount reads 7. The conversation count is not affected: the carrier
-    # is a tool_use row. Remove this line when the directory folds the same
-    # entries as the detail; the row then requires 7 on both.
-    directoryTotalTurnsGap: 6
   - name: counts-entry-less-unmanaged
     path: entry-less-unmanaged
     storedTurnCount: 6

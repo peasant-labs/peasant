@@ -187,6 +187,23 @@ func shimListEntries(records []EntryRecord, bounded bool) ([]schema.SessionEntry
 	return entries, nil
 }
 
+// shimListEntriesWithRefs shapes rows as shimListEntries does, bounded or not,
+// and then puts back each entry's stored source ref and provenance. The turn
+// fold decides whether an empty turn survives by its source ref, so a reader
+// that must fold the turns the stored counts count needs them.
+func shimListEntriesWithRefs(records []EntryRecord, bounded bool) ([]schema.SessionEntry, error) {
+	entries, err := shimListEntries(records, bounded)
+	if err != nil {
+		return nil, err
+	}
+	for i := range entries {
+		native := entryFromRow(records[i])
+		entries[i].SourceEntryRef = native.SourceEntryRef
+		entries[i].Provenance = native.Provenance
+	}
+	return entries, nil
+}
+
 // shimFirstUserPreview reads the first depth-zero user preview for one
 // session through the shim, bounded exactly as the mirror bounded it.
 func shimFirstUserPreview(conn *sqlite.Conn, sessionID string) (string, error) {

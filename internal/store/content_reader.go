@@ -351,7 +351,7 @@ func verifyCaptureProjection(ctx context.Context, conn *sqlite.Conn, id ingest.S
 		return shimErr
 	}
 	if shimmed {
-		_, err := verifyShimCaptureProjection(ctx, conn, id, c)
+		_, err := verifyShimCaptureProjection(ctx, conn, id, c, false)
 		return err
 	}
 	err := sqlitex.Execute(conn, sqlListEntries, &sqlitex.ExecOptions{Args: []any{string(id)}, ResultFunc: func(st *sqlite.Stmt) error {
@@ -428,8 +428,10 @@ func verifyStoredContent(ctx context.Context, conn *sqlite.Conn, id ingest.Sessi
 // without touching the retired mirror or chunks: every mapped body proves
 // its stored digest, and the full-capture hash recomputes over the decoded
 // active main entries — the write-time domain — against the capture row. It
-// returns the verified full entries for callers that keep reading.
-func verifyShimCaptureProjection(ctx context.Context, conn *sqlite.Conn, id ingest.SessionID, c ingest.SessionContentCapture) ([]schema.SessionEntry, error) {
+// returns the verified full entries for callers that keep reading. The entries
+// are the ref-less mirror projection unless generationRefs is set, in which case
+// each keeps its stored source ref and provenance.
+func verifyShimCaptureProjection(ctx context.Context, conn *sqlite.Conn, id ingest.SessionID, c ingest.SessionContentCapture, generationRefs bool) ([]schema.SessionEntry, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -502,6 +504,10 @@ func verifyShimCaptureProjection(ctx context.Context, conn *sqlite.Conn, id inge
 		return nil, err
 	}
 	for i := range shaped {
+		if generationRefs {
+			shaped[i] = legacyShape(records[i], false)
+			continue
+		}
 		shaped[i] = mirrorShape(records[i], false)
 	}
 	return shaped, nil
@@ -562,7 +568,7 @@ func (s *Store) ReadSessionEntries(ctx context.Context, id ingest.SessionID, opt
 			return page, shimErr
 		}
 		if shimmed {
-			verified, verifyErr := verifyShimCaptureProjection(ctx, conn, id, c)
+			verified, verifyErr := verifyShimCaptureProjection(ctx, conn, id, c, opts.GenerationRefs)
 			if verifyErr != nil {
 				return page, verifyErr
 			}
@@ -671,6 +677,12 @@ func contentPageBudget(from int, override int64) int64 {
 // stored projection otherwise. The segment directory must measure exactly this
 // content, because a directory built from the preview projection would declare a
 // byte length the segment read can never match.
+//
+// The entries keep their managed generation's source refs and provenance, as a
+// ReadSessionEntries page with GenerationRefs does. The directory's turn totals
+// must equal the session's stored turn counts, and those are folded from the
+// generation's entries; without the refs the fold drops a turn that has no text
+// of its own.
 func (s *Store) LoadAvailableSessionEntries(ctx context.Context, id ingest.SessionID) (_ []schema.SessionEntry, retErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
@@ -687,7 +699,7 @@ func (s *Store) LoadAvailableSessionEntries(ctx context.Context, id ingest.Sessi
 	if err := s.ValidateIndexFormatsOnConn(conn, []schema.SessionID{id}); err != nil {
 		return nil, err
 	}
-	entries, _, err := loadAvailableSessionEntriesOnConn(ctx, conn, id)
+	entries, _, err := loadAvailableSessionEntriesShapedOnConn(ctx, conn, id, true)
 	if err != nil {
 		return nil, err
 	}
@@ -721,6 +733,13 @@ func (s *Store) LoadFullSessionEntries(ctx context.Context, id ingest.SessionID,
 // loadFullSessionEntriesOnConn borrows an already-open read transaction. This
 // also lets publication load its metadata and content from the same snapshot.
 func loadFullSessionEntriesOnConn(ctx context.Context, conn *sqlite.Conn, id ingest.SessionID, softMaxBytes int64) (entries []schema.SessionEntry, capture ingest.SessionContentCapture, err error) {
+	return loadFullSessionEntriesShapedOnConn(ctx, conn, id, softMaxBytes, false)
+}
+
+// loadFullSessionEntriesShapedOnConn is loadFullSessionEntriesOnConn with the
+// choice of entry shape: generationRefs keeps each entry's source ref and
+// provenance when the session reads from a managed generation.
+func loadFullSessionEntriesShapedOnConn(ctx context.Context, conn *sqlite.Conn, id ingest.SessionID, softMaxBytes int64, generationRefs bool) (entries []schema.SessionEntry, capture ingest.SessionContentCapture, err error) {
 	fail := func(cause error) ([]schema.SessionEntry, ingest.SessionContentCapture, error) {
 		if ctx.Err() != nil {
 			cause = ctx.Err()
@@ -759,7 +778,7 @@ func loadFullSessionEntriesOnConn(ctx context.Context, conn *sqlite.Conn, id ing
 		return fail(shimErr)
 	}
 	if shimmed {
-		return loadShimFullSessionEntries(ctx, conn, id, capture, softMaxBytes, fail)
+		return loadShimFullSessionEntries(ctx, conn, id, capture, softMaxBytes, generationRefs, fail)
 	}
 	if err := verifyCaptureProjection(ctx, conn, id, capture, false); err != nil {
 		return fail(err)
@@ -802,7 +821,11 @@ func shimPreviewPage(conn *sqlite.Conn, id ingest.SessionID, opts ingest.Session
 	if err != nil {
 		return page, err
 	}
-	entries, err := shimListEntries(records, bounded)
+	shape := shimListEntries
+	if opts.GenerationRefs {
+		shape = shimListEntriesWithRefs
+	}
+	entries, err := shape(records, bounded)
 	if err != nil {
 		return page, err
 	}
@@ -819,8 +842,8 @@ func shimPreviewPage(conn *sqlite.Conn, id ingest.SessionID, opts ingest.Session
 // cursor contract as the mirror pager: entries slice by index cursor and
 // byte budget, and the cursor refuses to stall or run past the capture's
 // entry count.
-func loadShimFullSessionEntries(ctx context.Context, conn *sqlite.Conn, id ingest.SessionID, capture ingest.SessionContentCapture, softMaxBytes int64, fail func(cause error) ([]schema.SessionEntry, ingest.SessionContentCapture, error)) ([]schema.SessionEntry, ingest.SessionContentCapture, error) {
-	verified, err := verifyShimCaptureProjection(ctx, conn, id, capture)
+func loadShimFullSessionEntries(ctx context.Context, conn *sqlite.Conn, id ingest.SessionID, capture ingest.SessionContentCapture, softMaxBytes int64, generationRefs bool, fail func(cause error) ([]schema.SessionEntry, ingest.SessionContentCapture, error)) ([]schema.SessionEntry, ingest.SessionContentCapture, error) {
+	verified, err := verifyShimCaptureProjection(ctx, conn, id, capture, generationRefs)
 	if err != nil {
 		return fail(err)
 	}
@@ -880,6 +903,14 @@ func shimContentPage(verified []schema.SessionEntry, from, limit int, softMaxByt
 // evidence and never echo raw payload bytes, labels, or position strings into
 // diagnostics, counts, logs, or errors.
 func loadAvailableSessionEntriesOnConn(ctx context.Context, conn *sqlite.Conn, id ingest.SessionID) (entries []schema.SessionEntry, capture ingest.SessionContentCapture, err error) {
+	return loadAvailableSessionEntriesShapedOnConn(ctx, conn, id, false)
+}
+
+// loadAvailableSessionEntriesShapedOnConn is loadAvailableSessionEntriesOnConn
+// with the choice of entry shape: generationRefs keeps each entry's source ref
+// and provenance when the session reads from a managed generation, on the
+// complete path and on the bounded one.
+func loadAvailableSessionEntriesShapedOnConn(ctx context.Context, conn *sqlite.Conn, id ingest.SessionID, generationRefs bool) (entries []schema.SessionEntry, capture ingest.SessionContentCapture, err error) {
 	capture, found, err := readCapture(conn, id)
 	if err != nil {
 		return nil, capture, err
@@ -888,9 +919,13 @@ func loadAvailableSessionEntriesOnConn(ctx context.Context, conn *sqlite.Conn, i
 	// preview of an omitted-record session shows the placeholders in place
 	// rather than the bounded projection.
 	if found && PublishableWithOmissions(capture) {
-		return loadFullSessionEntriesOnConn(ctx, conn, id, 0)
+		return loadFullSessionEntriesShapedOnConn(ctx, conn, id, 0, generationRefs)
 	}
-	entries, err = listEntriesOnConn(conn, id)
+	if generationRefs {
+		entries, err = listEntriesWithGenerationRefsOnConn(conn, id)
+	} else {
+		entries, err = listEntriesOnConn(conn, id)
+	}
 	if err != nil {
 		return nil, capture, err
 	}
@@ -905,6 +940,33 @@ func loadAvailableSessionEntriesOnConn(ctx context.Context, conn *sqlite.Conn, i
 		return nil, capture, fmt.Errorf("store available content read: stored retained evidence is corrupt; no preview was served; re-index the source with a position-aware adapter")
 	}
 	return entries, capture, nil
+}
+
+// listEntriesWithGenerationRefsOnConn lists a session's stored projection as
+// listEntriesOnConn does. For a session that reads from a managed generation it
+// keeps each entry's source ref and provenance; any other session has none and
+// is listed unchanged.
+func listEntriesWithGenerationRefsOnConn(conn *sqlite.Conn, id ingest.SessionID) ([]schema.SessionEntry, error) {
+	shimmed, err := shimmedOnConn(conn, string(id))
+	if err != nil {
+		return nil, err
+	}
+	if !shimmed {
+		return listEntriesOnConn(conn, id)
+	}
+	records, err := shimBodyRecordsOnConn(conn, string(id), nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	bounded, err := shimBoundedOnConn(conn, string(id))
+	if err != nil {
+		return nil, err
+	}
+	entries, err := shimListEntriesWithRefs(records, bounded)
+	if err != nil {
+		return nil, fmt.Errorf("store: list shim entries with their source refs for %s: %w", id, err)
+	}
+	return entries, nil
 }
 
 // loadLatestAttemptAvailableEntriesOnConn serves the latest attempt to an
