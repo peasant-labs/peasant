@@ -7,7 +7,7 @@ cases:
         body: '{"type":"user","message":{"role":"user","content":"two"}}'
     total: 2
     sessions: 2
-    remined: 2
+    final_rereads: 2
   - name: claude-advances-once-per-source
     files:
       - path: project/11111111-1111-4111-8111-111111111111.jsonl
@@ -18,8 +18,8 @@ cases:
         body: '{"type":"user","message":{"role":"user","content":"workflow child"}}'
     total: 3
     sessions: 2
-    remined: 2
-  - name: cached-and-remined-sources-both-advance
+    final_rereads: 2
+  - name: cached-and-reread-sources-both-advance
     files: *claude_files
     warm_cache: true
     rewrite:
@@ -27,8 +27,8 @@ cases:
       body: '{"type":"user","message":{"role":"user","content":"a changed transcript"}}'
     total: 2
     sessions: 2
-    remined: 1
-    remined_counts: [0, 1]
+    final_rereads: 1
+    step_rereads: [0, 1]
   - name: unreadable-location-does-not-stall-the-count
     files:
       - path: project/11111111-1111-4111-8111-111111111111.jsonl
@@ -38,25 +38,25 @@ cases:
     unreadable_dir: hidden
     total: 1
     sessions: 1
-    remined: 1
+    final_rereads: 1
   - name: vanished-file-does-not-stall-the-count
     files: *claude_files
     failed_stat: project/11111111-1111-4111-8111-111111111111.jsonl
     total: 2
     sessions: 1
-    remined: 1
+    final_rereads: 1
   - name: no-progress-attached-changes-nothing
     files: *claude_files
     total: 2
     sessions: 2
-    remined: 2
+    final_rereads: 2
   - name: total-equals-final-count
     files: *claude_files
     total: 2
     sessions: 2
-    remined: 2
+    final_rereads: 2
   - name: empty-enumeration-reports-zero
     files: []
     total: 0
     sessions: 0
-    remined: 0
+    final_rereads: 0

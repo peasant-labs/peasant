@@ -42,8 +42,8 @@ func (p *spinnerDiscoveryEvents) DiscoveryTotal(_ ingest.Harness, total int) {
 	p.spinner.SetProgress(p.done, p.total)
 }
 
-func (p *spinnerDiscoveryEvents) DiscoveryAdvance(_ ingest.Harness, delta int) {
-	p.done += delta
+func (p *spinnerDiscoveryEvents) DiscoveryAdvance(_ ingest.Harness, step ingest.DiscoveryStep) {
+	p.done += step.Sources
 	p.calls++
 	p.spinner.SetProgress(p.done, p.total)
 }
@@ -102,7 +102,7 @@ func TestKickstartDiscoverySpinnerProgress(t *testing.T) {
 				spinner := discoveryprogress.New(io.Discard, false)
 				spinner.SetPhase("previous")
 				spinner.SetProgress(1, 2)
-				spinner.SetDiscoveryReminedCount(1)
+				spinner.SetDiscoveryRequiredRereads(1)
 				spinner.SetPhase(c.Phase)
 				events := &spinnerDiscoveryEvents{spinner: spinner}
 				ingest.AttachDiscoveryProgress(adapter, events)
@@ -121,7 +121,7 @@ func TestKickstartDiscoverySpinnerProgress(t *testing.T) {
 				spinner := discoveryprogress.New(writer, true)
 				spinner.SetPhase("previous")
 				spinner.SetProgress(1, 2)
-				spinner.SetDiscoveryReminedCount(1)
+				spinner.SetDiscoveryRequiredRereads(1)
 				spinner.SetPhase(c.Phase)
 				defer spinner.Stop()
 				ctx := testwait.Context(t)

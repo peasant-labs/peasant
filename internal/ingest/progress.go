@@ -257,9 +257,11 @@ func (p *pipelineDiscoveryProgress) DiscoveryTotal(_ Harness, total int) {
 	emitAdvance(p.state, StageDiscover, 0, p.total)
 }
 
-func (p *pipelineDiscoveryProgress) DiscoveryAdvance(_ Harness, delta int) {
+// DiscoveryAdvance counts finished sources. The harvest display shows source
+// counts only, so the step's re-read count is not used here.
+func (p *pipelineDiscoveryProgress) DiscoveryAdvance(_ Harness, step DiscoveryStep) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.done += delta
-	emitAdvance(p.state, StageDiscover, delta, p.total)
+	p.done += step.Sources
+	emitAdvance(p.state, StageDiscover, step.Sources, p.total)
 }

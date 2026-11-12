@@ -1,0 +1,10 @@
+requiredNames:
+  - mid-run-names-required-rereads
+  - complete-names-required-rereads
+  - counts-of-ten-thousand-or-more-are-not-grouped
+  - zero-required-rereads-is-shown
+  - unreported-rereads-show-no-count
+  - negative-rereads-mean-not-reported
+  - phase-only-adapter-inherits-no-counts
+  - new-phase-clears-the-previous-rereads
+  - found-count-without-total-is-not-grouped

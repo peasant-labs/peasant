@@ -82,13 +82,15 @@ func (s discoveryProgressState) valid() bool {
 }
 
 type discoveryProgressStateFixture struct {
-	Key          discoveryProgressState `yaml:"key"`
-	Phase        string                 `yaml:"phase"`
-	Done         int                    `yaml:"done"`
-	Total        int                    `yaml:"total"`
-	Remined      *int                   `yaml:"remined"`
-	WantContains []string               `yaml:"wantContains"`
-	WantAbsent   []string               `yaml:"wantAbsent"`
+	Key   discoveryProgressState `yaml:"key"`
+	Phase string                 `yaml:"phase"`
+	Done  int                    `yaml:"done"`
+	Total int                    `yaml:"total"`
+	// RequiredRereads is the re-read count the spinner shows; nil for a state
+	// whose adapter reports none.
+	RequiredRereads *int     `yaml:"requiredRereads"`
+	WantContains    []string `yaml:"wantContains"`
+	WantAbsent      []string `yaml:"wantAbsent"`
 }
 
 type discoveryProgressCaptureFixture struct {
@@ -518,31 +520,31 @@ func validateDiscoveryProgressMatrix(states []discoveryProgressStateFixture, cap
 		case discoveryProgressMidRun:
 			if state.Done <= 0 ||
 				state.Done >= state.Total ||
-				state.Remined == nil ||
-				*state.Remined < 0 ||
-				*state.Remined > state.Done {
-				return fmt.Errorf("screenshot fixture discovery progress %q needs an incomplete count and a re-read count", state.Key)
+				state.RequiredRereads == nil ||
+				*state.RequiredRereads < 0 ||
+				*state.RequiredRereads > state.Done {
+				return fmt.Errorf("screenshot fixture discovery progress %q needs an incomplete count and a required re-read count", state.Key)
 			}
 		case discoveryProgressComplete:
 			if state.Done <= 0 ||
 				state.Done != state.Total ||
-				state.Remined == nil ||
-				*state.Remined < 0 ||
-				*state.Remined > state.Done {
-				return fmt.Errorf("screenshot fixture discovery progress %q needs equal positive counts and a re-read count", state.Key)
+				state.RequiredRereads == nil ||
+				*state.RequiredRereads < 0 ||
+				*state.RequiredRereads > state.Done {
+				return fmt.Errorf("screenshot fixture discovery progress %q needs equal positive counts and a required re-read count", state.Key)
 			}
 		case discoveryProgressPhaseOnly:
 			if state.Done != 0 ||
 				state.Total != 0 ||
-				state.Remined != nil ||
+				state.RequiredRereads != nil ||
 				!slices.Contains(state.WantAbsent, "(") ||
 				!slices.Contains(state.WantAbsent, "re-read") {
 				return fmt.Errorf("screenshot fixture discovery progress %q must forbid inherited counts", state.Key)
 			}
 		}
-		if state.Remined != nil && (!slices.Contains(state.WantContains, fmt.Sprintf("(%d/%d)", state.Done, state.Total)) ||
-			!slices.Contains(state.WantContains, fmt.Sprintf("%d re-read", *state.Remined))) {
-			return fmt.Errorf("screenshot fixture discovery progress %q must assert its exact file and re-read counts", state.Key)
+		if state.RequiredRereads != nil && (!slices.Contains(state.WantContains, fmt.Sprintf("(%d/%d)", state.Done, state.Total)) ||
+			!slices.Contains(state.WantContains, fmt.Sprintf("%d required re-read", *state.RequiredRereads))) {
+			return fmt.Errorf("screenshot fixture discovery progress %q must assert its exact file and required re-read counts", state.Key)
 		}
 		stateRows[state.Key] = state
 	}

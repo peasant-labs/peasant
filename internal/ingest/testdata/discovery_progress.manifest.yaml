@@ -1,7 +1,7 @@
 requiredNames:
   - claude-total-is-known-before-the-first-advance
   - claude-advances-once-per-source
-  - cached-and-remined-sources-both-advance
+  - cached-and-reread-sources-both-advance
   - unreadable-location-does-not-stall-the-count
   - vanished-file-does-not-stall-the-count
   - no-progress-attached-changes-nothing

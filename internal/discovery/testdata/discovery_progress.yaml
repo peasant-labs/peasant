@@ -9,3 +9,5 @@ cases:
     phase: Discovering Claude Code sessions...
     counts: [0, 1, 2]
     total: 2
+    # No evidence cache is attached, so every finished source had to be read.
+    rereads: [1, 2]

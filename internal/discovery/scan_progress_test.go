@@ -27,6 +27,9 @@ type scanProgressCase struct {
 	Phase  string `yaml:"phase"`
 	Counts []int  `yaml:"counts"`
 	Total  int    `yaml:"total"`
+	// Rereads is the required re-read count the display receives after each
+	// source advance, in order.
+	Rereads []int `yaml:"rereads"`
 }
 
 type scanProgressObservation struct {
@@ -37,6 +40,7 @@ type scanProgressObservation struct {
 type scanProgressRecorder struct {
 	phase        string
 	observations []scanProgressObservation
+	rereads      []int
 }
 
 func (r *scanProgressRecorder) SetPhase(phase string) { r.phase = phase }
@@ -44,7 +48,12 @@ func (r *scanProgressRecorder) SetProgress(done, total int) {
 	r.observations = append(r.observations, scanProgressObservation{phase: r.phase, done: done, total: total})
 }
 
+func (r *scanProgressRecorder) SetDiscoveryRequiredRereads(count int) {
+	r.rereads = append(r.rereads, count)
+}
+
 var _ discovery.ScanProgress = (*scanProgressRecorder)(nil)
+var _ discovery.ScanRereadProgress = (*scanProgressRecorder)(nil)
 
 func TestScanReportsDiscoveryProgress(t *testing.T) {
 	var fixture struct {
@@ -89,6 +98,9 @@ func TestScanReportsDiscoveryProgress(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got, c.Counts) {
 				t.Fatalf("counts during %q = %v, want %v (all observations: %+v)", c.Phase, got, c.Counts, recorder.observations)
+			}
+			if !reflect.DeepEqual(recorder.rereads, c.Rereads) {
+				t.Fatalf("required re-reads during %q = %v, want %v", c.Phase, recorder.rereads, c.Rereads)
 			}
 		})
 	}
