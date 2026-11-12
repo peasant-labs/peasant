@@ -45,9 +45,12 @@ cases:
         mode: selected
         autoIngestNewBranches: false
         projects:
+          # The ticked project row chooses clone-a's one branch, so the rule is
+          # that branch's.
           - harness: claude-code
             gitRemote: "git@github.com:acme/tool.git"
             pathKeys: [clone-a]
+            branches: [main]
           - harness: claude-code
             gitRemote: "git@github.com:acme/tool.git"
             pathKeys: [clone-b]

@@ -5,7 +5,8 @@ cases:
   - {name: api-not-import-internal-tui, directory: internal/api, forbidden: github.com/peasant-labs/peasant/internal/tui}
   - {name: discovery-not-import-internal-tui, directory: internal/discovery, forbidden: github.com/peasant-labs/peasant/internal/tui}
   - {name: one-declaration-of-each-neutral-type}
-neutralTypes: [ProjectIdentity, PreparedSessionListing, SessionListing, SessionSource, SessionSourceOrigin, Forest, Node, Stop, Field, Draft, Residual, StopKind, FieldKind, ModelScope, FlowKey]
+neutralTypes: [ProjectIdentity, PreparedSessionListing, SessionListing, SessionSource, SessionSourceOrigin, Forest, Node, Stop, Field, Draft, Residual, StopKind, FieldKind, ModelScope, FlowKey, NextStep]
+retiredTypes: [NextStepKind]
 guardedDirectories: [internal/tui/settings, internal/tui/kickstart, internal/tui/ftue, internal/discovery]
 permittedHomonyms:
   - {file: internal/codegraph/graph.go, name: Node}

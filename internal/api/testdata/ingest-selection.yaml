@@ -11,10 +11,16 @@ requiredNames:
   - conflict-recorder-lines-appear-in-diagnostics
   - session-exclusion-removes-branch
   - stored-session-excluded-by-selection-remains-viewable
+  - moved-clone-tree-branch-and-import-agree
+  - sessions-stored-while-active-are-counted-new
+  - invalid-saved-selection-refuses-the-import-and-says-where
+  - chosen-single-branch-checkout-excludes-a-later-new-branch
+  - chosen-single-branch-checkout-admits-a-later-new-branch-when-auto-ingest-is-on
 ids:
   selected: 11111111-1111-4111-8111-111111111111
   other: 22222222-2222-4222-8222-222222222222
   child: agent-a1b2c3d4
+  unrecorded: 33333333-3333-4333-8333-333333333333
 cases:
   - name: selected-policy-imports-exactly-the-selected-set
     throughRoute: true
@@ -83,3 +89,51 @@ cases:
       - 11111111-1111-4111-8111-111111111111
     expectExcluded:
       - 22222222-2222-4222-8222-222222222222
+  # One clone hosts a session recorded on main, a session recorded on
+  # feature/stray, and a session that recorded no branch. The clone sits on main,
+  # then moves on. The tree groups each session under one branch: the one it
+  # recorded, else the one the store holds, else the clone's. The saved choice of
+  # main must import exactly the sessions the tree showed as chosen, before and
+  # after the clone moves.
+  - name: moved-clone-tree-branch-and-import-agree
+    movedClone: true
+    chosenBranch: main
+    otherRecordedBranch: feature/stray
+    expectImported:
+      - 11111111-1111-4111-8111-111111111111
+      - 33333333-3333-4333-8333-333333333333
+    expectExcluded:
+      - 22222222-2222-4222-8222-222222222222
+  # A person runs the import while they are still working in their sessions, so
+  # it meets recordings that are still being written. The run stores such a
+  # session like any other, and the finish panel counts it: new when the store
+  # did not hold it.
+  - name: sessions-stored-while-active-are-counted-new
+    activeRecordings: true
+    mode: all
+    expectImported:
+      - 11111111-1111-4111-8111-111111111111
+      - 22222222-2222-4222-8222-222222222222
+    expectWritten: {new: 2, updated: 0}
+  # A saved selection this version cannot read stops the import before any
+  # source is read, and the refusal names the check that made it and what to do.
+  - name: invalid-saved-selection-refuses-the-import-and-says-where
+    mode: everything
+    expectIngestError:
+      - internal/api.checkIngestable
+      - unknown selection.mode
+      - choose the sessions to import again in setup
+  # Choosing the one branch of a checkout saves that branch. The rule is derived
+  # from the real tree, not written by hand. A session recorded in the checkout
+  # later, on a branch that did not exist at choose time, is imported only when
+  # the new-branch setting is on.
+  - name: chosen-single-branch-checkout-excludes-a-later-new-branch
+    derivedBranchRule: true
+    chosenBranch: main
+    laterBranch: feature/after-the-choice
+    autoIngestNewBranches: false
+  - name: chosen-single-branch-checkout-admits-a-later-new-branch-when-auto-ingest-is-on
+    derivedBranchRule: true
+    chosenBranch: main
+    laterBranch: feature/after-the-choice
+    autoIngestNewBranches: true

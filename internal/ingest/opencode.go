@@ -1475,34 +1475,34 @@ func (a *OpenCodeAdapter) ExtractMetadata(ctx context.Context, session Discovere
 	// ── 3. Resolve git info ────────────────────────────────────────────────────
 	workDir := ses.Directory
 	if workDir == "" {
-		// Session has no directory; use storage root as a safe fallback for git resolution.
-		// Git calls will likely fail, but worktreeForHash will be a valid absolute path
-		// rather than "/" which produces invalid HostSlug values.
+		// Session has no directory; use the storage root as the path the identity
+		// hash is derived from, so worktreeForHash is a valid absolute path rather
+		// than "/" (which produces invalid HostSlug values). Git is not asked about
+		// it: see gitDir below.
 		workDir = storageRoot
 	}
 
 	var gitBranch, gitRemote, gitWorktree *string
 
-	branch, err := a.git.Branch(ctx, workDir)
-	if session.Branch != "" {
-		branch = session.Branch
-		err = nil
-	}
-	if err == nil && branch != "" {
-		b := branch
-		gitBranch = &b
+	// Git is asked about the session's project directory and nothing else, the
+	// directory the tree and the import filter ask about; workDir above may be
+	// the storage root, which is only a path for the identity hash.
+	gitDir := ExtractionDirectory(session, ses.Directory, osDirectoryExists)
+	if branch := ResolveGitBranch(ctx, a.git, gitDir, session.Branch); branch != "" {
+		gitBranch = &branch
 	}
 
-	remote, tracking := ResolveGitRemote(ctx, a.git, workDir, session.Branch, "")
+	remote, tracking := ResolveGitRemote(ctx, a.git, gitDir, session.Branch, "")
 	if remote != "" {
 		r := remote
 		gitRemote = &r
 	}
 
-	wt, err := a.git.Worktree(ctx, workDir)
-	if err == nil && wt != "" {
-		w := wt
-		gitWorktree = &w
+	if gitDir != "" {
+		if wt, err := a.git.Worktree(ctx, gitDir); err == nil && wt != "" {
+			w := wt
+			gitWorktree = &w
+		}
 	}
 
 	var gitTracking *string

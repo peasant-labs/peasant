@@ -169,7 +169,7 @@ harnesses:
           - &tool {kind: tool_use, status: represented, preview: no, payload: tool name and arguments}
           - &result {kind: tool_result, status: represented, preview: yes, payload: tool output}
   strike:
-    adapter_version: 2
+    adapter_version: 3
     indexer_version: 18
     index_version: 1
     fallback: &fallback
@@ -311,10 +311,10 @@ harnesses:
           - {<<: *text, kind: image, payload: textual media marker}
           - &tool {kind: toolCall, status: represented, preview: no, payload: tool name and arguments}
   codex:
-    adapter_version: 2
+    adapter_version: 3
     indexer_version: 19
     index_version: 1
-    native_versions: {adapter_version: 3, indexer_version: 22, index_version: 2}
+    native_versions: {adapter_version: 4, indexer_version: 22, index_version: 2}
     fallback: &fallback
       status: retained-unknown
       preview: no

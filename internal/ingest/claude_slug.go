@@ -4,7 +4,13 @@ import "os"
 
 // DecodeClaudeSlugOnDisk resolves a Claude slug against existing directories.
 func DecodeClaudeSlugOnDisk(encoded string) string {
-	return DecodeClaudeSlug(encoded, func(path string) bool { info, err := os.Stat(path); return err == nil && info.IsDir() })
+	return DecodeClaudeSlug(encoded, osDirectoryExists)
+}
+
+// osDirectoryExists reports whether path is a directory on the disk.
+func osDirectoryExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 // DecodeClaudeSlug decodes a Claude project slug to a real filesystem path.

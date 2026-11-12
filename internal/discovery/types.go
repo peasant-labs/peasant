@@ -1,10 +1,7 @@
 package discovery
 
 import (
-	"time"
-
 	"github.com/peasant-labs/peasant/internal/defaults"
-	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/onboarding"
 )
 
@@ -59,36 +56,6 @@ type ProjectIdentity = onboarding.ProjectIdentity
 
 // PreparedSessionListing is owned by onboarding.
 type PreparedSessionListing = onboarding.PreparedSessionListing
-
-// KnownSession is what a previous ingest recorded for one session. A scan
-// reuses it instead of walking git again when the source has not changed.
-type KnownSession struct {
-	GitRemote     string
-	Branch        string
-	GitWorktree   string
-	CanonicalCwd  string
-	Title         string
-	IngestedMs    int64
-	SchemaVersion int
-}
-
-// WorkingDirectory returns the most specific project directory already
-// recorded. A per-session Git worktree wins over the project-level canonical
-// directory. Discovery still wins over both when the current source carries a
-// working directory.
-func (s KnownSession) WorkingDirectory() string {
-	if s.GitWorktree != "" {
-		return s.GitWorktree
-	}
-	return s.CanonicalCwd
-}
-
-// KnownSessionIndex answers whether a discovered session can reuse a recorded
-// git resolution. A nil index means every session is resolved the full way.
-// Implementations must not require this package to import a database type.
-type KnownSessionIndex interface {
-	Reusable(session ingest.DiscoveredSession, staleness time.Duration) (KnownSession, bool)
-}
 
 // ScanProgress receives phase and count updates while a scan runs. A nil
 // progress value is ignored. Implementations must tolerate a nil receiver.

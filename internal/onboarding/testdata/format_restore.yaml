@@ -1,0 +1,38 @@
+# The formatting restore on its own: the original document, what the YAML
+# encoder wrote for the edited one, and the text the save writes. Aligned lines
+# that differ only in trailing spaces or the spacing before a trailing comment
+# take the original's text; anything else is the encoder's.
+requiredNames:
+  - aligned-lines-keep-original-text
+  - blank-run-stays-before-the-replacing-line
+  - deleted-line-drops-its-text-and-keeps-its-blank
+  - meaning-guard-returns-encoder-output
+  - encoder-blank-line-skips-restore
+  - carriage-return-skips-restore
+cases:
+  - name: aligned-lines-keep-original-text
+    original: "a: 1   # x  \nb: 2\n"
+    encoded: "a: 1 # x\nb: 2\n"
+    want: "a: 1   # x  \nb: 2\n"
+  - name: blank-run-stays-before-the-replacing-line
+    original: "a: 1\n\nb: old   # note\nc: 3\n"
+    encoded: "a: 1\nb: new # note\nc: 3\n"
+    want: "a: 1\n\nb: new # note\nc: 3\n"
+  - name: deleted-line-drops-its-text-and-keeps-its-blank
+    original: "a: 1\n\nb: 2\n\nc: 3\n"
+    encoded: "a: 1\nc: 3\n"
+    want: "a: 1\n\nc: 3\n"
+  # The restored line would decode to "x   #y", the encoder wrote "x #y".
+  - name: meaning-guard-returns-encoder-output
+    original: "a: \"x   #y\"\n"
+    encoded: "a: \"x #y\"\n"
+    want: "a: \"x #y\"\n"
+  # A blank line in the encoder's output is inside a block scalar, where it is content.
+  - name: encoder-blank-line-skips-restore
+    original: "a: |\n  x\n\n  y\n\nb: 1\n"
+    encoded: "a: |\n  x\n\n  y\nb: 1\n"
+    want: "a: |\n  x\n\n  y\nb: 1\n"
+  - name: carriage-return-skips-restore
+    original: "a: 1\r\n\r\nb: 2   # x\r\n"
+    encoded: "a: 1\nb: 3 # x\n"
+    want: "a: 1\nb: 3 # x\n"

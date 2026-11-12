@@ -1,10 +1,14 @@
-requiredNames: [binary-local-deadline-preserves-domain-effects, binary-remote-504-is-not-local-deadline, binary-invalid-deadline-refuses-startup]
+requiredNames: [binary-local-deadline-preserves-domain-effects, binary-remote-504-is-not-local-deadline, binary-invalid-deadline-refuses-startup, binary-seeded-sandbox-reports-configured, binary-unseeded-sandbox-reports-unconfigured]
 timeout: 2s
 maxDeadlineMilliseconds: 5000
 cases:
   - {name: binary-local-deadline-preserves-domain-effects, scenario: partial-504, status: 504, historyState: cancelled, issueCode: deadline, stalled: true}
   - {name: binary-remote-504-is-not-local-deadline, scenario: remote-history-504, status: 502, historyState: failed, issueCode: remote, stalled: false}
   - {name: binary-invalid-deadline-refuses-startup, scenario: complete, invalidTimeout: invalid-duration}
+  # The other built-binary journeys start from a computer that is already set up. The seed is what
+  # makes it so: the same start without the seed reports an unconfigured install.
+  - {name: binary-seeded-sandbox-reports-configured, scenario: complete, mode: setup-status}
+  - {name: binary-unseeded-sandbox-reports-unconfigured, scenario: complete, mode: setup-status, configSeed: false}
 requiredRemotePaths:
   /api/v1/auth/me: 1
   /api/v1/auth/orgs: 1

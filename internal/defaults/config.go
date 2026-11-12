@@ -1,10 +1,19 @@
 package defaults
 
+import "time"
+
 // Config value defaults for the peasant ingest pipeline.
 const (
 	ConfigVersion               = 1
 	ConfigStalenessThresholdSec = 60
 )
+
+// ConfigLockWait is how long a writer of config.yaml waits for the file's lock
+// before it gives up and says another change holds it. The settings update and
+// the setup save take the same lock, so they wait the same time: a request
+// should not hang for minutes, and the shorter wait would refuse an update that
+// the other writer's save was about to release.
+const ConfigLockWait = 10 * time.Second
 
 // SourcePathFor returns the documented default source directory for a harness.
 func SourcePathFor(harness Harness) (SourcePath, bool) {

@@ -610,8 +610,8 @@ func writeSelection(cfg *config.Config, w WriteContext, value schema.LocalSettin
 	if err := json.Unmarshal(value, &answer); err != nil {
 		return writeValueError(FieldSelection, err)
 	}
-	if selectionAnswerHasIDs(value) {
-		derived, err := deriveSelection(w.Forest, SelectedForest{IDs: answer.IDs}, cfg.Selection.AutoIngestNewBranches, w.Residual)
+	if ids, isIDAnswer := SelectionIDs(value); isIDAnswer {
+		derived, err := deriveSelection(w.Forest, SelectedForest{IDs: ids}, cfg.Selection.AutoIngestNewBranches, w.Residual)
 		if err != nil {
 			return err
 		}
@@ -680,27 +680,8 @@ func answeredIDs(w WriteContext) []string {
 	if w.Answers == nil {
 		return nil
 	}
-	value, ok := w.Answers[FieldSelection]
-	if !ok || !selectionAnswerHasIDs(value) {
-		return nil
-	}
-	var answer SelectionAnswer
-	if err := json.Unmarshal(value, &answer); err != nil {
-		return nil
-	}
-	return answer.IDs
-}
-
-// selectionAnswerHasIDs reports whether the answer is an id list, including an
-// explicit empty list. A mapping answer has no ids key and writes mode and
-// harnesses directly.
-func selectionAnswerHasIDs(value schema.LocalSettingValue) bool {
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(value, &raw); err != nil {
-		return false
-	}
-	_, ok := raw["ids"]
-	return ok
+	ids, _ := SelectionIDs(w.Answers[FieldSelection])
+	return ids
 }
 
 func destinationFor(path []string) Destination {
@@ -740,6 +721,16 @@ func writeValueError(key FieldKey, err error) error {
 
 // NeverExpireDays is the Claude Code cleanup period that keeps transcripts.
 const NeverExpireDays = 99999
+
+// neverExpireFloor is the smallest stored cleanup period that reads as "keeps
+// transcripts forever". Claude Code accepts any large number, so a value that a
+// person or another tool wrote below NeverExpireDays still means never expire.
+const neverExpireFloor = 9999
+
+// NeverExpires reports whether a stored cleanup period keeps transcripts
+// forever. A presentation uses it to read an existing value. It writes
+// NeverExpireDays.
+func NeverExpires(days int) bool { return days >= neverExpireFloor }
 
 // RecommendedRetentionDays is the retention choice a first run starts on when
 // Claude Code has no cleanup period set.

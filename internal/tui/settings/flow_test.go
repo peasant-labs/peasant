@@ -257,7 +257,7 @@ func TestFlow_ReceiptGroupsChoicesAndEffectsWithAContinueCue(t *testing.T) {
 	f := NewFlow(theme.New(theme.ModeDark), testRegistry(), d,
 		WithConsentSummary(func(ConsentContext) (ConsentSummary, error) {
 			return ConsentSummary{
-				Values:  []string{"selection: only the buffered projects"},
+				Values:  []string{"selection: 1 project you chose"},
 				Effects: []string{"save the visible choices to peasant configuration"},
 			}, nil
 		}))
@@ -289,7 +289,7 @@ func TestFlow_ReceiptGroupsChoicesAndEffectsWithAContinueCue(t *testing.T) {
 	// own "connection" label (rendered above the body) cannot be mistaken for
 	// the changed-fields section heading.
 	yourChoices := indexOf("your choices")
-	choiceValue := indexOfFrom("selection: only the buffered projects", yourChoices)
+	choiceValue := indexOfFrom("selection: 1 project you chose", yourChoices)
 	whenYouConfirm := indexOfFrom("when you confirm", choiceValue)
 	effectValue := indexOfFrom("save the visible choices to peasant configuration", whenYouConfirm)
 	changedSection := indexOfFrom("changed: connect to village", effectValue)

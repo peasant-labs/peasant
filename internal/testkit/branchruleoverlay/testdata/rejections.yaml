@@ -1,0 +1,194 @@
+# The overlay loader refuses an overlay that is not strictly what it says it is.
+# Each case gives an overlay document, the captured selections it is checked
+# against (by scenario name), and either the error it must produce or, for the
+# accepted case, the selection Want returns for the named scenario.
+# requiredNames is the deletion guard: every name below must still be present.
+requiredNames:
+  - a-well-formed-overlay-is-accepted
+  - an-unknown-field-is-refused
+  - an-entry-for-a-scenario-that-was-not-captured-is-refused
+  - an-entry-with-no-reason-is-refused
+  - an-entry-that-changes-more-than-the-branch-list-is-refused
+  - an-entry-equal-to-its-capture-is-refused
+  - a-required-entry-that-is-missing-is-refused
+  - a-repeated-entry-is-refused
+cases:
+  - name: a-well-formed-overlay-is-accepted
+    overlay: |
+      requiredNames: [whole]
+      cases:
+        - name: whole
+          reason: the project is chosen with both branches
+          expected:
+            mode: selected
+            harnesses:
+              claude-code:
+                projects:
+                  - {gitRemote: "git@github.com:acme/tool.git", branches: [main, release]}
+    captured:
+      whole:
+        mode: selected
+        harnesses:
+          claude-code:
+            projects:
+              - {gitRemote: "git@github.com:acme/tool.git"}
+    want: {mode: selected, harnesses: {claude-code: {projects: [{gitRemote: "git@github.com:acme/tool.git", branches: [main, release]}]}}}
+
+  - name: an-unknown-field-is-refused
+    overlay: |
+      requiredNames: [whole]
+      cases:
+        - name: whole
+          reason: the project is chosen with both branches
+          why: a typo for reason
+          expected:
+            mode: selected
+            harnesses:
+              claude-code:
+                projects:
+                  - {gitRemote: "git@github.com:acme/tool.git", branches: [main]}
+    captured:
+      whole:
+        mode: selected
+        harnesses:
+          claude-code:
+            projects:
+              - {gitRemote: "git@github.com:acme/tool.git"}
+    wantError: field why not found
+
+  - name: an-entry-for-a-scenario-that-was-not-captured-is-refused
+    overlay: |
+      requiredNames: [other]
+      cases:
+        - name: other
+          reason: the project is chosen with both branches
+          expected:
+            mode: selected
+            harnesses:
+              claude-code:
+                projects:
+                  - {gitRemote: "git@github.com:acme/tool.git", branches: [main]}
+    captured:
+      whole:
+        mode: selected
+        harnesses:
+          claude-code:
+            projects:
+              - {gitRemote: "git@github.com:acme/tool.git"}
+    wantError: which the captured goldens do not hold
+
+  - name: an-entry-with-no-reason-is-refused
+    overlay: |
+      requiredNames: [whole]
+      cases:
+        - name: whole
+          reason: "  "
+          expected:
+            mode: selected
+            harnesses:
+              claude-code:
+                projects:
+                  - {gitRemote: "git@github.com:acme/tool.git", branches: [main]}
+    captured:
+      whole:
+        mode: selected
+        harnesses:
+          claude-code:
+            projects:
+              - {gitRemote: "git@github.com:acme/tool.git"}
+    wantError: gives no reason
+
+  - name: an-entry-that-changes-more-than-the-branch-list-is-refused
+    overlay: |
+      requiredNames: [whole]
+      cases:
+        - name: whole
+          reason: the project is chosen with both branches
+          expected:
+            mode: selected
+            autoIngestNewBranches: true
+            harnesses:
+              claude-code:
+                projects:
+                  - {gitRemote: "git@github.com:acme/tool.git", branches: [main]}
+    captured:
+      whole:
+        mode: selected
+        harnesses:
+          claude-code:
+            projects:
+              - {gitRemote: "git@github.com:acme/tool.git"}
+    wantError: by more than a branch list
+
+  - name: an-entry-equal-to-its-capture-is-refused
+    overlay: |
+      requiredNames: [whole]
+      cases:
+        - name: whole
+          reason: the project is chosen with both branches
+          expected:
+            mode: selected
+            harnesses:
+              claude-code:
+                projects:
+                  - {gitRemote: "git@github.com:acme/tool.git", branches: [main]}
+    captured:
+      whole:
+        mode: selected
+        harnesses:
+          claude-code:
+            projects:
+              - {gitRemote: "git@github.com:acme/tool.git", branches: [main]}
+    wantError: overlays nothing
+
+  - name: a-required-entry-that-is-missing-is-refused
+    overlay: |
+      requiredNames: [whole, mixed]
+      cases:
+        - name: whole
+          reason: the project is chosen with both branches
+          expected:
+            mode: selected
+            harnesses:
+              claude-code:
+                projects:
+                  - {gitRemote: "git@github.com:acme/tool.git", branches: [main]}
+    captured:
+      whole:
+        mode: selected
+        harnesses:
+          claude-code:
+            projects:
+              - {gitRemote: "git@github.com:acme/tool.git"}
+      mixed:
+        mode: selected
+    wantError: is missing required case "mixed"
+
+  - name: a-repeated-entry-is-refused
+    overlay: |
+      requiredNames: [whole]
+      cases:
+        - name: whole
+          reason: the project is chosen with both branches
+          expected:
+            mode: selected
+            harnesses:
+              claude-code:
+                projects:
+                  - {gitRemote: "git@github.com:acme/tool.git", branches: [main]}
+        - name: whole
+          reason: again
+          expected:
+            mode: selected
+            harnesses:
+              claude-code:
+                projects:
+                  - {gitRemote: "git@github.com:acme/tool.git", branches: [main]}
+    captured:
+      whole:
+        mode: selected
+        harnesses:
+          claude-code:
+            projects:
+              - {gitRemote: "git@github.com:acme/tool.git"}
+    wantError: duplicate

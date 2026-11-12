@@ -15,6 +15,7 @@ import {
   PublishingRequestError,
   startVillageSignIn,
 } from '@/lib/share/publishing';
+import { watchVillageSignIn } from '@/lib/share/villageSignIn';
 import { useRedactionPipeline, type RedactionScanTarget } from '@/lib/share/redactionScan';
 import { DEFAULT_REDACTION_LEVEL } from '@/lib/share/redactions';
 import { guardReviewMatches } from '@/lib/share/reviewMatches';
@@ -47,9 +48,6 @@ import {
   type AccessDraft,
   type PublishOutcome,
 } from './publishModel';
-
-/** How often the popup asks whether the browser sign-in finished. */
-const SIGN_IN_POLL_MS = 2000;
 
 /** The recovery when village no longer holds the transcript a receipt names. */
 const TRANSCRIPT_MISSING = 'peasant online no longer holds this transcript: run peasant village push --force for this session';
@@ -283,27 +281,11 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
   // After `continue with github`, wait for the browser sign-in to land.
   useEffect(() => {
     if (!open || signIn !== 'waiting') return;
-    let live = true;
-    let timer = 0;
-    const tick = async () => {
-      try {
-        const auth = await fetchVillageAuth();
-        if (!live) return;
-        if (auth.authenticated) {
-          setSignIn('signed-in');
-          return;
-        }
-      } catch {
-        // A missed poll is not a failed sign-in: the browser flow still runs.
-      }
-      if (!live) return;
-      timer = window.setTimeout(tick, SIGN_IN_POLL_MS);
-    };
-    timer = window.setTimeout(tick, SIGN_IN_POLL_MS);
-    return () => {
-      live = false;
-      window.clearTimeout(timer);
-    };
+    const stop = new AbortController();
+    void watchVillageSignIn({ signal: stop.signal }).then((outcome) => {
+      if (outcome === 'signed-in') setSignIn('signed-in');
+    });
+    return () => stop.abort();
   }, [open, signIn]);
 
   const connect = useCallback(() => {

@@ -1,4 +1,4 @@
-requiredNames: [forced-child-reaped-once, timed-out-child-reaped, stale-owner-recovered, stale-owner-other-temp-context, concurrent-recovery-loser-preserves-winner, missing-command-reaped]
+requiredNames: [forced-child-reaped-once, timed-out-child-reaped, stale-owner-recovered, stale-owner-other-temp-context, concurrent-recovery-loser-preserves-winner, missing-command-reaped, configured-sandbox-seed-writes-the-file-the-binary-reads, configured-sandbox-seed-survives-a-cleared-directory, configured-sandbox-seed-refuses-a-relative-root, configured-sandbox-seed-accepts-a-config-dir]
 cases:
   - {name: forced-child-reaped-once, mode: forced, termMs: 50, killMs: 2000}
   - {name: timed-out-child-reaped, mode: timeout, termMs: 50, killMs: 2000}
@@ -6,3 +6,8 @@ cases:
   - {name: stale-owner-other-temp-context, mode: changed-temp, termMs: 50, killMs: 2000}
   - {name: concurrent-recovery-loser-preserves-winner, mode: concurrent, termMs: 50, killMs: 2000}
   - {name: missing-command-reaped, mode: missing, termMs: 50, killMs: 2000}
+  # A journey about any page but setup starts from a computer that is already set up.
+  - {name: configured-sandbox-seed-writes-the-file-the-binary-reads, mode: config-seed, relativePath: peasant/config.yaml, content: "version: 1\n", fileMode: 0o600}
+  - {name: configured-sandbox-seed-survives-a-cleared-directory, mode: config-reseed, relativePath: peasant/config.yaml, content: "version: 1\n"}
+  - {name: configured-sandbox-seed-refuses-a-relative-root, mode: config-relative, error: not an absolute path}
+  - {name: configured-sandbox-seed-accepts-a-config-dir, mode: config-home, relativePath: peasant/config.yaml, content: "version: 1\n", fileMode: 0o600}

@@ -1,0 +1,195 @@
+# The words of a preview, shared by the terminal pane and the setup page.
+#
+# op repository: context is the resolved project or branch metadata; lines are
+#   the exact lines. The cleaner is discovery.CleanPreviewValue.
+# op clean: value is cleaned to want.
+# op cut: the notice for consumed/total/more/canLoadMore, exactly.
+# op note: the fixed sentence named by note (no-turns, unavailable, shortened),
+#   exactly.
+# op size: bytes written as a size.
+requiredNames:
+  - project-names-its-harness-remote-worktree-and-branches
+  - branch-names-its-branch-and-lists-no-branches
+  - several-harnesses-and-remotes-are-plural-and-comma-joined
+  - several-git-directories-are-listed-with-a-count
+  - one-git-directory-is-named-on-one-line
+  - empty-lists-print-nothing
+  - clean-collapses-white-space
+  - clean-drops-control-characters
+  - clean-drops-c1-control-characters
+  - clean-keeps-printable-characters-beside-the-control-ranges
+  - cut-notice-with-load-more
+  - cut-notice-without-load-more
+  - cut-notice-needs-more-behind-it
+  - cut-notice-needs-a-known-size
+  - size-reads-bytes-kibibytes-and-mebibytes
+  - note-for-a-session-without-readable-turns
+  - note-for-a-session-without-a-transcript-location
+  - note-for-a-preview-shortened-without-a-size
+cases:
+  - name: project-names-its-harness-remote-worktree-and-branches
+    op: repository
+    context:
+      kind: project
+      project: github.com:acme/tool
+      harnesses: [claude-code]
+      remotes: [github.com/acme/tool]
+      gitDirectories: [/work/tool]
+      clonePaths: [/work/tool]
+      branches: [feature/x, main]
+      sessionCount: 3
+    lines:
+      - "project: github.com:acme/tool"
+      - "harness: claude code"
+      - "remote: github.com/acme/tool"
+      - "git directory: /work/tool"
+      - "worktrees: 1"
+      - "  /work/tool"
+      - "branches: 2"
+      - "  feature/x"
+      - "  main"
+      - "sessions: 3"
+
+  - name: branch-names-its-branch-and-lists-no-branches
+    op: repository
+    context:
+      kind: branch
+      project: github.com:acme/tool
+      branch: main
+      branches: [main]
+      harnesses: [claude-code]
+      sessionCount: 2
+    lines:
+      - "project: github.com:acme/tool"
+      - "branch: main"
+      - "harness: claude code"
+      - "sessions: 2"
+
+  - name: several-harnesses-and-remotes-are-plural-and-comma-joined
+    op: repository
+    context:
+      kind: project
+      project: tool
+      harnesses: [claude-code, codex]
+      remotes: [github.com/acme/tool, gitlab.com/acme/tool]
+      sessionCount: 4
+    lines:
+      - "project: tool"
+      - "harnesses: claude code, codex"
+      - "remotes: github.com/acme/tool, gitlab.com/acme/tool"
+      - "sessions: 4"
+
+  - name: several-git-directories-are-listed-with-a-count
+    op: repository
+    context:
+      kind: project
+      project: tool
+      gitDirectories: [/work/a, /work/b]
+      sessionCount: 2
+    lines:
+      - "project: tool"
+      - "git directories: 2"
+      - "  /work/a"
+      - "  /work/b"
+      - "sessions: 2"
+
+  - name: one-git-directory-is-named-on-one-line
+    op: repository
+    context:
+      kind: project
+      project: tool
+      gitDirectories: [/work/a]
+      sessionCount: 1
+    lines:
+      - "project: tool"
+      - "git directory: /work/a"
+      - "sessions: 1"
+
+  - name: empty-lists-print-nothing
+    op: repository
+    context:
+      kind: project
+      project: tool
+      sessionCount: 0
+    lines:
+      - "project: tool"
+      - "sessions: 0"
+
+  - name: clean-collapses-white-space
+    op: clean
+    value: "  a \t b\n\n c  "
+    want: "a b c"
+
+  - name: clean-drops-control-characters
+    op: clean
+    value: "x\x1b[31my\x00z\x7f"
+    want: "x[31myz"
+
+  # U+0080 and U+009F are the ends of the C1 range; U+00A0 is the first
+  # character past it and is white space, not a control.
+  - name: clean-drops-c1-control-characters
+    op: clean
+    value: "a\u0080b\u0085c\u009fd\u00a0e"
+    want: "abcd e"
+
+  # 0x1f and 0x20 straddle the end of the C0 range, 0x7e and 0x7f its DEL.
+  - name: clean-keeps-printable-characters-beside-the-control-ranges
+    op: clean
+    value: "a\x1fb c~d\x7fe\u00a1f"
+    want: "ab c~de\u00a1f"
+
+  - name: cut-notice-with-load-more
+    op: cut
+    consumed: 7340032
+    total: 31457280
+    more: true
+    canLoadMore: true
+    want: "showing the first 7 MiB of this 30 MiB session. scroll to the bottom to load more. the full session ingests normally."
+
+  - name: cut-notice-without-load-more
+    op: cut
+    consumed: 2048
+    total: 1048576
+    more: true
+    canLoadMore: false
+    want: "showing the first 2 KiB of this 1 MiB session. the full session ingests normally."
+
+  - name: cut-notice-needs-more-behind-it
+    op: cut
+    consumed: 2048
+    total: 2048
+    more: false
+    canLoadMore: true
+    want: ""
+
+  - name: cut-notice-needs-a-known-size
+    op: cut
+    consumed: 2048
+    total: 0
+    more: true
+    canLoadMore: true
+    want: ""
+
+  - name: size-reads-bytes-kibibytes-and-mebibytes
+    op: size
+    sizes:
+      - {bytes: 0, want: 0 bytes}
+      - {bytes: 1023, want: 1023 bytes}
+      - {bytes: 1024, want: 1 KiB}
+      - {bytes: 1048575, want: 1023 KiB}
+      - {bytes: 1048576, want: 1 MiB}
+
+  - name: note-for-a-session-without-readable-turns
+    op: note
+    note: no-turns
+    want: "no readable turns are in this session's transcript yet."
+
+  - name: note-for-a-session-without-a-transcript-location
+    op: note
+    note: unavailable
+    want: "no transcript preview is available for this session; it still ingests normally."
+
+  - name: note-for-a-preview-shortened-without-a-size
+    op: note
+    note: shortened
+    want: "preview shortened here. the full session ingests normally."

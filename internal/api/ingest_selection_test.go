@@ -4,18 +4,23 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/discovery"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/onboarding"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -34,23 +39,53 @@ type ingestSelectionIDs struct {
 	Selected string `yaml:"selected"`
 	Other    string `yaml:"other"`
 	Child    string `yaml:"child"`
+	// Unrecorded names a session whose recording carries no branch.
+	Unrecorded string `yaml:"unrecorded"`
 }
 
 type ingestSelectionCase struct {
-	Name             string   `yaml:"name"`
-	PreludeAll       bool     `yaml:"preludeAll"`
-	ThroughRoute     bool     `yaml:"throughRoute"`
-	Mode             string   `yaml:"mode"`
-	Allow            []string `yaml:"allow"`
-	WithChild        bool     `yaml:"withChild"`
-	EmptyHarnesses   bool     `yaml:"emptyHarnesses"`
-	Conflict         bool     `yaml:"conflict"`
-	BranchExclusion  bool     `yaml:"branchExclusion"`
-	Route            string   `yaml:"route"`
-	ScopeSession     string   `yaml:"scopeSession"`
-	ExpectImported   []string `yaml:"expectImported"`
-	ExpectExcluded   []string `yaml:"expectExcluded"`
-	ExpectDiagnostic bool     `yaml:"expectDiagnostic"`
+	Name            string   `yaml:"name"`
+	PreludeAll      bool     `yaml:"preludeAll"`
+	ThroughRoute    bool     `yaml:"throughRoute"`
+	Mode            string   `yaml:"mode"`
+	Allow           []string `yaml:"allow"`
+	WithChild       bool     `yaml:"withChild"`
+	EmptyHarnesses  bool     `yaml:"emptyHarnesses"`
+	Conflict        bool     `yaml:"conflict"`
+	BranchExclusion bool     `yaml:"branchExclusion"`
+	Route           string   `yaml:"route"`
+	ScopeSession    string   `yaml:"scopeSession"`
+	// MovedClone runs the case on a clone that has since moved to ChosenBranch:
+	// the Selected session recorded ChosenBranch, the Other session recorded
+	// OtherRecordedBranch, and both ran in that one clone.
+	MovedClone          bool   `yaml:"movedClone"`
+	ChosenBranch        string `yaml:"chosenBranch"`
+	OtherRecordedBranch string `yaml:"otherRecordedBranch"`
+	// DerivedBranchRule runs the case on a single-branch clone whose selection is
+	// derived from the real tree by choosing its one branch, then adds a session
+	// recorded on LaterBranch to that clone. AutoIngestNewBranches is the answer
+	// the person gave for new branches.
+	DerivedBranchRule     bool     `yaml:"derivedBranchRule"`
+	LaterBranch           string   `yaml:"laterBranch"`
+	AutoIngestNewBranches bool     `yaml:"autoIngestNewBranches"`
+	ExpectImported        []string `yaml:"expectImported"`
+	ExpectExcluded        []string `yaml:"expectExcluded"`
+	ExpectDiagnostic      bool     `yaml:"expectDiagnostic"`
+	// ExpectWritten is what the finish panel and the status route report for
+	// the run: the sessions written new and the sessions written again.
+	ExpectWritten *ingestSelectionWritten `yaml:"expectWritten"`
+	// ExpectIngestError makes the case run the import and require it to refuse
+	// to start, with each of these in its message.
+	ExpectIngestError []string `yaml:"expectIngestError"`
+	// ActiveRecordings leaves each recording's modification time at the moment
+	// it was written, so the run meets it while it is still being written.
+	// Without it every recording is two hours old.
+	ActiveRecordings bool `yaml:"activeRecordings"`
+}
+
+type ingestSelectionWritten struct {
+	New     int `yaml:"new"`
+	Updated int `yaml:"updated"`
 }
 
 func loadIngestSelectionFixture(t *testing.T) ingestSelectionFixture {
@@ -69,7 +104,7 @@ func loadIngestSelectionFixture(t *testing.T) ingestSelectionFixture {
 	if err := testutil.RequireFixtureNames("internal/api/testdata/ingest-selection.yaml", "case", fixture.RequiredNames, present); err != nil {
 		t.Fatal(err)
 	}
-	for _, raw := range []string{fixture.IDs.Selected, fixture.IDs.Other, fixture.IDs.Child} {
+	for _, raw := range []string{fixture.IDs.Selected, fixture.IDs.Other, fixture.IDs.Child, fixture.IDs.Unrecorded} {
 		if _, err := ingest.NewSessionID(raw); err != nil {
 			t.Fatalf("fixture session id %q: %v", raw, err)
 		}
@@ -111,6 +146,14 @@ func runIngestSelectionCase(t *testing.T, ids ingestSelectionIDs, item ingestSel
 		runScopedIngestIgnoresSelection(t, ids, item)
 		return
 	}
+	if item.MovedClone {
+		runMovedCloneTreeAndImportAgree(t, ids, item)
+		return
+	}
+	if item.DerivedBranchRule {
+		runDerivedBranchRuleAdmitsOnlyTheChosenBranch(t, ids, item)
+		return
+	}
 	root := t.TempDir()
 	source := filepath.Join(root, "recordings")
 	output := filepath.Join(root, "managed")
@@ -142,6 +185,14 @@ func runIngestSelectionCase(t *testing.T, ids ingestSelectionIDs, item ingestSel
 	}
 	writeClaudeSession(t, filepath.Join(project, ids.Selected+".jsonl"), ids.Selected, selectedCWD, branchOf(item))
 	writeClaudeSession(t, filepath.Join(project, ids.Other+".jsonl"), ids.Other, otherCWD, "main")
+	if item.ActiveRecordings {
+		for _, id := range []string{ids.Selected, ids.Other} {
+			now := time.Now()
+			if err := os.Chtimes(filepath.Join(project, id+".jsonl"), now, now); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	if item.WithChild {
 		childDir := filepath.Join(project, ids.Selected, "subagents")
 		if err := os.MkdirAll(childDir, 0o700); err != nil {
@@ -154,6 +205,10 @@ func runIngestSelectionCase(t *testing.T, ids ingestSelectionIDs, item ingestSel
 	hs := newTestXDGHomes(t)
 	handler := hs.handler(nil, cfg)
 	handler.configPath = filepath.Join(root, "custom-config", "settings.yaml")
+	if len(item.ExpectIngestError) > 0 {
+		assertIngestRefused(t, handler, item.ExpectIngestError)
+		return
+	}
 	if item.PreludeAll {
 		prelude := hs.handler(nil, webIngestConfig(t, source, output, ingestSelectionCase{Mode: "all"}, "", ""))
 		first := runWebIngest(t, prelude, false)
@@ -161,6 +216,9 @@ func runIngestSelectionCase(t *testing.T, ids ingestSelectionIDs, item ingestSel
 	}
 	result := runWebIngest(t, handler, item.ThroughRoute)
 	assertIngestMembership(t, result, item.ExpectImported, item.ExpectExcluded)
+	if item.ExpectWritten != nil {
+		assertIngestWritten(t, handler, *item.ExpectWritten)
+	}
 	if item.PreludeAll {
 		opts, err := store.ManagedGenerationOptions(output)
 		if err != nil {
@@ -180,6 +238,16 @@ func runIngestSelectionCase(t *testing.T, ids ingestSelectionIDs, item ingestSel
 			t.Fatalf("excluded session not listable: rows=%v err=%v", rows, err)
 		}
 	}
+	// The finish panel is told about the sessions the selection withheld, beside
+	// the counts, and about nothing when no session was withheld.
+	if note := handler.ingestWire().Note; item.ExpectDiagnostic {
+		configPath := handler.configPath
+		if !strings.Contains(note, "1 session was left out") || !strings.Contains(note, configPath) {
+			t.Fatalf("the finished import's note is %q, want it to say one session was left out and name the configuration file %s", note, configPath)
+		}
+	} else if note != "" {
+		t.Fatalf("the finished import's note is %q, want none: no session was withheld", note)
+	}
 	if item.ExpectDiagnostic {
 		configPath := handler.configPath
 		found := false
@@ -194,6 +262,49 @@ func runIngestSelectionCase(t *testing.T, ids ingestSelectionIDs, item ingestSel
 		if !found {
 			t.Fatalf("ingest diagnostics do not name the withheld session %s and config %s: %+v", ids.Selected, configPath, result.Diagnostics)
 		}
+	}
+}
+
+// assertIngestRefused runs the import and requires it to end in an error that
+// says what is wrong and where, before it read or imported any source.
+func assertIngestRefused(t *testing.T, handler *syncHandler, wantInMessage []string) {
+	t.Helper()
+	handler.runIngestPipeline(ingest.NewProgressState())
+	handler.mu.Lock()
+	status, refusal, result := handler.ingestStatus, handler.ingestError, handler.ingestResult
+	handler.mu.Unlock()
+	if status != "error" || refusal == nil || result != nil {
+		t.Fatalf("the import status = %q, error = %v, result = %v; want an error and no result", status, refusal, result)
+	}
+	for _, part := range wantInMessage {
+		if !strings.Contains(refusal.Error(), part) {
+			t.Errorf("the refusal %q should contain %q", refusal, part)
+		}
+	}
+}
+
+// assertIngestWritten checks the counts the finish panel is given when the
+// import ends and the counts the status route serves to a tab that reconnects:
+// both are what the run wrote, one number each for new and updated.
+func assertIngestWritten(t *testing.T, handler *syncHandler, want ingestSelectionWritten) {
+	t.Helper()
+	wire := handler.ingestWire()
+	if wire.New != want.New || wire.Updated != want.Updated {
+		t.Errorf("the finish panel is told %d new and %d updated, want %d and %d", wire.New, wire.Updated, want.New, want.Updated)
+	}
+	response := httptest.NewRecorder()
+	handler.handleSyncIngestStatus(response, httptest.NewRequest(http.MethodGet, "/api/v1/sync/ingest/status", nil))
+	var status struct {
+		Result struct {
+			New     int `json:"new"`
+			Updated int `json:"updated"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &status); err != nil {
+		t.Fatalf("decode the ingest status: %v; body %s", err, response.Body.String())
+	}
+	if status.Result.New != want.New || status.Result.Updated != want.Updated {
+		t.Errorf("the status route reports %d new and %d updated, want %d and %d", status.Result.New, status.Result.Updated, want.New, want.Updated)
 	}
 }
 
@@ -265,6 +376,231 @@ func runScopedIngestIgnoresSelection(t *testing.T, ids ingestSelectionIDs, item 
 	}
 	if got := userTurns(t, db, ids.Other); got != before+1 {
 		t.Fatalf("scoped re-index stored %d user turns; want %d", got, before+1)
+	}
+}
+
+// runMovedCloneTreeAndImportAgree proves the choice a person makes in the tree
+// is the import that follows, however the clone has moved since. One clone
+// hosts three sessions: one recorded on the chosen branch, one recorded on
+// another, and one that recorded no branch. The real scan, the real forest and
+// the saved selection decide what the tree shows as chosen; the real web import
+// must bring in exactly that set.
+//
+// First the clone sits on the chosen branch, so git's checked-out branch would
+// put the session recorded elsewhere on it too. Then the clone moves to another
+// branch and the sessions, now stored and unchanged, are scanned and imported
+// again: the session that recorded no branch stays where the store put it.
+func runMovedCloneTreeAndImportAgree(t *testing.T, ids ingestSelectionIDs, item ingestSelectionCase) {
+	t.Helper()
+	root := t.TempDir()
+	source := filepath.Join(root, "recordings")
+	output := filepath.Join(root, "managed")
+	project := filepath.Join(source, "-workspace")
+	clone := filepath.Join(root, "clone")
+	for _, dir := range []string{project, clone} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const remote = "https://github.com/example-org/demo.git"
+	initSelectionRepo(t, clone, remote, item.ChosenBranch)
+	writeClaudeSession(t, filepath.Join(project, ids.Selected+".jsonl"), ids.Selected, clone, item.ChosenBranch)
+	writeClaudeSession(t, filepath.Join(project, ids.Other+".jsonl"), ids.Other, clone, item.OtherRecordedBranch)
+	writeClaudeSession(t, filepath.Join(project, ids.Unrecorded+".jsonl"), ids.Unrecorded, clone, "")
+
+	cfg := webIngestConfig(t, source, output, ingestSelectionCase{Mode: "selected", EmptyHarnesses: true}, "", "")
+	cfg.Selection.Harnesses = map[string]config.SelectionHarnessConfig{
+		ingest.HarnessClaudeCode.String(): {Projects: []config.ProjectSelection{
+			{GitRemote: remote, Branches: []string{item.ChosenBranch}},
+		}},
+	}
+	hs := newTestXDGHomes(t)
+	all := []string{ids.Selected, ids.Other, ids.Unrecorded}
+
+	// tree is what the setup tree shows: the branch each session is listed under
+	// and the sessions the saved selection marks as chosen.
+	tree := func(known ingest.KnownSessionIndex) (map[string]string, []string) {
+		_, listings, relation := discovery.Scan(t.Context(), cfg, &ingest.OSFileSystem{}, &ingest.ExecGitResolver{}, known, nil, nil)
+		prepared := discovery.PrepareSessionListings(listings, ingest.NewPhysicalPathResolver())
+		forest, _, err := onboarding.RestoreSelection(discovery.BuildForest(prepared, nil, relation), cfg.Selection)
+		if err != nil {
+			t.Fatalf("restore the saved selection onto the tree: %v", err)
+		}
+		branchOfNode := make(map[string]string)
+		for _, node := range forest.Nodes {
+			if node.Kind == onboarding.NodeKindBranch {
+				branchOfNode[node.ID] = node.Label
+			}
+		}
+		listedUnder := make(map[string]string)
+		var chosen []string
+		for _, node := range forest.Nodes {
+			if node.Kind != onboarding.NodeKindSession {
+				continue
+			}
+			listedUnder[node.ID] = branchOfNode[node.ParentID]
+			if node.State == onboarding.NodeStateAll {
+				chosen = append(chosen, node.ID)
+			}
+		}
+		slices.Sort(chosen)
+		return listedUnder, chosen
+	}
+	assertTreeShows := func(phase string, listedUnder map[string]string, wantUnrecorded string) {
+		t.Helper()
+		want := map[string]string{ids.Selected: item.ChosenBranch, ids.Other: item.OtherRecordedBranch, ids.Unrecorded: wantUnrecorded}
+		if !maps.Equal(listedUnder, want) {
+			t.Fatalf("%s: the tree lists the sessions under %v, want %v", phase, listedUnder, want)
+		}
+	}
+
+	// The clone sits on the chosen branch. A session that recorded no branch is
+	// placed by it, and nothing else is.
+	listedUnder, treeChosen := tree(nil)
+	assertTreeShows("clone on the chosen branch", listedUnder, item.ChosenBranch)
+	wantChosen := []string{ids.Selected, ids.Unrecorded}
+	slices.Sort(wantChosen)
+	if !slices.Equal(treeChosen, wantChosen) {
+		t.Fatalf("clone on the chosen branch: the tree shows %v as chosen, want %v", treeChosen, wantChosen)
+	}
+	result := runWebIngest(t, hs.handler(nil, cfg), false)
+	assertIngestMembership(t, result, item.ExpectImported, item.ExpectExcluded)
+	imported, _ := importedAndLeftOut(result)
+	if !slices.Equal(imported, treeChosen) {
+		t.Fatalf("clone on the chosen branch: the import brought in %v but the tree showed %v as chosen", imported, treeChosen)
+	}
+
+	// The clone moves on. The stored, unchanged sessions are scanned and imported
+	// again against the rows the store now holds.
+	runGit(t, clone, "checkout", "--quiet", "-b", "moved-on")
+	storeOptions, err := store.ManagedGenerationOptions(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.Open(hs.dbPath(), append(storeOptions, store.WithWriteConfig(cfg.Write), store.WithSkipMigrations())...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.AllIngestedSessions(t.Context())
+	if closeErr := db.Close(); err != nil || closeErr != nil {
+		t.Fatalf("read the stored sessions: read=%v close=%v", err, closeErr)
+	}
+	listedUnder, treeChosen = tree(discovery.NewStoreKnownSessions(rows))
+	assertTreeShows("clone moved on", listedUnder, item.ChosenBranch)
+	if !slices.Equal(treeChosen, wantChosen) {
+		t.Fatalf("clone moved on: the tree shows %v as chosen, want %v", treeChosen, wantChosen)
+	}
+	result = runWebIngest(t, hs.handler(nil, cfg), false)
+	_, leftOut := importedAndLeftOut(result)
+	var treeUnchosen []string
+	for _, id := range all {
+		if !slices.Contains(treeChosen, id) {
+			treeUnchosen = append(treeUnchosen, id)
+		}
+	}
+	slices.Sort(treeUnchosen)
+	if !slices.Equal(leftOut, treeUnchosen) {
+		t.Fatalf("clone moved on: the import left out %v but the tree showed %v as unchosen", leftOut, treeUnchosen)
+	}
+}
+
+// importedAndLeftOut is what the web import did with each session: the ones it
+// wrote, and the ones the saved selection left out.
+func importedAndLeftOut(result *ingest.PipelineResult) (imported, leftOut []string) {
+	for _, session := range result.Sessions {
+		switch {
+		case session.ExcludedBySelection:
+			leftOut = append(leftOut, session.SessionID.String())
+		case session.Error == nil && session.OutputPath != "":
+			imported = append(imported, session.SessionID.String())
+		}
+	}
+	slices.Sort(imported)
+	slices.Sort(leftOut)
+	return imported, leftOut
+}
+
+// runDerivedBranchRuleAdmitsOnlyTheChosenBranch proves that choosing the one
+// branch of a checkout saves that branch, and that the saved rule then decides
+// what the import admits. The selection is not written by hand: the real scan
+// builds the tree, the person's answer is the chosen session, and the shared
+// derivation writes the rule. A session recorded in the clone later, on a branch
+// that did not exist when the choice was made, is admitted only by the
+// new-branch setting, in the tree and in the import alike.
+func runDerivedBranchRuleAdmitsOnlyTheChosenBranch(t *testing.T, ids ingestSelectionIDs, item ingestSelectionCase) {
+	t.Helper()
+	root := t.TempDir()
+	source := filepath.Join(root, "recordings")
+	output := filepath.Join(root, "managed")
+	project := filepath.Join(source, "-workspace")
+	clone := filepath.Join(root, "clone")
+	for _, dir := range []string{project, clone} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	physicalClone, err := filepath.EvalSymlinks(clone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const remote = "https://github.com/example-org/demo.git"
+	initSelectionRepo(t, clone, remote, item.ChosenBranch)
+	writeClaudeSession(t, filepath.Join(project, ids.Selected+".jsonl"), ids.Selected, clone, item.ChosenBranch)
+
+	cfg := webIngestConfig(t, source, output, ingestSelectionCase{Mode: "selected", EmptyHarnesses: true}, "", "")
+	cfg.Selection.AutoIngestNewBranches = item.AutoIngestNewBranches
+	scanForest := func() onboarding.Forest {
+		_, listings, relation := discovery.Scan(t.Context(), cfg, &ingest.OSFileSystem{}, &ingest.ExecGitResolver{}, nil, nil, nil)
+		prepared := discovery.PrepareSessionListings(listings, ingest.NewPhysicalPathResolver())
+		return discovery.BuildForest(prepared, nil, relation)
+	}
+	chosenInTree := func() []string {
+		restored, _, restoreErr := onboarding.RestoreSelection(scanForest(), cfg.Selection)
+		if restoreErr != nil {
+			t.Fatalf("restore the saved selection onto the tree: %v", restoreErr)
+		}
+		chosen := onboarding.SelectedSessionIDs(restored)
+		slices.Sort(chosen)
+		return chosen
+	}
+
+	// The person chooses the branch: the answer is its session, as the setup tree
+	// reports it, and the shared derivation writes the rule.
+	value, err := onboarding.SelectionIDsValue([]string{ids.Selected})
+	if err != nil {
+		t.Fatal(err)
+	}
+	answers := onboarding.Answers{onboarding.FieldSelection: value}
+	model := onboarding.BuildModel(onboarding.Options{Scope: onboarding.ScopeSelection})
+	if err := model.ApplyAnswers(cfg, answers, onboarding.WriteContext{Config: cfg, Forest: scanForest(), Answers: answers}); err != nil {
+		t.Fatalf("derive the selection from the chosen branch: %v", err)
+	}
+	wantRule := []config.ProjectSelection{{GitRemote: remote, ClonePaths: []string{physicalClone}, Branches: []string{item.ChosenBranch}}}
+	if got := cfg.Selection.Harnesses[ingest.HarnessClaudeCode.String()].Projects; !reflect.DeepEqual(got, wantRule) {
+		t.Fatalf("the saved rule for the chosen branch is %+v, want %+v", got, wantRule)
+	}
+	hs := newTestXDGHomes(t)
+	first := runWebIngest(t, hs.handler(nil, cfg), false)
+	assertIngestMembership(t, first, []string{ids.Selected}, nil)
+
+	// A session recorded in the clone later, on a branch that did not exist when
+	// the choice was made.
+	writeClaudeSession(t, filepath.Join(project, ids.Other+".jsonl"), ids.Other, clone, item.LaterBranch)
+	wantChosen := []string{ids.Selected}
+	if item.AutoIngestNewBranches {
+		wantChosen = append(wantChosen, ids.Other)
+	}
+	slices.Sort(wantChosen)
+	if got := chosenInTree(); !slices.Equal(got, wantChosen) {
+		t.Fatalf("with new branches %t the tree shows %v as chosen, want %v", item.AutoIngestNewBranches, got, wantChosen)
+	}
+	second := runWebIngest(t, hs.handler(nil, cfg), false)
+	imported, leftOut := importedAndLeftOut(second)
+	if slices.Contains(imported, ids.Other) != item.AutoIngestNewBranches || slices.Contains(leftOut, ids.Other) == item.AutoIngestNewBranches {
+		t.Fatalf("with new branches %t the import wrote %v and left out %v, but the tree shows %v as chosen", item.AutoIngestNewBranches, imported, leftOut, wantChosen)
+	}
+	if slices.Contains(leftOut, ids.Selected) {
+		t.Fatalf("the import left out the chosen branch's session: %v", leftOut)
 	}
 }
 

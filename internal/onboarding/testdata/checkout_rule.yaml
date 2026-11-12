@@ -1,0 +1,120 @@
+# How the chosen sessions of one checkout are saved. This is the one derivation
+# the setup page and the terminal share, so it is specified here on its own: the
+# input is a checkout's sessions with which of them are chosen, and the output is
+# the rule that saves them.
+#
+# A session carries the branch it is listed under (empty when it recorded none),
+# whether it is chosen, and whether a saved rule named it by id (explicit).
+#
+# Choosing a branch saves that branch, even when it is the only one in the
+# checkout and even when every branch is chosen. The checkout's own rule, with no
+# branch list, is saved only when the checkout has no named branch. A branch that
+# appears later is admitted by autoIngestNewBranches, never by the shape of the
+# rule. A session in a detached checkout has no branch: git's word for it, HEAD,
+# is not a branch name, so such a session is branchless.
+#
+# requiredNames is the deletion guard.
+requiredNames:
+  - nothing-chosen-saves-nothing
+  - the-only-branch-chosen-saves-the-branch
+  - every-branch-of-several-chosen-saves-each-branch
+  - one-of-two-branches-chosen-saves-that-branch
+  - partly-chosen-branch-saves-its-chosen-sessions
+  - no-named-branch-all-chosen-saves-the-checkout
+  - no-named-branch-partly-chosen-saves-its-sessions
+  - named-and-branchless-sessions-save-the-branch-and-the-sessions
+  - explicit-sessions-stay-sessions-when-all-chosen
+  - an-explicit-branch-keeps-its-sessions-and-another-branch-stays-a-branch
+  - branches-are-saved-sorted
+  - detached-sessions-have-no-branch-so-the-checkout-is-saved
+  - a-detached-session-beside-a-branch-is-named-by-id
+  - a-detached-session-left-out-saves-the-chosen-ones-by-id
+cases:
+  - name: nothing-chosen-saves-nothing
+    sessions:
+      - {id: a, branch: main}
+      - {id: b, branch: release}
+    expected: {}
+
+  - name: the-only-branch-chosen-saves-the-branch
+    sessions:
+      - {id: a, branch: main, chosen: true}
+      - {id: b, branch: main, chosen: true}
+    expected: {branches: [main]}
+
+  - name: every-branch-of-several-chosen-saves-each-branch
+    sessions:
+      - {id: a, branch: main, chosen: true}
+      - {id: b, branch: release, chosen: true}
+      - {id: c, branch: feature/x, chosen: true}
+    expected: {branches: [feature/x, main, release]}
+
+  - name: one-of-two-branches-chosen-saves-that-branch
+    sessions:
+      - {id: a, branch: main, chosen: true}
+      - {id: b, branch: release}
+    expected: {branches: [main]}
+
+  - name: partly-chosen-branch-saves-its-chosen-sessions
+    sessions:
+      - {id: a, branch: main, chosen: true}
+      - {id: b, branch: main}
+      - {id: c, branch: release, chosen: true}
+    expected: {branches: [release], sessions: [a]}
+
+  - name: no-named-branch-all-chosen-saves-the-checkout
+    sessions:
+      - {id: a, chosen: true}
+      - {id: b, chosen: true}
+    expected: {whole: true}
+
+  - name: no-named-branch-partly-chosen-saves-its-sessions
+    sessions:
+      - {id: a, chosen: true}
+      - {id: b}
+    expected: {sessions: [a]}
+
+  - name: named-and-branchless-sessions-save-the-branch-and-the-sessions
+    sessions:
+      - {id: a, branch: main, chosen: true}
+      - {id: b, chosen: true}
+    expected: {branches: [main], sessions: [b]}
+
+  - name: explicit-sessions-stay-sessions-when-all-chosen
+    sessions:
+      - {id: a, branch: main, chosen: true, explicit: true}
+      - {id: b, branch: main, chosen: true, explicit: true}
+    expected: {sessions: [a, b]}
+
+  - name: an-explicit-branch-keeps-its-sessions-and-another-branch-stays-a-branch
+    sessions:
+      - {id: a, branch: main, chosen: true, explicit: true}
+      - {id: b, branch: release, chosen: true}
+    expected: {branches: [release], sessions: [a]}
+
+  - name: branches-are-saved-sorted
+    sessions:
+      - {id: a, branch: zeta, chosen: true}
+      - {id: b, branch: alpha, chosen: true}
+      - {id: c, branch: mid, chosen: true}
+    expected: {branches: [alpha, mid, zeta]}
+
+  # HEAD is what git reports for a detached checkout. It names no branch, so a
+  # checkout whose sessions are all detached has no branch to save.
+  - name: detached-sessions-have-no-branch-so-the-checkout-is-saved
+    sessions:
+      - {id: a, branch: HEAD, chosen: true}
+      - {id: b, branch: HEAD, chosen: true}
+    expected: {whole: true}
+
+  - name: a-detached-session-beside-a-branch-is-named-by-id
+    sessions:
+      - {id: a, branch: main, chosen: true}
+      - {id: b, branch: HEAD, chosen: true}
+    expected: {branches: [main], sessions: [b]}
+
+  - name: a-detached-session-left-out-saves-the-chosen-ones-by-id
+    sessions:
+      - {id: a, branch: HEAD, chosen: true}
+      - {id: b, branch: HEAD}
+    expected: {sessions: [a]}

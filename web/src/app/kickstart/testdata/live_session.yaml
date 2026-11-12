@@ -1,0 +1,241 @@
+# The live session across tabs and across the socket. Messages the server
+# pushes are played on the real WebSocket provider; `push` builds the topic
+# message from a served model. Nothing here polls: a kickstart call the page
+# makes that neither the case nor the file's defaultServer answers fails the
+# test at its teardown, and the cases assert how many calls they expect.
+# Every case below is played with the forest of the session it opens answered,
+# because the page reads it whatever the case is about. A case that is about the
+# forest scripts the route itself.
+defaultServer:
+  "GET /api/v1/kickstart/sessions/ses-full/tree": {body: {$tree: forest}}
+  "GET /api/v1/kickstart/sessions/ses-full/tree/s-one/preview": {body: {lines: [{kind: text, text: the first lines of this session}]}}
+  "GET /api/v1/kickstart/sessions/ses-full/tree/s-two/preview": {body: {lines: [{kind: text, text: the first lines of this session}]}}
+requiredNames:
+  - second-tab-answer-without-reload
+  - stale-patch-shows-overwritten-notice
+  - closed-committed-moves-to-finish
+  - closed-expired-offers-reopen
+  - reconnect-rereads-snapshot
+  - forest-loads-on-mount-and-on-scan-done
+  - no-location-reload
+  - no-poll-loop
+  - scan-running-progress
+  - scan-error-offers-a-rescan
+  - selection-change-rereads-the-forest
+  - another-tabs-selection-rereads-the-forest
+  - events-of-another-session-are-ignored
+  - unknown-event-kind-is-refused-and-the-page-stays
+cases:
+  - name: second-tab-answer-without-reload
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+    steps:
+      - click: continue
+      - click: continue
+      - expectControl: {role: radio, name: "keep local, do not publish", checked: true}
+      # Another tab answered; the server pushes the whole view.
+      - push: {kind: answers, model: second-tab-answer}
+      - expectControl: {role: radio, name: plan to publish later, checked: true}
+      - expectControl: {role: radio, name: "keep local, do not publish", checked: false}
+      - expectNoReload: true
+      # The view arrived on the topic: no snapshot was fetched to get it.
+      - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-full", count: 0}
+
+  - name: stale-patch-shows-overwritten-notice
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      "PATCH /api/v1/kickstart/sessions/ses-full":
+        body:
+          revision: 2
+          stale: true
+          overwritten:
+            - {key: publication-preference, previous: keep-local, revision: 1}
+          view: {$model: second-tab-answer}
+    steps:
+      - click: continue
+      - click: continue
+      - choose: plan to publish later
+      - expectBody: {route: "PATCH /api/v1/kickstart/sessions/ses-full", subset: {revision: 1, values: {publication-preference: share-later}}}
+      - expectText:
+          - another tab changed publication preference, and your answer replaced keep local, do not publish.
+      - click: dismiss
+      - expectNoText: [another tab changed]
+      # The write was applied, not refused: the view it answered is drawn.
+      - expectControl: {role: radio, name: plan to publish later, checked: true}
+
+  - name: closed-committed-moves-to-finish
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+    steps:
+      - expectNoText: [your setup is saved]
+      - push:
+          kind: closed
+          sessionId: ses-full
+          revision: 4
+          reason: committed
+          committed:
+            saved: true
+            configPath: /home/ada/.config/peasant/config.yaml
+            ingest: {state: running, new: 0, updated: 0}
+            nextSteps: [config, web-start, village-login, village-push, auto-publish-settings]
+      - expectText:
+          - your setup is saved
+          - /home/ada/.config/peasant/config.yaml
+          - nothing was published and no hook was installed
+          - importing
+      - expectControl: {role: button, name: continue, present: false}
+      - expectControl: {role: button, name: back, disabled: true}
+      # Import progress arrives on the same topic, with no reload.
+      - push: {kind: ingest, sessionId: ses-full, revision: 4, ingest: {state: idle, new: 12, updated: 3}}
+      - expectText: [import finished]
+      - expectNoReload: true
+
+  - name: closed-expired-offers-reopen
+    server:
+      "POST /api/v1/kickstart/sessions": [{body: {$model: fresh}}, {body: {$model: second-tab-answer}}]
+    steps:
+      - push: {kind: closed, sessionId: ses-full, revision: 1, reason: expired}
+      - expectText: [this setup session timed out]
+      - expectControl: {role: button, name: open a new setup}
+      - expectCalls: {route: "POST /api/v1/kickstart/sessions", count: 1}
+      - click: open a new setup
+      - expectCalls: {route: "POST /api/v1/kickstart/sessions", count: 2}
+      - expectNoText: [this setup session timed out]
+      - expectText: [step 1 of 8]
+
+  - name: reconnect-rereads-snapshot
+    fakeTimers: true
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      "GET /api/v1/kickstart/sessions/ses-full": {body: {$model: second-tab-answer}}
+    steps:
+      - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-full", count: 0}
+      - socket: close
+      - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-full", count: 0}
+      # The socket comes back after its backoff: missed events are recovered by
+      # one read of the snapshot.
+      - socket: open
+      - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-full", count: 1}
+      - click: continue
+      - click: continue
+      - expectControl: {role: radio, name: plan to publish later, checked: true}
+      - expectNoReload: true
+
+  - name: forest-loads-on-mount-and-on-scan-done
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: scanning}}
+      "GET /api/v1/kickstart/sessions/ses-full/tree": [{body: {$tree: empty}}, {body: {$tree: forest}}]
+    steps:
+      - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-full/tree", count: 1}
+      - click: continue
+      - expectText: [reading projects, no sessions found]
+      # The scan ends: the forest is read again, once, with no reload.
+      - push: {kind: scan, sessionId: ses-full, revision: 3, scan: {state: done, done: 4, total: 4}}
+      - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-full/tree", count: 2}
+      - expectText: [ledger, fix the ledger rounding, add a csv export]
+      - expectNoReload: true
+      # A repeat of the same event is not a second scan.
+      - push: {kind: scan, sessionId: ses-full, revision: 3, scan: {state: done, done: 4, total: 4}}
+      - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-full/tree", count: 2}
+
+  - name: no-location-reload
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      "GET /api/v1/kickstart/sessions/ses-full/tree": {body: {$tree: forest}}
+    steps:
+      - push: {kind: session, model: second-tab-answer}
+      - push: {kind: scan, sessionId: ses-full, revision: 3, scan: {state: running, done: 1, total: 4}}
+      - push: {kind: conflicts, model: conflicted}
+      - push: {kind: ingest, sessionId: ses-full, revision: 3, ingest: {state: busy, note: an import started earlier is still running, new: 0, updated: 0}}
+      - push: {kind: closed, sessionId: ses-full, revision: 3, reason: expired}
+      - expectNoReload: true
+
+  - name: no-poll-loop
+    fakeTimers: true
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      "GET /api/v1/kickstart/sessions/ses-full/tree": {body: {$tree: forest}}
+    steps:
+      - expectCalls: {route: "POST /api/v1/kickstart/sessions", count: 1}
+      - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-full/tree", count: 1}
+      # Ten idle minutes: the page asks the server for nothing more.
+      - advance: 600000
+      - expectCalls: {route: "POST /api/v1/kickstart/sessions", count: 1}
+      - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-full/tree", count: 1}
+      - expectNoCalls: "GET /api/v1/kickstart/(status|sessions/ses-full$)|GET /api/v1/sync"
+
+  - name: scan-running-progress
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: scanning}}
+      "GET /api/v1/kickstart/sessions/ses-full/tree": {body: {$tree: empty}}
+    steps:
+      - click: continue
+      - expectText: [reading projects]
+      - expectControl: {role: progressbar, name: scan progress, valueNow: 25}
+      - push: {kind: scan, sessionId: ses-full, revision: 3, scan: {state: running, phase: reading sessions, done: 3, total: 4}}
+      - expectText: [reading sessions]
+      - expectControl: {role: progressbar, name: scan progress, valueNow: 75}
+
+  - name: scan-error-offers-a-rescan
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: scan-failed}}
+      "GET /api/v1/kickstart/sessions/ses-full/tree": {body: {$tree: empty}}
+      "POST /api/v1/kickstart/sessions/ses-full/scan": {body: {state: running, phase: reading projects, done: 0, total: 4}}
+    steps:
+      - click: continue
+      - expectText: [the scan did not finish, the projects folder could not be read]
+      - click: scan again
+      - expectCalls: {route: "POST /api/v1/kickstart/sessions/ses-full/scan", count: 1}
+      - expectText: [reading projects]
+
+  - name: selection-change-rereads-the-forest
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      "GET /api/v1/kickstart/sessions/ses-full/tree": [{body: {$tree: forest}}, {body: {$tree: forest-two-selected}}]
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 2, stale: false, view: {$model: selected-two}}}
+    steps:
+      - click: continue
+      - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-full/tree", count: 1}
+      - expectControl: {role: checkbox, name: add a CSV export, checked: false}
+      # The toggle sends the ids the tree reports; node states are the server's,
+      # so the forest is read again to draw the new ones.
+      - check: add a CSV export
+      - expectBody: {route: "PATCH /api/v1/kickstart/sessions/ses-full", subset: {revision: 1, selectedIds: [s-one, s-two]}}
+      - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-full/tree", count: 2}
+      - expectControl: {role: checkbox, name: add a CSV export, checked: true}
+      - expectNoReload: true
+
+  - name: another-tabs-selection-rereads-the-forest
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      "GET /api/v1/kickstart/sessions/ses-full/tree": [{body: {$tree: forest}}, {body: {$tree: forest-two-selected}}]
+    steps:
+      - click: continue
+      - expectControl: {role: checkbox, name: add a CSV export, checked: false}
+      - push: {kind: answers, model: selected-two}
+      - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-full/tree", count: 2}
+      - expectControl: {role: checkbox, name: add a CSV export, checked: true}
+      # An answer that leaves the selection where it was does not read the forest.
+      - push: {kind: answers, model: selected-two-licensed}
+      - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-full/tree", count: 2}
+
+  - name: events-of-another-session-are-ignored
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+    steps:
+      - push: {kind: session, model: selection-scope}
+      - expectText: [step 1 of 8, peasant online]
+      - push: {kind: closed, sessionId: ses-selection, revision: 2, reason: expired}
+      - expectNoText: [this setup session timed out]
+      - push: {kind: ingest, sessionId: ses-selection, revision: 2, ingest: {state: failed, error: not this one, new: 0, updated: 0}}
+      - expectNoText: [not this one]
+
+  - name: unknown-event-kind-is-refused-and-the-page-stays
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+    steps:
+      # A kind the contract does not list: the breach is the point of the case.
+      - frame: {type: kickstart, data: {kind: replaced, sessionId: ses-full, revision: 9}}
+        malformed: true
+      - expectText: [peasant online, step 1 of 8]
+      - expectNoText: [this setup session timed out]

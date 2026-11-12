@@ -2,7 +2,6 @@ package onboarding_test
 
 import (
 	_ "embed"
-	"encoding/json"
 	"strings"
 	"testing"
 
@@ -130,7 +129,7 @@ func assertIDAnswerWritten(t *testing.T) {
 		t.Fatal("missing selection field")
 	}
 	cfg := config.BaseConfig()
-	raw, err := jsonMarshalIDs([]string{"node-1"})
+	raw, err := onboarding.SelectionIDsValue([]string{"node-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,11 +140,6 @@ func assertIDAnswerWritten(t *testing.T) {
 	if cfg.Selection.Mode != config.SelectionModeSelected {
 		t.Fatalf("id answer mode = %s, want selected", cfg.Selection.Mode)
 	}
-}
-
-func jsonMarshalIDs(ids []string) (schema.LocalSettingValue, error) {
-	encoded, err := json.Marshal(map[string]any{"ids": ids})
-	return schema.LocalSettingValue(encoded), err
 }
 
 func assertDuplicatePathRefused(t *testing.T) {

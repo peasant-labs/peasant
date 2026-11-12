@@ -9,6 +9,7 @@ import { join, resolve, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import YAML from 'yaml';
+import { seedConfiguredSandbox } from '../journey/lib/configured-sandbox.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const binary = join(repo, 'peasant');
@@ -61,6 +62,8 @@ assert.ok(bytes.includes(Buffer.from('data-home-bounded')), 'Rebuild the CLI: em
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const home = mkdtempSync('/tmp/opencode/home-browser-');
 const env = { ...process.env, HOME: home, XDG_CONFIG_HOME: join(home, 'config'), XDG_DATA_HOME: join(home, 'data'), XDG_STATE_HOME: join(home, 'state'), XDG_CACHE_HOME: join(home, 'cache') };
+// Home is a page of an installed dashboard. A computer with no configuration file is sent to setup instead.
+seedConfiguredSandbox(env);
 const server = spawn(binary, ['web', 'start', '--port', String(port), '--foreground', '--no-browser', '--mock-data-store=web'], { cwd: repo, env, stdio: ['ignore', 'ignore', 'pipe'] });
 let stderr = '';
 server.stderr.on('data', data => { stderr += data; });

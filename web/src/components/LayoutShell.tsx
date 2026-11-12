@@ -12,6 +12,7 @@ import { CommandPalette } from '@/components/command/CommandPalette';
 import { DevAnnotateOverlay } from '@/components/dev/DevAnnotateOverlay';
 import { playEnter } from '@/lib/motion/enter';
 import { parseTranscriptRoute } from '@/lib/navigation/projectRoutes';
+import { FirstRunProvider } from '@/hooks/useFirstRun';
 
 /** The transcript holds dialogs that position against the screen, so it only fades in. */
 const FADE_ONLY = ['/projects'];
@@ -69,9 +70,13 @@ export function LayoutShell({ children }: { children: ReactNode }) {
     <WebSocketProvider>
       <ServerCapabilitiesProvider>
         <PublishProvider>
-          <AppSidebarLayout sidebar={<LocalSidebar />} viewport={viewport} notice={<PageNotices />} mainAs="main">
-            {children}
-          </AppSidebarLayout>
+          {/* Sends the person to setup from any top-level page until setup has been saved,
+              and holds a page that starts something on mount until that is decided. */}
+          <FirstRunProvider>
+            <AppSidebarLayout sidebar={<LocalSidebar />} viewport={viewport} notice={<PageNotices />} mainAs="main">
+              {children}
+            </AppSidebarLayout>
+          </FirstRunProvider>
           <PageEnter />
           <CommandPalette />
           {process.env.NODE_ENV === 'development' && <DevAnnotateOverlay />}

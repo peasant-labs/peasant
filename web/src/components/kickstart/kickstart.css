@@ -1,0 +1,411 @@
+/*
+ * The setup wizard and the selection page. Tokens only (fairtrade's
+ * components.css declares them for both themes), radius 0, lowercase chrome,
+ * tabular numbers on counts. The shell is fairtrade's step-wizard frame (rail,
+ * body, footer), sized by the shared host classes; this file adds only what a
+ * served stop needs inside it.
+ */
+
+/* The page owns the viewport and the frame fills it through the shared
+   `wizard-page` and `wizard-host` classes (app/globals.css). */
+
+/* The answers a stop asks for, in its body. */
+.ks-answers {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+/* One stop. */
+.ks-stop {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  max-width: var(--measure-prose);
+}
+.ks-stop-wide {
+  max-width: none;
+}
+.ks-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  line-height: var(--lh-body);
+  color: var(--ink-strong);
+  font-weight: 700;
+  text-transform: lowercase;
+}
+.ks-intro,
+.ks-hint,
+.ks-help {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--ink-2);
+}
+.ks-hints {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ink-3);
+}
+.ks-hints .ks-hint {
+  color: var(--ink-3);
+}
+.ks-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.ks-field > legend {
+  margin-bottom: var(--sp-2);
+}
+.ks-field > legend,
+.ks-field-label {
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  line-height: var(--lh-mono);
+  color: var(--ink);
+}
+.ks-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.ks-option {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.ks-option-desc {
+  margin: 0;
+  margin-inline-start: calc(var(--ic-lg) + var(--sp-2));
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--ink-3);
+}
+.ks-refusal {
+  margin: 0;
+  padding-inline-start: var(--sp-2);
+  border-inline-start: var(--bd-strong);
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--ink);
+}
+
+/* Notices above the body. */
+.ks-notices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-4);
+}
+.ks-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding: var(--sp-2) var(--sp-3);
+  border: var(--bd);
+  background: var(--surface-2);
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--ink);
+}
+
+/* Selection: the tree and the preview of the row the reader is on. */
+.ks-select {
+  display: grid;
+  gap: var(--sp-4);
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (min-width: 56rem) {
+  .ks-select {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  }
+}
+.ks-tree {
+  min-width: 0;
+  max-height: 28rem;
+  overflow-y: auto;
+}
+.ks-scan {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.ks-counts {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  color: var(--ink-3);
+}
+.ks-num {
+  font-variant-numeric: tabular-nums;
+}
+.ks-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+  padding: var(--sp-3);
+  border: var(--bd);
+  background: var(--surface);
+}
+.ks-preview-title {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  color: var(--ink-3);
+}
+.ks-lines {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+}
+.ks-line {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.ks-line-label {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  color: var(--ink-3);
+}
+.ks-line-before,
+.ks-line-after {
+  padding: var(--sp-1) var(--sp-2);
+  border: var(--bd);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  line-height: var(--lh-mono);
+}
+.ks-line-before {
+  background: var(--del-bg);
+  color: var(--del-text);
+}
+.ks-line-after {
+  background: var(--add-bg);
+  color: var(--add-text);
+}
+.ks-line-spacer {
+  height: var(--sp-2);
+}
+.ks-example {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: var(--bd);
+  background: var(--surface);
+}
+.ks-split {
+  display: grid;
+  gap: var(--sp-5);
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (min-width: 56rem) {
+  .ks-split {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+/* Review. */
+.ks-conflicts,
+.ks-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ks-conflict {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: var(--bd-strong);
+  background: var(--surface);
+}
+.ks-conflict-sides {
+  display: grid;
+  gap: var(--sp-2);
+  grid-template-columns: minmax(0, 1fr);
+  margin: 0;
+}
+@media (min-width: 40rem) {
+  .ks-conflict-sides {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+.ks-side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin: 0;
+}
+.ks-side dt {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  color: var(--ink-3);
+}
+.ks-side dd {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.ks-value {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: var(--bd);
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  line-height: var(--lh-mono);
+  color: var(--ink);
+  white-space: pre;
+  overflow-x: auto;
+}
+.ks-value:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset-inset);
+}
+.ks-value-details > summary {
+  display: flex;
+  align-items: baseline;
+  min-height: var(--target-min);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.ks-value-details > summary:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+.ks-summary-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.ks-summary-group ul {
+  margin: 0;
+  padding-inline-start: var(--sp-5);
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--ink);
+}
+.ks-diff {
+  border: var(--bd);
+  background: var(--surface);
+}
+.ks-diff > summary {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  min-height: var(--target-min);
+  padding: var(--sp-2) var(--sp-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  color: var(--ink-2);
+  cursor: pointer;
+  list-style: none;
+}
+.ks-diff > summary::-webkit-details-marker {
+  display: none;
+}
+.ks-diff > summary:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset-inset);
+}
+.ks-diff[open] > summary {
+  border-bottom: var(--bd);
+}
+.ks-churn-add {
+  color: var(--add-text);
+}
+.ks-churn-del {
+  color: var(--del-text);
+}
+
+/* Finish. */
+.ks-finish {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  max-width: var(--measure-prose);
+}
+.ks-steps {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: var(--bd);
+}
+.ks-steps > li + li {
+  border-top: var(--bd);
+}
+.ks-step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-3);
+}
+.ks-step-name {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  min-height: var(--target-min);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  color: var(--ink-strong);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.ks-step-name:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+.ks-step-detail {
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--ink-3);
+}
+.ks-diagnostics {
+  margin: 0;
+  padding-inline-start: var(--sp-5);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  line-height: var(--lh-mono);
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}

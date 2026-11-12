@@ -943,19 +943,19 @@ func (a *OpenCodeAdapter) metadataFromManagedProjection(ctx context.Context, ses
 		}
 	}
 	var gitBranch, gitRemote, gitWorktree, gitTracking *string
-	if workDir != "" {
-		value := session.Branch
-		if value == "" {
-			value, _ = a.git.Branch(ctx, workDir)
-		}
+	// Git is asked about the session's project directory and the remote follows
+	// the recorded branch, as the tree and the import filter ask before the
+	// session is stored.
+	if gitDir := ExtractionDirectory(session, workDir, osDirectoryExists); gitDir != "" {
+		value := ResolveGitBranch(ctx, a.git, gitDir, session.Branch)
 		if value != "" {
 			gitBranch = &value
 		}
-		remote, tracking := ResolveGitRemote(ctx, a.git, workDir, value, "")
+		remote, tracking := ResolveGitRemote(ctx, a.git, gitDir, session.Branch, "")
 		if value := remote; value != "" {
 			gitRemote = &value
 		}
-		if value, gitErr := a.git.Worktree(ctx, workDir); gitErr == nil && value != "" {
+		if value, gitErr := a.git.Worktree(ctx, gitDir); gitErr == nil && value != "" {
 			gitWorktree = &value
 		}
 		if value := tracking; value != "" {

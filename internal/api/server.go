@@ -120,6 +120,15 @@ type Server struct {
 	// saved through the settings routes since the server started.
 	live *liveConfig
 
+	// kickstart holds the live setup sessions, one per scope. Listen creates it.
+	kickstart *kickstartSessions
+	// kickstartTune lets a test replace members of the session environment
+	// before the sessions are created. Production leaves it nil.
+	kickstartTune func(*kickstartEnv)
+	// syncTune lets a test replace members of the sync handler before its routes
+	// are mounted. Production leaves it nil.
+	syncTune func(*syncHandler)
+
 	// bg tracks background tasks spawned by request handlers (WebSocket
 	// broadcasts after a mutation). Shutdown drains it so no task can touch
 	// the store after the owner closes it.
@@ -249,6 +258,12 @@ func (s *Server) Listen(ctx context.Context) error {
 		dataHome:    s.cfg.DataHome,
 		stateHome:   s.cfg.StateHome,
 	}
+	// The import reports its state to every saved setup session that is kept.
+	kickstartFeed := newKickstartImportFeed()
+	sh.kickstartFeed = kickstartFeed
+	if s.syncTune != nil {
+		s.syncTune(sh)
+	}
 	// The grouped sync chooser view registers the exact sync predicate on the
 	// same member seam the sessions and search routes use, so expanding a sync
 	// helper group replays the sync route rather than another route's set.
@@ -303,6 +318,22 @@ func (s *Server) Listen(ctx context.Context) error {
 	settingsRoutes := &settingsHandler{catalog: catalog, path: s.cfg.ConfigPath, live: s.live, git: &ingest.ExecGitResolver{}, rules: aph}
 	mux.HandleFunc("GET "+defaults.RouteSettings.String(), settingsRoutes.handleGetSettings)
 	mux.HandleFunc("PATCH "+defaults.RouteSettings.String(), settingsRoutes.handleUpdateSetting)
+
+	// Kickstart routes: the local setup sessions and their live topic.
+	sessionEnv := s.kickstartEnv(ctx)
+	if s.kickstartTune != nil {
+		s.kickstartTune(&sessionEnv)
+	}
+	s.kickstart = newKickstartSessions(sessionEnv)
+	kickstartFeed.attach(s.kickstart)
+	if s.hub != nil {
+		s.hub.attachKickstart(s.kickstart)
+	}
+	registerKickstartRoutes(mux, &kickstartHandler{
+		sessions:   s.kickstart,
+		configPath: s.cfg.ConfigPath,
+		commit:     &kickstartCommitter{sessions: s.kickstart, ingest: sh, live: s.live, catalog: catalog, feed: kickstartFeed},
+	})
 
 	// Static assets or dev proxy
 	if s.cfg.DevMode && s.cfg.DevProxyAddr != "" {
@@ -387,6 +418,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	var err error
 	if s.server != nil {
 		err = s.server.Shutdown(ctx)
+	}
+	if s.kickstart != nil {
+		s.kickstart.shutdown()
 	}
 	s.bg.Wait()
 	return err

@@ -1,0 +1,37 @@
+# The store-backed index of sessions a scan may skip resolving through git.
+# A recorded session is reusable only while its source has not changed since the
+# ingest the store recorded; any other session is resolved the full way.
+# schema is "current" or "old". Times are unix milliseconds.
+requiredNames:
+  - recorded-and-unchanged-is-reused
+  - source-changed-after-ingest-is-resolved-again
+  - older-metadata-is-resolved-again
+  - never-recorded-is-resolved
+  - no-rows-yield-no-index
+cases:
+  - name: recorded-and-unchanged-is-reused
+    rows: [{sessionId: s-1, ingestedMs: 2000, schema: current, gitRemote: "git@github.com:acme/tool.git", branch: main, canonicalCwd: /work/tool, title: recorded title}]
+    discovered: {sessionId: s-1, modMs: 1000}
+    reusable: true
+    want: {gitRemote: "git@github.com:acme/tool.git", branch: main, workingDirectory: /work/tool, title: recorded title}
+
+  - name: source-changed-after-ingest-is-resolved-again
+    rows: [{sessionId: s-1, ingestedMs: 2000, schema: current, branch: main}]
+    discovered: {sessionId: s-1, modMs: 3000}
+    reusable: false
+
+  - name: older-metadata-is-resolved-again
+    rows: [{sessionId: s-1, ingestedMs: 2000, schema: old, branch: main}]
+    discovered: {sessionId: s-1, modMs: 1000}
+    reusable: false
+
+  - name: never-recorded-is-resolved
+    rows: [{sessionId: s-2, ingestedMs: 2000, schema: current}]
+    discovered: {sessionId: s-1, modMs: 1000}
+    reusable: false
+
+  - name: no-rows-yield-no-index
+    rows: []
+    discovered: {sessionId: s-1, modMs: 1000}
+    reusable: false
+    nilIndex: true

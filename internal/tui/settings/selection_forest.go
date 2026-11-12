@@ -1,7 +1,6 @@
 package settings
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/peasant-labs/peasant/internal/config"
@@ -9,7 +8,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/onboarding"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
-	"github.com/peasant-labs/schema"
 )
 
 // SelectionForest projects a kit tree into the neutral forest.
@@ -244,11 +242,10 @@ func writeSelectionIDs(cfg *config.Config, roots []*kit.TreeNode, residual onboa
 		return TreeSelection{}, fmt.Errorf("write selection ids: configuration is nil")
 	}
 	forest := selectionForest(roots)
-	raw, err := json.Marshal(map[string]any{"ids": checkedForestIDs(roots)})
+	value, err := onboarding.SelectionIDsValue(checkedForestIDs(roots))
 	if err != nil {
 		return TreeSelection{}, err
 	}
-	value := schema.LocalSettingValue(raw)
 	answers := onboarding.Answers{onboarding.FieldSelection: value}
 	model := onboarding.BuildModel(onboarding.Options{Scope: onboarding.ScopeSelection})
 	if err := model.ApplyAnswers(cfg, answers, onboarding.WriteContext{

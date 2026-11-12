@@ -1,0 +1,25 @@
+# The wizard's three option menus are the shared setup model's. Each case names a
+# model field and the page that shows it; the test compares the page's options,
+# their order, their labels and descriptions against the model's, and presses each
+# option's digit key to prove the page writes the model's token.
+#
+# withheldTokens lists model options this wizard deliberately does not show. The
+# license page never offers "no license" (token ""): it asks for a real license and
+# starts on the first one.
+requiredNames:
+  - retention-menu
+  - privacy-menu
+  - license-menu
+cases:
+  - name: retention-menu
+    field: claude-retention-days
+    page: retention
+    withheldTokens: []
+  - name: privacy-menu
+    field: redaction-level
+    page: privacy
+    withheldTokens: []
+  - name: license-menu
+    field: content-license
+    page: license
+    withheldTokens: [""]

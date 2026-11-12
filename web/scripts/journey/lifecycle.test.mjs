@@ -1,10 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, existsSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { parse } from 'yaml';
 import { acquireLifecycle, bounded, ownedGroups, start } from './lib/owned-lifecycle.mjs';
+import { seedConfiguredConfigHome, seedConfiguredSandbox } from './lib/configured-sandbox.mjs';
 
 const f = parse(readFileSync(new URL('./testdata/lifecycle.yaml', import.meta.url), 'utf8'));
 assert.deepEqual(new Set(f.cases.map(c => c.name)), new Set(f.requiredNames));
@@ -12,6 +13,25 @@ for (const row of f.cases) test(row.name, { timeout: 20000 }, async t => {
   const root = mkdtempSync(join(tmpdir(), 'peasant-journey-test-'));
   const cleanups = [() => rmSync(root, { recursive: true, force: true })];
   t.after(async () => { for (const cleanup of cleanups.reverse()) await cleanup(); });
+  if (row.mode === 'config-relative') { assert.throws(() => seedConfiguredSandbox({ XDG_CONFIG_HOME: 'config' }), new RegExp(row.error)); assert.throws(() => seedConfiguredSandbox({}), new RegExp(row.error)); return; }
+  if (row.mode === 'config-home') {
+    const home = join(root, 'config-dir'), expected = join(home, row.relativePath);
+    assert.equal(seedConfiguredConfigHome(home), expected);
+    assert.equal(readFileSync(expected, 'utf8'), row.content);
+    assert.equal(statSync(expected).mode & 0o777, row.fileMode);
+    assert.throws(() => seedConfiguredConfigHome('config-dir'), /not an absolute path/);
+    return;
+  }
+  if (row.mode === 'config-seed' || row.mode === 'config-reseed') {
+    const env = { XDG_CONFIG_HOME: join(root, 'config') }, expected = join(env.XDG_CONFIG_HOME, row.relativePath);
+    assert.equal(existsSync(expected), false);
+    assert.equal(seedConfiguredSandbox(env), expected);
+    if (row.mode === 'config-reseed') { rmSync(env.XDG_CONFIG_HOME, { recursive: true, force: true }); assert.equal(existsSync(expected), false); assert.equal(seedConfiguredSandbox(env), expected); }
+    assert.equal(readFileSync(expected, 'utf8'), row.content);
+    assert.deepEqual(parse(readFileSync(expected, 'utf8')), parse(row.content));
+    if (row.fileMode !== undefined) assert.equal(statSync(expected).mode & 0o777, row.fileMode);
+    return;
+  }
   const directory = join(root, 'owner');
   const acquire = () => acquireLifecycle(directory, row);
   function peer(mode = 'hold', extraEnv = {}) {

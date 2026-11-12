@@ -13,7 +13,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
-	"github.com/peasant-labs/schema"
 )
 
 // Scan runs discovery for each configured provider. It returns the provider
@@ -29,7 +28,7 @@ func Scan(
 	cfg *config.Config,
 	fs ingest.FileSystem,
 	git ingest.GitResolver,
-	known KnownSessionIndex,
+	known ingest.KnownSessionIndex,
 	evidence ingest.ClaudeEvidenceCache,
 	progress ScanProgress,
 ) (ProviderInventory, []SessionListing, SubagentRelation) {
@@ -39,7 +38,7 @@ func Scan(
 	if cfg == nil {
 		return inventory, sessions, subagents
 	}
-	staleness := ConfigStaleness(cfg)
+	staleness := cfg.StalenessWindow()
 
 	for provider, factory := range ingest.DefaultAdapterRegistry {
 		src, ok := configuredSource(cfg, provider)
@@ -57,7 +56,7 @@ func Scan(
 		// Inventory available data before the user chooses providers. The saved
 		// selection still controls which providers ingestion enables.
 		src.Enabled = true
-		setPhase(progress, fmt.Sprintf("Discovering %s sessions...", schema.HarnessDisplayName(provider)))
+		setPhase(progress, DiscoveringPhase(provider))
 		adapter := factory(fs, git, salt.Salt{})
 		ingest.AttachClaudeEvidenceCache(adapter, evidence)
 		discovered, err := adapter.Discover(ctx, src)
@@ -74,7 +73,7 @@ func Scan(
 
 		roots := FilterRootSessions(discovered)
 		rootCount := len(roots)
-		setPhase(progress, fmt.Sprintf("Resolving %s project info...", schema.HarnessDisplayName(provider)))
+		setPhase(progress, ResolvingPhase(provider))
 		setProgress(progress, 0, rootCount)
 		for idx, d := range roots {
 			setProgress(progress, idx+1, rootCount)
@@ -84,38 +83,32 @@ func Scan(
 			}
 			projectName := d.ProjectName
 			title := d.Title
-			branchName := d.Branch
 			workingDir := d.CWD
-			var gitRemote string
-			claudeProjectDir := ""
 
 			if provider == defaults.HarnessClaudeCode {
 				slug := filepath.Base(filepath.Dir(string(d.SourcePath)))
-				if decoded := DecodeClaudeSlugToPath(slug); decoded != "" {
-					claudeProjectDir = decoded
-					if projectName == "" {
-						projectName = ShortenPath(decoded)
-					}
+				if decoded := DecodeClaudeSlugToPath(slug); decoded != "" && projectName == "" {
+					projectName = ShortenPath(decoded)
 				}
 				if projectName == "" {
 					projectName = ClaudeSlugToProjectName(slug)
 				}
 			}
 
-			if record, ok := reusable(known, d, staleness); ok {
-				gitRemote = record.GitRemote
-				if branchName == "" {
-					branchName = record.Branch
-				}
+			record, stored := reusable(known, d, staleness)
+			if stored {
 				if title == "" {
 					title = record.Title
 				}
 				if workingDir == "" {
 					workingDir = record.WorkingDirectory()
 				}
-			} else {
-				gitRemote, branchName = ResolveSessionGit(ctx, git, d, claudeProjectDir, branchName)
 			}
+			// The import filter asks the same functions with the same index, so the
+			// remote and the branch a session is listed under are the remote and
+			// the branch it is judged by.
+			gitRemote := ingest.SessionRemoteFor(ctx, git, d, record, stored)
+			branchName := ingest.SessionBranchFor(ctx, git, d, record, stored)
 
 			sessions = append(sessions, SessionListing{
 				Harness:     provider.String(),
@@ -147,9 +140,22 @@ func Scan(
 	return inventory, sessions, subagents
 }
 
-func reusable(known KnownSessionIndex, session ingest.DiscoveredSession, staleness time.Duration) (KnownSession, bool) {
+// DiscoveringPhase is what a scan says while it lists a harness's sessions. It
+// is written in the lowercase chrome of the surfaces that show it: the terminal
+// spinner and the setup page.
+func DiscoveringPhase(harness defaults.Harness) string {
+	return fmt.Sprintf("discovering %s sessions...", HarnessLabel(harness.String()))
+}
+
+// ResolvingPhase is what a scan says while it resolves each listed session's
+// project.
+func ResolvingPhase(harness defaults.Harness) string {
+	return fmt.Sprintf("resolving %s project info...", HarnessLabel(harness.String()))
+}
+
+func reusable(known ingest.KnownSessionIndex, session ingest.DiscoveredSession, staleness time.Duration) (ingest.KnownSession, bool) {
 	if known == nil {
-		return KnownSession{}, false
+		return ingest.KnownSession{}, false
 	}
 	return known.Reusable(session, staleness)
 }
@@ -182,19 +188,6 @@ func configuredSource(cfg *config.Config, harness defaults.Harness) (ingest.Sour
 		paths = append(paths, resolved)
 	}
 	return ingest.SourceConfig{Paths: paths, Enabled: configured.Enabled}, true
-}
-
-// ConfigStaleness returns the window inside which a source file counts as still
-// being written. Ingest and a re-scan read it the same way.
-func ConfigStaleness(cfg *config.Config) time.Duration {
-	if cfg == nil {
-		return time.Duration(defaults.ConfigStalenessThresholdSec) * time.Second
-	}
-	staleness := time.Duration(cfg.Output.StalenessThresholdSec) * time.Second
-	if staleness == 0 {
-		staleness = time.Duration(defaults.ConfigStalenessThresholdSec) * time.Second
-	}
-	return staleness
 }
 
 // FilterRootSessions returns only root sessions. A subagent session is never
@@ -241,45 +234,6 @@ func ExpandAllowedSessionIDs(selected []SessionListing) map[ingest.SessionID]boo
 		}
 	}
 	return allowed
-}
-
-// ResolveSessionGit walks git for one discovered session's remote and branch.
-func ResolveSessionGit(
-	ctx context.Context,
-	git ingest.GitResolver,
-	d ingest.DiscoveredSession,
-	claudeProjectDir string,
-	branchName string,
-) (string, string) {
-	if git == nil {
-		return "", branchName
-	}
-	var gitRemote string
-	if claudeProjectDir != "" {
-		if remote, err := git.RemoteURL(ctx, claudeProjectDir); err == nil && remote != "" {
-			gitRemote = remote
-		}
-	}
-	if gitRemote == "" && d.CWD != "" {
-		if remote, err := git.RemoteURL(ctx, d.CWD); err == nil && remote != "" {
-			gitRemote = remote
-		}
-	}
-	if gitRemote == "" && d.ProjectName != "" {
-		dir := string(d.OriginalRoot)
-		if dir == "" {
-			dir = filepath.Dir(string(d.SourcePath))
-		}
-		if remote, err := git.RemoteURL(ctx, dir); err == nil && remote != "" {
-			gitRemote = remote
-		}
-	}
-	if branchName == "" && d.CWD != "" {
-		if branch, err := git.Branch(ctx, d.CWD); err == nil && branch != "" {
-			branchName = branch
-		}
-	}
-	return gitRemote, branchName
 }
 
 // ResolveListingOrigin turns discovery's typed origin into the listing value.

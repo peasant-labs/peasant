@@ -64,7 +64,7 @@ var settingReadOnly = []struct {
 	{"sources.claude.", "retired: renamed to sources.claude-code; a configuration that turns it on is refused", true},
 	{"push.fields.projectHash", "retired: the project hash is always sent, so this key changes nothing", true},
 	{"selection.providers", "retired: renamed to selection.harnesses; a configuration that sets it is refused", true},
-	{"selection.", "the saved selection; change it with peasant kickstart or peasant config", false},
+	{"selection.", "the saved selection; change it on the selection page", false},
 	{"sources.mock.", "a development setting the dashboard reads when it starts; edit config.yaml and restart the dashboard", false},
 	{"output.basePath", "the dashboard reads it when it starts; edit config.yaml and restart the dashboard", false},
 }

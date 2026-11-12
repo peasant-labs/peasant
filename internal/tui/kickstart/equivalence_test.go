@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/testkit/branchruleoverlay"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
@@ -411,21 +412,32 @@ func mustRead(t *testing.T, path string) []byte {
 // TestKickstartEquivalence_LegacyGoldens proves every pre-existing selection
 // field remains equivalent after removing the one additive identity field. Any
 // project selection must also carry a clone path; explicit-session-only rows do
-// not invent a project.
+// not invent a project. A project chosen at project level is measured against
+// its branchruleoverlay entry, which adds the branch list the project shows to
+// the captured golden and changes nothing else.
 func TestKickstartEquivalence_LegacyGoldens(t *testing.T) {
 	t.Parallel()
 	scenarios := loadScenarios(t, legacyGoldensRelPath, legacyGoldenFloor)
+	captured := make(map[string]config.SelectionConfig, len(scenarios))
+	for _, scenario := range scenarios {
+		captured[scenario.Name] = scenario.Golden.toConfig()
+	}
+	branchRule, err := branchruleoverlay.Load(captured)
+	if err != nil {
+		t.Fatalf("legacy branch rule overlay: %v", err)
+	}
 	for _, scenario := range scenarios {
 		scenario := scenario
 		if scenario.Oracle != "legacy-captured" {
 			t.Fatalf("scenario %q is a %q row in the legacy golden file", scenario.Name, scenario.Oracle)
 		}
+		want := branchRule.Want(scenario.Name, captured[scenario.Name])
 		t.Run(scenario.Name, func(t *testing.T) {
 			t.Parallel()
 			roots := loadInventory(t)
 			applyScopes(roots, scenario.Scopes)
 			got := commitSelection(t, roots, scenario.AutoIngestNewBranches)
-			assertFieldEquivalent(t, scenario.Name, withoutClonePaths(got), scenario.Golden.toConfig())
+			assertFieldEquivalent(t, scenario.Name, withoutClonePaths(got), want)
 			for harness, configured := range got.Harnesses {
 				for _, project := range configured.Projects {
 					if len(project.ClonePaths) == 0 {

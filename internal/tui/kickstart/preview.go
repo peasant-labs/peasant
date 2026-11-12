@@ -108,9 +108,9 @@ type ListingPreviewOption func(*ListingPreview)
 func WithDiscoveryInventory(inventory ftue.ProviderInventory) ListingPreviewOption {
 	return func(preview *ListingPreview) {
 		var notes []string
-		for harness, discovery := range inventory {
-			if discovery.Detail != "" {
-				notes = append(notes, harnessDisplayName(harness.String())+": "+previewMetadataValue(discovery.Detail))
+		for harness, found := range inventory {
+			if found.Detail != "" {
+				notes = append(notes, discovery.HarnessLabel(harness.String())+": "+previewMetadataValue(found.Detail))
 			}
 		}
 		sort.Strings(notes)
@@ -169,11 +169,9 @@ func WithListingPreviewContextSource(source ListingPreviewContextSource) Listing
 // store does not hold yet - the normal case on a first run.
 const notImportedBody = "not imported yet. peasant shows the transcript here after it imports this session."
 
-// emptySourceBody is what the preview says for a discovered session whose
-// harness transcript holds no readable turns. The pane can reach that
-// transcript, so it must not repeat the not-imported explanation, which would
-// blame the import for an empty source.
-const emptySourceBody = "no readable turns are in this session's transcript yet."
+// An empty source is described by discovery.PreviewNoTurnsNote. The pane can
+// reach that transcript, so it must not repeat the not-imported explanation,
+// which would blame the import for an empty source.
 
 // notASessionBody is what the preview says for a row that is not a session (a
 // project or a branch).
@@ -315,7 +313,7 @@ func (p *ListingPreview) load(id string, read func(string) ([]ingest.Turn, bool,
 	if !ok {
 		if p.contexts != nil {
 			if context, found := p.contexts.ListingPreviewContext(id); found {
-				lines := listingContextLines(context)
+				lines := discovery.RepositoryPreviewLines(context, previewMetadataValue)
 				if context.Kind == ListingPreviewProject && len(p.discoveryNotes) > 0 {
 					lines = append(append([]string{"discovery notes"}, p.discoveryNotes...), lines...)
 				}
@@ -383,7 +381,7 @@ func emptyNote(sess ftue.SessionListing) string {
 	if sess.Source.IsZero() {
 		return notImportedBody
 	}
-	return emptySourceBody
+	return discovery.PreviewNoTurnsNote
 }
 
 func cloneListingPreviewContext(context ListingPreviewContext) ListingPreviewContext {
@@ -393,57 +391,6 @@ func cloneListingPreviewContext(context ListingPreviewContext) ListingPreviewCon
 	context.ClonePaths = append([]string(nil), context.ClonePaths...)
 	context.Branches = append([]string(nil), context.Branches...)
 	return context
-}
-
-func listingContextLines(context ListingPreviewContext) []string {
-	lines := []string{"project: " + previewMetadataValue(context.Project)}
-	if context.Kind == ListingPreviewBranch && context.Branch != "" {
-		lines = append(lines, "branch: "+previewMetadataValue(context.Branch))
-	}
-	if len(context.Harnesses) > 0 {
-		harnesses := make([]string, 0, len(context.Harnesses))
-		for _, harness := range context.Harnesses {
-			harnesses = append(harnesses, harnessDisplayName(harness))
-		}
-		label := "harness: "
-		if len(harnesses) > 1 {
-			label = "harnesses: "
-		}
-		lines = append(lines, label+strings.Join(harnesses, ", "))
-	}
-	if len(context.Remotes) > 0 {
-		label := "remote: "
-		if len(context.Remotes) > 1 {
-			label = "remotes: "
-		}
-		values := make([]string, 0, len(context.Remotes))
-		for _, remote := range context.Remotes {
-			values = append(values, previewMetadataValue(remote))
-		}
-		lines = append(lines, label+strings.Join(values, ", "))
-	}
-	if len(context.GitDirectories) == 1 {
-		lines = append(lines, "git directory: "+previewMetadataValue(context.GitDirectories[0]))
-	} else if len(context.GitDirectories) > 1 {
-		lines = appendPreviewList(lines, "git directories", context.GitDirectories)
-	}
-	lines = appendPreviewList(lines, "worktrees", context.ClonePaths)
-	if context.Kind == ListingPreviewProject {
-		lines = appendPreviewList(lines, "branches", context.Branches)
-	}
-	lines = append(lines, fmt.Sprintf("sessions: %d", context.SessionCount))
-	return lines
-}
-
-func appendPreviewList(lines []string, label string, values []string) []string {
-	if len(values) == 0 {
-		return lines
-	}
-	lines = append(lines, fmt.Sprintf("%s: %d", label, len(values)))
-	for _, value := range values {
-		lines = append(lines, "  "+previewMetadataValue(value))
-	}
-	return lines
 }
 
 func previewMetadataValue(value string) string {
@@ -476,7 +423,7 @@ func (b listingContextBody) Render(width int) string {
 // renders - printing both put the same sentence on screen twice, which is what
 // this header replaced.
 func headerLines(sess ftue.SessionListing) []string {
-	lines := []string{fmt.Sprintf("harness: %s", harnessDisplayName(sess.Harness))}
+	lines := []string{fmt.Sprintf("harness: %s", discovery.HarnessLabel(sess.Harness))}
 	if sess.ProjectName != "" {
 		lines = append(lines, fmt.Sprintf("project: %s", sess.ProjectName))
 	}

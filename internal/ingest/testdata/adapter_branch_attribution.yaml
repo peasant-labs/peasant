@@ -1,0 +1,166 @@
+# The branch each harness's metadata extraction stores for a session. Every
+# extractor takes it from ingest.ResolveGitBranch: the branch the session
+# recorded wins, and the branch checked out in the session's directory answers
+# only when none was recorded. The checked-out branch is main in every case, so a
+# recorded feature/recorded can only come from the recording; wantCheckoutCalls
+# is how many times the extractor asked git for the checked-out branch.
+# declared is the harness's entry in the branch-source declarations (ingest.BranchSourceOf): the tree and the
+# import filter place a session by that declaration, so the extractor must behave
+# as it says. A recording-only harness never has the checkout answer.
+# A detached checkout reports HEAD, which is no branch: no extractor stores it.
+# wantGitCalls, where given, is how many questions of any kind git was asked, and
+# wantGitDirs the distinct directories it was asked about, in order.
+# requiredNames is the deletion guard: every name below must still be present.
+requiredNames:
+  - claude-recorded-branch-wins-over-checkout
+  - claude-checkout-answers-when-nothing-recorded
+  - cursor-recorded-branch-wins-over-checkout
+  - cursor-checkout-answers-when-nothing-recorded
+  - opencode-recorded-branch-wins-over-checkout
+  - opencode-checkout-answers-when-nothing-recorded
+  - pi-checkout-answers-because-pi-records-no-branch
+  - codex-recorded-branch-is-stored
+  - codex-never-asks-the-checkout
+  - strike-recorded-branch-is-stored
+  - strike-never-asks-the-checkout
+  - claude-detached-checkout-is-no-branch
+  - claude-recorded-detached-head-is-no-branch
+  - cursor-detached-checkout-is-no-branch
+  - opencode-detached-checkout-is-no-branch
+  - pi-detached-checkout-is-no-branch
+  - claude-no-project-directory-asks-git-nothing
+  - claude-transcript-folder-that-decodes-is-the-project-directory
+cases:
+  - name: claude-recorded-branch-wins-over-checkout
+    harness: claude-code
+    declared: recording-or-checkout
+    recordedBranch: feature/recorded
+    checkout: main
+    wantBranch: feature/recorded
+    wantCheckoutCalls: 0
+  - name: claude-checkout-answers-when-nothing-recorded
+    harness: claude-code
+    declared: recording-or-checkout
+    checkout: main
+    wantBranch: main
+    wantCheckoutCalls: 1
+    wantGitDirs: [/home/test/project]
+  - name: cursor-recorded-branch-wins-over-checkout
+    harness: cursor
+    declared: recording-or-checkout
+    recordedBranch: feature/recorded
+    checkout: main
+    wantBranch: feature/recorded
+    wantCheckoutCalls: 0
+  - name: cursor-checkout-answers-when-nothing-recorded
+    harness: cursor
+    declared: recording-or-checkout
+    checkout: main
+    wantBranch: main
+    wantCheckoutCalls: 1
+  - name: opencode-recorded-branch-wins-over-checkout
+    harness: opencode
+    declared: recording-or-checkout
+    recordedBranch: feature/recorded
+    checkout: main
+    wantBranch: feature/recorded
+    wantCheckoutCalls: 0
+  - name: opencode-checkout-answers-when-nothing-recorded
+    harness: opencode
+    declared: recording-or-checkout
+    checkout: main
+    wantBranch: main
+    wantCheckoutCalls: 1
+  # Pi's recording carries no branch, so the checkout is the only evidence.
+  - name: pi-checkout-answers-because-pi-records-no-branch
+    harness: pi
+    declared: recording-or-checkout
+    checkout: main
+    wantBranch: main
+    wantCheckoutCalls: 1
+  # Codex keeps the branch its session_meta names and nothing else.
+  - name: codex-recorded-branch-is-stored
+    harness: codex
+    declared: recording-only
+    recordedBranch: feature/recorded
+    checkout: main
+    wantBranch: feature/recorded
+    wantCheckoutCalls: 0
+  - name: codex-never-asks-the-checkout
+    harness: codex
+    declared: recording-only
+    checkout: main
+    wantBranch: ""
+    wantCheckoutCalls: 0
+  # Strike keeps the branch its sidecar names and nothing else.
+  - name: strike-recorded-branch-is-stored
+    harness: strike
+    declared: recording-only
+    recordedBranch: feature/recorded
+    checkout: main
+    wantBranch: feature/recorded
+    wantCheckoutCalls: 0
+  - name: strike-never-asks-the-checkout
+    harness: strike
+    declared: recording-only
+    checkout: main
+    wantBranch: ""
+    wantCheckoutCalls: 0
+  # A detached checkout reports HEAD, which is not a branch name, so no extractor
+  # that asks the checkout stores it.
+  - name: claude-detached-checkout-is-no-branch
+    harness: claude-code
+    declared: recording-or-checkout
+    checkout: HEAD
+    wantBranch: ""
+    wantCheckoutCalls: 1
+  # A recording that names HEAD says the session ran on no branch; the checkout,
+  # which sits on main, does not answer for it.
+  - name: claude-recorded-detached-head-is-no-branch
+    harness: claude-code
+    declared: recording-or-checkout
+    recordedBranch: HEAD
+    checkout: main
+    wantBranch: ""
+    wantCheckoutCalls: 0
+  - name: cursor-detached-checkout-is-no-branch
+    harness: cursor
+    declared: recording-or-checkout
+    checkout: HEAD
+    wantBranch: ""
+    wantCheckoutCalls: 1
+  - name: opencode-detached-checkout-is-no-branch
+    harness: opencode
+    declared: recording-or-checkout
+    checkout: HEAD
+    wantBranch: ""
+    wantCheckoutCalls: 1
+  - name: pi-detached-checkout-is-no-branch
+    harness: pi
+    declared: recording-or-checkout
+    checkout: HEAD
+    wantBranch: ""
+    wantCheckoutCalls: 1
+  # The transcript records no working directory and its folder decodes to no
+  # directory that exists, so the session has no project directory. The folder the
+  # transcript sits in is a storage folder that can lie inside an unrelated
+  # repository, so git is asked nothing at all: no branch, no remote, no worktree.
+  - name: claude-no-project-directory-asks-git-nothing
+    harness: claude-code
+    declared: recording-or-checkout
+    noCWD: true
+    checkout: main
+    wantBranch: ""
+    wantCheckoutCalls: 0
+    wantGitCalls: 0
+  # The same transcript, but the folder it sits in decodes to a directory that
+  # exists: that is the project directory, and the checkout answers for it.
+  - name: claude-transcript-folder-that-decodes-is-the-project-directory
+    harness: claude-code
+    declared: recording-or-checkout
+    noCWD: true
+    projectDirectoryExists: true
+    checkout: main
+    wantBranch: main
+    wantCheckoutCalls: 1
+    wantGitDirs: [/home/test/project]

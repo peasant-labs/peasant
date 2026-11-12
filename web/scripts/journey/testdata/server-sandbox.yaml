@@ -14,6 +14,9 @@ requiredNames:
   - owned-server-sandbox-is-removed-when-the-script-ends-normally
   - owned-server-sandbox-is-removed-when-the-script-throws
   - owned-server-sandbox-keeps-a-named-directory
+  - owned-server-sandbox-starts-as-an-installed-dashboard
+  - owned-server-sandbox-leaves-a-named-config-file-as-found
+  - owned-server-sandbox-writes-no-config-file-into-a-named-dir
   - owned-server-sandbox-leaves-no-root-when-the-layout-is-refused
   - owned-server-sandbox-refuses-a-name-that-is-not-a-slug
   - named-directory-is-resolved-against-the-working-directory
@@ -67,6 +70,10 @@ cases:
   # leaves in each way listed in `ends` (a number is process.exit with that status). The root is
   # in the temporary directory, named for the script, and gone once the process has exited.
   # `named` directories ($OTHER is outside the root) get a marker file each and must survive.
+  # `config` is the configuration file the script's server reads (<configDir>/peasant/config.yaml):
+  # `seed` is exactly the configured seed, so the server starts as an installed dashboard; `absent`
+  # is no file, during the run and after it; `kept` is `existingConfig`, written into the named
+  # configuration directory before the run and unchanged during and after it.
   - {name: owned-server-sandbox-is-removed-when-the-script-exits, mode: owned, script: share-geometry, ends: [0, 3]}
   - {name: owned-server-sandbox-is-removed-when-the-script-ends-normally, mode: owned, script: full-app-smoke, ends: [last-line]}
   - {name: owned-server-sandbox-is-removed-when-the-script-throws, mode: owned, script: search-share-visual, ends: [uncaught-error]}
@@ -75,6 +82,20 @@ cases:
     script: offline-gate
     named: {configDir: $OTHER/their-config, dataDir: $OTHER/their-data}
     ends: [0, 3]
+  - {name: owned-server-sandbox-starts-as-an-installed-dashboard, mode: owned, script: full-app-smoke, ends: [last-line, 3], config: seed}
+  - name: owned-server-sandbox-leaves-a-named-config-file-as-found
+    mode: owned
+    script: offline-gate
+    named: {configDir: $OTHER/their-config}
+    existingConfig: "version: 1\ntheme: light\n"
+    ends: [last-line, 3]
+    config: kept
+  - name: owned-server-sandbox-writes-no-config-file-into-a-named-dir
+    mode: owned
+    script: offline-gate
+    named: {configDir: $OTHER/their-config}
+    ends: [last-line, 3]
+    config: absent
   - name: owned-server-sandbox-leaves-no-root-when-the-layout-is-refused
     mode: owned-refused
     script: offline-gate
@@ -149,3 +170,4 @@ scripts:
     - {path: scripts/visual/transcript-segments-shoot.mjs, reason: "passes --data-dir, --config-dir and --state-dir of a seeded temp store; HOME and the cache variable are inherited"}
     - {path: scripts/journey/api-binary.test.mjs, reason: "sets HOME and the config, data and state XDG variables under its owned lifecycle root; the cache variable is inherited"}
     - {path: scripts/journey/run-collective-observations.mjs, reason: "sets HOME and the config, data and state XDG variables under its owned lifecycle root; the cache variable is inherited"}
+    - {path: scripts/journey/run-kickstart.mjs, reason: "sets HOME and the config, data and state XDG variables under one temp root per theme, with no config.yaml on purpose so the binary starts unconfigured; the cache variable is inherited"}

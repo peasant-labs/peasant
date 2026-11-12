@@ -1,0 +1,365 @@
+# What one PATCH may carry: a value answer per field, the tree's selected ids,
+# conflict resolutions, and the boundary connect offer. A refused request changes
+# nothing. See kickstart_script_test.go for the step vocabulary.
+requiredNames:
+  - one-answer-per-field
+  - unknown-field-key-refused
+  - tree-ids-are-the-only-tree-answer
+  - connect-accept-requires-connected
+  - connect-skip-records-session-only
+  - resolutions-echo
+  - stale-tree-answer-names-the-array-it-replaced
+  - hidden-field-answer-refused
+cases:
+  - name: one-answer-per-field
+    world: {listings: two-projects, gate: true}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      # two fields in one request are one change: one revision, one event
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, values: {publication-preference: share-later, content-license: CC0-1.0}}
+        json:
+          revision: 2
+          "view.stops[key=publication].fields[key=publication-preference].value": share-later
+          "view.stops[key=license].fields[key=content-license].value": CC0-1.0
+      # a later answer for the same field replaces the first; the field keeps one
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 2, values: {content-license: CC-BY-4.0}}
+        json:
+          revision: 3
+          "view.stops[key=license].fields[key=content-license].value": CC-BY-4.0
+          "view.stops[key=publication].fields[key=publication-preference].value": share-later
+      - events:
+          - {kind: answers, revision: 2}
+          - {kind: answers, revision: 3}
+      # the retention stop appears once the scan found Claude sessions; a period
+      # given as its token or as a number is the same answer
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {claude-retention-days: "365"}}
+        save: {saved: revision}
+        json: {"view.stops[key=retention].fields[key=claude-retention-days].value": 365}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{saved}", values: {claude-retention-days: 365}}
+        json: {revision: "{saved}", stale: false}
+
+  - name: unknown-field-key-refused
+    world: {listings: two-projects, gate: true}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: selection}
+        save: {selection: id}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, values: {nonsense: true}}
+        status: 400
+        json: {code: kickstart_field_unknown}
+        contains: {error: "nonsense"}
+      # a field of the other scope's model is not part of this session
+      - call: PATCH /api/v1/kickstart/sessions/{selection}
+        body: {revision: 1, values: {content-license: CC0-1.0}}
+        status: 400
+        json: {code: kickstart_field_out_of_scope}
+      # a value the field does not offer, a notice, and an action nobody lists
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, values: {content-license: MIT}}
+        status: 400
+        json: {code: kickstart_answer_refused}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, values: {review-notice: true}}
+        status: 400
+        json: {code: kickstart_answer_refused}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, values: {village-connect: maybe}}
+        status: 400
+        json: {code: kickstart_answer_refused}
+      # a request with one bad key applies none of its good keys
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, values: {content-license: CC0-1.0, nonsense: 1}}
+        status: 400
+      # an empty request, and a field the contract does not declare
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1}
+        status: 400
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, reset: true}
+        status: 400
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 9, values: {content-license: CC0-1.0}}
+        status: 400
+        json: {code: kickstart_revision_ahead}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        json:
+          revision: 1
+          "stops[key=license].fields[key=content-license].value": ""
+      - events: []
+
+  - name: tree-ids-are-the-only-tree-answer
+    world: {listings: two-projects, gate: true}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      # there is no forest to answer before the scan finishes
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, selectedIds: [11111111-1111-4111-8111-111111111111]}
+        status: 400
+        json: {code: kickstart_scan_not_done}
+      # the tree is never answered with a value
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, values: {transcripts: {ids: [11111111-1111-4111-8111-111111111111]}}}
+        status: 400
+        json: {code: kickstart_tree_answer_shape}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, values: {transcripts: {mode: all}}}
+        status: 400
+        json: {code: kickstart_tree_answer_shape}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", selectedIds: [11111111-1111-4111-8111-111111111111]}
+        json:
+          stale: false
+          "view.stops[key=selection].fields[key=transcripts].value.0": 11111111-1111-4111-8111-111111111111
+          "view.stops[key=review].summary.values.0": "selection: 1 session you chose"
+        len: {"view.stops[key=selection].fields[key=transcripts].value": 1}
+      # an id that names a row that groups sessions answers for its sessions;
+      # an id that names nothing answers for nothing
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", selectedIds: ["branch:10:/work/toolmain", not-a-row]}
+        len: {"view.stops[key=selection].fields[key=transcripts].value": 2}
+      # an empty list is an answer: nothing is selected
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", selectedIds: []}
+        len: {"view.stops[key=selection].fields[key=transcripts].value": 0}
+        json:
+          "view.stops[key=review].summary.values.0": "selection: nothing chosen"
+
+  - name: connect-accept-requires-connected
+    world: {listings: two-projects, gate: true}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: selection}
+        save: {selection: id}
+      # signing in has not happened, so accepting records nothing and the offer stays
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, connectAnswer: accept}
+        status: 400
+        json: {code: kickstart_connect_not_connected}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        json: {revision: 1, connect.offered: true, connect.afterStop: license}
+      # the selection page has no connect offer to answer
+      - call: PATCH /api/v1/kickstart/sessions/{selection}
+        body: {revision: 1, connectAnswer: skip}
+        status: 400
+        json: {code: kickstart_connect_out_of_scope}
+      - setVillage: connected
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, connectAnswer: accept}
+        json: {revision: 2, stale: false, view.village.connected: true, view.connect.offered: false}
+      # signing out does not bring the offer back: the answer is recorded
+      - setVillage: disconnected
+      - call: GET /api/v1/kickstart/sessions/{full}
+        json: {revision: 2, village.connected: false, connect.offered: false}
+      - events:
+          - {kind: answers, session: "{full}", revision: 2}
+
+  - name: connect-skip-records-session-only
+    world:
+      listings: two-projects
+      gate: true
+      config: |
+        version: 1
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+        json: {connect.offered: true}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, connectAnswer: skip}
+        json: {revision: 2, stale: false, view.connect.offered: false}
+        absent: [view.connect.afterStop]
+      # the answer is the session's, not a field: no stop carries it
+      - call: GET /api/v1/kickstart/sessions/{full}
+        json: {connect.offered: false}
+        absent: ["stops[key=village].fields[key=connect]", "stops[key=license].fields[key=connect]"]
+      - configFile: unchanged
+      # another tab that signed in answers the same offer from an older view: its
+      # answer is applied and the skip it replaced is named
+      - setVillage: connected
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, connectAnswer: accept}
+        json:
+          revision: 3
+          stale: true
+          overwritten.0.key: connect
+          overwritten.0.previous: skip
+          overwritten.0.revision: 2
+        len: {overwritten: 1}
+      - configFile: unchanged
+      # the answer lives and dies with the session: a new one is offered again
+      - setVillage: disconnected
+      - expire: full
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        json: {id: ses-2, connect.offered: true}
+
+  # The user's choice on a conflict row is made against the file value the row
+  # showed. Every step goes through the routes: another program changes the
+  # file, the save is refused with its rows, the choices are sent, and the save
+  # is judged against the file as it is then.
+  - name: resolutions-echo
+    world:
+      listings: two-projects
+      gate: true
+      village: connected
+      config: |
+        version: 1
+        push:
+          visibility: private
+          license: ""
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0, default-visibility: public}}
+        json: {stale: false}
+      - await: {kind: answers, session: "{full}"}
+      # another program changes both settings the user answered
+      - editConfig: {from: 'license: ""', to: "license: CC-BY-4.0"}
+      - editConfig: {from: "visibility: private", to: "visibility: group"}
+      # the refused save names a row for each, with the file value as it is now
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        status: 409
+        len: {conflicts: 2}
+        json:
+          "conflicts[field=content-license].mine": CC0-1.0
+          "conflicts[field=content-license].theirs": CC-BY-4.0
+          "conflicts[field=default-visibility].mine": public
+          "conflicts[field=default-visibility].theirs": group
+      - await: {kind: conflicts, session: "{full}", len: {view.conflicts: 2}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+        len: {conflicts: 2}
+      # the user keeps their license and takes the file's visibility
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", resolutions: {content-license: mine, default-visibility: theirs}}
+        json:
+          stale: false
+          "view.stops[key=license].fields[key=content-license].value": CC0-1.0
+        len: {view.conflicts: 0}
+      - await: {kind: conflicts, session: "{full}", len: {view.conflicts: 0}}
+      # the choice was made against CC-BY-4.0. The file moves on again, so the
+      # choice settles nothing about the value now there: the row comes back
+      - editConfig: {from: "license: CC-BY-4.0", to: "license: CC-BY-SA-4.0"}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        status: 409
+        len: {conflicts: 1}
+        json:
+          conflicts.0.field: content-license
+          conflicts.0.mine: CC0-1.0
+          conflicts.0.theirs: CC-BY-SA-4.0
+      - await: {kind: conflicts, session: "{full}", len: {view.conflicts: 1}}
+      - configHas: ["license: CC-BY-SA-4.0", "visibility: group"]
+      # keeping theirs for what was seen is still a choice about the value now seen
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", resolutions: {content-license: mine}}
+        len: {view.conflicts: 0}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        json: {saved: true}
+      # the user's license is saved; the visibility is the file's, never overwritten
+      - configHas: ["license: CC0-1.0", "visibility: group"]
+
+  - name: stale-tree-answer-names-the-array-it-replaced
+    world: {listings: two-projects}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", selectedIds: [11111111-1111-4111-8111-111111111111]}
+        save: {first: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", selectedIds: [22222222-2222-4222-8222-222222222222]}
+        json:
+          stale: true
+          overwritten.0.key: transcripts
+          overwritten.0.previous.0: 11111111-1111-4111-8111-111111111111
+          overwritten.0.revision: "{first}"
+          "view.stops[key=selection].fields[key=transcripts].value.0": 22222222-2222-4222-8222-222222222222
+        len: {overwritten: 1, overwritten.0.previous: 1}
+
+  # A field the setup does not show takes no answer. The refusal names the field
+  # and the condition that hides it, changes nothing, and publishes nothing.
+  - name: hidden-field-answer-refused
+    world: {listings: two-projects, gate: true}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      # the sharing stop is shown only while this computer is connected to online
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, values: {default-visibility: private}}
+        status: 400
+        json: {code: kickstart_field_hidden}
+        contains: {error: "default-visibility is shown only when village-connected"}
+      # a request with one hidden answer applies none of its shown ones
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, values: {content-license: CC0-1.0, default-visibility: private}}
+        status: 400
+        json: {code: kickstart_field_hidden}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        json:
+          revision: 1
+          "stops[key=license].fields[key=content-license].value": ""
+      - events: []
+      # the refusal follows the sign-in: once connected the same answer is taken
+      - setVillage: connected
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, values: {default-visibility: private}}
+        json:
+          revision: 2
+          "view.stops[key=destination].fields[key=default-visibility].value": private
+      - events:
+          - {kind: answers, revision: 2}
+      # the sign-in is lost again, and the stop is hidden again
+      - setVillage: disconnected
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 2, values: {default-visibility: group}}
+        status: 400
+        json: {code: kickstart_field_hidden}
+      # the retention stop is shown only once the scan found Claude sessions
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 2, values: {claude-retention-days: 365}}
+        status: 400
+        json: {code: kickstart_field_hidden}
+        contains: {error: "claude-retention-days is shown only when claude-sessions-present"}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {claude-retention-days: 365}}
+        json: {"view.stops[key=retention].fields[key=claude-retention-days].value": 365}

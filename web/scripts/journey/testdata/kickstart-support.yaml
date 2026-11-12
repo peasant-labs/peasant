@@ -1,0 +1,125 @@
+# The setup journey's support code, before any browser: the seeded recordings
+# and the served-build provenance. Provenance must fail closed, so each way a
+# capture could be taken from the wrong build is a case that must be refused.
+requiredNames:
+  - seed-names-a-project-directory-like-claude-code
+  - seed-session-lines-replace-identity-and-prompts
+  - seed-session-lines-are-reproducible
+  - seed-ids-are-unique-per-session
+  - seed-refuses-more-prompts-than-the-template-has
+  - seed-filler-is-deterministic
+  - seed-checkouts-match-recorded-branches
+  - seed-recordings-are-dated-by-their-session
+  - seed-refuses-a-root-whose-project-names-are-ambiguous
+  - rail-labels-are-judged-against-the-frame
+  - served-build-exact
+  - served-page-stale-refused
+  - served-asset-stale-refused
+  - served-marker-missing-refused
+  - served-marker-in-base-refused
+  - served-no-marker-refused
+  - served-wrong-binary-refused
+  - served-route-without-export-refused
+cases:
+  - {name: seed-names-a-project-directory-like-claude-code, mode: encode, cwd: /tmp/a.b/ledger-1, expected: -tmp-a-b-ledger-1}
+  - {name: seed-session-lines-replace-identity-and-prompts, mode: lines}
+  - {name: seed-session-lines-are-reproducible, mode: reproducible}
+  - {name: seed-ids-are-unique-per-session, mode: unique}
+  - {name: seed-refuses-more-prompts-than-the-template-has, mode: prompts}
+  - {name: seed-filler-is-deterministic, mode: filler}
+  - {name: seed-checkouts-match-recorded-branches, mode: checkouts}
+  - {name: seed-recordings-are-dated-by-their-session, mode: mtimes}
+  - {name: seed-refuses-a-root-whose-project-names-are-ambiguous, mode: slug-root}
+  - {name: rail-labels-are-judged-against-the-frame, mode: rail}
+  - {name: served-build-exact, mode: exact}
+  - {name: served-page-stale-refused, mode: stale-page, error: differs from this export}
+  - {name: served-asset-stale-refused, mode: stale-asset, error: differs from this build}
+  - {name: served-marker-missing-refused, mode: missing-marker, error: lacks}
+  - {name: served-marker-in-base-refused, mode: base-has-marker, error: base commit already contains}
+  - {name: served-no-marker-refused, mode: no-markers, error: names no marker}
+  - {name: served-wrong-binary-refused, mode: wrong-binary, error: not the binary this run built}
+  - {name: served-route-without-export-refused, mode: no-export, error: has no export}
+# Boxes as the browser measures them, in pixels, for a frame from 100 to 700 in a
+# 1000 wide viewport. `problems` are the words each judgement must contain; none
+# means the rail is fine. The first row is the placement the page has now, the
+# second the centred placement that clipped the first label at the frame's edge.
+rails:
+  - name: labels-inside-the-frame
+    rail:
+      labelled: true
+      frame: {left: 100, right: 700}
+      viewportWidth: 1000
+      labels:
+        - {text: choose sessions to import, place: start, left: 110, right: 230, textLeft: 110, textRight: 230, visible: true}
+        - {text: review, place: middle, left: 380, right: 420, textLeft: 380, textRight: 420, visible: true}
+        - {text: ingest, place: end, left: 560, right: 690, textLeft: 560, textRight: 690, visible: true}
+    problems: []
+  - name: first-label-clipped-at-the-left-edge
+    rail:
+      labelled: true
+      frame: {left: 100, right: 700}
+      viewportWidth: 1000
+      labels:
+        - {text: choose sessions to import, place: middle, left: 60, right: 180, textLeft: 60, textRight: 180, visible: true}
+        - {text: review, place: middle, left: 380, right: 420, textLeft: 380, textRight: 420, visible: true}
+        - {text: ingest, place: end, left: 560, right: 690, textLeft: 560, textRight: 690, visible: true}
+    problems: [spills out of the frame on the left, "the first label is placed"]
+  - name: last-label-spills-past-the-right-edge
+    rail:
+      labelled: true
+      frame: {left: 100, right: 700}
+      viewportWidth: 1000
+      labels:
+        - {text: choose sessions to import, place: start, left: 110, right: 230, textLeft: 110, textRight: 230, visible: true}
+        - {text: review, place: middle, left: 380, right: 420, textLeft: 380, textRight: 420, visible: true}
+        - {text: ingest, place: end, left: 600, right: 740, textLeft: 600, textRight: 740, visible: true}
+    problems: [spills out of the frame on the right]
+  - name: only-the-text-spills-though-the-box-fits
+    rail:
+      labelled: true
+      frame: {left: 100, right: 700}
+      viewportWidth: 1000
+      labels:
+        - {text: choose sessions to import, place: start, left: 110, right: 230, textLeft: 90, textRight: 230, visible: true}
+        - {text: ingest, place: end, left: 560, right: 690, textLeft: 560, textRight: 690, visible: true}
+    problems: [spills out of the frame on the left]
+  - name: neighbours-meet
+    rail:
+      labelled: true
+      frame: {left: 100, right: 700}
+      viewportWidth: 1000
+      labels:
+        - {text: choose sessions to import, place: start, left: 110, right: 400, textLeft: 110, textRight: 400, visible: true}
+        - {text: ingest, place: end, left: 380, right: 690, textLeft: 380, textRight: 690, visible: true}
+    problems: [overlap]
+  - name: a-label-that-is-not-drawn
+    rail:
+      labelled: true
+      frame: {left: 100, right: 700}
+      viewportWidth: 1000
+      labels:
+        - {text: choose sessions to import, place: start, left: 110, right: 230, textLeft: 110, textRight: 230, visible: false}
+        - {text: ingest, place: end, left: 560, right: 690, textLeft: 560, textRight: 690, visible: true}
+    problems: [is not visible]
+  - name: a-labelled-rail-with-no-labels
+    rail: {labelled: true, frame: {left: 100, right: 700}, viewportWidth: 1000, labels: []}
+    problems: [none was found]
+  - name: a-rail-of-numbers-has-no-labels-to-judge
+    rail: {labelled: false, frame: {left: 100, right: 700}, viewportWidth: 1000, labels: []}
+    problems: []
+fixture:
+  # A small computer for the checkout case: one repository, three sessions on two branches.
+  template: template.jsonl
+  repositories:
+    - name: ledger
+      remote: https://github.com/acme/ledger.git
+      sessions:
+        - {name: a, branch: main, startedAt: "2026-02-03T09:00:00Z", prompts: [first a, second a]}
+        - {name: b, branch: feature/x, startedAt: "2026-02-04T09:00:00Z", prompts: [first b, second b]}
+        - {name: c, branch: feature/x, startedAt: "2026-02-05T09:00:00Z", prompts: [first c, second c]}
+template:
+  # Two user lines and two assistant lines, as the ingest fixture's root session has.
+  lines:
+    - '{"type":"user","uuid":"11111111-1111-4111-8111-111111111111","sessionId":"x","cwd":"/old","gitBranch":"old","timestamp":"2026-01-01T10:00:00.000Z","message":{"role":"user","content":"old one"}}'
+    - '{"type":"assistant","uuid":"22222222-2222-4222-8222-222222222222","parentUuid":"11111111-1111-4111-8111-111111111111","sessionId":"x","cwd":"/old","gitBranch":"old","timestamp":"2026-01-01T10:00:01.000Z","message":{"role":"assistant","content":[{"type":"text","text":"reply"}]}}'
+    - '{"type":"user","uuid":"33333333-3333-4333-8333-333333333333","parentUuid":"22222222-2222-4222-8222-222222222222","sessionId":"x","cwd":"/old","gitBranch":"old","timestamp":"2026-01-01T10:00:02.000Z","message":{"role":"user","content":"old two"}}'

@@ -1,0 +1,25 @@
+# The window inside which a source file counts as still being written. Ingest, a
+# re-scan and the setup scan all read it through Config.StalenessWindow, so they
+# agree on which sessions are active.
+#   thresholdSec  output.stalenessThresholdSec of the configuration; noConfig
+#                 passes no configuration at all
+#   wantSeconds   the window in seconds
+# requiredNames is the deletion guard: every name below must still be present.
+requiredNames:
+  - no-configuration-uses-the-packaged-default
+  - unset-threshold-uses-the-packaged-default
+  - configured-threshold-is-used
+  - one-second-threshold-is-not-rounded-to-the-default
+cases:
+  - name: no-configuration-uses-the-packaged-default
+    noConfig: true
+    wantSeconds: 60
+  - name: unset-threshold-uses-the-packaged-default
+    thresholdSec: 0
+    wantSeconds: 60
+  - name: configured-threshold-is-used
+    thresholdSec: 120
+    wantSeconds: 120
+  - name: one-second-threshold-is-not-rounded-to-the-default
+    thresholdSec: 1
+    wantSeconds: 1

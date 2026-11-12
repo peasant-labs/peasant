@@ -1,11 +1,13 @@
 package onboarding
 
 import (
+	"slices"
 	"sort"
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/schema"
 )
 
 const (
@@ -129,50 +131,80 @@ func SanitizeSelectionPlaceholders(forest Forest, sel config.SelectionConfig) (c
 	return sanitizePlaceholderSelection(sel, availableProjects(selectionTree(forest)))
 }
 
-// DroppedSelections is what a rescan removed from an answered id set.
-// Labels holds at most three names. Count is the full number removed.
+// DroppedSelections is what a rescan removed from an answered id set. Labels
+// holds at most schema.LocalKickstartDroppedLabelsMax names, the number the
+// contract allows a scan to carry. Count is the full number removed.
 type DroppedSelections struct {
 	Count  int
 	Labels []string
 }
 
-// RescanIDs keeps answered ids that still exist in the forest and drops the
-// rest. It never adds an id. Vanished ids are reported by count and at most
-// three labels; a vanished id is its own label because the new forest no
-// longer has the row.
-func RescanIDs(ids []string, forest Forest) ([]string, DroppedSelections) {
-	present := map[string]string{}
-	for _, node := range forest.Nodes {
-		if node.ID == "" {
-			continue
-		}
-		label := node.Label
-		if label == "" {
-			label = node.ID
-		}
-		present[node.ID] = label
-		if node.SessionID != "" {
-			present[node.SessionID] = label
-		}
-	}
+// RescanIDs keeps the answered ids that still exist in the forest the rescan
+// found (current) and drops the rest. It never adds an id. Vanished ids are
+// reported by count and at most schema.LocalKickstartDroppedLabelsMax labels.
+// A vanished row is gone from current, so its label is read from the forest the
+// answer was given over (previous); an id that forest does not hold either is
+// its own label.
+func RescanIDs(ids []string, previous, current Forest) ([]string, DroppedSelections) {
+	present := forestRowIDs(current)
 	kept := make([]string, 0, len(ids))
 	seen := map[string]bool{}
 	var dropped DroppedSelections
+	var labels map[string]string
 	for _, id := range ids {
 		if id == "" || seen[id] {
 			continue
 		}
 		seen[id] = true
-		if _, ok := present[id]; ok {
+		if present[id] {
 			kept = append(kept, id)
 			continue
 		}
 		dropped.Count++
-		if len(dropped.Labels) < 3 {
-			dropped.Labels = append(dropped.Labels, id)
+		if len(dropped.Labels) >= schema.LocalKickstartDroppedLabelsMax {
+			continue
 		}
+		if labels == nil {
+			labels = forestRowLabels(previous)
+		}
+		label := labels[id]
+		if label == "" {
+			label = id
+		}
+		dropped.Labels = append(dropped.Labels, label)
 	}
 	return kept, dropped
+}
+
+// forestRowIDs is every id a forest answers to: a row's id and, for a session
+// row, its session id.
+func forestRowIDs(forest Forest) map[string]bool {
+	ids := make(map[string]bool, len(forest.Nodes))
+	for _, node := range forest.Nodes {
+		if node.ID == "" {
+			continue
+		}
+		ids[node.ID] = true
+		if node.SessionID != "" {
+			ids[node.SessionID] = true
+		}
+	}
+	return ids
+}
+
+// forestRowLabels maps every id a forest answers to onto the row's label.
+func forestRowLabels(forest Forest) map[string]string {
+	labels := make(map[string]string, len(forest.Nodes))
+	for _, node := range forest.Nodes {
+		if node.ID == "" || node.Label == "" {
+			continue
+		}
+		labels[node.ID] = node.Label
+		if node.SessionID != "" {
+			labels[node.SessionID] = node.Label
+		}
+	}
+	return labels
 }
 
 // Rollup recomputes parent tri-states from their children. A locked child
@@ -880,6 +912,113 @@ func unmatchedSelection(sel config.SelectionConfig, projects []availProject) Res
 	return residual
 }
 
+// CheckoutSession is one session of a checkout as the derivation reads it.
+type CheckoutSession struct {
+	// ID is the session id.
+	ID string
+	// Branch is the branch the session is listed under. It is empty for a
+	// session that recorded none.
+	Branch string
+	// Chosen reports whether the person chose the session.
+	Chosen bool
+	// ExplicitSession is provenance: a saved rule named this session by id, so
+	// a derivation that finds every session of the checkout chosen keeps naming
+	// them instead of widening the rule to a branch.
+	ExplicitSession bool
+}
+
+// CheckoutRule is how a checkout's chosen sessions are saved.
+type CheckoutRule struct {
+	// Whole is the checkout's own rule with no branch list. It is saved only for
+	// a checkout with no named branch, where there is no branch to name.
+	Whole bool
+	// Branches are the named branches every one of whose sessions is chosen,
+	// sorted. A branch that appears later is admitted by the new-branch setting,
+	// not by this rule.
+	Branches []string
+	// Sessions are the chosen sessions that no rule above covers, in the order
+	// given: sessions named explicitly, and the chosen sessions of a group with
+	// no branch to name.
+	Sessions []string
+}
+
+// DeriveCheckout is the one derivation of the rule that saves a checkout's
+// chosen sessions. The setup page, the terminal's select-all and the terminal's
+// project row all call it, so the same sessions chosen give the same rule
+// whichever row was ticked.
+//
+// Choosing a branch saves that branch, even when it is the only branch in its
+// checkout and even when every branch of the checkout is chosen. The
+// whole-checkout rule is saved only when the checkout has no named branch. A
+// session in a detached checkout has no branch (ingest.NamedBranch).
+func DeriveCheckout(sessions []CheckoutSession) CheckoutRule {
+	// A detached checkout is on no branch, so git's word for it names none: the
+	// session is branchless, whichever listing carried the word.
+	sessions = slices.Clone(sessions)
+	for index := range sessions {
+		sessions[index].Branch = ingest.NamedBranch(sessions[index].Branch)
+	}
+	allChosen, allExplicit, chosen := true, true, 0
+	var branchOrder []string
+	byBranch := map[string][]CheckoutSession{}
+	named := false
+	for _, session := range sessions {
+		if _, known := byBranch[session.Branch]; !known {
+			branchOrder = append(branchOrder, session.Branch)
+		}
+		byBranch[session.Branch] = append(byBranch[session.Branch], session)
+		if session.Branch != "" {
+			named = true
+		}
+		if !session.Chosen {
+			allChosen = false
+			continue
+		}
+		chosen++
+		if !session.ExplicitSession {
+			allExplicit = false
+		}
+	}
+	var rule CheckoutRule
+	if chosen == 0 {
+		return rule
+	}
+	if allChosen && allExplicit {
+		for _, session := range sessions {
+			rule.Sessions = appendUnique(rule.Sessions, session.ID)
+		}
+		return rule
+	}
+	if allChosen && !named {
+		rule.Whole = true
+		return rule
+	}
+	for _, branch := range branchOrder {
+		group := byBranch[branch]
+		branchChosen, branchExplicit := len(group) > 0, true
+		for _, session := range group {
+			if !session.Chosen {
+				branchChosen = false
+				continue
+			}
+			if !session.ExplicitSession {
+				branchExplicit = false
+			}
+		}
+		if branch != "" && branchChosen && !branchExplicit {
+			rule.Branches = appendUnique(rule.Branches, branch)
+			continue
+		}
+		for _, session := range group {
+			if session.Chosen {
+				rule.Sessions = appendUnique(rule.Sessions, session.ID)
+			}
+		}
+	}
+	sort.Strings(rule.Branches)
+	return rule
+}
+
 func deriveProjectFirst(projects []availProject) config.SelectionConfig {
 	type build struct {
 		projects []config.ProjectSelection
@@ -901,70 +1040,24 @@ func deriveProjectFirst(projects []availProject) config.SelectionConfig {
 			continue
 		}
 		row := get(project.harness.String())
-		allChecked := true
-		allExplicit := true
-		checked := 0
-		explicitBranch := false
-		var branchOrder []string
-		branchSessions := map[string][]availSession{}
-		for _, session := range project.sessions {
-			branch := session.candidate.Branch
-			if _, known := branchSessions[branch]; !known {
-				branchOrder = append(branchOrder, branch)
-			}
-			branchSessions[branch] = append(branchSessions[branch], session)
-			if session.node.state != triAll {
-				allChecked = false
-				continue
-			}
-			checked++
-			if !session.node.explicitSession {
-				allExplicit = false
-			}
-			if session.node.explicitBranch {
-				explicitBranch = true
+		sessions := make([]CheckoutSession, len(project.sessions))
+		for index, session := range project.sessions {
+			sessions[index] = CheckoutSession{
+				ID:              session.candidate.SessionID.String(),
+				Branch:          session.candidate.Branch,
+				Chosen:          session.node.state == triAll,
+				ExplicitSession: session.node.explicitSession,
 			}
 		}
-		if checked == 0 {
-			continue
+		rule := DeriveCheckout(sessions)
+		for _, sessionID := range rule.Sessions {
+			row.sessions = appendUnique(row.sessions, sessionID)
 		}
-		if allChecked && allExplicit {
-			for _, session := range project.sessions {
-				row.sessions = appendUnique(row.sessions, session.candidate.SessionID.String())
-			}
-			continue
-		}
-		if allChecked && !explicitBranch {
+		switch {
+		case rule.Whole:
 			row.projects = appendEquivalent(row.projects, projectSelection(project, nil))
-			continue
-		}
-		var branches []string
-		for _, branch := range branchOrder {
-			sessions := branchSessions[branch]
-			branchChecked := len(sessions) > 0
-			branchExplicit := true
-			for _, session := range sessions {
-				if session.node.state != triAll {
-					branchChecked = false
-					continue
-				}
-				if !session.node.explicitSession {
-					branchExplicit = false
-				}
-			}
-			if branch != "" && branchChecked && !branchExplicit {
-				branches = appendUnique(branches, branch)
-				continue
-			}
-			for _, session := range sessions {
-				if session.node.state == triAll {
-					row.sessions = appendUnique(row.sessions, session.candidate.SessionID.String())
-				}
-			}
-		}
-		if len(branches) > 0 {
-			sort.Strings(branches)
-			row.projects = appendEquivalent(row.projects, projectSelection(project, branches))
+		case len(rule.Branches) > 0:
+			row.projects = appendEquivalent(row.projects, projectSelection(project, rule.Branches))
 		}
 	}
 	cfg := config.SelectionConfig{Mode: config.SelectionModeSelected, Harnesses: map[string]config.SelectionHarnessConfig{}}

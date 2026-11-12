@@ -5,6 +5,10 @@ requiredNames:
   - recorded untracked branch ignores checkout upstream
   - recorded untracked branch falls back to path
   - local recorded upstream falls back to origin
+  - recorded detached head uses the checkout upstream
+  - a deleted subfolder has no remote and the repository above it is not adopted
+  - an empty directory asks git nothing
+  - an empty directory still has the provider remote
 cases:
   - name: recorded branch tracks non-origin
     recordedBranch: recorded
@@ -29,3 +33,25 @@ cases:
     recordedBranch: recorded
     localUpstream: true
     wantRemote: git@github.com:testuser/testrepo.git
+  # A recording that names HEAD recorded no branch, so the checkout's upstream
+  # answers, as for a session that recorded nothing.
+  - name: recorded detached head uses the checkout upstream
+    recordedBranch: HEAD
+    trackedCheckout: true
+    wantRemote: https://github.com/example/live.git
+  # The directory a session recorded has since been deleted. Git cannot place it,
+  # and the repository that contains its parent is not adopted: the tree and the
+  # extractors do not walk up to a parent directory.
+  - name: a deleted subfolder has no remote and the repository above it is not adopted
+    subfolder: gone/away
+    wantRemote: ""
+  # No project directory: git is not asked, so the process's own repository can
+  # never answer for the session.
+  - name: an empty directory asks git nothing
+    emptyDirectory: true
+    recordedBranch: recorded
+    wantRemote: ""
+  - name: an empty directory still has the provider remote
+    emptyDirectory: true
+    explicitRemote: ssh://git@example.test/provider/repository.git
+    wantRemote: ssh://git@example.test/provider/repository.git

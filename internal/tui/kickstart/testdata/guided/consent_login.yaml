@@ -1,4 +1,4 @@
-expectedConsentCount: 3
+expectedConsentCount: 5
 consent:
   - name: local-all-no-license
     selectionMode: all
@@ -27,7 +27,7 @@ consent:
     claudeSessionsPresent: true
     retentionDays: 90
     wantContains:
-      - 'selection: only the buffered projects, branches, and sessions'
+      - 'selection: 1 session you chose'
       - 'auto-ingest future branches in fully-selected projects: on'
       - 'publication privacy: standard redaction; local imports remain original unless you run `peasant redact`'
       - 'later publish license: CC-BY-SA-4.0'
@@ -45,7 +45,7 @@ consent:
     connected: false
     claudeSessionsPresent: false
     wantContains:
-      - 'selection: only the buffered projects, branches, and sessions'
+      - 'selection: 1 session you chose'
       - 'auto-ingest future branches in fully-selected projects: off'
       - 'publication privacy: standard redaction; local imports remain original unless you run `peasant redact`'
       - 'later publish license: CC-BY-4.0'
@@ -55,6 +55,37 @@ consent:
     wantMissing:
       - 'default visibility after a later publish:'
       - apply claude code retention
+  # The never-expire period is stored as 99999 days. The terminal's review says
+  # "never expire", as the retention stop does, and never prints the number.
+  - name: summary-names-never-expire-for-the-sentinel
+    selectionMode: all
+    autoIngestNewBranches: false
+    license: CC-BY-4.0
+    visibility: private
+    connected: false
+    claudeSessionsPresent: true
+    retentionDays: 99999
+    wantContains:
+      - 'selection: all discovered sessions'
+      - 'claude code source retention: never expire'
+      - apply claude code retention after config saves
+    wantMissing:
+      - '99999'
+      - 'retention: 99999'
+  # The selection line says what was chosen in plain words and carries no word
+  # of the implementation.
+  - name: summary-selection-line-has-no-internal-words
+    selectionMode: selected
+    autoIngestNewBranches: false
+    license: CC-BY-4.0
+    visibility: private
+    connected: false
+    claudeSessionsPresent: false
+    wantContains:
+      - 'selection: 1 session you chose'
+    wantMissing:
+      - buffered
+      - 'only the'
 
 expectedLoginCount: 3
 login:

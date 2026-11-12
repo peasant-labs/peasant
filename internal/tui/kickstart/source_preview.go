@@ -642,12 +642,7 @@ func (s *SourceTurns) materializeBytes(sessionID string, listing ftue.SessionLis
 // A session with nothing more behind it gets no sentence at all: there is
 // nothing to explain.
 func previewSliceNotice(cursor ingest.TranscriptSliceCursor, more bool) string {
-	if !more || cursor.TotalBytes() <= 0 {
-		return ""
-	}
-	return fmt.Sprintf(
-		"showing the first %s of this %s session. scroll to the bottom to load more. the full session ingests normally.",
-		previewByteSize(cursor.ConsumedBytes()), previewByteSize(cursor.TotalBytes()))
+	return discovery.PreviewCutNotice(cursor.ConsumedBytes(), cursor.TotalBytes(), more, true)
 }
 
 // previewTruncationNotice writes the sentence the pane shows above the turns of
@@ -661,21 +656,8 @@ func previewTruncationNotice(truncation ingest.MaterializeTruncation) string {
 	}
 	return fmt.Sprintf(
 		"preview shows the first %s of this %s session (%s of %s %s). the full session ingests normally. this bound applies to the preview only.",
-		previewByteSize(truncation.IncludedBytes), previewByteSize(truncation.TotalBytes),
+		discovery.PreviewByteSize(truncation.IncludedBytes), discovery.PreviewByteSize(truncation.TotalBytes),
 		previewCount(truncation.IncludedRows), previewCount(truncation.TotalRows), truncation.Unit)
-}
-
-// previewByteSize renders a byte count the way the note reads it aloud: whole
-// mebibytes past a mebibyte, kibibytes below that.
-func previewByteSize(size int64) string {
-	switch {
-	case size >= 1<<20:
-		return fmt.Sprintf("%d MiB", size/(1<<20))
-	case size >= 1<<10:
-		return fmt.Sprintf("%d KiB", size/(1<<10))
-	default:
-		return fmt.Sprintf("%d bytes", size)
-	}
 }
 
 // previewCount groups a row count in thousands so a six-figure count stays

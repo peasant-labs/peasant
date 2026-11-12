@@ -39,6 +39,11 @@ import {
   EmptyState as FtEmptyState,
   FeedbackPanel as FtFeedbackPanel,
   GroupedMultiSelect,
+  DiffView,
+  Progress,
+  SelectionNodeKind,
+  SelectionTree,
+  Spinner,
   HelperGroup as FtHelperGroup,
   HelperGroupListItem as FtHelperGroupListItem,
   HelperThreadRow as FtHelperThreadRow,
@@ -69,6 +74,7 @@ import {
   ProviderBars as FtProviderBars,
   StepWizard as FtStepWizard,
   StepIndicator as FtStepIndicator,
+  StepWizardFrame,
   ConsentDialog as FtConsentDialog,
   ConsentSummary as FtConsentSummary,
   Treemap as FtTreemap,
@@ -233,6 +239,13 @@ export const Skeleton = FtSkeleton as unknown as ComponentType<SkeletonProps>;
 // These take only their declared props at this app's call-sites — re-export as
 // shipped (their declared types are sufficient).
 export { GroupedMultiSelect, RedactionReview, WhereDoesThisGo };
+
+// The server-grouped selection forest, the unified hunk diff, the progress bar, the spinner and
+// the controlled step-wizard frame: their shipped declarations already carry their props (the
+// frame's accessible name is a hyphenated JSX attribute, `aria-label`, which TypeScript does not
+// check against a props type). SelectionNodeKind is the forest's own closed set of row kinds; a
+// host that needs to name one takes it from here.
+export { DiffView, Progress, SelectionNodeKind, SelectionTree, Spinner, StepWizardFrame };
 
 // The settings page parts. Their declared props cover these call-sites; a row's
 // `data-*` attributes pass through to its element at runtime.
@@ -414,7 +427,7 @@ export interface WizardBodyArgs {
  * footer.  Advance with continue/submit; jump back to completed steps.
  */
 export interface StepWizardProps {
-  steps: WizardStep[];
+  steps: readonly WizardStep[];
   onComplete?: (args: { completed: Set<string> }) => void;
   /** Render-prop for the active step's body. */
   renderStep?: (args: WizardBodyArgs) => ReactNode;
@@ -429,11 +442,11 @@ export const StepWizard = FtStepWizard as unknown as ComponentType<StepWizardPro
 
 /** Pure/controlled step-progress rail — numbered markers joined by connector lines. */
 export interface StepIndicatorProps {
-  steps: WizardStep[];
+  steps: readonly WizardStep[];
   /** Id of the active step. */
   current: string;
-  completed?: Set<string>;
-  reachable?: Set<string>;
+  completed?: ReadonlySet<string>;
+  reachable?: ReadonlySet<string>;
   onJump?: (id: string) => void;
   'aria-label'?: string;
 }

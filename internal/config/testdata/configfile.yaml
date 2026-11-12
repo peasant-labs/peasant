@@ -1,0 +1,150 @@
+# Rows for the locked configuration file handle. Every row runs the real
+# OpenConfigFile / Read / Swap / Close against a file in a temporary directory.
+# "scenario" selects the assertion shape; the other fields are its inputs.
+#   read          open, Read, check the result
+#   swap          open, Read, let a second writer act, Swap, check the file
+#   contend       open one handle, try a second with a short deadline, close, retry
+#   close-twice   open, Close twice
+#   closed-handle open, Close, then Read and Swap
+requiredNames:
+  - absent-file-reads-defaults-and-no-bytes
+  - existing-file-reads-bytes-document-and-configuration
+  - read-refuses-more-than-one-document
+  - read-refuses-unparseable-file
+  - swap-writes-when-unchanged
+  - swap-refuses-changed-document-with-fresh-bytes
+  - swap-refuses-file-that-appeared
+  - swap-refuses-file-that-vanished
+  - swap-refuses-invalid-replacement-and-leaves-file
+  - second-handle-waits-then-takes-the-lock-after-close
+  - close-is-idempotent
+  - closed-handle-refuses-read-and-swap
+cases:
+  - name: absent-file-reads-defaults-and-no-bytes
+    scenario: read
+    absent: true
+    want:
+      bytesNil: true
+      documentEmpty: true
+      redactionLevel: standard
+  - name: existing-file-reads-bytes-document-and-configuration
+    scenario: read
+    file: |
+      # kept comment
+      version: 1
+      redaction:
+        level: standard
+    want:
+      documentEmpty: false
+      redactionLevel: standard
+  - name: read-refuses-more-than-one-document
+    scenario: read
+    file: |
+      version: 1
+      ---
+      version: 1
+    want:
+      readError: more than one YAML document
+  - name: read-refuses-unparseable-file
+    scenario: read
+    file: |
+      version: 1
+      redaction:
+        level: not-a-level
+    want:
+      readError: unknown redaction level
+  - name: swap-writes-when-unchanged
+    scenario: swap
+    file: |
+      version: 1
+    replacement: |
+      version: 1
+      redaction:
+        level: standard
+    want:
+      swapOK: true
+      fileEquals: |
+        version: 1
+        redaction:
+          level: standard
+  - name: swap-refuses-changed-document-with-fresh-bytes
+    scenario: swap
+    file: |
+      version: 1
+    concurrent:
+      write: |
+        version: 1
+        # another writer
+    replacement: |
+      version: 1
+      redaction:
+        level: standard
+    want:
+      swapChanged: true
+      fresh: |
+        version: 1
+        # another writer
+      fileEquals: |
+        version: 1
+        # another writer
+  - name: swap-refuses-file-that-appeared
+    scenario: swap
+    absent: true
+    concurrent:
+      write: |
+        version: 1
+    replacement: |
+      version: 1
+      redaction:
+        level: standard
+    want:
+      swapChanged: true
+      fresh: |
+        version: 1
+      fileEquals: |
+        version: 1
+  - name: swap-refuses-file-that-vanished
+    scenario: swap
+    file: |
+      version: 1
+    concurrent:
+      remove: true
+    replacement: |
+      version: 1
+    want:
+      swapChanged: true
+      freshNil: true
+      fileAbsent: true
+  - name: swap-refuses-invalid-replacement-and-leaves-file
+    scenario: swap
+    file: |
+      version: 1
+    replacement: |
+      version: 1
+      redaction:
+        level: not-a-level
+    want:
+      swapError: unknown redaction level
+      fileEquals: |
+        version: 1
+  - name: second-handle-waits-then-takes-the-lock-after-close
+    scenario: contend
+    file: |
+      version: 1
+    want:
+      secondRefusedWhileHeld: true
+      secondOpensAfterClose: true
+  - name: close-is-idempotent
+    scenario: close-twice
+    file: |
+      version: 1
+    want:
+      closeTwiceOK: true
+      secondOpensAfterClose: true
+  - name: closed-handle-refuses-read-and-swap
+    scenario: closed-handle
+    file: |
+      version: 1
+    want:
+      readError: lock was already released
+      swapError: lock was already released

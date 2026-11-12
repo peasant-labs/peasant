@@ -1,0 +1,452 @@
+# Document diff cases. Every expected hunk below was checked against
+# `diff -U3` on the same two documents: the same ranges, the same line numbers,
+# the same order of removed and added lines. "before" and "after" are the
+# document bytes; an empty "before" is an absent file.
+#
+# A line is {type, oldNo, newNo, text}. oldNo is absent on an added line and
+# newNo is absent on a removed line, exactly as the contract's review diff
+# omits a side that has no number.
+#
+# "limits" overrides the default bound for one scenario; a field left out keeps
+# its default (40 hunks, 400 lines, 262144 bytes). "variants" run the same
+# production function over other documents and bounds, so one named row can pin
+# several edges of the same rule.
+requiredNames:
+  - changed-scalar
+  - added-key
+  - removed-key
+  - reordered-key
+  - comment-only-change
+  - absent-file-all-add
+  - over-limit-truncated
+  - exact-hunk-headers-and-line-numbers
+  - output-is-hunks-never-rendered-text
+  - one-field-rerun-is-a-one-line-hunk
+cases:
+  - name: changed-scalar
+    before: |
+      version: 1
+      redaction:
+        level: standard
+      push:
+        visibility: private
+    after: |
+      version: 1
+      redaction:
+        level: standard
+      push:
+        visibility: group
+    want:
+      hunks:
+        - header: "-2,4 +2,4"
+          lines:
+            - {type: ctx, oldNo: 2, newNo: 2, text: "redaction:"}
+            - {type: ctx, oldNo: 3, newNo: 3, text: "  level: standard"}
+            - {type: ctx, oldNo: 4, newNo: 4, text: "push:"}
+            - {type: del, oldNo: 5, text: "  visibility: private"}
+            - {type: add, newNo: 5, text: "  visibility: group"}
+    variants:
+      # A last line with no newline is not the same line as one with it.
+      - note: only the final newline differs
+        before: "a: 1\nb: 2"
+        after: "a: 1\nb: 2\n"
+        want:
+          hunks:
+            - header: "-1,2 +1,2"
+              lines:
+                - {type: ctx, oldNo: 1, newNo: 1, text: "a: 1"}
+                - {type: del, oldNo: 2, text: "b: 2"}
+                - {type: add, newNo: 2, text: "b: 2"}
+      - note: identical documents have no hunks
+        before: |
+          a: 1
+        after: |
+          a: 1
+        want:
+          hunks: []
+  - name: added-key
+    before: |
+      version: 1
+      redaction:
+        level: standard
+      push:
+        visibility: private
+    after: |
+      version: 1
+      redaction:
+        level: standard
+      push:
+        visibility: private
+        license: CC0-1.0
+    want:
+      hunks:
+        - header: "-3,3 +3,4"
+          lines:
+            - {type: ctx, oldNo: 3, newNo: 3, text: "  level: standard"}
+            - {type: ctx, oldNo: 4, newNo: 4, text: "push:"}
+            - {type: ctx, oldNo: 5, newNo: 5, text: "  visibility: private"}
+            - {type: add, newNo: 6, text: "  license: CC0-1.0"}
+  - name: removed-key
+    before: |
+      version: 1
+      redaction:
+        level: standard
+      push:
+        visibility: private
+        license: CC0-1.0
+    after: |
+      version: 1
+      redaction:
+        level: standard
+      push:
+        visibility: private
+    want:
+      hunks:
+        - header: "-3,4 +3,3"
+          lines:
+            - {type: ctx, oldNo: 3, newNo: 3, text: "  level: standard"}
+            - {type: ctx, oldNo: 4, newNo: 4, text: "push:"}
+            - {type: ctx, oldNo: 5, newNo: 5, text: "  visibility: private"}
+            - {type: del, oldNo: 6, text: "  license: CC0-1.0"}
+  - name: reordered-key
+    before: |
+      push:
+        license: CC0-1.0
+        visibility: private
+    after: |
+      push:
+        visibility: private
+        license: CC0-1.0
+    want:
+      hunks:
+        - header: "-1,3 +1,3"
+          lines:
+            - {type: ctx, oldNo: 1, newNo: 1, text: "push:"}
+            - {type: del, oldNo: 2, text: "  license: CC0-1.0"}
+            - {type: ctx, oldNo: 3, newNo: 2, text: "  visibility: private"}
+            - {type: add, newNo: 3, text: "  license: CC0-1.0"}
+  - name: comment-only-change
+    before: |
+      push:
+        # keep local
+        sharePreference: ""
+    after: |
+      push:
+        # plan to publish later
+        sharePreference: ""
+    want:
+      hunks:
+        - header: "-1,3 +1,3"
+          lines:
+            - {type: ctx, oldNo: 1, newNo: 1, text: "push:"}
+            - {type: del, oldNo: 2, text: "  # keep local"}
+            - {type: add, newNo: 2, text: "  # plan to publish later"}
+            - {type: ctx, oldNo: 3, newNo: 3, text: "  sharePreference: \"\""}
+  - name: absent-file-all-add
+    before: ""
+    after: |
+      version: 1
+      redaction:
+        level: standard
+      push:
+        visibility: group
+    want:
+      hunks:
+        - header: "-0,0 +1,5"
+          lines:
+            - {type: add, newNo: 1, text: "version: 1"}
+            - {type: add, newNo: 2, text: "redaction:"}
+            - {type: add, newNo: 3, text: "  level: standard"}
+            - {type: add, newNo: 4, text: "push:"}
+            - {type: add, newNo: 5, text: "  visibility: group"}
+    variants:
+      # Removing every line is the mirror: no new range at all.
+      - note: every line removed
+        before: |
+          version: 1
+          redaction:
+            level: standard
+        after: ""
+        want:
+          hunks:
+            - header: "-1,3 +0,0"
+              lines:
+                - {type: del, oldNo: 1, text: "version: 1"}
+                - {type: del, oldNo: 2, text: "redaction:"}
+                - {type: del, oldNo: 3, text: "  level: standard"}
+  - name: over-limit-truncated
+    before: |
+      line01
+      line02
+      line03
+      line04
+      line05
+      line06
+      line07
+      line08
+      line09
+      line10
+      line11
+      line12
+      line13
+      line14
+      line15
+      line16
+      line17
+      line18
+      line19
+      line20
+      line21
+      line22
+      line23
+      line24
+      line25
+      line26
+      line27
+      line28
+      line29
+      line30
+      line31
+      line32
+      line33
+      line34
+      line35
+      line36
+      line37
+      line38
+      line39
+      line40
+    after: |
+      line01
+      line02
+      LINE03
+      line04
+      line05
+      line06
+      line07
+      line08
+      line09
+      line10
+      line11
+      line12
+      line13
+      line14
+      LINE15
+      line16
+      line17
+      line18
+      line19
+      line20
+      line21
+      line22
+      line23
+      line24
+      line25
+      line26
+      line27
+      line28
+      line29
+      line30
+      LINE31
+      line32
+      line33
+      line34
+      line35
+      line36
+      line37
+      line38
+      line39
+      line40
+    # Three changes far enough apart for three hunks: seven, eight and eight
+    # lines (each shows its removed and its added line).
+    want:
+      truncated: false
+      hunkHeaders: ["-1,6 +1,6", "-12,7 +12,7", "-28,7 +28,7"]
+      lineCount: 23
+    variants:
+      - note: the hunk bound keeps whole hunks and reports the cut
+        limits: {maxHunks: 1}
+        want:
+          truncated: true
+          hunkHeaders: ["-1,6 +1,6"]
+          lineCount: 7
+      - note: the line bound cuts inside a hunk and the header states the lines kept
+        limits: {maxLines: 12}
+        want:
+          truncated: true
+          hunkHeaders: ["-1,6 +1,6", "-12,4 +12,4"]
+          lineCount: 12
+      - note: a cut that leaves only context drops that hunk
+        limits: {maxLines: 10}
+        want:
+          truncated: true
+          hunkHeaders: ["-1,6 +1,6"]
+          lineCount: 7
+      - note: a document over the byte bound is not compared
+        limits: {maxBytes: 10}
+        want:
+          truncated: true
+          hunkHeaders: []
+          lineCount: 0
+      # Two documents of 2100 lines with nothing in common are past the
+      # comparison table cap, so the changed middle is reported as removed and
+      # then added. The line bound then cuts the first hunk at 400 lines.
+      - note: past the table cap the middle is removed then added
+        generate: {lines: 2100}
+        want:
+          truncated: true
+          hunkHeaders: ["-1,400 +0,0"]
+          lineCount: 400
+      - note: a bound that cannot hold anything is refused
+        limits: {maxHunks: 0}
+        want:
+          error: must all be positive
+  - name: exact-hunk-headers-and-line-numbers
+    before: |
+      version: 1
+      redaction:
+        level: standard
+      output:
+        basePath: /data
+        stalenessThresholdSec: 60
+      village:
+        url: https://village.example
+      push:
+        method: all
+        visibility: private
+        sharePreference: ""
+        license: ""
+      selection:
+        mode: all
+        autoIngestNewBranches: true
+      display:
+        theme: dark
+      daemon:
+        projectMode: opt-in
+    after: |
+      version: 1
+      redaction:
+        level: minimal
+      output:
+        basePath: /data
+        stalenessThresholdSec: 60
+      village:
+        url: https://village.example
+      push:
+        method: all
+        visibility: private
+        sharePreference: ""
+        license: CC0-1.0
+      selection:
+        mode: all
+        autoIngestNewBranches: true
+      display:
+        theme: dark
+      daemon:
+        projectMode: opt-in
+      write:
+        mode: fast
+    want:
+      hunks:
+        - header: "-1,6 +1,6"
+          lines:
+            - {type: ctx, oldNo: 1, newNo: 1, text: "version: 1"}
+            - {type: ctx, oldNo: 2, newNo: 2, text: "redaction:"}
+            - {type: del, oldNo: 3, text: "  level: standard"}
+            - {type: add, newNo: 3, text: "  level: minimal"}
+            - {type: ctx, oldNo: 4, newNo: 4, text: "output:"}
+            - {type: ctx, oldNo: 5, newNo: 5, text: "  basePath: /data"}
+            - {type: ctx, oldNo: 6, newNo: 6, text: "  stalenessThresholdSec: 60"}
+        - header: "-10,7 +10,7"
+          lines:
+            - {type: ctx, oldNo: 10, newNo: 10, text: "  method: all"}
+            - {type: ctx, oldNo: 11, newNo: 11, text: "  visibility: private"}
+            - {type: ctx, oldNo: 12, newNo: 12, text: "  sharePreference: \"\""}
+            - {type: del, oldNo: 13, text: "  license: \"\""}
+            - {type: add, newNo: 13, text: "  license: CC0-1.0"}
+            - {type: ctx, oldNo: 14, newNo: 14, text: "selection:"}
+            - {type: ctx, oldNo: 15, newNo: 15, text: "  mode: all"}
+            - {type: ctx, oldNo: 16, newNo: 16, text: "  autoIngestNewBranches: true"}
+        - header: "-18,3 +18,5"
+          lines:
+            - {type: ctx, oldNo: 18, newNo: 18, text: "  theme: dark"}
+            - {type: ctx, oldNo: 19, newNo: 19, text: "daemon:"}
+            - {type: ctx, oldNo: 20, newNo: 20, text: "  projectMode: opt-in"}
+            - {type: add, newNo: 21, text: "write:"}
+            - {type: add, newNo: 22, text: "  mode: fast"}
+  - name: output-is-hunks-never-rendered-text
+    before: |
+      sources:
+        - a
+        - b
+    after: |
+      sources:
+        - a
+        - c
+    # The diff glyph is a line type, never a prefix on the text. A text that
+    # itself starts with "- " (a YAML list item) arrives verbatim.
+    want:
+      structuredOnly: true
+      hunks:
+        - header: "-1,3 +1,3"
+          lines:
+            - {type: ctx, oldNo: 1, newNo: 1, text: "sources:"}
+            - {type: ctx, oldNo: 2, newNo: 2, text: "  - a"}
+            - {type: del, oldNo: 3, text: "  - b"}
+            - {type: add, newNo: 3, text: "  - c"}
+  # A rerun that changes one field of a hand-written file: because the save keeps
+  # the file's blank lines and comment spacing, the diff is the one changed line
+  # with its context and no whitespace-only change anywhere else.
+  - name: one-field-rerun-is-a-one-line-hunk
+    before: |
+      # peasant configuration, edited by hand
+      version: 1
+
+      # where transcripts go
+      output:
+        basePath: /data/peasant   # keep this comment
+        stalenessThresholdSec: 90
+
+      village:
+        url: https://village.example   # self-hosted
+
+      push:
+        # who may read a push
+        visibility: private
+        license: ""
+        method: all
+      selection:
+        mode: all
+        autoIngestNewBranches: true
+    after: |
+      # peasant configuration, edited by hand
+      version: 1
+
+      # where transcripts go
+      output:
+        basePath: /data/peasant   # keep this comment
+        stalenessThresholdSec: 90
+
+      village:
+        url: https://village.example   # self-hosted
+
+      push:
+        # who may read a push
+        visibility: private
+        license: CC0-1.0
+        method: all
+      selection:
+        mode: all
+        autoIngestNewBranches: true
+    want:
+      hunks:
+        - header: "-12,7 +12,7"
+          lines:
+            - {type: ctx, oldNo: 12, newNo: 12, text: "push:"}
+            - {type: ctx, oldNo: 13, newNo: 13, text: "  # who may read a push"}
+            - {type: ctx, oldNo: 14, newNo: 14, text: "  visibility: private"}
+            - {type: del, oldNo: 15, text: "  license: \"\""}
+            - {type: add, newNo: 15, text: "  license: CC0-1.0"}
+            - {type: ctx, oldNo: 16, newNo: 16, text: "  method: all"}
+            - {type: ctx, oldNo: 17, newNo: 17, text: "selection:"}
+            - {type: ctx, oldNo: 18, newNo: 18, text: "  mode: all"}

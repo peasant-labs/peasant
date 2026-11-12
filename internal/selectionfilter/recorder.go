@@ -30,7 +30,8 @@ type selectionConflict struct {
 
 // ConflictRecorder records each withheld selection conflict once. Notice writes
 // the same lines the harvest command prints. Diagnostics returns those lines
-// for a caller that has no stderr, such as the web ingest.
+// for a caller that has no stderr, such as the web ingest, and Summary is the
+// one sentence that web ingest says about them.
 type ConflictRecorder struct {
 	conflicts []selectionConflict
 }
@@ -70,6 +71,23 @@ func (r *ConflictRecorder) Diagnostics(configPath string) []string {
 		lines = append(lines, fmt.Sprintf("warning: session %s (%s) was withheld during ingest because project selection entries %s disagree on branch %q in %q; the session was not ingested; edit one entry or add the branch", conflict.session.SessionID, conflict.session.Harness, describeEntries(conflict.entries), conflict.branch, configPath))
 	}
 	return lines
+}
+
+// Summary is the one sentence a finished import says beside its counts when the
+// saved selection withheld sessions because its rules disagree: how many, and
+// where to fix it. The lines that name each session are Diagnostics; the import
+// runs after the setup's save has answered, so they are not known when the
+// save's own answer is written, and this sentence is the way they reach the
+// setup page. It is empty when nothing was withheld.
+func (r *ConflictRecorder) Summary(configPath string) string {
+	switch withheld := r.Recorded(); {
+	case withheld <= 0:
+		return ""
+	case withheld == 1:
+		return fmt.Sprintf("1 session was left out because the selection rules for its project disagree on its branch; edit one entry or add the branch in %s, then import again", configPath)
+	default:
+		return fmt.Sprintf("%d sessions were left out because the selection rules for their projects disagree on a branch; edit one entry or add the branch in %s, then import again", withheld, configPath)
+	}
 }
 
 func (r *ConflictRecorder) record(conflict selectionConflict, seen map[ingest.SessionID]bool) {
