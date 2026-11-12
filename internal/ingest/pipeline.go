@@ -858,18 +858,23 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	// has nothing to discover.
 	discoverProfileStart := time.Now()
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageDiscover})
+	discoveryProgress := &pipelineDiscoveryProgress{state: prog}
+	var discoveryReporter DiscoveryProgress
+	if prog != nil {
+		discoveryReporter = discoveryProgress
+	}
 	var allSessions []DiscoveredSession
 	var duplicateResults []SessionResult
 	if located != nil {
 		allSessions = located.sessions
 		duplicateResults = located.refusals
 	} else {
-		allSessions, err = p.discover(ctx)
+		allSessions, err = p.discover(ctx, discoveryReporter)
 		if ctx.Err() != nil {
 			err = ctx.Err()
 		}
 		if err != nil {
-			emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiscover, Err: err})
+			emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiscover, Done: discoveryProgress.done, Total: discoveryProgress.total, Err: err})
 			p.recordIndexProfileStage(StageDiscover, discoverProfileStart, 0, 0)
 			if ctx.Err() != nil || !p.hasUsableRetainedSession(ctx) {
 				if ctx.Err() == nil && p.hasStoredMetricRefresh() {
@@ -887,7 +892,11 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 			p.reportDiagnostic(DiagnosticEntry{ErrorType: "native_discovery_unavailable", Location: "native discovery", Message: err.Error() + "; continuing maintenance of usable stored sessions", Remediation: "Restore access to the configured harness sources and retry harvest to acquire unseen native changes."})
 		}
 	}
-	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiscover, Done: len(allSessions), Total: len(allSessions)})
+	discoveryDone, discoveryTotal := len(allSessions), len(allSessions)
+	if discoveryProgress.reported {
+		discoveryDone, discoveryTotal = discoveryProgress.done, discoveryProgress.total
+	}
+	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiscover, Done: discoveryDone, Total: discoveryTotal})
 	p.recordIndexProfileStage(StageDiscover, discoverProfileStart, len(allSessions), len(allSessions))
 	prepareProfileStart := time.Now()
 	if p.config.PrepareSessionFilter != nil {
@@ -2929,7 +2938,7 @@ func collectSourcePaths(sources map[Harness]SourceConfig) *string {
 // discover runs all enabled provider adapters and collects discovered sessions.
 // If some providers succeed and others fail, partial results are returned.
 // Only returns an error if ALL providers fail.
-func (p *Pipeline) discover(ctx context.Context) ([]DiscoveredSession, error) {
+func (p *Pipeline) discover(ctx context.Context, progress DiscoveryProgress) ([]DiscoveredSession, error) {
 	var all []DiscoveredSession
 	var providerErrors []error
 	enabledCount := 0
@@ -2940,6 +2949,9 @@ func (p *Pipeline) discover(ctx context.Context) ([]DiscoveredSession, error) {
 		}
 		enabledCount++
 		adapter := factory(p.fs, p.git, p.salt)
+		if progress != nil {
+			AttachDiscoveryProgress(adapter, progress)
+		}
 		// The local store doubles as the discovery evidence cache, so an
 		// unchanged transcript is never read and parsed again.
 		if cache, ok := p.store.(ClaudeEvidenceCache); ok && !p.config.DryRun {

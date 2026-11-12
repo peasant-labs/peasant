@@ -53,7 +53,7 @@ func TestCaptureFixtureRejectsTrailingDocuments(t *testing.T) {
 // missing sheet even without a bare sheet-count guard: deleting the "push"
 // sheet block must fail decode with a message naming the missing sheet.
 func TestCaptureFixtureGuardsRequiredSheetDeletion(t *testing.T) {
-	old := []byte("  - name: push\n    kind: push\n    title: \"mounted push wizard: start, selection, published-transcript preview, consent, receipt, and keyboard help in both themes\"\n    theme: dark\n    viewport: {width: 1800, height: 7840}\n")
+	old := []byte("  - name: push\n    kind: push\n    title: \"mounted push wizard: start, selection, published-transcript preview, consent, receipt, and keyboard help in both themes\"\n    theme: dark\n    viewport: {width: 1800, height: 7900}\n")
 	if count := bytes.Count(captureFixtureData, old); count != 1 {
 		t.Fatalf("push-sheet mutation source occurs %d times, want exactly one", count)
 	}

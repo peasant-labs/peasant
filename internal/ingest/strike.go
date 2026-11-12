@@ -21,12 +21,14 @@ import (
 
 // StrikeAdapter discovers and extracts metadata from Strike JSONL sessions.
 type StrikeAdapter struct {
+	discoveryProgressAttachment
 	fs   FileSystem
 	git  GitResolver
 	salt salt.Salt
 }
 
 var _ SourceAdapter = (*StrikeAdapter)(nil)
+var _ DiscoveryProgressReporting = (*StrikeAdapter)(nil)
 var _ SessionLocator = (*StrikeAdapter)(nil)
 
 // strikeAncestorProbeKind is this adapter's one declared ancestor-probe kind:
@@ -555,6 +557,7 @@ type strikeSource struct {
 // source cannot describe one session two ways.
 func (a *StrikeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]DiscoveredSession, error) {
 	if !cfg.Enabled {
+		discoveryTotal(a.progress, HarnessStrike, 0)
 		return nil, nil
 	}
 
@@ -566,7 +569,8 @@ func (a *StrikeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 		}
 		sources = append(sources, enumerated...)
 	}
-	return a.buildStrikeSessions(ctx, sources)
+	discoveryTotal(a.progress, HarnessStrike, len(sources))
+	return a.buildStrikeSessions(ctx, sources, a.progress)
 }
 
 // enumerateStrikeRoot walks one configured root and returns the transcript files
@@ -685,7 +689,7 @@ func strikeParent(sidecar strikeSidecar) *SessionID {
 // The build performs every stat and read discovery needs, so it checks the
 // caller's context itself: a cancel after enumeration must surface as
 // ctx.Err() instead of being swallowed through the rest of the tree.
-func (a *StrikeAdapter) buildStrikeSessions(ctx context.Context, sources []strikeSource) ([]DiscoveredSession, error) {
+func (a *StrikeAdapter) buildStrikeSessions(ctx context.Context, sources []strikeSource, progress DiscoveryProgress) ([]DiscoveredSession, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -693,7 +697,10 @@ func (a *StrikeAdapter) buildStrikeSessions(ctx context.Context, sources []strik
 	childParents := make(map[SessionID]SessionID)
 	loaded := make([]strikeSource, 0, len(sources))
 	sessions := make([]DiscoveredSession, 0, len(sources))
-	for _, source := range sources {
+	for i, source := range sources {
+		if i > 0 {
+			discoveryAdvance(progress, HarnessStrike)
+		}
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -707,6 +714,9 @@ func (a *StrikeAdapter) buildStrikeSessions(ctx context.Context, sources []strik
 		}
 		loaded = append(loaded, filled)
 		sessions = append(sessions, session)
+	}
+	if len(sources) > 0 {
+		discoveryAdvance(progress, HarnessStrike)
 	}
 	// A cancel during the last source's reads has no next iteration to catch
 	// it, so the loop's completion is checked as well.
@@ -862,7 +872,7 @@ func (a *StrikeAdapter) DiscoverSessionAt(ctx context.Context, cfg SourceConfig,
 	sources = append(sources, named...)
 	unreadable := a.appendStrikeStoredChildren(cfg, &sources, at)
 
-	sessions, err := a.buildStrikeSessions(ctx, sources)
+	sessions, err := a.buildStrikeSessions(ctx, sources, nil)
 	if err != nil {
 		return LocatedBuild{}, err
 	}

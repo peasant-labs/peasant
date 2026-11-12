@@ -28,12 +28,14 @@ const (
 
 // CursorAdapter discovers and extracts metadata from Cursor agent JSONL transcripts.
 type CursorAdapter struct {
+	discoveryProgressAttachment
 	fs   FileSystem
 	git  GitResolver
 	salt salt.Salt
 }
 
 var _ SourceAdapter = (*CursorAdapter)(nil)
+var _ DiscoveryProgressReporting = (*CursorAdapter)(nil)
 var _ SessionLocator = (*CursorAdapter)(nil)
 
 // NewCursorAdapter creates a CursorAdapter with injected dependencies.
@@ -178,12 +180,19 @@ type cursorSource struct {
 // two ways.
 func (a *CursorAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]DiscoveredSession, error) {
 	var sessions []DiscoveredSession
+	groups := make([][]cursorSource, 0, len(cfg.Paths))
+	total := 0
 	for _, basePath := range cfg.Paths {
 		sources, err := a.enumerateCursorRoot(ctx, basePath)
 		if err != nil {
 			return nil, err
 		}
-		built, _ := a.buildCursorSessions(sources)
+		groups = append(groups, sources)
+		total += len(sources)
+	}
+	discoveryTotal(a.progress, HarnessCursor, total)
+	for _, sources := range groups {
+		built, _ := a.buildCursorSessions(sources, a.progress)
 		sessions = append(sessions, built...)
 	}
 	return sessions, nil
@@ -404,7 +413,7 @@ func (a *CursorAdapter) DiscoverSessionAt(ctx context.Context, cfg SourceConfig,
 	}
 	sources = append(sources, children...)
 	unreadable := a.appendCursorStoredChildren(&sources, cfg, at)
-	sessions, built := a.buildCursorSessions(sources)
+	sessions, built := a.buildCursorSessions(sources, nil)
 	members := make([]LocatedMember, 0, len(sources)+len(unreadable))
 	for index, enumerated := range sources {
 		builtIndex := built[index]
@@ -574,11 +583,14 @@ func cursorAncestorProbe(parsed cursorSourcePath) *AncestorProbe {
 // source cannot describe the same session two ways. built[i] is the index in
 // the returned sessions for sources[i], or -1 when the file was gone by the
 // time the build read it.
-func (a *CursorAdapter) buildCursorSessions(sources []cursorSource) ([]DiscoveredSession, []int) {
+func (a *CursorAdapter) buildCursorSessions(sources []cursorSource, progress DiscoveryProgress) ([]DiscoveredSession, []int) {
 	built := make([]int, len(sources))
 	rootIndex := make(map[SessionID]int, len(sources))
 	sessions := make([]DiscoveredSession, 0, len(sources))
 	for index, source := range sources {
+		if index > 0 {
+			discoveryAdvance(progress, HarnessCursor)
+		}
 		built[index] = -1
 		session, ok := a.buildCursorSession(source)
 		if !ok {
@@ -589,6 +601,9 @@ func (a *CursorAdapter) buildCursorSessions(sources []cursorSource) ([]Discovere
 		if source.parent == nil {
 			rootIndex[source.id] = len(sessions) - 1
 		}
+	}
+	if len(sources) > 0 {
+		discoveryAdvance(progress, HarnessCursor)
 	}
 	for index := range sessions {
 		if sessions[index].ParentUUID == nil {

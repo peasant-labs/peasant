@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
+	"github.com/peasant-labs/peasant/internal/tui/discoveryprogress"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/harvestprogress"
 	"github.com/peasant-labs/peasant/internal/tui/ingestprogress"
@@ -141,6 +143,23 @@ func renderSheets(document captureDocument) ([]renderedSheet, error) {
 		pullProgressCaptures[capture.Name] = terminalCapture{name: capture.Name, view: view}
 	}
 
+	discoveryCaptures := make(map[string]terminalCapture, len(document.DiscoveryProgressCaptures))
+	discoveryStates := make(map[discoveryProgressState]discoveryProgressStateFixture, len(document.DiscoveryProgressStates))
+	for _, state := range document.DiscoveryProgressStates {
+		discoveryStates[state.Key] = state
+	}
+	for _, capture := range document.DiscoveryProgressCaptures {
+		state := discoveryStates[capture.State]
+		view, renderErr := renderDiscoveryProgressCapture(capture, state)
+		if renderErr != nil {
+			return nil, renderErr
+		}
+		if err := validateTerminalCapture(capture.Name, view, capture.Width, capture.Height, state.WantContains, state.WantAbsent); err != nil {
+			return nil, err
+		}
+		discoveryCaptures[capture.Name] = terminalCapture{name: capture.Name, view: view}
+	}
+
 	sheets := make([]renderedSheet, 0, len(document.Sheets))
 	for _, sheet := range document.Sheets {
 		var content string
@@ -156,6 +175,8 @@ func renderSheets(document captureDocument) ([]renderedSheet, error) {
 			content, rows, err = composeIngestProgressSheet(sheet, document.IngestProgressStates, document.IngestProgressCaptures, ingestProgressCaptures)
 		case sheetKindPullProgress:
 			content, rows, err = composePullProgressSheet(sheet, document.PullProgressStates, document.PullProgressCaptures, pullProgressCaptures)
+		case sheetKindDiscovery:
+			content, rows, err = composeDiscoveryProgressSheet(sheet, document.DiscoveryProgressStates, document.DiscoveryProgressCaptures, discoveryCaptures)
 		case sheetKindCompletion:
 			content, rows, err = renderCompletionSheet(workingDirectory, sheet, document.Completion)
 		default:
@@ -167,6 +188,34 @@ func renderSheets(document captureDocument) ([]renderedSheet, error) {
 		sheets = append(sheets, renderedSheet{fixture: sheet, ansi: content, rows: rows})
 	}
 	return sheets, nil
+}
+
+// renderDiscoveryProgressCapture mounts the same spinner that kickstart writes
+// to stderr. Synthetic callbacks stand in for a scanner: the phase-only case
+// deliberately receives no count callback after the previous phase resets.
+func renderDiscoveryProgressCapture(capture discoveryProgressCaptureFixture, state discoveryProgressStateFixture) (string, error) {
+	spinner := discoveryprogress.New(io.Discard, false)
+	spinner.SetPhase("previous")
+	spinner.SetProgress(1, 2)
+	spinner.SetDiscoveryReminedCount(1)
+	spinner.SetPhase(state.Phase)
+	if state.Total > 0 {
+		spinner.SetProgress(state.Done, state.Total)
+	}
+	if state.Remined != nil {
+		spinner.SetDiscoveryReminedCount(*state.Remined)
+	}
+	view := spinner.View()
+	if lipgloss.Height(view) > capture.Height || lipgloss.Width(view) > capture.Width {
+		return "", fmt.Errorf("discovery spinner overflows capture %q", capture.Name)
+	}
+	// The CLI's spinner is an unstyled single line on the user's terminal. The
+	// panel supplies that terminal's theme and remaining viewport without
+	// changing the spinner's content or concealing an overflow.
+	canvas := kit.NewPanel(captureThemeValue(capture.Theme))
+	canvas.SetSize(capture.Width, capture.Height)
+	canvas.Rendered(view)
+	return canvas.View(), nil
 }
 
 func renderIngestProgressCapture(workingDirectory string, index int, capture ingestProgressCaptureFixture) (string, error) {
@@ -293,7 +342,7 @@ func renderGuidedCapture(workingDirectory string, index int, capture guidedCaptu
 	})
 	var selected settings.Section
 	for _, section := range registry.Sections {
-		if section.Key == string(capture.Section) {
+		if section.Key == capture.Section.String() {
 			selected = section
 			break
 		}
@@ -902,6 +951,53 @@ func composePullProgressSheet(
 		}
 	}
 	return renderContactSheet(sheet.Title, rows), meta, nil
+}
+
+func composeDiscoveryProgressSheet(
+	sheet sheetFixture,
+	states []discoveryProgressStateFixture,
+	cases []discoveryProgressCaptureFixture,
+	captures map[string]terminalCapture,
+) (string, []sheetRow, error) {
+	rows := make([]string, 0, len(states)*2)
+	meta := make([]sheetRow, 0, len(states)*2)
+	for _, state := range states {
+		for _, name := range []captureTheme{captureThemeDark, captureThemeLight} {
+			left, err := discoveryProgressCaptureFor(cases, captures, state.Key, name, 80, 24)
+			if err != nil {
+				return "", nil, err
+			}
+			right, err := discoveryProgressCaptureFor(cases, captures, state.Key, name, 120, 40)
+			if err != nil {
+				return "", nil, err
+			}
+			row := joinCapturePair(left, right)
+			rows = append(rows, row)
+			meta = append(meta, sheetRow{
+				label: fmt.Sprintf("discovery progress state %q (%s)", state.Key, name),
+				lines: strings.Count(row, "\n") + 1,
+			})
+		}
+	}
+	return renderContactSheet(sheet.Title, rows), meta, nil
+}
+
+func discoveryProgressCaptureFor(
+	cases []discoveryProgressCaptureFixture,
+	captures map[string]terminalCapture,
+	state discoveryProgressState,
+	name captureTheme,
+	width, height int,
+) (terminalCapture, error) {
+	for _, capture := range cases {
+		if capture.State == state &&
+			capture.Theme == name &&
+			capture.Width == width &&
+			capture.Height == height {
+			return captures[capture.Name], nil
+		}
+	}
+	return terminalCapture{}, fmt.Errorf("compose discovery progress sheet: no capture for %s/%s/%dx%d", state, name, width, height)
 }
 
 func pullProgressCaptureFor(

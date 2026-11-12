@@ -22,6 +22,50 @@ type SourceAdapter interface {
 	ExtractMetadata(ctx context.Context, session DiscoveredSession) (*UnifiedMetadata, error)
 }
 
+// DiscoveryProgress reports the number of source files enumerated and built
+// by a Discover call. The total precedes every advance; an advance includes a
+// source that disappeared or was rejected while it was being built. An adapter
+// may call the reporter concurrently, but all calls must finish before Discover
+// returns; callers may read or replace the reporter after that point.
+type DiscoveryProgress interface {
+	DiscoveryTotal(harness Harness, total int)
+	DiscoveryAdvance(harness Harness, delta int)
+}
+
+// DiscoveryProgressReporting is an optional adapter capability. Attaching a
+// reporter does not change discovery results or require other adapters to report.
+type DiscoveryProgressReporting interface {
+	SetDiscoveryProgress(DiscoveryProgress)
+}
+
+// AttachDiscoveryProgress attaches a reporter to adapters that support it.
+// Passing nil removes a reporter from a supporting adapter.
+func AttachDiscoveryProgress(adapter SourceAdapter, progress DiscoveryProgress) {
+	if capable, ok := adapter.(DiscoveryProgressReporting); ok {
+		capable.SetDiscoveryProgress(progress)
+	}
+}
+
+// discoveryProgressAttachment supplies the optional capability to adapters
+// without changing their constructors or their Discover signatures.
+type discoveryProgressAttachment struct{ progress DiscoveryProgress }
+
+func (a *discoveryProgressAttachment) SetDiscoveryProgress(progress DiscoveryProgress) {
+	a.progress = progress
+}
+
+func discoveryTotal(progress DiscoveryProgress, harness Harness, total int) {
+	if progress != nil {
+		progress.DiscoveryTotal(harness, total)
+	}
+}
+
+func discoveryAdvance(progress DiscoveryProgress, harness Harness) {
+	if progress != nil {
+		progress.DiscoveryAdvance(harness, 1)
+	}
+}
+
 // TranscriptMaterializer converts a typed provider source into the managed
 // transcript bytes Peasant stores. Most adapters ingest a transcript file
 // directly and do not implement this interface. It exists for sources such as
@@ -107,6 +151,8 @@ type DiscoveryStatistics interface {
 	// the interface: nothing here stops a caller from reading the count after a
 	// second Discover has already overwritten it. Read it immediately after the
 	// Discover whose work it is meant to describe.
+	// During a progress callback, an adapter may also expose the records mined
+	// so far; the final post-discovery value remains authoritative.
 	ReminedCount() int
 }
 
