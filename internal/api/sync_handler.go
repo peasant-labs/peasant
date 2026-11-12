@@ -1160,9 +1160,9 @@ type ingestStart struct {
 // publish something before the import can speak, such as the end of a saved
 // setup session, launches after it has.
 //
-// preflight refuses to claim, with the reason, when the configuration the import
-// would run under cannot be applied: an invalid saved selection or a redaction
-// level this version cannot apply. preflight false keeps the route's
+// preflight refuses to claim, with the reason, when the import could not start
+// (see ingestPreflight): an invalid saved selection, a redaction level this
+// version cannot apply, or a search index that needs its one-time repair. preflight false keeps the route's
 // long-standing behavior: such a configuration is reported by the run, in the
 // status route, not by the request that started it.
 func (h *syncHandler) reserveIngest(preflight bool) (ingestStart, func(observe func(schema.LocalKickstartIngest)), error) {
@@ -1171,7 +1171,7 @@ func (h *syncHandler) reserveIngest(preflight bool) (ingestStart, func(observe f
 		return ingestStart{}, nil, errIngestNoConfig
 	}
 	if preflight {
-		if err := checkIngestable(cfg); err != nil {
+		if err := h.ingestPreflight(cfg); err != nil {
 			return ingestStart{}, nil, err
 		}
 	}
@@ -1220,6 +1220,27 @@ func (h *syncHandler) ingestWire() schema.LocalKickstartIngest {
 		return schema.LocalKickstartIngest{State: schema.LocalKickstartIngestFailed, Error: message}
 	}
 	return schema.LocalKickstartIngest{State: schema.LocalKickstartIngestIdle, Note: h.ingestNote, New: h.ingestWritten.New, Updated: h.ingestWritten.Updated}
+}
+
+// ingestPreflight is the one place that decides whether an import can start. It
+// runs the checks the run itself makes before it reads a source or opens the
+// store, so a caller that asks first is told what the run would be told, and
+// nothing is claimed for an import that would refuse at once.
+func (h *syncHandler) ingestPreflight(cfg *config.Config) error {
+	if err := checkIngestable(cfg); err != nil {
+		return err
+	}
+	return h.refuseStaleSearchIndex()
+}
+
+// refuseStaleSearchIndex refuses an import while the store's search index
+// still needs its one-time repair. A server-triggered run never pays that
+// repair: there is no terminal watching it. The refusal names the terminal
+// command that performs it, and the store is not opened. This is defensive: a
+// running server already opened the store, so the refusal means the store
+// changed under the server or the server started before the repair.
+func (h *syncHandler) refuseStaleSearchIndex() error {
+	return store.RefuseStaleSearchRebuild(false, string(h.dbPath()))
 }
 
 // checkIngestable refuses a configuration the import cannot apply, before any
@@ -1582,14 +1603,11 @@ func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *
 	if err != nil {
 		return nil, err
 	}
-	// A server-triggered run never pays the one-time search index repair:
-	// there is no terminal watching it. Refuse on residue with the terminal
-	// command that performs the repair instead of opening. This gate is
-	// defensive: a running server already opened the store, so reaching it
-	// means the store changed under the server or the server started before
-	// the repair.
-	if err := store.RefuseStaleSearchRebuild(false, string(h.dbPath())); err != nil {
-		return nil, nil, nil, err
+	// The run asks again at the point it would open the store: a run that was
+	// not asked first (the import route, a one-session re-index) is refused
+	// here, and so is a store that changed since the caller asked.
+	if err := h.refuseStaleSearchIndex(); err != nil {
+		return nil, err
 	}
 	db, err := store.Open(string(h.dbPath()), append(storeOptions, store.WithWriteConfig(cfg.Write))...)
 	if err != nil {

@@ -53,7 +53,12 @@ func TestSyncIngestRefusesResidue(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := syncResidueHandler(t, dataHome, nil)
-	_, _, _, err = h.newIngestPipeline(ingest.NewProgressState(), nil)
+	built, err := h.newIngestPipeline(ingest.NewProgressState(), nil)
+	if built != nil {
+		// A pipeline was built, so the store was opened: release it before failing.
+		built.release()
+		t.Fatal("web ingest built a pipeline over an affected store; it must refuse before opening the database")
+	}
 	if err == nil {
 		t.Fatal("web ingest opened an affected store; it must refuse instead of rebuilding in the server")
 	}
@@ -87,7 +92,10 @@ func TestSyncIngestProceedsWithoutResidue(t *testing.T) {
 	}
 	seedSyncResidueDB(t, string(dbPath), false)
 	h := syncResidueHandler(t, dataHome, nil)
-	_, _, _, err := h.newIngestPipeline(ingest.NewProgressState(), nil)
+	built, err := h.newIngestPipeline(ingest.NewProgressState(), nil)
+	if built != nil {
+		defer built.release()
+	}
 	var refusal *store.SearchResidueRebuildError
 	if errors.As(err, &refusal) {
 		t.Fatalf("clean store refused: %v", err)
