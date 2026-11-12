@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"errors"
-	"net/http"
 	"strings"
 	"unicode/utf8"
 
@@ -64,7 +63,7 @@ func (st *kickstartSessions) previewTarget(id, nodeID string) (kickstartPreviewT
 		}
 		return target, nil
 	}
-	return kickstartPreviewTarget{}, newKickstartError(http.StatusNotFound, "kickstart_preview_row_not_found",
+	return kickstartPreviewTarget{}, newKickstartError(schema.LocalKickstartErrorPreviewRowNotFound,
 		"The row %q is not in the forest of setup session %q in internal/api.kickstartSessions.previewTarget, so there is nothing to preview. Nothing was changed. Reload the tree and preview a row it lists.", nodeID, id)
 }
 
@@ -105,7 +104,7 @@ func (st *kickstartSessions) sessionPreviewLines(ctx context.Context, target kic
 		return nil
 	}
 	if err != nil {
-		return newKickstartError(http.StatusInternalServerError, "kickstart_preview_unreadable",
+		return newKickstartError(schema.LocalKickstartErrorPreviewUnreadable,
 			"The preview of session %q could not be read in internal/api.kickstartSessions.preview: %v. Nothing was changed. The session still imports normally; check that its transcript is readable, then preview it again.", sessionID, err)
 	}
 	if len(page.Turns) == 0 {
