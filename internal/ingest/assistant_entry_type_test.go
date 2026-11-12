@@ -156,6 +156,7 @@ func TestAssistantEntryType(t *testing.T) {
 				entries := runAssistantEntryPath(t, row, path)
 				turns := ingest.EntriesToTurns(entries)
 				assertAssistantEntryLiterals(t, row, path, turns)
+				assertAssistantEntryTyping(t, row, path, entries)
 			})
 		}
 	}
@@ -163,28 +164,28 @@ func TestAssistantEntryType(t *testing.T) {
 
 func runAssistantEntryPath(t *testing.T, row assistantEntryCase, path string) []schema.SessionEntry {
 	t.Helper()
-	switch row.Harness {
-	case "claude-code":
+	switch ingest.Harness(row.Harness) {
+	case ingest.HarnessClaudeCode:
 		if path == "managed" {
 			return runAssistantEntryClaudeManaged(t, row)
 		}
 		return runAssistantEntryClaudeIndexer(t, row)
-	case "cursor":
+	case ingest.HarnessCursor:
 		if path != "indexer" {
 			t.Fatalf("case %q: cursor has no managed path", row.Name)
 		}
 		return runAssistantEntryCursorIndexer(t, row)
-	case "opencode":
+	case ingest.HarnessOpenCode:
 		if path == "managed" {
 			return runAssistantEntryOpenCodeManaged(t, row)
 		}
 		return runAssistantEntryOpenCodeIndexer(t, row)
-	case "codex":
+	case ingest.HarnessCodex:
 		if path != "managed" {
 			t.Fatalf("case %q: codex runs the managed path only", row.Name)
 		}
 		return runAssistantEntryCodexManaged(t, row)
-	case "pi":
+	case ingest.HarnessPi:
 		if path != "indexer" {
 			t.Fatalf("case %q: pi runs the indexer path only", row.Name)
 		}
