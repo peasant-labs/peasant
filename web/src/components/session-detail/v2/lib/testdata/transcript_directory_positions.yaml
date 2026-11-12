@@ -1,0 +1,101 @@
+# Conversation turn positions on a transcript segment directory, as the host
+# parser reads them. `path` is the read path every warning must name. Each row's
+# `positions` are overlaid on the base directory: `total` is the wire
+# totalConversationTurns, `spans` the wire conversationTurns of each segment in
+# order. The literal `absent` leaves the key off the wire. `want` states what the
+# parsed directory holds, with `absent` for a key the parser must not emit.
+# `warn` lists text the single console warning must contain; an empty list means
+# no warning at all.
+path: /api/v1/sessions/position-session/transcript/segments
+base:
+  sessionId: position-session
+  revision: '41'
+  totalTurns: 80
+  totalSegments: 3
+  segments:
+    - { index: 0, firstTurn: 0, lastTurn: 19, byteLength: 1048000 }
+    - { index: 1, firstTurn: 20, lastTurn: 45, byteLength: 1047000 }
+    - { index: 2, firstTurn: 46, lastTurn: 79, byteLength: 900000 }
+cases:
+  - name: fields absent
+    positions: { total: absent, spans: [absent, absent, absent] }
+    want: { total: absent, spans: [absent, absent, absent] }
+    warn: []
+  - name: fields kept
+    positions:
+      total: 77
+      spans: [{ before: 0, count: 19 }, { before: 19, count: 24 }, { before: 43, count: 34 }]
+    want:
+      total: 77
+      spans: [{ before: 0, count: 19 }, { before: 19, count: 24 }, { before: 43, count: 34 }]
+    warn: []
+  - name: a segment with no conversation turns keeps its zero count
+    positions:
+      total: 53
+      spans: [{ before: 0, count: 19 }, { before: 19, count: 0 }, { before: 19, count: 34 }]
+    want:
+      total: 53
+      spans: [{ before: 0, count: 19 }, { before: 19, count: 0 }, { before: 19, count: 34 }]
+    warn: []
+  # The server's validator owns the rules between fields. The browser checks
+  # each field's shape only, so a span past the total and a gap between
+  # neighbours both pass through unchanged and unwarned.
+  - name: positions that disagree with each other are kept
+    positions:
+      total: 10
+      spans: [{ before: 0, count: 19 }, { before: 40, count: 24 }, { before: 5, count: 34 }]
+    want:
+      total: 10
+      spans: [{ before: 0, count: 19 }, { before: 40, count: 24 }, { before: 5, count: 34 }]
+    warn: []
+  - name: a span beside no total is kept
+    positions: { total: absent, spans: [{ before: 0, count: 19 }, absent, absent] }
+    want: { total: absent, spans: [{ before: 0, count: 19 }, absent, absent] }
+    warn: []
+  - name: malformed span drops every position field and warns once
+    positions:
+      total: 77
+      spans: [{ before: 0, count: 19 }, { before: -1, count: 2 }, { before: 43, count: 34 }]
+    want: { total: absent, spans: [absent, absent, absent] }
+    warn:
+      - /api/v1/sessions/position-session/transcript/segments
+      - segments[1].conversationTurns
+      - '{"before":-1,"count":2}'
+      - totalConversationTurns and every segment's conversationTurns were dropped
+      - session id position-session
+      - revision 41
+  - name: malformed total drops every position field and warns once
+    positions:
+      total: '77'
+      spans: [{ before: 0, count: 19 }, { before: 19, count: 24 }, { before: 43, count: 34 }]
+    want: { total: absent, spans: [absent, absent, absent] }
+    warn:
+      - /api/v1/sessions/position-session/transcript/segments
+      - 'totalConversationTurns is "77"'
+      - totalConversationTurns and every segment's conversationTurns were dropped
+      - session id position-session
+      - revision 41
+  - name: a null span drops every position field and warns once
+    positions:
+      total: 77
+      spans: [null, { before: 19, count: 24 }, { before: 43, count: 34 }]
+    want: { total: absent, spans: [absent, absent, absent] }
+    warn:
+      - segments[0].conversationTurns is null
+  - name: a fractional count drops every position field and warns once
+    positions:
+      total: 77
+      spans: [{ before: 0, count: 19 }, { before: 19, count: 24 }, { before: 43, count: 1.5 }]
+    want: { total: absent, spans: [absent, absent, absent] }
+    warn:
+      - segments[2].conversationTurns
+      - '{"before":43,"count":1.5}'
+  # Two bad fields are one fault of one directory: the warning names the first
+  # it meets, in wire order (the total, then each segment).
+  - name: two malformed fields warn once
+    positions:
+      total: -3
+      spans: [{ before: 0 }, { before: 19, count: 24 }, absent]
+    want: { total: absent, spans: [absent, absent, absent] }
+    warn:
+      - totalConversationTurns is -3
