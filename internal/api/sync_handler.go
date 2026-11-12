@@ -67,7 +67,11 @@ type syncHandler struct {
 	// ingestWritten is what the finished run wrote, counting a session that was
 	// still being written when the run read it.
 	ingestWritten ingest.WrittenCounts
-	ingestError   error
+	// ingestNote is what the finished run says beside its counts: how many
+	// sessions the saved selection withheld because its rules disagree. It is
+	// empty when none were.
+	ingestNote  string
+	ingestError error
 	// sessionIngest is set while a one-session re-index runs, so it and the
 	// whole-machine ingest never run at once in this process.
 	sessionIngest bool
@@ -1143,9 +1147,9 @@ func (h *syncHandler) handleSyncIngest(w http.ResponseWriter, r *http.Request) {
 // errIngestNoConfig is the refusal to import without a configuration.
 var errIngestNoConfig = errors.New("config not available")
 
-// IngestStart is what claiming the import found: AlreadyRunning is true when an
+// ingestStart is what claiming the import found: AlreadyRunning is true when an
 // import was already running and nothing was claimed.
-type IngestStart struct {
+type ingestStart struct {
 	AlreadyRunning bool
 }
 
@@ -1162,21 +1166,21 @@ type IngestStart struct {
 // level this version cannot apply. preflight false keeps the route's
 // long-standing behavior: such a configuration is reported by the run, in the
 // status route, not by the request that started it.
-func (h *syncHandler) reserveIngest(preflight bool) (IngestStart, func(observe func(schema.LocalKickstartIngest)), error) {
+func (h *syncHandler) reserveIngest(preflight bool) (ingestStart, func(observe func(schema.LocalKickstartIngest)), error) {
 	cfg := h.currentConfig()
 	if cfg == nil {
-		return IngestStart{}, nil, errIngestNoConfig
+		return ingestStart{}, nil, errIngestNoConfig
 	}
 	if preflight {
 		if err := checkIngestable(cfg); err != nil {
-			return IngestStart{}, nil, err
+			return ingestStart{}, nil, err
 		}
 	}
 
 	h.mu.Lock()
 	if h.ingestStatus == "running" || h.sessionIngest {
 		h.mu.Unlock()
-		return IngestStart{AlreadyRunning: true}, nil, nil
+		return ingestStart{AlreadyRunning: true}, nil, nil
 	}
 
 	progState := ingest.NewProgressState()
@@ -1184,6 +1188,7 @@ func (h *syncHandler) reserveIngest(preflight bool) (IngestStart, func(observe f
 	h.ingestProgress = progState
 	h.ingestResult = nil
 	h.ingestWritten = ingest.WrittenCounts{}
+	h.ingestNote = ""
 	h.ingestError = nil
 	h.mu.Unlock()
 
@@ -1199,11 +1204,12 @@ func (h *syncHandler) reserveIngest(preflight bool) (IngestStart, func(observe f
 			}
 		}()
 	}
-	return IngestStart{}, launch, nil
+	return ingestStart{}, launch, nil
 }
 
 // ingestWire is the finished import as the kickstart topic reports it: idle with
-// the counts of sessions written, or failed with the reason.
+// the counts of sessions written and, when the saved selection withheld
+// sessions, the note that says so, or failed with the reason.
 func (h *syncHandler) ingestWire() schema.LocalKickstartIngest {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -1214,7 +1220,7 @@ func (h *syncHandler) ingestWire() schema.LocalKickstartIngest {
 		}
 		return schema.LocalKickstartIngest{State: schema.LocalKickstartIngestFailed, Error: message}
 	}
-	return schema.LocalKickstartIngest{State: schema.LocalKickstartIngestIdle, New: h.ingestWritten.New, Updated: h.ingestWritten.Updated}
+	return schema.LocalKickstartIngest{State: schema.LocalKickstartIngestIdle, Note: h.ingestNote, New: h.ingestWritten.New, Updated: h.ingestWritten.Updated}
 }
 
 // checkIngestable refuses a configuration the import cannot apply, before any
@@ -1476,6 +1482,7 @@ func (h *syncHandler) runIngestPipeline(progState *ingest.ProgressState) {
 	h.ingestStatus = "done"
 	h.ingestResult = result
 	h.ingestWritten = written
+	h.ingestNote = selectionConflictNote(built.conflicts.Recorded(), h.selectionConfigPath())
 	h.mu.Unlock()
 }
 

@@ -238,6 +238,16 @@ func runIngestSelectionCase(t *testing.T, ids ingestSelectionIDs, item ingestSel
 			t.Fatalf("excluded session not listable: rows=%v err=%v", rows, err)
 		}
 	}
+	// The finish panel is told about the sessions the selection withheld, beside
+	// the counts, and about nothing when no session was withheld.
+	if note := handler.ingestWire().Note; item.ExpectDiagnostic {
+		configPath := handler.configPath
+		if !strings.Contains(note, "1 session was left out") || !strings.Contains(note, configPath) {
+			t.Fatalf("the finished import's note is %q, want it to say one session was left out and name the configuration file %s", note, configPath)
+		}
+	} else if note != "" {
+		t.Fatalf("the finished import's note is %q, want none: no session was withheld", note)
+	}
 	if item.ExpectDiagnostic {
 		configPath := handler.configPath
 		found := false

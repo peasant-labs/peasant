@@ -1,0 +1,196 @@
+# Answers handed to the check that holds every kickstart answer to the schema
+# module's record of what each route may answer (kickstartAnswerFault). The
+# check runs on every answer of every kickstart fixture, so a check that
+# never refuses anything would leave all of them green. This fixture is the
+# proof it refuses: each bad answer must name its fault, and each answer the
+# check is not meant to judge, or that the contract allows, must name none.
+#
+# method, path, status, body: the answer as the server sent it. path may carry a
+#   query. body is the raw bytes.
+# fault: text the reported fault must contain. A case names exactly one of
+#   fault and ok.
+# ok: true says the check must report nothing.
+requiredNames:
+  - status-the-route-does-not-declare
+  - code-answering-another-status
+  - code-the-route-does-not-declare
+  - code-outside-the-closed-set
+  - body-that-is-not-json
+  - error-text-left-empty
+  - read-403-with-the-origin-code
+  - read-403-with-no-code
+  - write-403-on-the-wrong-body
+  - commit-409-with-no-rows
+  - commit-409-without-a-reason
+  - 409-on-a-route-that-does-not-declare-it
+  - declared-error-is-no-fault
+  - declared-error-with-a-query-is-no-fault
+  - read-403-with-the-host-code-is-no-fault
+  - write-403-with-the-origin-code-is-no-fault
+  - write-403-with-the-host-code-is-no-fault
+  - commit-409-with-rows-is-no-fault
+  - success-is-no-fault
+  - redirect-is-no-fault
+  - path-that-is-not-a-kickstart-route-is-no-fault
+  - method-the-route-does-not-mount-is-no-fault
+cases:
+  # A status no code of the route answers.
+  - name: status-the-route-does-not-declare
+    method: GET
+    path: /api/v1/kickstart/status
+    status: 404
+    body: '{"error":"There is no such session.","code":"kickstart_session_not_found"}'
+    fault: which the contract does not declare for it
+
+  # A declared code sent with a status it does not answer.
+  - name: code-answering-another-status
+    method: GET
+    path: /api/v1/kickstart/sessions/ses-1
+    status: 400
+    body: '{"error":"There is no such session.","code":"kickstart_session_not_found"}'
+    fault: which answers 404
+
+  # A real code, at the right status, that this route never raises.
+  - name: code-the-route-does-not-declare
+    method: GET
+    path: /api/v1/kickstart/sessions/ses-1
+    status: 404
+    body: '{"error":"There is no such row.","code":"kickstart_preview_row_not_found"}'
+    fault: which the contract does not declare for it
+
+  - name: code-outside-the-closed-set
+    method: GET
+    path: /api/v1/kickstart/sessions/ses-1
+    status: 404
+    body: '{"error":"There is no such session.","code":"kickstart_session_gone"}'
+    fault: not the contract's error response
+
+  - name: body-that-is-not-json
+    method: GET
+    path: /api/v1/kickstart/sessions/ses-1
+    status: 404
+    body: 'session not found'
+    fault: not the contract's error response
+
+  - name: error-text-left-empty
+    method: GET
+    path: /api/v1/kickstart/sessions/ses-1
+    status: 404
+    body: '{"error":"","code":"kickstart_session_not_found"}'
+    fault: breaks the contract
+
+  # A read is refused for its host only; the origin check guards writes.
+  - name: read-403-with-the-origin-code
+    method: GET
+    path: /api/v1/kickstart/status
+    status: 403
+    body: '{"error":"The request was refused.","code":"request_origin_not_local"}'
+    fault: want one of [request_host_not_local]
+
+  - name: read-403-with-no-code
+    method: GET
+    path: /api/v1/kickstart/sessions/ses-1/tree
+    status: 403
+    body: '{"error":"The request was refused."}'
+    fault: want one of [request_host_not_local]
+
+  - name: write-403-on-the-wrong-body
+    method: POST
+    path: /api/v1/kickstart/sessions
+    status: 403
+    body: '{"error":"The request was refused.","code":"kickstart_unavailable"}'
+    fault: want one of [request_host_not_local request_origin_not_local]
+
+  # The commit refusal names the rows that blocked the save; none is no refusal.
+  - name: commit-409-with-no-rows
+    method: POST
+    path: /api/v1/kickstart/sessions/ses-1/commit
+    status: 409
+    body: '{"error":"The setup was not saved.","conflicts":[]}'
+    fault: the 409 body breaks the contract
+
+  - name: commit-409-without-a-reason
+    method: POST
+    path: /api/v1/kickstart/sessions/ses-1/commit
+    status: 409
+    body: '{"error":"","conflicts":[{"field":"content-license","stop":"license","label":"license","mine":"\"CC0-1.0\"","theirs":null}]}'
+    fault: the 409 body breaks the contract
+
+  - name: 409-on-a-route-that-does-not-declare-it
+    method: GET
+    path: /api/v1/kickstart/sessions/ses-1
+    status: 409
+    body: '{"error":"The setup was not saved.","conflicts":[{"field":"content-license","stop":"license","label":"license","mine":"\"CC0-1.0\"","theirs":null}]}'
+    fault: answers 409, which the contract does not declare for it
+
+  # Answers the contract allows: the check must not refuse them.
+  - name: declared-error-is-no-fault
+    method: GET
+    path: /api/v1/kickstart/sessions/ses-1
+    status: 404
+    body: '{"error":"There is no such session.","code":"kickstart_session_not_found"}'
+    ok: true
+
+  - name: declared-error-with-a-query-is-no-fault
+    method: GET
+    path: /api/v1/kickstart/sessions/ses-1?after=3
+    status: 404
+    body: '{"error":"There is no such session.","code":"kickstart_session_not_found"}'
+    ok: true
+
+  - name: read-403-with-the-host-code-is-no-fault
+    method: GET
+    path: /api/v1/kickstart/status
+    status: 403
+    body: '{"error":"The request was refused.","code":"request_host_not_local"}'
+    ok: true
+
+  - name: write-403-with-the-origin-code-is-no-fault
+    method: POST
+    path: /api/v1/kickstart/sessions
+    status: 403
+    body: '{"error":"The request was refused.","code":"request_origin_not_local"}'
+    ok: true
+
+  - name: write-403-with-the-host-code-is-no-fault
+    method: PATCH
+    path: /api/v1/kickstart/sessions/ses-1
+    status: 403
+    body: '{"error":"The request was refused.","code":"request_host_not_local"}'
+    ok: true
+
+  - name: commit-409-with-rows-is-no-fault
+    method: POST
+    path: /api/v1/kickstart/sessions/ses-1/commit
+    status: 409
+    body: '{"error":"The setup was not saved.","conflicts":[{"field":"content-license","stop":"license","label":"license","mine":"\"CC0-1.0\"","theirs":null}]}'
+    ok: true
+
+  # What the check is not asked to judge.
+  - name: success-is-no-fault
+    method: GET
+    path: /api/v1/kickstart/status
+    status: 200
+    body: 'not even JSON'
+    ok: true
+
+  - name: redirect-is-no-fault
+    method: GET
+    path: /api/v1/kickstart/status
+    status: 304
+    body: ''
+    ok: true
+
+  - name: path-that-is-not-a-kickstart-route-is-no-fault
+    method: GET
+    path: /api/v1/health
+    status: 500
+    body: 'not even JSON'
+    ok: true
+
+  - name: method-the-route-does-not-mount-is-no-fault
+    method: DELETE
+    path: /api/v1/kickstart/sessions/ses-1
+    status: 405
+    body: ''
+    ok: true

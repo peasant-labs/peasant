@@ -18,12 +18,8 @@ import (
 	"github.com/peasant-labs/peasant/internal/filelock"
 )
 
-// ErrConfigChanged reports that the configuration file is no longer the one a
-// caller read. Swap returns a *ConfigChangedError that matches it.
-var ErrConfigChanged = errors.New("configuration changed since it was read")
-
 // ConfigChangedError is what Swap returns when the file on disk is not the
-// document the caller read. Fresh holds the bytes now on disk, so the caller can
+// document the caller read; a caller finds it with errors.As. Fresh holds the bytes now on disk, so the caller can
 // recompute against them under the lock it already holds. Fresh is nil when the
 // file is now absent.
 type ConfigChangedError struct {
@@ -42,9 +38,6 @@ func (e *ConfigChangedError) Error() string {
 			"fix: recompute the save against the current file and retry.",
 		e.Path)
 }
-
-// Is makes errors.Is(err, ErrConfigChanged) true for this error.
-func (e *ConfigChangedError) Is(target error) bool { return target == ErrConfigChanged }
 
 // ConfigFile holds the exclusive advisory lock on one configuration file across
 // a read, a comparison and an atomic replacement. Every writer that takes the

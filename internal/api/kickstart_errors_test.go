@@ -3,6 +3,7 @@ package api
 import (
 	_ "embed"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -24,6 +25,15 @@ type kickstartCodeSource struct {
 	Case        string `yaml:"case"`
 	Table       string `yaml:"table"`
 	Unreachable string `yaml:"unreachable"`
+	// Instead, for an unreachable code, is the case that shows what a request
+	// that would reach the code meets in its place, and the code it asserts.
+	Instead *kickstartCodeInstead `yaml:"instead"`
+}
+
+type kickstartCodeInstead struct {
+	Fixture string `yaml:"fixture"`
+	Case    string `yaml:"case"`
+	Code    string `yaml:"code"`
 }
 
 type kickstartCommitFailure struct {
@@ -85,6 +95,18 @@ func TestKickstartEveryErrorCodeIsAccountedFor(t *testing.T) {
 			}
 			if set != 1 {
 				t.Fatalf("code %s must name exactly one of a case, a table, or why it is unreachable", code)
+			}
+			if source.Instead != nil {
+				if source.Unreachable == "" {
+					t.Fatalf("code %s names a case that shows what is raised instead, and is not unreachable", code)
+				}
+				fixture, ok := fixtures[source.Instead.Fixture]
+				if !ok {
+					t.Fatalf("code %s names fixture %q for what is raised instead, which is not a kickstart fixture", code, source.Instead.Fixture)
+				}
+				if !kickstartCaseAssertsCode(fixture, source.Instead.Case, source.Instead.Code) {
+					t.Errorf("code %s is unreachable because %s answers in its place, and case %q does not assert it", code, source.Instead.Code, source.Instead.Case)
+				}
 			}
 			switch {
 			case source.Case != "":
@@ -151,6 +173,7 @@ func TestKickstartCommitFailuresAnswerTheirCodes(t *testing.T) {
 		"lock":    onboarding.CommitFailureLock,
 		"changed": onboarding.CommitFailureChanged,
 		"write":   onboarding.CommitFailureWrite,
+		"unknown": onboarding.CommitFailureUnknown,
 	}
 	// Every kind the model has is in the table, and the table has no other.
 	named := map[onboarding.CommitFailure]bool{}
@@ -195,10 +218,26 @@ func TestKickstartWriterAnswersEveryCodeWithItsOwnStatus(t *testing.T) {
 	for _, row := range script.Writer {
 		t.Run(row.Failure, func(t *testing.T) {
 			t.Parallel()
+			failure, ok := kickstartWriterErrors()[row.Failure]
+			if !ok {
+				t.Fatalf("the writer table names failure %q, which kickstartWriterErrors does not build", row.Failure)
+			}
 			recorder := httptest.NewRecorder()
-			writeKickstartError(recorder, errors.New("a plain failure"))
+			writeKickstartError(recorder, failure)
 			assertKickstartErrorAnswer(t, recorder, row.Code)
 		})
+	}
+}
+
+// kickstartWriterErrors builds the errors the writer table names.
+func kickstartWriterErrors() map[string]error {
+	return map[string]error{
+		"plain":         errors.New("a failure no code names"),
+		"wrapped-plain": fmt.Errorf("while answering: %w", errors.New("a failure no code names")),
+		"wrapped-refusal": fmt.Errorf("while answering: %w",
+			newKickstartError(schema.LocalKickstartErrorSessionNotFound, "The fixture refusal.")),
+		"wrapped-commit-failure": commitFailureResponse(fmt.Errorf("while saving: %w",
+			&onboarding.CommitError{Kind: onboarding.CommitFailureLock, Err: errors.New("the fixture failure")})),
 	}
 }
 

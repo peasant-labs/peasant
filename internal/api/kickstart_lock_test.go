@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"errors"
+	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -9,6 +11,7 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/discovery"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/onboarding"
@@ -35,6 +38,15 @@ type lockHarness struct {
 	// restarts at that moment, under the lock.
 	touched chan struct{}
 
+	// configPath is the configuration file the sessions read and review.
+	configPath string
+	// reviewsUnderLock counts reviews that began while the store lock was held.
+	reviewsUnderLock atomic.Int32
+	// signInReads counts reads of the sign-in file, and signInReadsUnderLock the
+	// reads that found the store lock held.
+	signInReads          atomic.Int32
+	signInReadsUnderLock atomic.Int32
+
 	mu        sync.Mutex
 	published []schema.LocalKickstartEvent
 }
@@ -42,13 +54,14 @@ type lockHarness struct {
 func newLockHarness(t *testing.T) *lockHarness {
 	t.Helper()
 	h := &lockHarness{
-		entered: make(chan struct{}, 4),
-		release: make(chan struct{}),
-		touched: make(chan struct{}, 64),
+		entered:    make(chan struct{}, 4),
+		release:    make(chan struct{}),
+		touched:    make(chan struct{}, 64),
+		configPath: filepath.Join(t.TempDir(), "config.yaml"),
 	}
 	h.st = newKickstartSessions(kickstartEnv{
 		ctx:        t.Context(),
-		configPath: filepath.Join(t.TempDir(), "config.yaml"),
+		configPath: h.configPath,
 		loadConfig: func(context.Context) (*config.Config, error) { return config.BaseConfig(), nil },
 		scan: func(ctx context.Context, _ *config.Config, _ ingest.KnownSessionIndex, _ discovery.ScanProgress) (discovery.ProviderInventory, []onboarding.SessionListing, discovery.SubagentRelation) {
 			<-ctx.Done()
@@ -63,7 +76,17 @@ func newLockHarness(t *testing.T) *lockHarness {
 			defer h.mu.Unlock()
 			h.published = append(h.published, event)
 		},
+		village: func() kickstartFacts {
+			h.signInReads.Add(1)
+			if h.heldNow() {
+				h.signInReadsUnderLock.Add(1)
+			}
+			return kickstartFacts{}
+		},
 		review: func(ctx context.Context, draft *onboarding.Draft, input onboarding.ReviewInput) (onboarding.ReviewResult, error) {
+			if h.heldNow() {
+				h.reviewsUnderLock.Add(1)
+			}
 			// The first review after the test arms the hold stops here.
 			if h.hold.CompareAndSwap(true, false) {
 				h.entered <- struct{}{}
@@ -73,6 +96,26 @@ func newLockHarness(t *testing.T) *lockHarness {
 		},
 	})
 	return h
+}
+
+// heldNow reports whether the store lock is held by someone at this moment. A
+// test that reads it has no other request running, so a held lock is the
+// request that is asking.
+func (h *lockHarness) heldNow() bool {
+	if h.st.mu.TryLock() {
+		h.st.mu.Unlock()
+		return false
+	}
+	return true
+}
+
+// writeFile replaces the configuration file the sessions review, the way another
+// program would.
+func (h *lockHarness) writeFile(t *testing.T, text string) {
+	t.Helper()
+	if err := os.WriteFile(h.configPath, []byte(text), 0o600); err != nil {
+		t.Fatalf("write the configuration file: %v", err)
+	}
 }
 
 // arm makes the next review wait until release is closed.
@@ -215,8 +258,9 @@ func TestKickstartRefusedChangeStillLeavesTheSessionAsItWas(t *testing.T) {
 		Revision: opened.Revision,
 		Values:   map[string]schema.LocalSettingValue{onboarding.FieldVisibility.String(): onboarding.StringValue("private")},
 	})
-	if err == nil {
-		t.Fatal("an answer to a hidden field was accepted")
+	var refusal *kickstartError
+	if !errors.As(err, &refusal) || refusal.code != schema.LocalKickstartErrorFieldHidden {
+		t.Fatalf("an answer to a hidden field was answered %v, want a %s refusal", err, schema.LocalKickstartErrorFieldHidden)
 	}
 	after, getErr := h.st.get(opened.ID)
 	if getErr != nil {
@@ -233,10 +277,18 @@ func TestKickstartRefusedChangeStillLeavesTheSessionAsItWas(t *testing.T) {
 	}
 }
 
+// kickstartFileWithLicense is a configuration file another program saved with
+// the license the setup session's own answer disagrees with.
+const kickstartFileWithLicense = `version: 1
+push:
+  license: CC-BY-4.0
+`
+
 // TestKickstartConflictChoicesReadTheFileOutsideTheStoreLock holds the review a
 // choice on a conflict row needs to learn the file value the user saw, and
 // requires the store to go on meanwhile. The choice is then applied against a
-// session that stood still, and the event it publishes is its own.
+// session that stood still: it is recorded with the file value that review saw,
+// no review ran under the lock, and the event it publishes is its own.
 func TestKickstartConflictChoicesReadTheFileOutsideTheStoreLock(t *testing.T) {
 	t.Parallel()
 	h := newLockHarness(t)
@@ -244,19 +296,147 @@ func TestKickstartConflictChoicesReadTheFileOutsideTheStoreLock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open a session: %v", err)
 	}
+	// The session answers the license, and then another program saves a
+	// different one: the file's value is a row the choice settles.
+	answered, err := h.st.patch(opened.ID, schema.LocalKickstartAnswers{
+		Revision: opened.Revision,
+		Values:   map[string]schema.LocalSettingValue{onboarding.FieldLicense.String(): onboarding.StringValue("CC0-1.0")},
+	})
+	if err != nil {
+		t.Fatalf("answer the license: %v", err)
+	}
+	h.writeFile(t, kickstartFileWithLicense)
+	published := len(h.eventRevisions())
+
 	h.arm()
-	done := make(chan error, 1)
+	type outcome struct {
+		result schema.LocalKickstartPatchResult
+		err    error
+	}
+	done := make(chan outcome, 1)
 	go func() {
-		_, err := h.st.patch(opened.ID, schema.LocalKickstartAnswers{
-			Revision:    opened.Revision,
+		result, err := h.st.patch(opened.ID, schema.LocalKickstartAnswers{
+			Revision:    answered.Revision,
 			Resolutions: map[string]schema.LocalKickstartResolution{onboarding.FieldLicense.String(): schema.LocalKickstartResolutionMine},
 		})
-		done <- err
+		done <- outcome{result, err}
 	}()
 	testwait.Receive(t, h.entered, "the choice to start reading the file")
 	requireStoreFree(t, h, opened.ID, "a choice reads the file")
 	close(h.release)
-	if err := testwait.Receive(t, done, "the choice to be applied"); err != nil {
-		t.Fatalf("the choice was refused: %v", err)
+	got := testwait.Receive(t, done, "the choice to be applied")
+	if got.err != nil {
+		t.Fatalf("the choice was refused: %v", got.err)
+	}
+
+	if want := answered.Revision + 1; got.result.Revision != want || got.result.Stale {
+		t.Errorf("the choice was answered at revision %d (stale %t), want revision %d, not stale", got.result.Revision, got.result.Stale, want)
+	}
+	events := h.eventRevisions()
+	if len(events) != published+1 || events[len(events)-1] != answered.Revision+1 {
+		t.Errorf("the events after the choice are %v, want exactly one more, at revision %d", events[min(published, len(events)):], answered.Revision+1)
+	}
+	h.st.mu.Lock()
+	recorded := h.st.byID[opened.ID].resolutions[onboarding.FieldLicense]
+	h.st.mu.Unlock()
+	if recorded.Choice != schema.LocalKickstartResolutionMine || string(recorded.Seen) != `"CC-BY-4.0"` {
+		t.Errorf("the choice was recorded as %q seeing %s, want mine seeing \"CC-BY-4.0\", the value the review read", recorded.Choice, recorded.Seen)
+	}
+	if n := h.reviewsUnderLock.Load(); n != 0 {
+		t.Errorf("%d reviews ran with the store lock held, want none: the session stood still", n)
+	}
+}
+
+// TestKickstartSignInFileIsReadOnceOutsideTheStoreLock counts the reads of the
+// sign-in file each request makes: one, before the store lock is taken, however
+// many views and rebuilds the request goes on to make under it.
+func TestKickstartSignInFileIsReadOnceOutsideTheStoreLock(t *testing.T) {
+	t.Parallel()
+	h := newLockHarness(t)
+	once := func(name string, do func()) {
+		t.Helper()
+		before := h.signInReads.Load()
+		do()
+		if got := h.signInReads.Load() - before; got != 1 {
+			t.Errorf("%s read the sign-in file %d times, want once", name, got)
+		}
+	}
+
+	var opened schema.LocalKickstartSession
+	once("opening a session", func() {
+		var err error
+		if opened, err = h.st.open(t.Context(), onboarding.ScopeFull); err != nil {
+			t.Fatalf("open a session: %v", err)
+		}
+	})
+	revision := opened.Revision
+	once("an accepted change", func() {
+		result, err := h.st.patch(opened.ID, schema.LocalKickstartAnswers{
+			Revision: revision,
+			Values:   map[string]schema.LocalSettingValue{onboarding.FieldLicense.String(): onboarding.StringValue("CC0-1.0")},
+		})
+		if err != nil {
+			t.Fatalf("answer the license: %v", err)
+		}
+		revision = result.Revision
+	})
+	h.writeFile(t, kickstartFileWithLicense)
+	once("a choice on a conflict row, which also reviews the file", func() {
+		result, err := h.st.patch(opened.ID, schema.LocalKickstartAnswers{
+			Revision:    revision,
+			Resolutions: map[string]schema.LocalKickstartResolution{onboarding.FieldLicense.String(): schema.LocalKickstartResolutionMine},
+		})
+		if err != nil {
+			t.Fatalf("settle the license: %v", err)
+		}
+		revision = result.Revision
+	})
+	once("reading a session", func() {
+		if _, err := h.st.get(opened.ID); err != nil {
+			t.Fatalf("get the session: %v", err)
+		}
+	})
+	once("publishing the rows of a refused save", func() {
+		rows := []schema.LocalKickstartConflict{{
+			Field: onboarding.FieldLicense.String(), Stop: "license", Label: "license",
+			Mine: onboarding.StringValue("CC0-1.0"), Theirs: onboarding.StringValue("CC-BY-4.0"),
+		}}
+		if _, err := h.st.publishConflicts(opened.ID, rows); err != nil {
+			t.Fatalf("publish the rows: %v", err)
+		}
+	})
+	once("freezing a session for a save", func() {
+		if _, err := h.st.beginCommit(opened.ID); err != nil {
+			t.Fatalf("begin the save: %v", err)
+		}
+		h.st.abortCommit(opened.ID)
+	})
+	once("a finished scan", func() {
+		h.st.mu.Lock()
+		sess, gen := h.st.byID[opened.ID], h.st.byID[opened.ID].scanGen
+		h.st.mu.Unlock()
+		h.st.finishScan(sess, gen, kickstartScanResult{})
+	})
+
+	if n := h.signInReadsUnderLock.Load(); n != 0 {
+		t.Errorf("%d reads of the sign-in file happened with the store lock held, want none", n)
+	}
+}
+
+// TestConfigLockWaitIsOneValue holds the two writers that take config.yaml's
+// lock to one wait: the setup save and the settings update default to
+// defaults.ConfigLockWait, and a wait a test sets is the one used.
+func TestConfigLockWaitIsOneValue(t *testing.T) {
+	t.Parallel()
+	save := kickstartEnv{}.withDefaults().lockWait
+	update := (&settingsHandler{}).lockWaitOrDefault()
+	if save != defaults.ConfigLockWait || update != defaults.ConfigLockWait {
+		t.Errorf("the setup save waits %s and the settings update waits %s for the configuration lock, both want defaults.ConfigLockWait (%s)", save, update, defaults.ConfigLockWait)
+	}
+	if got := (&settingsHandler{lockWait: time.Second}).lockWaitOrDefault(); got != time.Second {
+		t.Errorf("a settings update with its own wait waits %s, want 1s", got)
+	}
+	if got := (kickstartEnv{lockWait: time.Second}).withDefaults().lockWait; got != time.Second {
+		t.Errorf("a setup save with its own wait waits %s, want 1s", got)
 	}
 }

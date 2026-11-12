@@ -123,7 +123,7 @@ func (c *kickstartCommitter) refuse(w http.ResponseWriter, id string, rows []sch
 		slog.Warn("kickstart: the conflict rows of a refused save were not published", "session", id, "error", publishErr)
 	}
 	refusal := schema.LocalKickstartCommitRefusal{
-		Error:     fmt.Sprintf("The setup was not saved because %d answered setting(s) changed in the configuration file since this session opened, in internal/api.kickstartHandler.handleCommit. Nothing was written. Choose mine or theirs for each row, then save again.", len(rows)),
+		Error:     fmt.Sprintf("The setup was not saved because %d setting(s) the save writes changed in the configuration file since this session opened, in internal/api.kickstartHandler.handleCommit. Nothing was written. Choose mine or theirs for each row, then save again.", len(rows)),
 		Conflicts: append([]schema.LocalKickstartConflict{}, rows...),
 	}
 	writeContractStatus(w, http.StatusConflict, &refusal, "Nothing was written. Retry; if it repeats, report it.")
@@ -148,6 +148,11 @@ func (c *kickstartCommitter) finish(w http.ResponseWriter, id string, result onb
 		Ingest:     ingestResponse(start, startErr),
 		NextSteps:  steps,
 	}
+	// A retention failure is about the save, not about reading the sessions. The
+	// contract has one list for it and for the import's own notes, so the line
+	// names the save in its own words. The import's notes arrive later, with the
+	// import's last state (see selectionConflictNote), because the import runs
+	// after this answer is written.
 	if result.Retention.Status == onboarding.RetentionFailed {
 		body.Diagnostics = []string{result.Retention.Note}
 	}
@@ -190,7 +195,7 @@ func webNextSteps(menu []onboarding.NextStep) ([]schema.LocalKickstartNextStep, 
 }
 
 // ingestResponse is the import's state in the commit body.
-func ingestResponse(start IngestStart, err error) schema.LocalKickstartIngest {
+func ingestResponse(start ingestStart, err error) schema.LocalKickstartIngest {
 	switch {
 	case err != nil:
 		return schema.LocalKickstartIngest{State: schema.LocalKickstartIngestFailed, Error: err.Error()}
@@ -204,9 +209,10 @@ func ingestResponse(start IngestStart, err error) schema.LocalKickstartIngest {
 	}
 }
 
-// commitFailureResponse maps a failed save to the refusal it is answered with.
-// The contract declares 404 and 409 for this route; the rest follow the status
-// the other kickstart routes use for the same kind of failure.
+// commitFailureResponse maps a failed save to the refusal it is answered with:
+// each kind of failure the save names has its own code, and the code brings its
+// own status. An error that is not a save failure is returned as it is, and a
+// kind this mapping has no code for is the defect it is, answered as one.
 func commitFailureResponse(err error) error {
 	var failed *onboarding.CommitError
 	if !errors.As(err, &failed) {
@@ -225,9 +231,12 @@ func commitFailureResponse(err error) error {
 	case onboarding.CommitFailureChanged:
 		return newKickstartError(schema.LocalKickstartErrorConfigChanging,
 			"The setup was not saved because the configuration file kept changing in internal/api.kickstartHandler.handleCommit: %v. Nothing was written. Stop the other program that edits it, then save again.", failed.Err)
-	default:
+	case onboarding.CommitFailureWrite:
 		return newKickstartError(schema.LocalKickstartErrorConfigUnwritable,
 			"The setup was not saved because the configuration file could not be written in internal/api.kickstartHandler.handleCommit: %v. The previous file is unchanged. Fix the directory's permissions or free space, then save again.", failed.Err)
+	default:
+		return newKickstartError(schema.LocalKickstartErrorFailed,
+			"The setup was not saved because it failed in a way internal/api.commitFailureResponse has no code for (%v): %v. Nothing was written. Retry; if it repeats, report it.", failed.Kind, failed.Err)
 	}
 }
 
@@ -381,14 +390,14 @@ func reviewRows(published []schema.LocalKickstartConflict, review onboarding.Rev
 // servedConflictSide is the file value a conflict row showed for key: from the
 // rows a refused save published, or from the review of the session that seen
 // carries. A request that has no such review (it is nil) reads the file now.
-func (st *kickstartSessions) servedConflictSide(sess *kickstartSession, seen *kickstartSeenRows, key onboarding.FieldKey) schema.LocalSettingValue {
+func (st *kickstartSessions) servedConflictSide(sess *kickstartSession, seen *kickstartSeenRows, key onboarding.FieldKey, facts kickstartFacts) schema.LocalSettingValue {
 	if side := seenConflictSide(sess.conflicts, key); side != nil {
 		return side
 	}
 	if seen != nil {
 		return seenConflictSide(seen.rows, key)
 	}
-	if review, ok := st.reviewOf(sess, st.env.village()); ok {
+	if review, ok := st.reviewOf(sess, facts); ok {
 		return seenConflictSide(review.Conflicts, key)
 	}
 	return nil

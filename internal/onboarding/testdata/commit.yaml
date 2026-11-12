@@ -379,7 +379,7 @@ cases:
           retention:
             status: failed
             days: 90
-            noteStarts: "config saved, retention not applied"
+            noteStarts: "the setup was saved, but claude code's retention period was not applied"
             noteContains: settings.json is read-only
   # The retention stop shows a period and the review promises to apply it. The
   # save applies the period that was shown whether or not it was answered, which is
