@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -34,9 +35,13 @@ type importProfileFixtures struct {
 	} `yaml:"sessions"`
 	EntryLine  string `yaml:"entryLine"`
 	Structural struct {
-		SmallEntries int `yaml:"smallEntries"`
-		LargeEntries int `yaml:"largeEntries"`
+		SmallEntries int    `yaml:"smallEntries"`
+		LargeEntries int    `yaml:"largeEntries"`
+		EntryLine    string `yaml:"entryLine"`
 	} `yaml:"structural"`
+	Discover struct {
+		StrayFile string `yaml:"strayFile"`
+	} `yaml:"discover"`
 	Cases []struct {
 		Name string `yaml:"name"`
 	} `yaml:"cases"`
@@ -72,12 +77,16 @@ func LoadImportProfileFixtures(t *testing.T) importProfileFixtures {
 // importProfileBench is one synthetic source tree, one real store, and the
 // production pipeline over them.
 type importProfileBench struct {
-	t        *testing.T
-	fixtures importProfileFixtures
-	root     string
-	db       *store.Store
-	versions map[ingest.Harness]ingest.HarvesterVersions
-	stamp    time.Time
+	t         *testing.T
+	fixtures  importProfileFixtures
+	root      string
+	db        *store.Store
+	versions  map[ingest.Harness]ingest.HarvesterVersions
+	stamp     time.Time
+	entryLine string
+	// classify wires the metrics engine and the classifier annotator, as
+	// `peasant harvest` does.
+	classify bool
 }
 
 func newImportProfileBench(t *testing.T, fixtures importProfileFixtures) *importProfileBench {
@@ -90,6 +99,7 @@ func newImportProfileBench(t *testing.T, fixtures importProfileFixtures) *import
 	return &importProfileBench{
 		t: t, fixtures: fixtures, root: t.TempDir(), db: db,
 		versions: maps.Clone(ingest.HarvesterVersionRegistry), stamp: time.Unix(1_700_000_000, 0),
+		entryLine: fixtures.EntryLine,
 	}
 }
 
@@ -103,7 +113,7 @@ func (b *importProfileBench) writeSession(id string, entries int) {
 	}
 	var content strings.Builder
 	for n := range entries {
-		line := strings.ReplaceAll(b.fixtures.EntryLine, "{{session}}", id)
+		line := strings.ReplaceAll(b.entryLine, "{{session}}", id)
 		content.WriteString(strings.ReplaceAll(line, "{{n}}", strconv.Itoa(n)))
 		content.WriteByte('\n')
 	}
@@ -134,20 +144,32 @@ func (b *importProfileBench) pipeline(profiler *ingest.IndexProfiler, configure 
 	if configure != nil {
 		configure(&cfg)
 	}
-	pipeline, err := newTestPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg,
+	options := []ingest.PipelineOption{
 		ingest.WithStore(b.db), ingest.WithMetricsStore(b.db), ingest.WithLogger(b.db), ingest.WithIndexLogger(b.db),
 		ingest.WithHarvesterVersions(b.versions),
-		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessClaudeCode: ingest.NewClaudeIndexer(fs)}))
+		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessClaudeCode: ingest.NewClaudeIndexer(fs)}),
+	}
+	if b.classify {
+		options = append(options,
+			ingest.WithAnalyzer(metrics.NewEngineWithModels(b.db, b.db)),
+			ingest.WithClassifier(metrics.NewClassifierAnnotator(b.db, b.db)))
+	}
+	pipeline, err := newTestPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg, options...)
 	if err != nil {
 		b.t.Fatal(err)
 	}
 	return pipeline
 }
 
-// run is one harvest with the profiler on, as every import entry point runs.
+// run is one harvest with the always-on profiler, as every import entry point
+// runs.
 func (b *importProfileBench) run(configure func(*ingest.PipelineConfig)) (*ingest.PipelineResult, *ingest.IndexProfiler) {
 	b.t.Helper()
-	profiler := &ingest.IndexProfiler{}
+	return b.runWith(&ingest.IndexProfiler{}, configure)
+}
+
+func (b *importProfileBench) runWith(profiler *ingest.IndexProfiler, configure func(*ingest.PipelineConfig)) (*ingest.PipelineResult, *ingest.IndexProfiler) {
+	b.t.Helper()
 	result, err := b.pipeline(profiler, configure).Run(b.t.Context())
 	if err != nil {
 		b.t.Fatal(err)
@@ -261,9 +283,6 @@ WHERE k.name = 'refresh' AND o.run_id = ?`, firstRun)
 					t.Fatalf("run %d stored no %s stage row; stored %+v", firstRun, required, stages)
 				}
 			}
-			if seen[ingest.StageDiscover].Done != len(fixtures.Sessions) {
-				t.Fatalf("DISCOVER row = %+v, want %d sessions done", seen[ingest.StageDiscover], len(fixtures.Sessions))
-			}
 			if seen[ingest.StageIndex].Bytes <= 0 {
 				t.Fatalf("INDEX row carries no bytes: %+v", seen[ingest.StageIndex])
 			}
@@ -283,6 +302,31 @@ WHERE k.name = 'refresh' AND o.run_id = ?`, firstRun)
 					t.Fatalf("session %s index timings = %+v, want one measured attempt", session.ID, timings)
 				}
 			}
+		},
+		"discover-stage-row-counts-sessions-not-files": func(t *testing.T) {
+			// The live discovery display counts files; the stored row counts
+			// the sessions discovery found. A .jsonl file that is not a
+			// session must not move it.
+			stray := filepath.Join(bench.root, "source", "-workspace", fixtures.Discover.StrayFile)
+			if err := os.WriteFile(stray, []byte("{}\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = os.Remove(stray) }()
+			bench.run(nil)
+			stages, err := bench.db.ListIngestRunStages(t.Context(), bench.lastRun())
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, stage := range stages {
+				if stage.Stage != ingest.StageDiscover {
+					continue
+				}
+				if stage.Done != len(fixtures.Sessions) || stage.Total != len(fixtures.Sessions) {
+					t.Fatalf("DISCOVER row = %+v, want done and total %d sessions (the tree holds %d .jsonl files)", stage, len(fixtures.Sessions), len(fixtures.Sessions)+1)
+				}
+				return
+			}
+			t.Fatalf("the run stored no DISCOVER row: %+v", stages)
 		},
 		"unchanged-session-writes-no-outcome-row": func(t *testing.T) {
 			result, _ := bench.run(nil)
@@ -407,12 +451,14 @@ WHERE k.name = 'refresh' AND o.run_id = ?`, firstRun)
 			}
 		},
 		"profiler-observations-scale-with-batches-sessions-and-stages": func(t *testing.T) {
-			observe := func(entries int) (int64, int) {
+			observe := func(entries int, detail bool) (int64, int, ingest.IndexProfileSnapshot) {
 				sized := newImportProfileBench(t, fixtures)
+				sized.classify = true
+				sized.entryLine = fixtures.Structural.EntryLine
 				for _, session := range fixtures.Sessions {
 					sized.writeSession(session.ID, entries)
 				}
-				result, profiler := sized.run(nil)
+				result, profiler := sized.runWith(&ingest.IndexProfiler{AnnotationResultDetail: detail}, nil)
 				if result.Summary.Indexed != len(fixtures.Sessions) {
 					t.Fatalf("import of %d-entry sessions: %+v", entries, result.Summary)
 				}
@@ -420,17 +466,34 @@ WHERE k.name = 'refresh' AND o.run_id = ?`, firstRun)
 				for _, entry := range result.IndexLog {
 					indexed += entry.EntriesCount
 				}
-				return profiler.Observations(), indexed
+				return profiler.Observations(), indexed, profiler.Snapshot()
 			}
-			small, smallEntries := observe(fixtures.Structural.SmallEntries)
-			large, largeEntries := observe(fixtures.Structural.LargeEntries)
+			small, smallEntries, smallProfile := observe(fixtures.Structural.SmallEntries, false)
+			large, largeEntries, largeProfile := observe(fixtures.Structural.LargeEntries, false)
 			if largeEntries <= smallEntries*10 {
 				t.Fatalf("the large import indexed %d entries against %d: the corpus does not grow enough to prove the bound", largeEntries, smallEntries)
 			}
-			// Same sessions, same stages, same batches: the observation count
-			// is a function of those alone, so it must not move with entries.
-			if small == 0 || large != small {
-				t.Fatalf("profiler observations grew with entries: %d for %d entries, %d for %d entries", small, smallEntries, large, largeEntries)
+			// Same sessions, same stages: the observation count is a function
+			// of those and of the drain batches, so it must not move with
+			// entries. A drain batch can split on timing (a partial-batch flush
+			// wait), at most once per session, so that is the only slack.
+			slack := int64(len(fixtures.Sessions))
+			if small == 0 || large > small+slack || small > large+slack {
+				t.Fatalf("always-on profiler observations grew with entries: %d for %d entries, %d for %d entries (slack %d)", small, smallEntries, large, largeEntries, slack)
+			}
+			for label, profile := range map[string]ingest.IndexProfileSnapshot{"small": smallProfile, "large": largeProfile} {
+				if len(profile.Annotation.AnnotationResults) != 0 {
+					t.Fatalf("the always-on %s import timed %d annotation result groups; per-result detail is for --profile-index only", label, len(profile.Annotation.AnnotationResults))
+				}
+			}
+			// The control: with per-result detail the same corpus must reach
+			// the per-entry path, one result per added reply, or the bound
+			// above proves nothing.
+			detailSmall, _, _ := observe(fixtures.Structural.SmallEntries, true)
+			detailLarge, _, detailProfile := observe(fixtures.Structural.LargeEntries, true)
+			addedReplies := int64(len(fixtures.Sessions) * (fixtures.Structural.LargeEntries - fixtures.Structural.SmallEntries))
+			if detailLarge-detailSmall < addedReplies || len(detailProfile.Annotation.AnnotationResults) == 0 {
+				t.Fatalf("per-result detail did not grow with entries (%d for %d entries, %d for %d entries): the corpus no longer makes one annotation result per entry", detailSmall, smallEntries, detailLarge, largeEntries)
 			}
 		},
 	}

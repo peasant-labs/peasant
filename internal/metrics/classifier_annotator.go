@@ -80,9 +80,12 @@ func (ca *ClassifierAnnotator) Annotate(ctx context.Context, sessionID ingest.Se
 }
 
 // AnnotateWithProfile runs all classifiers for sessionID and records aggregate
-// ANNOTATE detail into profiler. A nil profiler preserves Annotate behavior.
+// ANNOTATE detail into profiler. The detail is per annotation result, so it is
+// recorded only when the profiler asks for it (AnnotationResultDetail); the
+// always-on profile, and a nil profiler, take the Annotate path, and the
+// pipeline's own per-session and per-batch ANNOTATE timers cover the stage.
 func (ca *ClassifierAnnotator) AnnotateWithProfile(ctx context.Context, sessionID ingest.SessionID, profiler *ingest.IndexProfiler) error {
-	if profiler == nil {
+	if !annotationResultDetail(profiler) {
 		return ca.Annotate(ctx, sessionID)
 	}
 	var stats ingest.AnnotationProfileStats
@@ -92,8 +95,10 @@ func (ca *ClassifierAnnotator) AnnotateWithProfile(ctx context.Context, sessionI
 	return ca.annotate(ctx, sessionID, &stats)
 }
 
+// PrepareAnnotations runs all classifiers for sessionID and returns the writes
+// to flush. It records per-result detail only as AnnotateWithProfile does.
 func (ca *ClassifierAnnotator) PrepareAnnotations(ctx context.Context, sessionID ingest.SessionID, profiler *ingest.IndexProfiler) (ingest.SessionAnnotationBatch, error) {
-	if profiler == nil {
+	if !annotationResultDetail(profiler) {
 		return ca.prepareAnnotations(ctx, sessionID, nil)
 	}
 	var stats ingest.AnnotationProfileStats
@@ -185,8 +190,10 @@ func (ca *ClassifierAnnotator) prepareAnnotations(ctx context.Context, sessionID
 	return batch, nil
 }
 
+// FlushAnnotationBatches persists prepared batches. It records per-result
+// detail only as AnnotateWithProfile does.
 func (ca *ClassifierAnnotator) FlushAnnotationBatches(ctx context.Context, batches []ingest.SessionAnnotationBatch, profiler *ingest.IndexProfiler) []ingest.SessionAnnotationBatchResult {
-	if profiler == nil {
+	if !annotationResultDetail(profiler) {
 		return ca.flushAnnotationBatches(ctx, batches, nil)
 	}
 	var stats ingest.AnnotationProfileStats
@@ -605,6 +612,12 @@ func classifierResultTargetKind(r *ClassifierResult) ingest.AnnotationProfileTar
 		return ingest.AnnotationProfileTargetEntry
 	}
 	return ingest.AnnotationProfileTargetSession
+}
+
+// annotationResultDetail reports whether profiler asks for the per-result
+// ANNOTATE breakdown. Every timer behind it reads the clock per result.
+func annotationResultDetail(profiler *ingest.IndexProfiler) bool {
+	return profiler != nil && profiler.AnnotationResultDetail
 }
 
 func addAnnotationTiming(stats *ingest.AnnotationProfileStats, add func(*ingest.AnnotationProfileStats)) {

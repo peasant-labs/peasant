@@ -19,7 +19,12 @@ package store
 // row keeps its id, run_id, session_id and created_at. The reason id is looked
 // up by code, with one exception: a worker_error row spelled
 // adapter_refresh_unavailable takes the id of adapter_capture_failed, because
-// that spelling stays with the diagnostic of the same name. A stored code no
+// that spelling stays with the diagnostic of the same name. The lookup goes by
+// code only, so a row whose stored kind disagrees with its code's seeded kind
+// takes the seeded kind. No shipped build wrote such a row: worker_error rows
+// carried only error or adapter_refresh_unavailable (mapped above), and
+// diagnostic rows carried diagnostic codes, each seeded as a diagnostic. A
+// stored code no
 // build lists is seeded once as a retired row with a store-local id at or
 // above 1000000, under the kind of its lowest row, so the copy cannot fail.
 // Every shipped build validated a code against the closed Go set before
