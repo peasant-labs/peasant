@@ -11,6 +11,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/testkit/fsdecorator"
 	"github.com/peasant-labs/peasant/internal/testkit/testwait"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/internal/tui/discoveryprogress"
 )
 
 //go:embed testdata/kickstart_discovery_progress.yaml
@@ -62,24 +63,27 @@ func TestKickstartDiscoverySpinnerProgress(t *testing.T) {
 		t.Run(c.Name, func(t *testing.T) {
 			if c.Mode == "phase-reset" {
 				writer := &spinnerTestWriter{lines: make(chan string, 16)}
-				spinner := &discoverySpinner{w: writer, isTTY: true}
+				spinner := discoveryprogress.New(writer, true)
 				spinner.SetPhase("previous")
 				spinner.SetProgress(1, 2)
 				spinner.SetDiscoveryReminedCount(1)
 				spinner.SetPhase(c.Phase)
-				spinner.wg.Add(1)
-				go spinner.run()
 				defer spinner.Stop()
 				ctx := testwait.Context(t)
-				select {
-				case line := <-writer.lines:
-					if !strings.Contains(line, c.Want) || strings.Contains(line, "re-read") || strings.Contains(line, "1/2") {
-						t.Fatalf("phase-only spinner = %q; want %q with no inherited count", line, c.Want)
+				for {
+					select {
+					case line := <-writer.lines:
+						if !strings.Contains(line, c.Want) {
+							continue
+						}
+						if strings.Contains(line, "re-read") || strings.Contains(line, "1/2") {
+							t.Fatalf("phase-only spinner = %q; want %q with no inherited count", line, c.Want)
+						}
+						return
+					case <-ctx.Done():
+						t.Fatal("phase-only spinner did not render")
 					}
-				case <-ctx.Done():
-					t.Fatal("phase-only spinner did not render")
 				}
-				return
 			}
 			if c.Mode != "discover" {
 				t.Fatalf("unknown fixture mode %q", c.Mode)
@@ -93,9 +97,7 @@ func TestKickstartDiscoverySpinnerProgress(t *testing.T) {
 			fs.Arm(fsdecorator.Gate{Op: fsdecorator.OpStat, Path: c.Root + "/" + c.Block})
 			defer fs.Release()
 			writer := &spinnerTestWriter{lines: make(chan string, 16)}
-			spinner := &discoverySpinner{w: writer, isTTY: true}
-			spinner.wg.Add(1)
-			go spinner.run()
+			spinner := discoveryprogress.New(writer, true)
 			defer spinner.Stop()
 			cfg := &config.Config{Sources: config.SourcesConfig{ClaudeCode: config.SourceProviderConfig{Enabled: true, Paths: []string{c.Root}}}}
 			done := make(chan struct{})
