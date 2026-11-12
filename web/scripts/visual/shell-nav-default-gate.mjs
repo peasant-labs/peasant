@@ -19,6 +19,7 @@
 import { spawn } from 'node:child_process'
 import YAML from 'yaml'
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync } from 'node:fs'
+import { seedConfiguredConfigHome } from '../journey/lib/configured-sandbox.mjs'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
@@ -115,6 +116,9 @@ const STILL_PATTERN = new RegExp(`^${escapeRegExp(ANNOUNCE.stillStopped)} \\d{2}
 // ── the server this gate owns ────────────────────────────────────────────────────────────────────
 const ownConfigDir = !process.env.PEASANT_OFFLINE_CONFIG_DIR
 const configDir = process.env.PEASANT_OFFLINE_CONFIG_DIR || mkdtempSync(join(tmpdir(), 'peasant-offline-gate-'))
+// The gate's own throwaway directory is an installed dashboard: with no configuration file every page is
+// sent to setup. A directory the caller names is theirs, and is left as they made it.
+if (ownConfigDir) seedConfiguredConfigHome(configDir)
 mkdirSync(OUT, { recursive: true })
 const serverLog = join(OUT, 'server.log')
 closeSync(openSync(serverLog, 'w')) // one run per log: earlier runs never mix into the one a failure points to

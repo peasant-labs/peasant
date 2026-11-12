@@ -16,22 +16,35 @@ import { dirname, join } from 'node:path';
  */
 export const CONFIGURED_SANDBOX_CONFIG = 'version: 1\n';
 
+/**
+ * The configuration file the binary reads for a configuration home: the
+ * directory XDG_CONFIG_HOME names, or the one passed as `--config-dir`.
+ */
+export function configHomeConfigPath(configHome) {
+  if (typeof configHome !== 'string' || !configHome.startsWith('/')) {
+    throw new Error(`The journey sandbox could not be marked as set up in configHomeConfigPath because its configuration home is ${JSON.stringify(configHome)}, not an absolute path. No file was written, so the binary would start unconfigured and send every page to setup. Pass the same isolated XDG_CONFIG_HOME or --config-dir the binary is launched with.`);
+  }
+  return join(configHome, 'peasant', 'config.yaml');
+}
+
 /** The configuration file the binary reads under this environment's XDG_CONFIG_HOME. */
 export function sandboxConfigPath(env) {
-  const base = env?.XDG_CONFIG_HOME;
-  if (typeof base !== 'string' || !base.startsWith('/')) {
-    throw new Error(`The journey sandbox could not be marked as set up in sandboxConfigPath because XDG_CONFIG_HOME is ${JSON.stringify(base)}, not an absolute path. No file was written, so the binary would start unconfigured and send every page to setup. Pass the same isolated environment the binary is launched with.`);
-  }
-  return join(base, 'peasant', 'config.yaml');
+  return configHomeConfigPath(env?.XDG_CONFIG_HOME);
 }
 
 /**
- * Writes the configuration file. Call it before each start of the binary and
- * after anything that clears the configuration directory. Returns the path.
+ * Writes the configuration file below a configuration home. Call it before
+ * each start of the binary and after anything that clears the directory.
+ * Returns the path.
  */
-export function seedConfiguredSandbox(env) {
-  const path = sandboxConfigPath(env);
+export function seedConfiguredConfigHome(configHome) {
+  const path = configHomeConfigPath(configHome);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   writeFileSync(path, CONFIGURED_SANDBOX_CONFIG, { mode: 0o600 });
   return path;
+}
+
+/** The same seed for a binary that finds its configuration home through XDG_CONFIG_HOME. */
+export function seedConfiguredSandbox(env) {
+  return seedConfiguredConfigHome(env?.XDG_CONFIG_HOME);
 }
