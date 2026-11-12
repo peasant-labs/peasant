@@ -55,38 +55,55 @@ func LoadRunOutcomeHardeningFixtures(t *testing.T) runOutcomeHardeningFixture {
 	return fixture
 }
 
+// undefinedOutcomeReasonID is below the store-local range and names no reason
+// in this build: the write and read boundaries must both refuse it.
+const undefinedOutcomeReasonID = 999
+
 func TestRunOutcomesReasonBoundaries(t *testing.T) {
 	for _, row := range LoadRunOutcomeHardeningFixtures(t).Reasons {
 		t.Run(row.Name, func(t *testing.T) {
-			reason, err := ingest.NewAuditReason(row.Reason)
+			reason, err := ingest.NewOutcomeReason(row.Reason)
 			if (err == nil) != row.Valid {
 				t.Fatalf("constructor acceptance = %v, want %v", err == nil, row.Valid)
 			}
-			if row.Valid && string(reason) != row.Reason {
+			if row.Valid && reason.Code() != row.Reason {
 				t.Fatal("constructor changed spelling")
+			}
+			if !row.Valid && row.Reason != "" && strings.Contains(err.Error(), row.Reason) {
+				t.Fatal("constructor rejection leaked untrusted reason")
 			}
 			s, _ := openGenerationStore(t)
 			outcomes := LoadRunOutcomeFixtures(t)
-			// Deliberately bypass the constructor to exercise the store boundary.
-			outcomes[0].ReasonCode = ingest.AuditReason(row.Reason)
+			// Deliberately bypass the constructor to exercise the store boundary:
+			// a rejected code has no id, so the bypass is an id no build defines.
+			storedID := int64(reason)
+			if !row.Valid {
+				storedID = undefinedOutcomeReasonID
+			}
+			outcomes[0].Reason = ingest.OutcomeReason(storedID)
 			err = s.LogIngestRun(t.Context(), ingest.IngestLogEntry{StartedAt: 1, SessionsError: 1, Outcomes: outcomes})
 			if (err == nil) != row.Valid {
 				t.Fatalf("writer acceptance = %v, want %v", err == nil, row.Valid)
-			}
-			if !row.Valid && row.Reason != "" && strings.Contains(err.Error(), row.Reason) {
-				t.Fatal("write rejection leaked untrusted reason")
 			}
 			conn, err := s.pool.Take(t.Context())
 			if err != nil {
 				t.Fatal(err)
 			}
-			// Simulate old or externally corrupted data in the immutable schema.
-			if err := sqlitex.ExecuteTransient(conn, `PRAGMA ignore_check_constraints=ON`, nil); err != nil {
-				t.Fatal(err)
+			// The foreign key refuses a row that names a missing reason.
+			err = sqlitex.Execute(conn, `INSERT INTO ingest_run_outcomes(run_id, reason_id, created_at) VALUES(1,?,2)`, &sqlitex.ExecOptions{Args: []any{storedID}})
+			if (err == nil) != row.Valid {
+				s.pool.Put(conn)
+				t.Fatalf("foreign key acceptance = %v, want %v", err == nil, row.Valid)
 			}
-			err = sqlitex.Execute(conn, `INSERT INTO ingest_run_outcomes(run_id, kind, reason_code, created_at) VALUES(1,'diagnostic',?,2)`, &sqlitex.ExecOptions{Args: []any{row.Reason}})
-			if resetErr := sqlitex.ExecuteTransient(conn, `PRAGMA ignore_check_constraints=OFF`, nil); resetErr != nil {
-				t.Fatal(resetErr)
+			if !row.Valid {
+				// Simulate externally corrupted data past the foreign key.
+				if err := sqlitex.ExecuteTransient(conn, `PRAGMA foreign_keys=OFF`, nil); err != nil {
+					t.Fatal(err)
+				}
+				err = sqlitex.Execute(conn, `INSERT INTO ingest_run_outcomes(run_id, reason_id, created_at) VALUES(1,?,2)`, &sqlitex.ExecOptions{Args: []any{storedID}})
+				if resetErr := sqlitex.ExecuteTransient(conn, `PRAGMA foreign_keys=ON`, nil); resetErr != nil {
+					t.Fatal(resetErr)
+				}
 			}
 			s.pool.Put(conn)
 			if err != nil {
@@ -98,9 +115,6 @@ func TestRunOutcomesReasonBoundaries(t *testing.T) {
 			}
 			if !row.Valid && got != nil {
 				t.Fatal("reader returned unvalidated details")
-			}
-			if !row.Valid && row.Reason != "" && strings.Contains(err.Error(), row.Reason) {
-				t.Fatal("read rejection leaked untrusted reason")
 			}
 		})
 	}
@@ -181,7 +195,7 @@ func LoadRunOutcomeFixtures(t *testing.T) []ingest.RunOutcome {
 	var outcomes []ingest.RunOutcome
 	for _, row := range fixture.Outcomes {
 		names = append(names, row.Name)
-		kind, err := ingest.NewRunOutcomeKind(row.Kind)
+		kind, err := ingest.NewOutcomeKind(row.Kind)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -192,11 +206,14 @@ func LoadRunOutcomeFixtures(t *testing.T) []ingest.RunOutcome {
 				t.Fatal(err)
 			}
 		}
-		reason, err := ingest.NewAuditReason(row.Reason)
+		reason, err := ingest.NewOutcomeReason(row.Reason)
 		if err != nil {
 			t.Fatal(err)
 		}
-		outcomes = append(outcomes, ingest.RunOutcome{SessionID: sid, Kind: kind, ReasonCode: reason, CreatedAt: 2})
+		if reason.Kind() != kind {
+			t.Fatalf("fixture row %s names kind %s, but its reason belongs to %s", row.Name, kind, reason.Kind())
+		}
+		outcomes = append(outcomes, ingest.RunOutcome{SessionID: sid, Reason: reason, CreatedAt: 2})
 	}
 	if err := validateRecoveryRequiredNames(fixture.RequiredNames, names, "run outcomes"); err != nil {
 		t.Fatal(err)
@@ -308,7 +325,7 @@ func TestIngestRunOutcomesWriterAndRetention(t *testing.T) {
 func TestIngestRunOutcomesFailurePreservesAggregate(t *testing.T) {
 	s, _ := openGenerationStore(t)
 	invalid := LoadRunOutcomeFixtures(t)
-	invalid[0].ReasonCode = ""
+	invalid[0].Reason = 0
 	if err := s.LogIngestRun(t.Context(), ingest.IngestLogEntry{StartedAt: 1, SessionsError: 1, Outcomes: invalid}); err == nil {
 		t.Fatal("missing reason admitted")
 	}

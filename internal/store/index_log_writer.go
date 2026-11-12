@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
@@ -14,8 +15,9 @@ var _ ingest.IndexLogger = (*Store)(nil)
 const sqlInsertIndexLog = `INSERT INTO index_log (
     session_id, provider, outcome, index_version,
     entries_count, source_path, original_root, reason,
-    started_at, finished_at, error_message, index_format_version
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    started_at, finished_at, error_message, index_format_version,
+    parse_ms, write_ms, bytes
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 // LogIndexEntry inserts a single index_log row.
 // Best-effort: callers should not fail the pipeline on error.
@@ -40,10 +42,22 @@ func (s *Store) LogIndexEntry(ctx context.Context, entry ingest.IndexLogEntry) e
 			derefInt64(entry.FinishedAt),
 			derefString(entry.ErrorMessage),
 			derefInt(entry.IndexVersion),
+			derefDurationMs(entry.ParseDuration),
+			derefDurationMs(entry.WriteDuration),
+			derefInt64(entry.Bytes),
 		},
 	}); err != nil {
 		return fmt.Errorf("store: insert index_log: %w", err)
 	}
 
 	return nil
+}
+
+// derefDurationMs binds a measured duration as whole milliseconds, or NULL
+// when it was not measured.
+func derefDurationMs(d *time.Duration) any {
+	if d == nil {
+		return nil
+	}
+	return max(d.Milliseconds(), 0)
 }

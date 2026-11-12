@@ -285,6 +285,9 @@ var migrationV24 = createSessionCommands + ";\n" +
 // point at session_search_fts again, the union entries half is rebuilt when
 // the v75 window left residue (cheap re-sync otherwise), and
 // session_entries_fts is dropped. See schema_v76.go.
+// migrationV77 stores the import profile (index_log timing columns and
+// ingest_run_stages) and gives run outcomes stable reason ids through two
+// lookup tables. See schema_v77.go.
 
 // dbSchema is the sqlitemigration schema applied on Open().
 var dbSchema = sqlitemigration.Schema{
@@ -365,6 +368,7 @@ var dbSchema = sqlitemigration.Schema{
 		migrationV74,
 		migrationV75,
 		migrationV76,
+		migrationV77,
 	},
 	// V16 rebuilds annotation tables with new FKs; disable FK checking during
 	// the migration transaction so renamed/recreated tables don't cause violations.
@@ -435,5 +439,6 @@ var dbSchema = sqlitemigration.Schema{
 		nil,                        // V74: conversation turn count
 		{DisableForeignKeys: true}, // V75: image entries and session attachments
 		nil,                        // V76: search trigger repair (trigger + FTS DML only, no FK-bearing tables)
+		nil,                        // V77: import profile tables and the run-outcome rebuild (the rebuilt table is a leaf; FKs stay on so the copy is checked)
 	},
 }

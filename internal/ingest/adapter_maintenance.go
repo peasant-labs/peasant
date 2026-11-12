@@ -317,7 +317,7 @@ func (p *Pipeline) reportPairRepairUnavailable(ctx context.Context, sid SessionI
 		causeClass, shaped = sourceUnavailableCause(cause)
 	}
 	if shaped {
-		if !p.settleUnavailableSource(ctx, sid, causeClass, lane) || p.laneCauseAlreadyReported(sid, causeClass) {
+		if !p.settleUnavailableSource(ctx, sid, causeClass, lane, StageExtract) || p.laneCauseAlreadyReported(sid, causeClass) {
 			// A routine harvest stays quiet once this cause is recorded, and
 			// so does this lane when stored-content recovery already reported
 			// the same cause in this harvest. A store, locator, or write fault

@@ -101,7 +101,7 @@ func (p *Pipeline) refreshOneUnchangedCommit(ctx context.Context, session Discov
 	preserve := len(diags) > 0
 	write := func() { p.persistRefreshedCommits(ctx, session.SessionID, commits, preserve) }
 	if lane != nil {
-		p.runStoreWrite(lane, write)
+		p.runStoreWrite(lane, StageFilter, write)
 		return
 	}
 	write()

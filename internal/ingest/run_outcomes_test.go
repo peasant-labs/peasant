@@ -73,15 +73,18 @@ func TestFinalizeRunOutcomesAudit(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		kind, err := NewRunOutcomeKind(row.Kind)
+		kind, err := NewOutcomeKind(row.Kind)
 		if err != nil {
 			t.Fatal(err)
 		}
-		reason, err := NewAuditReason(row.Reason)
+		reason, err := NewOutcomeReason(row.Reason)
 		if err != nil {
 			t.Fatal(err)
 		}
-		want = append(want, RunOutcome{SessionID: sid, Kind: kind, ReasonCode: reason})
+		if reason.Kind() != kind {
+			t.Fatalf("fixture row %s names kind %s, but its reason belongs to %s", row.Name, kind, reason.Kind())
+		}
+		want = append(want, RunOutcome{SessionID: sid, Reason: reason})
 		if row.WorkerError {
 			err = errors.New("synthetic source payload must not enter the durable audit")
 			if row.Acquisition {
@@ -89,6 +92,7 @@ func TestFinalizeRunOutcomesAudit(t *testing.T) {
 			}
 			results = append(results, SessionResult{SessionID: sid, Error: err})
 		} else {
+			// The wire diagnostic keeps its own ErrorType spelling.
 			diagnostic := DiagnosticEntry{ErrorType: row.Reason, Location: "/synthetic/private/source", Message: "synthetic source payload", Remediation: "restore source"}
 			if sid == "" {
 				p.reportDiagnostic(diagnostic)
@@ -105,7 +109,14 @@ func TestFinalizeRunOutcomesAudit(t *testing.T) {
 	if result.Summary.Errors != 2 || logger.entry.SessionsError != 2 {
 		t.Fatalf("worker totals changed: %+v", result.Summary)
 	}
-	got := logger.entry.Outcomes
+	// Refresh rows have their own cases; this test covers failures and
+	// diagnostics.
+	var got []RunOutcome
+	for _, outcome := range logger.entry.Outcomes {
+		if outcome.Reason.Kind() != OutcomeKindRefresh {
+			got = append(got, outcome)
+		}
+	}
 	if len(got) != len(want) {
 		t.Fatalf("audit outcomes = %+v", got)
 	}
@@ -129,13 +140,13 @@ func TestFinalizeRunOutcomesAudit(t *testing.T) {
 		t.Fatalf("best-effort audit failed pipeline: %v", err)
 	}
 	p.resetDiagnostics()
-	if outcomes := p.runOutcomes(nil, 1); len(outcomes) != 0 {
+	if outcomes := p.runOutcomes(nil, nil, 1); len(outcomes) != 0 {
 		t.Fatalf("diagnostics leaked into next run: %+v", outcomes)
 	}
 }
 
 func TestRunOutcomeKindRejectsUnknown(t *testing.T) {
-	if _, err := NewRunOutcomeKind("unrecognized"); err == nil {
+	if _, err := NewOutcomeKind("unrecognized"); err == nil {
 		t.Fatal("unknown run outcome kind admitted")
 	}
 }

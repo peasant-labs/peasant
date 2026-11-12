@@ -123,7 +123,7 @@ func (p *Pipeline) replaceSessionDir(ctx context.Context, src, dst, sessionID, m
 		var sid SessionID
 		sid, err = NewSessionID(sessionID)
 		if err == nil {
-			p.runStoreWrite(writeLane, func() { err = mirror.PrepareArtifactInstall(ctx, sid) })
+			p.runStoreWrite(writeLane, StageExtract, func() { err = mirror.PrepareArtifactInstall(ctx, sid) })
 		}
 	}
 	if err != nil {
@@ -235,7 +235,7 @@ func (p *Pipeline) mirrorDrainedBatch(ctx context.Context, results []workerResul
 			requests[i] = mirrorRequestFor(wr)
 		}
 		var outcomes []ArtifactMirrorResult
-		p.runStoreWrite(writeLane, func() { outcomes = mirror.MirrorArtifacts(ctx, requests) })
+		p.runStoreWrite(writeLane, StageExtract, func() { outcomes = mirror.MirrorArtifacts(ctx, requests) })
 		byID := make(map[SessionID]ArtifactMirrorResult, len(outcomes))
 		for _, outcome := range outcomes {
 			byID[outcome.SessionID] = outcome
