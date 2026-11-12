@@ -37,6 +37,7 @@ import {
 import {
   KickstartCloseReason,
   KickstartEventKind,
+  KickstartIngestState,
   KickstartScanState,
   parseKickstartCloseReason,
   parseKickstartDiffLineType,
@@ -48,9 +49,10 @@ import {
   parseKickstartScanState,
   parseKickstartScope,
   parseKickstartStopKind,
+  parseSyncIngestStatusState,
+  SyncIngestStatusState,
   type KickstartDiffLineType,
   type KickstartFieldKind,
-  type KickstartIngestState,
   type KickstartLineKind,
   type KickstartNextStep,
   type KickstartScanState as KickstartScanStateMember,
@@ -269,6 +271,58 @@ function decodeIngest(raw: WireIngest, where: string): KickstartIngest {
     new: raw.new,
     updated: raw.updated,
   };
+}
+
+/**
+ * What `GET /api/v1/sync/ingest/status` says about the last import this server
+ * ran. It is not part of the kickstart contract: the panel reads it only as the
+ * fallback for a pushed end it may have missed, never to learn that an import is
+ * running (the topic pushes that). `idle` means the server has run none.
+ */
+export interface SyncIngestStatus {
+  readonly state: SyncIngestStatusState;
+  /** The sessions the last run wrote; zero unless it finished. */
+  readonly new: number;
+  readonly updated: number;
+  /** Why the last run failed; null unless it did. */
+  readonly error: string | null;
+}
+
+/** Read the import status route's body, or refuse it. */
+export function parseSyncIngestStatus(raw: unknown, where: string): SyncIngestStatus {
+  if (raw === null || typeof raw !== 'object') throw new KickstartContractError(where, 'the status is not an object');
+  const body = raw as { status?: unknown; result?: unknown; error?: unknown };
+  const state = parseSyncIngestStatusState(body.status, where);
+  switch (state) {
+    case SyncIngestStatusState.Done: {
+      const result = (body.result ?? {}) as { new?: unknown; updated?: unknown };
+      const counts = [result.new, result.updated];
+      if (!counts.every((count) => typeof count === 'number' && Number.isInteger(count) && count >= 0)) {
+        throw new KickstartContractError(where, 'a finished import reports no counts of the sessions it wrote');
+      }
+      return { state, new: result.new as number, updated: result.updated as number, error: null };
+    }
+    case SyncIngestStatusState.Error:
+      return { state, new: 0, updated: 0, error: typeof body.error === 'string' && body.error !== '' ? body.error : 'the import ended without a reason' };
+    default:
+      return { state, new: 0, updated: 0, error: null };
+  }
+}
+
+/**
+ * The end of an import as the panel shows it, from the status route; null while
+ * the status says no end has happened (running, or none ran), so the panel keeps
+ * what it was told.
+ */
+export function ingestEndOf(status: SyncIngestStatus): KickstartIngest | null {
+  switch (status.state) {
+    case SyncIngestStatusState.Done:
+      return { state: KickstartIngestState.Idle, note: null, error: null, new: status.new, updated: status.updated };
+    case SyncIngestStatusState.Error:
+      return { state: KickstartIngestState.Failed, note: null, error: status.error ?? 'the import ended without a reason', new: 0, updated: 0 };
+    default:
+      return null;
+  }
 }
 
 function decodeScan(raw: WireScan, where: string): KickstartScan {

@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { AllLocalKickstartErrorCodes, LocalKickstartDroppedLabelsMax } from '@peasant-labs/schema';
 import {
   acceptKickstartEvent,
+  ingestEndOf,
   KickstartContractError,
   parseKickstartErrorBody,
   parseKickstartEvent,
   parseKickstartScan,
   parseKickstartTree,
+  parseSyncIngestStatus,
 } from './model';
 import { ALL_KICKSTART_EVENT_KINDS } from './values';
 import { expandRefs, loadCases, loadModels, loadTrees } from '@/test/fixtures/kickstart';
@@ -133,6 +135,34 @@ describe('the scan', () => {
       const read = parseKickstartScan(scan);
       if (entry.expect !== undefined) expect({ notice: read.notice, phase: read.phase }).toEqual(entry.expect);
       if (entry.labels !== undefined) expect(read.droppedLabels).toHaveLength(LocalKickstartDroppedLabelsMax);
+    });
+  }
+});
+
+describe('the import status', () => {
+  const where = 'GET /api/v1/sync/ingest/status';
+  for (const entry of loadCases(PATH, 'statuses')) {
+    it(entry.name, () => {
+      if (Array.isArray(entry.refuses)) {
+        let failure: unknown;
+        try {
+          parseSyncIngestStatus(entry.body, where);
+        } catch (error) {
+          failure = error;
+        }
+        expect(failure, 'the page must refuse this status').toBeInstanceOf(Error);
+        expect((failure as Error).message).toContain(where);
+        for (const text of entry.refuses as string[]) expect((failure as Error).message).toContain(text);
+        return;
+      }
+      const end = ingestEndOf(parseSyncIngestStatus(entry.body, where));
+      if (entry.end === null) {
+        expect(end).toBeNull();
+        return;
+      }
+      const want = entry.end as { state: string; new: number; updated: number; error: string | null };
+      expect(end).not.toBeNull();
+      expect({ state: end!.state.wire, new: end!.new, updated: end!.updated, error: end!.error }).toEqual(want);
     });
   }
 });

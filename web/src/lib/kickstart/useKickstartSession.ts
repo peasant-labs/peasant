@@ -19,7 +19,12 @@
  *   - a write carries the revision this tab last rendered. The server applies
  *     it even when it is stale and names the fields it replaced, which the
  *     hook keeps as `overwritten` until the page dismisses them;
- *   - the socket coming back after a drop re-reads the snapshot once;
+ *   - the socket coming back after a drop re-reads the snapshot once, or, once
+ *     the session is saved, asks once how the import stands when the panel shows
+ *     it running;
+ *   - the import's progress is pushed, for every import that starts while the
+ *     saved session is kept, whoever starts it. After "import now" is accepted
+ *     the status route is read once, to show an end that was already pushed;
  *   - a closed event ends editing: `committed` carries the finish body,
  *     `expired` leaves {@link KickstartSessionApi.reopen} as the way forward.
  */
@@ -35,6 +40,7 @@ import {
   KickstartRequestError,
   openKickstartSession,
   patchKickstartSession,
+  fetchSyncIngestStatus,
   scanKickstartSession,
   startKickstartImport,
   type KickstartAnswers,
@@ -54,6 +60,7 @@ import {
   type KickstartSnapshotEvent,
   type KickstartTree,
   type LocalSettingValue,
+  ingestEndOf,
 } from './model';
 import { treeField } from './view';
 import {
@@ -171,6 +178,11 @@ export function useKickstartSession(scope: KickstartScope): KickstartSessionApi 
   const scanState = useRef<KickstartScan | null>(null);
   const selection = useRef<string | null>(null);
   const ingestSeen = useRef(false);
+  // The import as the panel shows it, and how many ingest events the topic has
+  // pushed: an end read from the status route is shown only if nothing was pushed
+  // while it was being read, because a push is the newer word.
+  const ingestShown = useRef<KickstartIngest | null>(null);
+  const ingestPushes = useRef(0);
   const ended = useRef(false);
   const alive = useRef(true);
   const buffered = useRef<KickstartEvent[]>([]);
@@ -243,19 +255,18 @@ export function useKickstartSession(scope: KickstartScope): KickstartSessionApi 
     return reloaded || moved;
   }, [loadTree, takeScan]);
 
-  const takeIngest = useCallback((next: KickstartIngest): void => {
+  const takeIngest = useCallback((next: KickstartIngest, pushed = false): void => {
     ingestSeen.current = true;
+    ingestShown.current = next;
+    if (pushed) ingestPushes.current += 1;
     setIngest(next);
   }, []);
 
   const finish = useCallback((reason: KickstartCloseReason, committed: KickstartCommitted | null): void => {
     ended.current = true;
     setEnding((current) => current ?? { reason, committed });
-    if (committed !== null && !ingestSeen.current) {
-      ingestSeen.current = true;
-      setIngest(committed.ingest);
-    }
-  }, []);
+    if (committed !== null && !ingestSeen.current) takeIngest(committed.ingest);
+  }, [takeIngest]);
 
   const applyEvent = useCallback((event: KickstartEvent): void => {
     acceptKickstartEvent(event, {
@@ -266,7 +277,7 @@ export function useKickstartSession(scope: KickstartScope): KickstartSessionApi 
         if (e.sessionId === sessionId.current) takeScan(e.scan, e.revision);
       },
       ingest: (e: KickstartIngestEvent) => {
-        if (e.sessionId === sessionId.current) takeIngest(e.ingest);
+        if (e.sessionId === sessionId.current) takeIngest(e.ingest, true);
       },
       closed: (e: KickstartClosedEvent) => {
         if (e.sessionId !== sessionId.current) return;
@@ -297,6 +308,8 @@ export function useKickstartSession(scope: KickstartScope): KickstartSessionApi 
     scanState.current = null;
     selection.current = null;
     ingestSeen.current = false;
+    ingestShown.current = null;
+    ingestPushes.current = 0;
     ended.current = false;
     buffered.current = [];
     setOpening(true);
@@ -333,7 +346,32 @@ export function useKickstartSession(scope: KickstartScope): KickstartSessionApi 
     };
   }, [open]);
 
-  // The socket coming back after a drop: events were missed, so read once.
+  /**
+   * Ask once how the import stands, and show its end if it already ended. This
+   * is the fallback for a push the page may have missed (the socket was down, or
+   * the import ended before the page was told it started), never a poll: a run
+   * that is still going is left to the topic, and a push that arrives while the
+   * answer is on its way is the newer word.
+   */
+  const readIngestEnd = useCallback(async (): Promise<void> => {
+    const mine = generation.current;
+    const pushes = ingestPushes.current;
+    try {
+      const end = ingestEndOf(await fetchSyncIngestStatus());
+      if (!alive.current || mine !== generation.current || pushes !== ingestPushes.current) return;
+      if (end !== null) takeIngest(end);
+    } catch (failure) {
+      if (!alive.current || mine !== generation.current) return;
+      setImportError(new Error(
+        `the import is running, but peasant did not say how it ended: ${asError(failure).message} ` +
+        'it keeps running; reload this page to see how it ended.',
+      ));
+    }
+  }, [takeIngest]);
+
+  // The socket coming back after a drop: events were missed, so read once. A
+  // saved session has no snapshot to read; what it can have missed is the end of
+  // the import it shows running.
   useEffect(() => {
     if (!connected) {
       if (socketSeen.current) socketDropped.current = true;
@@ -342,8 +380,12 @@ export function useKickstartSession(scope: KickstartScope): KickstartSessionApi 
     socketSeen.current = true;
     if (!socketDropped.current) return;
     socketDropped.current = false;
+    if (ended.current) {
+      if (ingestShown.current?.state === KickstartIngestState.Running) void readIngestEnd();
+      return;
+    }
     const id = sessionId.current;
-    if (id === null || ended.current) return;
+    if (id === null) return;
     const mine = generation.current;
     fetchKickstartSession(id)
       .then((view) => {
@@ -358,7 +400,7 @@ export function useKickstartSession(scope: KickstartScope): KickstartSessionApi 
         if (sessionIsGone(failure)) finish(KickstartCloseReason.Expired, null);
         else setAnswerError(asError(failure));
       });
-  }, [connected, finish, loadTree, takeSession]);
+  }, [connected, finish, loadTree, readIngestEnd, takeSession]);
 
   /** Queue one write behind the ones before it, so each carries the revision its predecessor left. */
   const write = useCallback((build: (revision: number) => KickstartAnswers): Promise<boolean> => {
@@ -446,16 +488,32 @@ export function useKickstartSession(scope: KickstartScope): KickstartSessionApi 
 
   const importNow = useCallback(async (): Promise<void> => {
     setImportError(null);
+    let started: boolean;
     try {
-      await startKickstartImport();
-      if (!alive.current) return;
-      // Started now, or already running: either way it is running. The topic
-      // pushes every change after this.
-      takeIngest({ state: KickstartIngestState.Running, note: null, error: null, new: 0, updated: 0 });
+      ({ started } = await startKickstartImport());
     } catch (failure) {
       if (alive.current) setImportError(asError(failure));
+      return;
     }
-  }, [takeIngest]);
+    if (!alive.current) return;
+    if (!started) {
+      // An import is running that this setup did not start. If it began after
+      // the save, the topic pushes its end here; if it began before, it says
+      // nothing about this setup, and a new one is the way to import it.
+      takeIngest({
+        state: KickstartIngestState.Busy,
+        note: 'an import is already running; its selection may predate this save. choose import now again when it ends.',
+        error: null,
+        new: 0,
+        updated: 0,
+      });
+      return;
+    }
+    // Started now. The topic pushes its end; one read of the status shows an end
+    // that was pushed before the page could be told it began.
+    takeIngest({ state: KickstartIngestState.Running, note: null, error: null, new: 0, updated: 0 });
+    await readIngestEnd();
+  }, [readIngestEnd, takeIngest]);
 
   const dismissOverwritten = useCallback(() => setOverwritten([]), []);
 
