@@ -1,6 +1,14 @@
 # Pure restoration and merge cases. All working directories are pre-resolved
 # fixture identities; real symlink and missing-directory behavior is tested with
 # the production resolver and temporary directories.
+#
+# Choosing a branch saves that branch, even when it is the only branch in its
+# checkout and even when every branch of the checkout is chosen. A checkout is
+# saved whole (no branches) only when it has no named branch to save. A branch
+# that appears later is admitted by autoIngestNewBranches, never by the shape of
+# the rule. The same chosen sessions give the same rule whichever row was ticked.
+# A saved whole-checkout rule is therefore re-saved as its branch list when the
+# selection is saved again after an edit.
 requiredNames:
   - restore-exact-clone-whole-project
   - new-project-starts-clear
@@ -24,7 +32,14 @@ requiredNames:
   - restore-returns-whole-residual
   - locked-node-blocks-commit
   - rescan-keeps-ids-only
-expectedCaseCount: 22
+  - single-branch-checkout-saves-the-chosen-branch
+  - project-row-saves-every-branch-it-shows
+  - checkout-with-no-named-branch-saves-the-checkout
+  - checkout-with-named-and-branchless-sessions-saves-branches-and-sessions
+  - new-branch-in-a-branch-rule-checkout-needs-auto-ingest
+  - new-branch-in-a-branch-rule-checkout-follows-auto-ingest-when-on
+  - rerun-prefill-shows-exactly-the-chosen-branch
+expectedCaseCount: 29
 cases:
   - name: restore-exact-clone-whole-project
     listings:
@@ -38,13 +53,15 @@ cases:
           projects:
             - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool]}
     expectInitiallyChecked: [exact-main, exact-release]
+    # The saved whole-checkout rule names a checkout with two named branches, so
+    # the re-saved rule lists them.
     expected:
       mode: selected
       autoIngestNewBranches: false
       harnesses:
         claude-code:
           projects:
-            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool]}
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool], branches: [main, release]}
 
   - name: new-project-starts-clear
     listings:
@@ -58,13 +75,15 @@ cases:
           projects:
             - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool]}
     expectInitiallyChecked: [known]
+    # The saved whole-checkout rule names a checkout that holds one branch, so the
+    # re-saved rule is that branch's.
     expected:
       mode: selected
       autoIngestNewBranches: false
       harnesses:
         claude-code:
           projects:
-            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool]}
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool], branches: [main]}
 
   - name: new-branch-stays-clear-when-policy-is-off
     listings:
@@ -141,13 +160,14 @@ cases:
     expectInitiallyChecked: [old-visible]
     clearProjectPaths: [/fixtures/team-a/tool]
     selectProjectPaths: [/fixtures/team-a/other]
+    # The chosen project holds one branch, so its rule is that branch's.
     expected:
       mode: selected
       autoIngestNewBranches: false
       harnesses:
         claude-code:
           projects:
-            - {gitRemote: "git@github.com:acme/other.git", clonePaths: [/fixtures/team-a/other]}
+            - {gitRemote: "git@github.com:acme/other.git", clonePaths: [/fixtures/team-a/other], branches: [main]}
             - {gitRemote: "git@github.com:acme/missing.git", clonePaths: [/fixtures/missing/tool], branches: [gone]}
           sessions: [missing-session]
 
@@ -233,13 +253,14 @@ cases:
           projects:
             - {name: app, clonePaths: [/fixtures/team-b/app]}
     expectInitiallyChecked: [app-b]
+    # The restored checkout holds one branch, so it is re-saved as that branch.
     expected:
       mode: selected
       autoIngestNewBranches: false
       harnesses:
         claude-code:
           projects:
-            - {name: app, clonePaths: [/fixtures/team-b/app]}
+            - {name: app, clonePaths: [/fixtures/team-b/app], branches: [main]}
 
   - name: duplicate-non-git-paths-keep-separate-branch-policies
     listings:
@@ -256,13 +277,15 @@ cases:
             - {name: app, clonePaths: [/fixtures/team-a/app]}
             - {name: app, clonePaths: [/fixtures/team-b/app], branches: [release, unavailable]}
     expectInitiallyChecked: [app-a-main, app-a-release, app-b-release]
+    # team-a's saved whole-checkout rule is re-saved as its two branches; team-b
+    # keeps its own list, so the two clones stay two rules.
     expected:
       mode: selected
       autoIngestNewBranches: false
       harnesses:
         claude-code:
           projects:
-            - {name: app, clonePaths: [/fixtures/team-a/app]}
+            - {name: app, clonePaths: [/fixtures/team-a/app], branches: [main, release]}
             - {name: app, clonePaths: [/fixtures/team-b/app], branches: [release, unavailable]}
 
   - name: ambiguous-pathless-name-selects-nothing
@@ -312,13 +335,17 @@ cases:
     saved: {mode: selected, autoIngestNewBranches: false}
     expectInitiallyChecked: []
     selectAll: true
+    # Select-all chooses what is on screen: each clone holds one branch, so each
+    # clone is saved as its branch. The two clones keep their own rules because
+    # their branches differ.
     expected:
       mode: selected
       autoIngestNewBranches: false
       harnesses:
         claude-code:
           projects:
-            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool, /fixtures/team-b/tool]}
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool], branches: [main]}
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-b/tool], branches: [release]}
 
   - name: explicit-session-wins-over-ambiguous-remote
     listings:
@@ -406,13 +433,15 @@ cases:
             - {gitRemote: "git@github.com:acme/ghost.git", branches: [main]}
           sessions: [gone-session]
     expectInitiallyChecked: [visible-session]
+    # The residual (ghost project, gone session) is returned whole; the visible
+    # checkout holds one branch and is re-saved as it.
     expected:
       mode: selected
       autoIngestNewBranches: false
       harnesses:
         claude-code:
           projects:
-            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool]}
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool], branches: [main]}
             - {gitRemote: "git@github.com:acme/ghost.git", branches: [main]}
           sessions: [gone-session]
 
@@ -453,3 +482,142 @@ cases:
     expected:
       mode: selected
       autoIngestNewBranches: false
+
+  # Choosing a branch saves that branch, even when it is the only branch in its
+  # checkout.
+  - name: single-branch-checkout-saves-the-chosen-branch
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, sessionId: only-main}
+    saved: {mode: selected, autoIngestNewBranches: false}
+    expectInitiallyChecked: []
+    selectBranches:
+      - {clonePath: /fixtures/team-a/tool, branch: main}
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool], branches: [main]}
+
+  # Ticking the project row chooses every session it shows, so the rule lists every
+  # branch it shows. A branch that appears later is not in it.
+  - name: project-row-saves-every-branch-it-shows
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, sessionId: whole-main}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: release, sessionId: whole-release}
+    saved: {mode: selected, autoIngestNewBranches: false}
+    expectInitiallyChecked: []
+    selectProjectPaths: [/fixtures/team-a/tool]
+    laterListings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, sessionId: whole-main}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: release, sessionId: whole-release}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: feature, sessionId: whole-new-branch}
+    expectLaterChecked: [whole-main, whole-release]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool], branches: [main, release]}
+
+  # The whole-checkout rule is for a checkout with no named branch: there is no
+  # branch to name.
+  - name: checkout-with-no-named-branch-saves-the-checkout
+    listings:
+      - {harness: claude-code, projectName: notes, workingDir: /fixtures/team-a/notes, sessionId: branchless-only}
+    saved: {mode: selected, autoIngestNewBranches: false}
+    expectInitiallyChecked: []
+    selectProjectPaths: [/fixtures/team-a/notes]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {name: notes, clonePaths: [/fixtures/team-a/notes]}
+
+  # A checkout that holds named branches and sessions with no recorded branch
+  # saves the branches, and names the branchless sessions one by one.
+  - name: checkout-with-named-and-branchless-sessions-saves-branches-and-sessions
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, sessionId: mixed-main}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, sessionId: mixed-branchless}
+    saved: {mode: selected, autoIngestNewBranches: false}
+    expectInitiallyChecked: []
+    selectProjectPaths: [/fixtures/team-a/tool]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool], branches: [main]}
+          sessions: [mixed-branchless]
+
+  # A session on a branch that did not exist when the branch was chosen is
+  # admitted only by the new-branch setting.
+  - name: new-branch-in-a-branch-rule-checkout-needs-auto-ingest
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, sessionId: chosen-main}
+    saved: {mode: selected, autoIngestNewBranches: false}
+    expectInitiallyChecked: []
+    selectBranches:
+      - {clonePath: /fixtures/team-a/tool, branch: main}
+    laterListings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, sessionId: chosen-main}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: feature, sessionId: later-feature}
+    expectLaterChecked: [chosen-main]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool], branches: [main]}
+
+  - name: new-branch-in-a-branch-rule-checkout-follows-auto-ingest-when-on
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, sessionId: auto-chosen-main}
+    saved: {mode: selected, autoIngestNewBranches: true}
+    expectInitiallyChecked: []
+    selectBranches:
+      - {clonePath: /fixtures/team-a/tool, branch: main}
+    laterListings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, sessionId: auto-chosen-main}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: feature, sessionId: auto-later-feature}
+    expectLaterChecked: [auto-chosen-main, auto-later-feature]
+    expected:
+      mode: selected
+      autoIngestNewBranches: true
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool], branches: [main]}
+
+  # Opening setup again shows exactly the branch that was chosen, and saving it
+  # unchanged writes the same rule.
+  - name: rerun-prefill-shows-exactly-the-chosen-branch
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, sessionId: rerun-main}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: feature, sessionId: rerun-feature}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool], branches: [main]}
+    expectInitiallyChecked: [rerun-main]
+    laterListings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, sessionId: rerun-main}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: feature, sessionId: rerun-feature}
+    expectLaterChecked: [rerun-main]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool], branches: [main]}

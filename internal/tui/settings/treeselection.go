@@ -966,14 +966,24 @@ func reconcileSelectionScope(next *TreeSelection, scope selectionScope, autoInge
 			// project out of the selection. Only a restricted harness gains a
 			// positive project rule; an unrestricted one just clears the touched
 			// candidates' denials and keeps its other exclusions.
+			var checkout onboarding.CheckoutRule
 			if !wasUnrestricted {
+				// Ticking the project row chooses every session of this checkout.
+				// The rule that saves them is the setup page's: the same
+				// derivation over the same chosen sessions.
+				checkout = chosenCheckoutRule(candidates)
 				replacement := projectReplacement(configured.Projects, scope, nil, true)
+				saved, _ := exactProjectTemplate(configured.Projects, scope.clonePath.String())
+				replacement.Branches = checkoutBranches(saved.Branches, checkout, candidates)
 				configured.Projects = spliceExactProjectPath(configured.Projects, scope.clonePath.String(), &replacement)
 			}
 			for _, candidate := range candidates {
 				configured.Sessions = removeString(configured.Sessions, string(candidate.SessionID))
 				configured.Exclusions.Sessions = removeString(configured.Exclusions.Sessions, string(candidate.SessionID))
 				configured.Exclusions.Branches = removeBranchExclusion(configured.Exclusions.Branches, scope.clonePath.String(), candidate.Branch)
+			}
+			for _, sessionID := range checkout.Sessions {
+				configured.Sessions = appendUniqueString(configured.Sessions, sessionID)
 			}
 		} else {
 			configured.Projects = spliceExactProjectPath(configured.Projects, scope.clonePath.String(), nil)
@@ -1148,6 +1158,44 @@ func candidatesForSelectionScope(scope selectionScope) ([]ingest.DiscoveryCandid
 		return nil, fmt.Errorf("exact %s scope for project %q has no visible session candidate", selectionScopeName(scope.kind), scope.projectIdentity)
 	}
 	return candidates, nil
+}
+
+// chosenCheckoutRule is the rule that saves a checkout whose every session is
+// chosen. It is onboarding.DeriveCheckout, the derivation the setup page and the
+// terminal's select-all use, so the same sessions chosen give the same rule
+// whichever row was ticked.
+func chosenCheckoutRule(candidates []ingest.DiscoveryCandidate) onboarding.CheckoutRule {
+	sessions := make([]onboarding.CheckoutSession, len(candidates))
+	for index, candidate := range candidates {
+		sessions[index] = onboarding.CheckoutSession{
+			ID:     string(candidate.SessionID),
+			Branch: semanticBranchName(candidate.Branch),
+			Chosen: true,
+		}
+	}
+	return onboarding.DeriveCheckout(sessions)
+}
+
+// checkoutBranches is the branch list a checkout's rule carries once its project
+// row is ticked: the branches the derivation names, plus any branch the saved
+// rule lists that the scan cannot show, which a tick does not remove. A rule that
+// is whole for the checkout has no list.
+func checkoutBranches(saved []string, checkout onboarding.CheckoutRule, candidates []ingest.DiscoveryCandidate) []string {
+	if checkout.Whole || len(checkout.Branches) == 0 {
+		return nil
+	}
+	shown := map[string]bool{}
+	for _, candidate := range candidates {
+		shown[semanticBranchName(candidate.Branch)] = true
+	}
+	branches := append([]string(nil), checkout.Branches...)
+	for _, branch := range saved {
+		if !shown[branch] {
+			branches = appendUniqueString(branches, branch)
+		}
+	}
+	sort.Strings(branches)
+	return branches
 }
 
 func projectReplacement(projects []config.ProjectSelection, scope selectionScope, branches []string, unrestricted bool) config.ProjectSelection {

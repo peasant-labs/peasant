@@ -214,6 +214,15 @@ A new branch in a selected project follows the saved `autoIngestNewBranches` val
 - `false` keeps discovery on the saved branch list. A project choice with no branch list still means
   all branches in that selected project.
 
+Kickstart saves the branches you chose. Choosing a branch saves that branch, even when it is the
+only branch in its clone, and ticking a project saves every branch it shows. A session recorded
+later on another branch of that clone is imported only when `autoIngestNewBranches` is `true`. The
+terminal and the web setup page save the same selection for the same chosen sessions, whichever row
+you ticked. Only a clone with no named branch is saved without a branch list, because it has no
+branch to name. A selection saved by an earlier version can still hold a project with no branch
+list. It keeps meaning all branches until you change the selection and save it again, when the list of
+the branches you chose replaces it. The review step shows that change.
+
 An exact branch exclusion still wins when `autoIngestNewBranches` is `true`. Clearing one available
 branch records a denial for that physical clone and branch. It does not disable automatic discovery
 for another branch or a sibling clone.

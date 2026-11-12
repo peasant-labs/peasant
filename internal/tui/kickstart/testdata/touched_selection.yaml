@@ -47,7 +47,9 @@ cases:
       projects:
         - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [clone-a], branches: [main]}
         - {harness: claude-code, gitRemote: "https://github.com/acme/tool.git", pathKeys: [clone-b], branches: [release]}
-        - {harness: claude-code, gitRemote: "git@github.com:acme/other.git", pathKeys: [clone-c]}
+        # The ticked project row chooses clone-c's one branch, so the rule is that
+        # branch's.
+        - {harness: claude-code, gitRemote: "git@github.com:acme/other.git", pathKeys: [clone-c], branches: [dev]}
       sessionExclusions:
         - {harness: claude-code, ids: [99999999-9999-4999-8999-999999999999]}
 
@@ -77,7 +79,7 @@ cases:
       projects:
         - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [clone-a], branches: [main]}
         - {harness: claude-code, gitRemote: "https://github.com/acme/tool.git", pathKeys: [clone-b], branches: [release]}
-        - {harness: claude-code, gitRemote: "git@github.com:acme/other.git", pathKeys: [clone-c]}
+        - {harness: claude-code, gitRemote: "git@github.com:acme/other.git", pathKeys: [clone-c], branches: [dev]}
 
   - name: auto-branch-deny-survives-refresh
     paths:
@@ -160,11 +162,14 @@ cases:
     actions: [down, down, toggle]
     refresh: true
     expectedCheckedSessions: [55555555-5555-4555-8555-555555555555]
+    # The saved whole-checkout rule is re-derived from the chosen sessions when the
+    # edit completes the project: the checkout names its branch, and no session id
+    # is added.
     expected:
       mode: selected
       autoIngestNewBranches: false
       projects:
-        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [clone-a]}
+        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [clone-a], branches: [main]}
 
   - name: filtered-select-all-leaves-hidden-harness-clear
     paths:
@@ -178,11 +183,13 @@ cases:
     refresh: true
     expectedCheckedSessions: [66666666-6666-4666-8666-666666666666]
     expectedUncheckedSessions: [77777777-7777-4777-8777-777777777777]
+    # Select-all chooses what is on screen; the clone holds one branch, so the
+    # rule is that branch's.
     expected:
       mode: selected
       autoIngestNewBranches: false
       projects:
-        - {harness: claude-code, gitRemote: "git@github.com:acme/claude.git", pathKeys: [claude-project]}
+        - {harness: claude-code, gitRemote: "git@github.com:acme/claude.git", pathKeys: [claude-project], branches: [main]}
 
   - name: exact-project-clear-preserves-sibling-clone
     paths:
@@ -379,8 +386,8 @@ cases:
       mode: selected
       autoIngestNewBranches: false
       projects:
-        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [clone-a]}
-        - {harness: acme-agent, gitRemote: "git@github.com:acme/other.git", pathKeys: [clone-b]}
+        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [clone-a], branches: [main]}
+        - {harness: acme-agent, gitRemote: "git@github.com:acme/other.git", pathKeys: [clone-b], branches: [main]}
 
   # A plain non-Git directory whose discovery carries no project name, no
   # remote, and no branch. The scanner has no Git cohort for it, so the

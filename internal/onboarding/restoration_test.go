@@ -48,6 +48,7 @@ type restorationCase struct {
 	ClearProjectPaths      []string               `yaml:"clearProjectPaths"`
 	SelectProjectPaths     []string               `yaml:"selectProjectPaths"`
 	ClearBranches          []restorationBranch    `yaml:"clearBranches"`
+	SelectBranches         []restorationBranch    `yaml:"selectBranches"`
 	SelectAll              bool                   `yaml:"selectAll"`
 	LaterListings          []restorationListing   `yaml:"laterListings"`
 	// PreviousListings is the machine the answer was given over; Listings is
@@ -135,6 +136,9 @@ func restoreAndDerive(t *testing.T, row restorationCase) (config.SelectionConfig
 	}
 	for _, branch := range row.ClearBranches {
 		setBranchState(t, roots, branch, kit.Unchecked)
+	}
+	for _, branch := range row.SelectBranches {
+		setBranchState(t, roots, branch, kit.Checked)
 	}
 	if row.SelectAll {
 		for _, root := range roots {
@@ -236,9 +240,40 @@ func assertEquivalenceCorpus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read inventory: %v", err)
 	}
+	// legacy_goldens.yaml records the old wizard and is not edited. The rule now
+	// saves the branches a project shows where the wizard saved none, so the
+	// scenarios that choose a project at project level are measured against the
+	// overlay's entry: the captured golden with the branch list added.
+	overlayData, err := os.ReadFile(filepath.Join("..", "tui", "kickstart", "testdata", "legacy_branch_rule.yaml"))
+	if err != nil {
+		t.Fatalf("read branch rule overlay: %v", err)
+	}
+	var overlay struct {
+		RequiredNames []string `yaml:"requiredNames"`
+		Scenarios     []struct {
+			Name     string                 `yaml:"name"`
+			Expected config.SelectionConfig `yaml:"expected"`
+		} `yaml:"scenarios"`
+	}
+	if err := yaml.Unmarshal(overlayData, &overlay); err != nil {
+		t.Fatalf("decode branch rule overlay: %v", err)
+	}
+	overlaid := map[string]config.SelectionConfig{}
+	for _, entry := range overlay.Scenarios {
+		overlaid[entry.Name] = entry.Expected
+	}
+	for _, name := range overlay.RequiredNames {
+		if _, ok := overlaid[name]; !ok {
+			t.Fatalf("branch rule overlay lost its entry for %q", name)
+		}
+	}
 	for _, scenario := range doc.Scenarios {
 		if scenario.Oracle != "legacy-captured" {
 			t.Fatalf("scenario %q oracle = %q", scenario.Name, scenario.Oracle)
+		}
+		want := scenario.Golden
+		if expected, changed := overlaid[scenario.Name]; changed {
+			want = expected
 		}
 		roots := inventoryRoots(t, inventory)
 		for _, scope := range scenario.Scopes {
@@ -259,7 +294,7 @@ func assertEquivalenceCorpus(t *testing.T) {
 			t.Fatalf("scenario %q derive: %v", scenario.Name, err)
 		}
 		got.AutoIngestNewBranches = scenario.AutoIngestNewBranches
-		if err := yamlEqual(withoutClonePaths(normalizeSelection(got)), normalizeSelection(scenario.Golden)); err != nil {
+		if err := yamlEqual(withoutClonePaths(normalizeSelection(got)), normalizeSelection(want)); err != nil {
 			t.Fatalf("scenario %q does not match the equivalence corpus: %v", scenario.Name, err)
 		}
 	}
