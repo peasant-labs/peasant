@@ -166,3 +166,32 @@ errors:
     - name: another-field-is-refused
       body: {code: kickstart_failed, error: a sentence, detail: a field the contract does not have}
       refuses: [detail, breaks the Local API contract]
+# The scan the server pushes and answers: what a finished scan could not read is
+# its own `notice` field, and the dropped labels are bounded by the contract's
+# own maximum. `labels` is how many dropped labels the case sends, as `max` or
+# `max-plus-one` of the schema's exported maximum, so the number is never
+# written here. `refuses` is text the actionable contract error must contain.
+scans:
+  requiredNames:
+    - a-notice-is-read-from-its-own-field
+    - a-scan-without-a-notice-has-none
+    - a-blank-notice-is-refused
+    - dropped-labels-up-to-the-contract-maximum-are-accepted
+    - one-more-than-the-maximum-of-dropped-labels-is-refused
+  cases:
+    - name: a-notice-is-read-from-its-own-field
+      scan: {state: done, done: 2, total: 2, phase: an older note carried in the phase, notice: "Could not read 1 harness folder: Codex."}
+      expect: {notice: "Could not read 1 harness folder: Codex.", phase: an older note carried in the phase}
+    - name: a-scan-without-a-notice-has-none
+      scan: {state: done, done: 2, total: 2}
+      expect: {notice: null, phase: null}
+    - name: a-blank-notice-is-refused
+      scan: {state: done, done: 2, total: 2, notice: "   "}
+      refuses: [notice, breaks the Local API contract]
+    - name: dropped-labels-up-to-the-contract-maximum-are-accepted
+      scan: {state: done, done: 2, total: 2, droppedSelections: 9}
+      labels: max
+    - name: one-more-than-the-maximum-of-dropped-labels-is-refused
+      scan: {state: done, done: 2, total: 2, droppedSelections: 9}
+      labels: max-plus-one
+      refuses: [droppedLabels, breaks the Local API contract]

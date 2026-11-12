@@ -183,6 +183,8 @@ export interface KickstartConnect {
 export interface KickstartScan {
   readonly state: KickstartScanStateMember;
   readonly phase: string | null;
+  /** What a finished scan could not read, in the server's words; null when it read everything. */
+  readonly notice: string | null;
   readonly done: number;
   readonly total: number;
   readonly error: string | null;
@@ -273,6 +275,7 @@ function decodeScan(raw: WireScan, where: string): KickstartScan {
   return {
     state: parseKickstartScanState(raw.state, where),
     phase: raw.phase ?? null,
+    notice: raw.notice ?? null,
     done: raw.done,
     total: raw.total,
     error: raw.error ?? null,
