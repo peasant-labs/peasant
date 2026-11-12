@@ -6,19 +6,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
-)
-
-// Cursor keeps its stores in SQLite files that a running Cursor may hold
-// open. The probes read at most cursorMaxRows rows per session query and
-// decode no value larger than cursorMaxValueBytes.
-const (
-	cursorMaxRows       = 20000
-	cursorMaxValueBytes = 16 << 20
-	cursorBusyTimeout   = 5 * time.Second
 )
 
 // cursorIdentifierKey matches an object key that names a field. Any other key
@@ -155,7 +145,7 @@ func cursorOpenReadOnly(ctx context.Context, src Source, rel string) (*sqlite.Co
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", rel, err)
 	}
-	conn.SetBusyTimeout(cursorBusyTimeout)
+	conn.SetBusyTimeout(sqliteProbeBusyTimeout)
 	conn.SetInterrupt(ctx.Done())
 	return conn, nil
 }
@@ -192,7 +182,7 @@ func cursorColumnType(declared string) JSONType {
 }
 
 // cursorBoundedValue reads column col, selected as
-// "CASE WHEN length(v) <= cursorMaxValueBytes THEN v END" so that SQLite
+// "CASE WHEN length(v) <= sqliteProbeMaxValueBytes THEN v END" so that SQLite
 // never hands an oversized value to Go. It returns false for NULL.
 func cursorBoundedValue(stmt *sqlite.Stmt, col int) ([]byte, bool) {
 	if stmt.ColumnIsNull(col) {

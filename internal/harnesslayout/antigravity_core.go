@@ -332,12 +332,12 @@ func antigravityShapeFile(src Source, a antigravityArtifact, rel string, rec *Sh
 	case antigravityReadJSONL:
 		return antigravityShapeJSONL(file, rec, a.observe, meta)
 	case antigravityReadJSON:
-		raw, err := io.ReadAll(io.LimitReader(file, cursorMaxValueBytes+1))
+		raw, err := io.ReadAll(io.LimitReader(file, sqliteProbeMaxValueBytes+1))
 		if err != nil {
 			return err
 		}
-		if len(raw) > cursorMaxValueBytes {
-			return fmt.Errorf("%s is larger than %d bytes", rel, cursorMaxValueBytes)
+		if len(raw) > sqliteProbeMaxValueBytes {
+			return fmt.Errorf("%s is larger than %d bytes", rel, sqliteProbeMaxValueBytes)
 		}
 		if value, ok := cursorDecode(rec, raw); ok {
 			cursorRecord(rec, "", "$", value)
@@ -459,7 +459,7 @@ func antigravityShapeBody(ctx context.Context, src Source, rel string, rec *Shap
 	defer db.Close()
 	var tables []string
 	err = db.query(`SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite\_%' ESCAPE '\' ORDER BY name LIMIT ?`,
-		[]any{cursorMaxRows}, func(stmt *sqlite.Stmt) error {
+		[]any{sqliteProbeMaxRows}, func(stmt *sqlite.Stmt) error {
 			tables = append(tables, stmt.ColumnText(0))
 			return nil
 		})
@@ -491,7 +491,7 @@ func antigravityShapeBody(ctx context.Context, src Source, rel string, rec *Shap
 		return nil
 	}
 	return db.query(`SELECT step_type, status, count(*) FROM steps GROUP BY step_type, status LIMIT ?`,
-		[]any{cursorMaxRows}, func(stmt *sqlite.Stmt) error {
+		[]any{sqliteProbeMaxRows}, func(stmt *sqlite.Stmt) error {
 			count := stmt.ColumnInt(2)
 			rec.shape.Kinds["step_type:"+strconv.FormatInt(stmt.ColumnInt64(0), 10)] += count
 			rec.shape.Kinds["status:"+strconv.FormatInt(stmt.ColumnInt64(1), 10)] += count
@@ -704,7 +704,7 @@ func antigravityOpen(ctx context.Context, src Source, rel string, database antig
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", rel, err)
 	}
-	conn.SetBusyTimeout(cursorBusyTimeout)
+	conn.SetBusyTimeout(sqliteProbeBusyTimeout)
 	conn.SetInterrupt(ctx.Done())
 	guard := &antigravityGuard{}
 	for _, denial := range antigravityDeniedReads {
@@ -734,7 +734,7 @@ func antigravityBlobColumns(conn *sqlite.Conn) ([]antigravityGuardEntry, error) 
 	err := sqlitex.ExecuteTransient(conn,
 		`SELECT m.name, p.name FROM sqlite_schema AS m JOIN pragma_table_info(m.name) AS p
 		 WHERE m.type = 'table' AND upper(p.type) LIKE '%BLOB%' ORDER BY m.name, p.cid LIMIT ?`,
-		&sqlitex.ExecOptions{Args: []any{cursorMaxRows}, ResultFunc: func(stmt *sqlite.Stmt) error {
+		&sqlitex.ExecOptions{Args: []any{sqliteProbeMaxRows}, ResultFunc: func(stmt *sqlite.Stmt) error {
 			denial := antigravityDenial{Database: antigravityBodyDatabase, Table: stmt.ColumnText(0), Column: stmt.ColumnText(1)}
 			out = append(out, antigravityGuardEntry{denial: denial, rule: antigravityRuleBlob})
 			return nil

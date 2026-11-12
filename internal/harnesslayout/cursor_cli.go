@@ -163,7 +163,7 @@ func cursorCLIShapeStore(ctx context.Context, src Source, rel string, artifact A
 	if tables["meta"] {
 		err := sqlitex.ExecuteTransient(conn,
 			`SELECT key, CASE WHEN length(value) <= ? THEN CAST(value AS TEXT) END FROM meta ORDER BY key LIMIT ?`,
-			&sqlitex.ExecOptions{Args: []any{cursorMaxValueBytes, cursorMaxRows}, ResultFunc: func(stmt *sqlite.Stmt) error {
+			&sqlitex.ExecOptions{Args: []any{sqliteProbeMaxValueBytes, sqliteProbeMaxRows}, ResultFunc: func(stmt *sqlite.Stmt) error {
 				raw, ok := cursorBoundedValue(stmt, 1)
 				if !ok {
 					rec.shape.Malformed++
@@ -186,7 +186,7 @@ func cursorCLIShapeStore(ctx context.Context, src Source, rel string, artifact A
 	if tables["blobs"] {
 		err := sqlitex.ExecuteTransient(conn,
 			`SELECT CASE WHEN length(data) <= ? THEN data END FROM blobs ORDER BY rowid LIMIT ?`,
-			&sqlitex.ExecOptions{Args: []any{cursorMaxValueBytes, cursorMaxRows}, ResultFunc: func(stmt *sqlite.Stmt) error {
+			&sqlitex.ExecOptions{Args: []any{sqliteProbeMaxValueBytes, sqliteProbeMaxRows}, ResultFunc: func(stmt *sqlite.Stmt) error {
 				raw, ok := cursorBoundedValue(stmt, 0)
 				if !ok {
 					cursorRecord(rec, "oversized", "", nil)
