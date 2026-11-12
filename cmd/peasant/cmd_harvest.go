@@ -21,7 +21,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/animation"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
-	"github.com/peasant-labs/peasant/internal/discovery"
 	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/metrics"
@@ -377,7 +376,7 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 	sources := buildSourceConfigsTo(cfg, cmd.ErrOrStderr())
 
 	// 6. Build pipeline config.
-	staleness := discovery.ConfigStaleness(cfg)
+	staleness := cfg.StalenessWindow()
 
 	// --all implies --force and --include-active, and clears all session filters.
 	force := flags.force || flags.all
