@@ -18,6 +18,7 @@ assert.deepEqual(new Set([...f.cases.map(c => c.name), 'every-script-that-starts
 
 // A process that answers the health route on `port`, as a running server does.
 const ANSWERS = `require('node:http').createServer((q, s) => s.end('{}')).listen(Number(process.argv[1]), 'localhost')`;
+const ANSWERS_AND_NOTIFIES = `process.once('disconnect', () => process.exit(0)); require('node:http').createServer((q, s) => { s.end('{}'); process.send('answered'); }).listen(Number(process.argv[1]), 'localhost')`;
 const freePort = () => new Promise((done) => { const s = createServer(); s.listen(0, 'localhost', () => { const { port } = s.address(); s.close(() => done(port)); }); });
 const gone = (child) => child.exitCode !== null || child.signalCode !== null;
 
@@ -90,15 +91,22 @@ const modes = {
   },
   async start(row, root, cleanups) {
     const port = await freePort();
-    const run = (code) => { const child = spawn(process.execPath, ['-e', code, String(port)], { stdio: ['ignore', 'ignore', 'pipe'] }); cleanups.push(() => { if (!gone(child)) child.kill('SIGKILL'); }); return child; };
+    const run = (code, ipc = false) => { const child = spawn(process.execPath, ['-e', code, String(port)], { stdio: ['ignore', 'ignore', 'pipe', ...(ipc ? ['ipc'] : [])] }); cleanups.push(() => { if (!gone(child)) child.kill('SIGKILL'); }); return child; };
     if (row.occupied) {
       const other = run(ANSWERS);
       for (let i = 0; i < 100 && !(await fetch(`http://localhost:${port}/api/v1/health`).catch(() => null))?.ok; i++) await new Promise((done) => setTimeout(done, 50));
       assert.equal(gone(other), false, 'the other process holds the port');
     }
-    const code = { answers: ANSWERS, exits: `process.exit(${row.status})`, silent: 'setInterval(() => {}, 1000)' }[row.server];
+    const code = { answers: ANSWERS, exits: `process.exit(${row.status})`, silent: 'setInterval(() => {}, 1000)', 'answers-elsewhere': `process.on('message', () => setTimeout(() => process.exit(${row.status}), ${row.exitAfterAnswerMs}))` }[row.server];
     let started = null;
-    const options = { port, portVariable: 'PEASANT_EXAMPLE_PORT', start: () => (started = run(code)), ...(row.withinMs ? { withinMs: row.withinMs } : {}) };
+    let answeredElsewhere = false;
+    const options = { port, portVariable: 'PEASANT_EXAMPLE_PORT', start: () => {
+      if (row.server === 'answers-elsewhere') {
+        const other = run(ANSWERS_AND_NOTIFIES, true);
+        other.once('message', () => { answeredElsewhere = true; started.send('exit'); });
+      }
+      return (started = run(code, row.server === 'answers-elsewhere'));
+    }, ...(row.withinMs ? { withinMs: row.withinMs } : {}) };
     const before = Date.now();
     if (row.error) {
       await assert.rejects(startOwnedServer(options), (error) => [row.error, String(port), ...(row.errorNames ?? [])].every((part) => error.message.includes(part)) || assert.fail(error.message));
@@ -110,6 +118,7 @@ const modes = {
       assert.equal((await fetch(`http://localhost:${port}/api/v1/health`)).ok, true);
     }
     assert.equal(started !== null, row.started, row.started ? 'the script started its server' : 'nothing was started on an occupied port');
+    if (row.server === 'answers-elsewhere') assert.equal(answeredElsewhere, true, 'the other process answered health before the started server exited');
     if (row.stopped) { await new Promise((done) => (gone(started) ? done() : started.once('exit', done))); assert.equal(started.signalCode, 'SIGKILL'); }
   },
 };
@@ -139,9 +148,9 @@ test('every-script-that-starts-the-binary-is-sandboxed-or-exempt', () => {
     assert.match(source, /\bownedServerSandbox\(/, `${path} makes its sandbox with ownedServerSandbox`);
     assert.match(source, /\bstartOwnedServer\(/, `${path} starts its server through startOwnedServer`);
     const spawns = source.split('\n').filter((line) => startsTheBinary.test(line));
-    assert.ok(spawns.length > 0);
+    assert.ok(spawns.length > 0, `${path}: the spawn must stay on one source line with the web start arguments, ...sandbox.args and env: sandbox.env; restore the one-line call so the sandbox check can verify it`);
     for (const line of spawns) {
-      assert.ok(/\bspawn\(/.test(line) && line.includes('...sandbox.args') && /\benv: sandbox\.env\b/.test(line), `${path} starts the binary without the whole sandbox (both ...sandbox.args and env: sandbox.env): ${line.trim()}`);
+      assert.ok(/\bspawn\(/.test(line) && line.includes('...sandbox.args') && /\benv: sandbox\.env\b/.test(line), `${path}: the spawn must stay on one source line with the web start arguments, ...sandbox.args and env: sandbox.env so the sandbox check can verify it: ${line.trim()}`);
     }
   }
 });

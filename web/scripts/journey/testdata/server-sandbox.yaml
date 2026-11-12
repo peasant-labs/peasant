@@ -22,6 +22,7 @@ requiredNames:
   - owned-server-start-refuses-an-occupied-port
   - owned-server-start-ends-the-wait-when-the-server-exits
   - owned-server-start-returns-the-server-that-answers
+  - owned-server-start-refuses-an-answer-from-a-server-that-then-exits
   - owned-server-start-stops-a-server-that-never-answers
   - every-script-that-starts-the-binary-is-sandboxed-or-exempt
 cases:
@@ -89,7 +90,8 @@ cases:
   - {name: named-directory-unset-or-empty-names-nothing, mode: named-directory, values: [null, ""], expect: null}
   # mode start: the port is `occupied` by another process that answers the health route, or free.
   # `server` is what the script's own start does: answers (the health route), exits (with
-  # `status`), or silent (runs and never listens). `started` says whether start was called at all.
+  # `status`), silent (runs and never listens), or answers-elsewhere (another process answers
+  # after the pre-check while the started process exits). `started` says whether start was called.
   - name: owned-server-start-refuses-an-occupied-port
     mode: start
     occupied: true
@@ -111,6 +113,14 @@ cases:
     occupied: false
     server: answers
     started: true
+  - name: owned-server-start-refuses-an-answer-from-a-server-that-then-exits
+    mode: start
+    occupied: false
+    server: answers-elsewhere
+    status: 7
+    exitAfterAnswerMs: 100
+    started: true
+    error: exited with status 7 before it answered
   - name: owned-server-start-stops-a-server-that-never-answers
     mode: start
     occupied: false

@@ -6,7 +6,7 @@
  * The route, shell, chooser, hierarchy and helper-group code remain real.
  */
 export function groupedSyncPayload(sessions) {
-  const items = sessions.map((session) => ({
+  const items = sessions.map(({ helperGroups, ...session }) => ({
     kind: 'transcript',
     transcript: {
       session,
@@ -25,7 +25,7 @@ export function groupedSyncPayload(sessions) {
         previouslyPushed: false,
       },
     },
-    helperGroups: (session.helperGroups || []).map((group) => ({ ...group, purpose: 'helper_review' })),
+    helperGroups: (helperGroups || []).map((group) => ({ ...group, purpose: 'helper_review' })),
   }))
   return {
     items,

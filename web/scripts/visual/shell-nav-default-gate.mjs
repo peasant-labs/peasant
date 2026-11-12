@@ -149,6 +149,7 @@ const startServer = async () => {
       port: PORT,
       portVariable: 'PEASANT_OFFLINE_PORT',
       log: serverLog,
+      // Save the child immediately so a signal can stop it before it answers health.
       start: () => server = spawn(BIN, ['web', 'start', '--port', String(PORT), '--foreground', '--no-browser', ...sandbox.args, `--mock-data-store=${SMOKE_MOCKS}`], { env: sandbox.env, stdio: ['ignore', log, log] }),
     })
   } finally {

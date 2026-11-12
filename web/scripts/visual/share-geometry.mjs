@@ -25,7 +25,11 @@ const VIEWPORTS = [
   { id: 'narrow-320', width: 320, height: 844 },
 ]
 const pause = (ms) => new Promise((resolvePause) => setTimeout(resolvePause, ms))
-const fail = (message) => { throw new Error(`Share geometry gate failed: ${message}`) }
+const fail = (message, exit = false) => {
+  const detail = `Share geometry gate failed: ${message}`
+  if (exit) { console.error(`ERROR [share-geometry] ${detail}`); process.exit(2) }
+  throw new Error(detail)
+}
 
 function filesBelow(directory) {
   if (!existsSync(directory)) return []
@@ -169,7 +173,7 @@ const puppeteer = (await import(process.env.PUPPETEER_CORE || 'puppeteer-core'))
 const sandbox = ownedServerSandbox('share-geometry')
 // It is started only when nothing answers on the port yet, and the wait ends when it answers or has exited,
 // so the pages are never driven against a server this run did not start.
-const server = await startOwnedServer({ port: PORT, portVariable: 'PEASANT_SHARE_GEOMETRY_PORT', start: () => spawn(BIN, ['web', 'start', '--port', PORT, '--foreground', '--no-browser', ...sandbox.args, '--mock-data-store=web,sessions,annotations'], { cwd: REPO, env: sandbox.env, stdio: ['ignore', 'ignore', 'pipe'] }) })
+const server = await startOwnedServer({ port: PORT, portVariable: 'PEASANT_SHARE_GEOMETRY_PORT', start: () => spawn(BIN, ['web', 'start', '--port', PORT, '--foreground', '--no-browser', ...sandbox.args, '--mock-data-store=web,sessions,annotations'], { cwd: REPO, env: sandbox.env, stdio: ['ignore', 'ignore', 'pipe'] }) }).catch((error) => fail(error.message, true))
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: null })
 try {
   const served = await fetch(`${ORIGIN}/_next/static/chunks/${relative(join(WEB, 'out/_next/static/chunks'), chunk).split('\\').join('/')}`)

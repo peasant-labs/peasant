@@ -34,7 +34,11 @@ const FEATURE_BYTES = Object.freeze({
 const THEMES = ['dark', 'light']
 const VIEWPORTS = [{ id: 'desktop', width: 1440, height: 1000 }, { id: 'mobile', width: 390, height: 844 }]
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
-const fail = (message) => { throw new Error(`Search/share visual harness failed: ${message}`) }
+const fail = (message, exit = false) => {
+  const detail = `Search/share visual harness failed: ${message}`
+  if (exit) { console.error(`ERROR [search-share-visual] ${detail}`); process.exit(2) }
+  throw new Error(detail)
+}
 
 // Parse an absolute M/L path into its ordered vertices. Returns an error string
 // if the path uses anything other than a single subpath of straight segments.
@@ -595,7 +599,7 @@ const puppeteer = (await import(process.env.PUPPETEER_CORE || 'puppeteer-core'))
 const sandbox = ownedServerSandbox('search-share-visual')
 // It is started only when nothing answers on the port yet, and the wait ends when it answers or has exited,
 // so the pages are never driven against a server this run did not start.
-const server = await startOwnedServer({ port: PORT, portVariable: 'PEASANT_SEARCH_SHARE_PORT', start: () => spawn(BIN, ['web', 'start', '--port', PORT, '--foreground', '--no-browser', ...sandbox.args, '--mock-data-store=web,sessions,search'], { cwd: REPO, env: sandbox.env, stdio: ['ignore', 'ignore', 'pipe'] }) })
+const server = await startOwnedServer({ port: PORT, portVariable: 'PEASANT_SEARCH_SHARE_PORT', start: () => spawn(BIN, ['web', 'start', '--port', PORT, '--foreground', '--no-browser', ...sandbox.args, '--mock-data-store=web,sessions,search'], { cwd: REPO, env: sandbox.env, stdio: ['ignore', 'ignore', 'pipe'] }) }).catch((error) => fail(error.message, true))
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: null })
 try {
   for (const chunk of chunks) {

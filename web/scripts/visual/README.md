@@ -281,7 +281,8 @@ may open `~/.local/share/peasant` or `~/.config/peasant`.
 - **the check:** `scripts/journey/testdata/server-sandbox.yaml`, run by `pnpm test:journey:support`
   (`scripts/journey/server-sandbox.test.mjs`). It also reads every script under `web/scripts`: one that
   starts `peasant web start` must be in that file's `scripts.required` list (and pass the whole sandbox on
-  its spawn) or in `scripts.exempt` with what it isolates instead.
+  its spawn) or in `scripts.exempt` with what it isolates instead. Each required `spawn` call must stay on
+  one source line, including `web`, `start`, `...sandbox.args` and `env: sandbox.env`, for the check to read it.
 - **a server you start by hand** (§2) uses your own directories unless you pass the three flags.
 
 ### 3. `full-app-smoke.mjs` — the durable real-binary gate for every visual change
