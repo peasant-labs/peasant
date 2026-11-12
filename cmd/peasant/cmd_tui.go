@@ -69,6 +69,13 @@ func runTUI(cmd *cobra.Command, cfgPath string, mockDataStore string) error {
 	// A fully mocked TUI needs no database, so an open failure is kept and
 	// reported only if a section then needs the real store.
 	var openErr error
+	// The TUI only runs on a terminal, so require it before touching the
+	// store: a non-interactive invocation must fail here instead of
+	// migrating (and rebuilding) the database invisibly on the way to the
+	// same refusal below.
+	if !tuiTerminalAvailable() {
+		return noTerminalError{command: "tui"}
+	}
 	if err := os.MkdirAll(dataDir, defaults.PrivateDirPerm); err != nil {
 		openErr = fmt.Errorf("create the data directory %s: %w", dataDir, err)
 	} else if db, err := store.Open(dbPath); err != nil {
@@ -91,9 +98,6 @@ func runTUI(cmd *cobra.Command, cfgPath string, mockDataStore string) error {
 		return fmt.Errorf("failed to fetch sessions: %w", err)
 	}
 
-	if err := requireTerminal("tui"); err != nil {
-		return err
-	}
 	p := tea.NewProgram(tui.NewApp(sessions))
 	if _, err := p.Run(); err != nil {
 		return fmt.Errorf("failed to run TUI: %w", err)

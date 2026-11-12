@@ -27,6 +27,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 // BuildWebCommand constructs the fully wired web cobra command tree.
@@ -70,6 +71,13 @@ func BuildWebCommand() *cobra.Command {
 			// answer the probe and be reported as the new one.
 			if addr, served := api.ServedLoopbackAddr(spawn.port); served {
 				return fmt.Errorf("web start: port %d already answers at %s, so no server was started. %s", spawn.port, addr, api.PortServedHint(spawn.port))
+			}
+			dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
+			// Migrate visibly before forking on a terminal; refuse an
+			// affected store on a non-interactive start instead of forking
+			// a server that could never start.
+			if err := maybePreopenStoreForWebStart(term.IsTerminal(int(os.Stdin.Fd())), dbPath); err != nil {
+				return err
 			}
 			// A cancelled start is not a usage error: the readiness probe stops
 			// on the signal context, prints what it already knows, and exits
@@ -173,6 +181,13 @@ func runWebForeground(cmd *cobra.Command, cfgPath string, port int, devMode bool
 	if generationErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: cannot configure managed generation reads: %v\n", generationErr)
 		generationOptions = nil
+	}
+	// A foreground run on a terminal opens as usual so the v76 notice and
+	// rebuild happen visibly. The detached background child has no
+	// terminal: it must not pay the whole-index rebuild where nobody
+	// watches, so it refuses instead of starting.
+	if err := refuseStaleSearchIndex(dbPath); err != nil {
+		return err
 	}
 	if err := os.MkdirAll(dataDir, defaults.PrivateDirPerm); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: cannot create data directory %s: %v\n", dataDir, err)

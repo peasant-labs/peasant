@@ -405,6 +405,9 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 
 				db, err := openRunStore(cmd, dryRun, string(resolvedOutput), cfg.Write)
 				if err != nil {
+					if skipped := pushSkipForSearchResidue(cmd, err); skipped {
+						return nil
+					}
 					return fmt.Errorf("open analytics store: %w", err)
 				}
 				defer db.Close()
@@ -1525,6 +1528,20 @@ func (r pushRun) scopeSuffix() string {
 		return ""
 	}
 	return " --repository " + githooks.ShellQuote(repository)
+}
+
+// pushSkipForSearchResidue maps a residue refusal to the hook contract: a
+// managed hook must never block the push it runs in, so when opening the
+// store would rebuild the whole search index, skip the publish with the
+// actionable message and exit 0 instead of failing the push. Any other
+// error passes through unchanged. It reports whether the caller is done.
+func pushSkipForSearchResidue(cmd *cobra.Command, err error) bool {
+	var residue *store.SearchResidueRebuildError
+	if !errors.As(err, &residue) {
+		return false
+	}
+	fmt.Fprintln(cmd.ErrOrStderr(), residue.Error())
+	return true
 }
 
 // pushNothingAttemptedError marks a push failure that happened before a single

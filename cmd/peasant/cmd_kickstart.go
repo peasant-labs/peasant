@@ -540,7 +540,15 @@ func buildFTUEIngestRunnerWithProgress(cmd *cobra.Command, configPath string) (f
 		if generationErr != nil {
 			return nil, generationErr
 		}
-		db, err := store.Open(string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd))), generationOptions...)
+		dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
+		// A non-interactive caller never runs migration v76's whole-index
+		// rebuild invisibly: refuse on residue instead of opening. The
+		// wizard itself requires a terminal, so this only fires for
+		// off-terminal ingest runs.
+		if err := refuseStaleSearchIndex(dbPath); err != nil {
+			return nil, err
+		}
+		db, err := store.Open(dbPath, generationOptions...)
 		if err != nil {
 			return nil, fmt.Errorf("open analytics store: %w", err)
 		}

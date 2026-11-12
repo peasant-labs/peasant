@@ -1482,6 +1482,14 @@ func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	// A server-triggered run never pays migration v76's whole-index rebuild:
+	// there is no terminal watching it. Refuse on residue with the terminal
+	// command that performs the repair instead of opening.
+	if skip, err := store.NeedsSearchResidueRebuild(string(h.dbPath())); err != nil {
+		return nil, nil, nil, fmt.Errorf("check the analytics store for a pending search rebuild: %w; nothing was imported and nothing already imported was changed", err)
+	} else if skip {
+		return nil, nil, nil, &store.SearchResidueRebuildError{DBPath: string(h.dbPath())}
+	}
 	db, err := store.Open(string(h.dbPath()), append(storeOptions, store.WithWriteConfig(cfg.Write))...)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("open analytics store: %w", err)
