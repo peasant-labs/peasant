@@ -54,6 +54,10 @@ const requests = [];
 const walked = [];
 let offerSeen = null;
 let ingestCounts = null;
+// What the finish panel shows once "import now" has run an import after the first
+// one ended, and the ingest states the first tab was pushed for that run.
+let importNowCounts = null;
+let importNowStates = null;
 let importedAfterSetup = null;
 const laterImports = {};
 // The selection the setup saved, as the file holds it, kept in the evidence.
@@ -255,7 +259,7 @@ test.beforeAll(async ({ browser }) => {
 
 test.afterAll(async () => {
   writeFileSync(join(artifacts, `${theme()}-evidence.json`), JSON.stringify({
-    theme: theme(), shots, probes, consoleErrors, failedResponses, walked, offerSeen, ingestCounts, laterImports, importedAfterSetup, savedSelection, storedRemotes,
+    theme: theme(), shots, probes, consoleErrors, failedResponses, walked, offerSeen, ingestCounts, importNowCounts, importNowStates, laterImports, importedAfterSetup, savedSelection, storedRemotes,
     frames: frames.map(({ tab, kind, revision, reason, scan, ingest }) => ({ tab, kind, revision, reason, scan, ingest })),
     requests: requests.filter((entry) => entry.path.startsWith('/api/')).map((entry) => `${entry.tab} ${entry.method} ${entry.path}${entry.scope === undefined ? '' : ` (scope ${entry.scope})`}`),
   }, null, 2));
@@ -531,6 +535,24 @@ test('save-finish-and-ingest-end', async () => {
   expect(stored, 'only the chosen sessions were imported').toEqual(chosenTitles);
   await shoot(pageA, '09-finish');
 
+  // "import now" after the first import ended. The panel has to leave the first
+  // import's counts for the second run's: the server pushes the run's start and its
+  // end to the saved session, so the page is never left waiting for an end that is
+  // not pushed. Every chosen session is stored already, so the second run brings in
+  // none and updates none, and its counts differ from the first run's.
+  expect(fixture.chosen.imported, 'the first import brought sessions in, so the second run\'s counts differ from it').toBeGreaterThan(0);
+  const pushedBefore = frames.filter((frame) => frame.tab === 'A' && frame.kind === 'ingest').length;
+  await pageA.getByRole('button', { name: 'import now' }).click();
+  await expect(pageA.locator('.ks-finish .ks-counts').first(), 'the panel shows the end of the second import, with its counts').toHaveText(/^\s*0 new,\s*0 updated\s*$/);
+  await expect(pageA.getByText('import finished')).toBeVisible();
+  await expect(pageA.getByText('reading your selected sessions'), 'the spinner is gone').toHaveCount(0);
+  await expect(pageA.getByRole('button', { name: 'import now' })).toBeEnabled();
+  importNowCounts = await finishCounts(pageA);
+  importNowStates = frames.filter((frame) => frame.tab === 'A' && frame.kind === 'ingest').slice(pushedBefore).map((frame) => frame.ingest.state);
+  expect(importNowStates, 'the server pushed the second import\'s start and then its end').toEqual(['running', 'idle']);
+  expect(importNowCounts, 'nothing new came in').toEqual({ new: 0, updated: 0 });
+  expect(await storedTitles(pageA.request), 'and the store holds the same sessions').toEqual(chosenTitles);
+
   // The finish only offers: the settings section it names is a real one.
   const link = pageA.getByRole('link', { name: 'choose automatic publishing rules' });
   // The app serves directory-style pages, so the link carries the trailing slash.
@@ -588,7 +610,8 @@ test('config-holds-only-the-chosen-selection', async () => {
     expect(installed, `no Git hook was installed in ${repo.name}`).toEqual([]);
   }
   const touched = requests.filter((entry) => entry.method !== 'GET' && !entry.path.startsWith(`${API}/`)).map((entry) => `${entry.method} ${entry.path}`);
-  expect(touched, 'the only writes were setup\'s own').toEqual([]);
+  // The only write outside the setup's own routes is the finish panel's "import now".
+  expect(touched, 'the only writes were setup\'s own').toEqual(['POST /api/v1/sync/ingest']);
   expect(requests.filter((entry) => entry.path.startsWith('/api/') && /\/auto-publish|\/sync\/push|\/sync\/login|\/village\//.test(entry.path)), 'no publish, sign-in or hook route was called').toEqual([]);
 });
 

@@ -188,6 +188,29 @@ export const ALL_KICKSTART_INGEST_STATES = Object.freeze([
 export const parseKickstartIngestState = parserFor('a kickstart ingest state', ALL_KICKSTART_INGEST_STATES);
 const _ingestState: Same<LocalKickstartIngestState, WireOf<typeof ALL_KICKSTART_INGEST_STATES>> = true;
 
+// ── the import status route ─────────────────────────────────────────────
+
+/**
+ * How the last import this server ran stands, as `GET /api/v1/sync/ingest/status`
+ * says. That route is outside the kickstart contract, so unlike the sets above
+ * this one is not proved against the schema: it is the four states the server
+ * writes, and the page refuses any other rather than guess.
+ */
+export const SyncIngestStatusState = Object.freeze({
+  Idle: closed('idle', 'no import has run'),
+  Running: closed('running', 'importing'),
+  Done: closed('done', 'import finished'),
+  Error: closed('error', 'import failed'),
+} as const);
+export type SyncIngestStatusState = (typeof SyncIngestStatusState)[keyof typeof SyncIngestStatusState];
+export const ALL_SYNC_INGEST_STATUS_STATES = Object.freeze([
+  SyncIngestStatusState.Idle,
+  SyncIngestStatusState.Running,
+  SyncIngestStatusState.Done,
+  SyncIngestStatusState.Error,
+] as const);
+export const parseSyncIngestStatusState = parserFor('an import status', ALL_SYNC_INGEST_STATUS_STATES);
+
 // ── resolution and connect answer ────────────────────────────────────────
 
 /** Which side of a conflict row to keep. The words are page copy; the tokens are the wire. */

@@ -15,6 +15,15 @@ requiredNames:
   - no-mid-run-ticks-keep-the-running-state-until-the-end-event
   - the-end-event-with-a-failure-shows-its-error
   - import-now-refused-shows-its-reason-on-the-panel
+  - import-now-after-the-first-import-ended-shows-the-end
+  - import-now-leaves-a-running-import-to-the-push
+  - import-now-reads-a-failed-end
+  - a-push-that-arrives-while-the-status-is-read-wins
+  - reconnect-while-importing-reads-the-status-once
+  - reconnect-after-the-import-ended-reads-nothing
+  - import-now-while-another-import-runs-says-so
+  - import-now-whose-status-cannot-be-read-says-so
+  - a-status-the-page-does-not-know-is-refused
 cases:
   - name: auto-publish-link-navigates-to-real-section
     # The href is a section the settings page has; the test checks that against
@@ -104,6 +113,7 @@ cases:
           ingest: {state: running, new: 0, updated: 0}
           nextSteps: [config]
       "POST /api/v1/sync/ingest": {body: {status: running}}
+      "GET /api/v1/sync/ingest/status": {body: {status: running}}
     steps:
       - click: continue
       - click: continue
@@ -229,3 +239,268 @@ cases:
       - expectText: [the import did not start, config not available, nothing was imported and your saved setup is unchanged, choose import now again]
       # It is shown once, on the panel, not also as a page notice.
       - expectCalls: {route: "POST /api/v1/kickstart/sessions/ses-full/commit", count: 1}
+
+  # A reported failure. The save's own import ended and the panel showed its counts;
+  # "import now" then started a second run, and the panel waited for a push that
+  # the server did not send. The server pushes now, and the page asks once, after
+  # the server accepted the import, how it stands: an end that was already pushed
+  # is shown, and a page that is only waiting does not poll.
+  - name: import-now-after-the-first-import-ended-shows-the-end
+    fakeTimers: true
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      "POST /api/v1/kickstart/sessions/ses-full/commit":
+        body:
+          saved: true
+          configPath: config.yaml
+          ingest: {state: running, new: 0, updated: 0}
+          nextSteps: [config]
+      "POST /api/v1/sync/ingest": {body: {status: running}}
+      "GET /api/v1/sync/ingest/status":
+        body: {status: done, result: {new: 1234, updated: 56, unchanged: 325, errors: 0, indexed: 0, computed: 0, duration: 2s}}
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: save and import
+      - expectText: [importing]
+      - push: {kind: ingest, sessionId: ses-full, revision: 3, ingest: {state: idle, new: 81, updated: 0}}
+      - expectText: [import finished, "81"]
+      - expectControl: {role: button, name: import now, disabled: false}
+      - click: import now
+      - expectCalls: {route: "POST /api/v1/sync/ingest", count: 1}
+      - expectCalls: {route: "GET /api/v1/sync/ingest/status", count: 1}
+      - expectText: [import finished, "1,234", "56"]
+      - expectNoText: [reading your selected sessions, "81"]
+      - expectControl: {role: button, name: import now, disabled: false}
+      # Nothing polls afterwards.
+      - advance: 120000
+      - expectCalls: {route: "GET /api/v1/sync/ingest/status", count: 1}
+
+  # The status says the import is still going: the page keeps saying so and
+  # waits for the end to be pushed. It does not ask again.
+  - name: import-now-leaves-a-running-import-to-the-push
+    fakeTimers: true
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      "POST /api/v1/kickstart/sessions/ses-full/commit":
+        body:
+          saved: true
+          configPath: config.yaml
+          ingest: {state: running, new: 0, updated: 0}
+          nextSteps: [config]
+      "POST /api/v1/sync/ingest": {body: {status: running}}
+      "GET /api/v1/sync/ingest/status": {body: {status: running}}
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: save and import
+      - push: {kind: ingest, sessionId: ses-full, revision: 3, ingest: {state: idle, new: 81, updated: 0}}
+      - expectText: [import finished]
+      - click: import now
+      - expectCalls: {route: "GET /api/v1/sync/ingest/status", count: 1}
+      - expectText: [importing, reading your selected sessions]
+      - expectControl: {role: button, name: import now, disabled: true}
+      - advance: 120000
+      - expectCalls: {route: "GET /api/v1/sync/ingest/status", count: 1}
+      - expectText: [importing]
+      - push: {kind: ingest, sessionId: ses-full, revision: 5, ingest: {state: idle, new: 9, updated: 0}}
+      - expectText: [import finished]
+      - expectNoText: [reading your selected sessions]
+      - expectControl: {role: button, name: import now, disabled: false}
+
+  - name: import-now-reads-a-failed-end
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      "POST /api/v1/kickstart/sessions/ses-full/commit":
+        body:
+          saved: true
+          configPath: config.yaml
+          ingest: {state: idle, new: 81, updated: 0}
+          nextSteps: [config]
+      "POST /api/v1/sync/ingest": {body: {status: running}}
+      "GET /api/v1/sync/ingest/status": {body: {status: error, error: the store is locked by another process}}
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: save and import
+      - click: import now
+      - expectText: [import failed, the store is locked by another process]
+      - expectNoText: [reading your selected sessions]
+      - expectControl: {role: button, name: import now, disabled: false}
+
+  # A pushed end is the newer word: one that arrives while the status is on its
+  # way is not replaced by what the status said.
+  - name: a-push-that-arrives-while-the-status-is-read-wins
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      "POST /api/v1/kickstart/sessions/ses-full/commit":
+        body:
+          saved: true
+          configPath: config.yaml
+          ingest: {state: idle, new: 81, updated: 0}
+          nextSteps: [config]
+      "POST /api/v1/sync/ingest": {body: {status: running}}
+      "GET /api/v1/sync/ingest/status":
+        held: true
+        body: {status: done, result: {new: 1234, updated: 56, unchanged: 325, errors: 0, indexed: 0, computed: 0, duration: 2s}}
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: save and import
+      - click: import now
+      - expectCalls: {route: "GET /api/v1/sync/ingest/status", count: 1}
+      - push: {kind: ingest, sessionId: ses-full, revision: 5, ingest: {state: idle, new: 77, updated: 0}}
+      - expectText: [import finished, "77"]
+      - release: "GET /api/v1/sync/ingest/status"
+      - settle: true
+      - expectText: ["77"]
+      - expectNoText: ["1,234"]
+
+  # The socket was down while the save's own import ended. When it comes back the
+  # page, which shows the import running, asks once how it stands.
+  - name: reconnect-while-importing-reads-the-status-once
+    fakeTimers: true
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      "POST /api/v1/kickstart/sessions/ses-full/commit":
+        body:
+          saved: true
+          configPath: config.yaml
+          ingest: {state: running, new: 0, updated: 0}
+          nextSteps: [config]
+      "GET /api/v1/sync/ingest/status":
+        body: {status: done, result: {new: 1234, updated: 56, unchanged: 325, errors: 0, indexed: 0, computed: 0, duration: 2s}}
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: save and import
+      - expectText: [importing]
+      - expectNoCalls: "GET /api/v1/sync/ingest"
+      - socket: close
+      - expectNoCalls: "GET /api/v1/sync/ingest"
+      - socket: open
+      - expectCalls: {route: "GET /api/v1/sync/ingest/status", count: 1}
+      - expectText: [import finished, "1,234"]
+      - expectNoText: [reading your selected sessions]
+      - advance: 120000
+      - expectCalls: {route: "GET /api/v1/sync/ingest/status", count: 1}
+
+  - name: reconnect-after-the-import-ended-reads-nothing
+    fakeTimers: true
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      "POST /api/v1/kickstart/sessions/ses-full/commit":
+        body:
+          saved: true
+          configPath: config.yaml
+          ingest: {state: running, new: 0, updated: 0}
+          nextSteps: [config]
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: save and import
+      - push: {kind: ingest, sessionId: ses-full, revision: 3, ingest: {state: idle, new: 81, updated: 0}}
+      - expectText: [import finished, "81"]
+      - socket: close
+      - socket: open
+      - settle: true
+      - expectNoCalls: "GET /api/v1/sync/ingest"
+      - expectText: [import finished, "81"]
+
+  # 409: an import is running that this setup did not start. It may have begun
+  # before the save, so the page cannot promise an end; it says what is going on
+  # and leaves the button for the next try.
+  - name: import-now-while-another-import-runs-says-so
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      "POST /api/v1/kickstart/sessions/ses-full/commit":
+        body:
+          saved: true
+          configPath: config.yaml
+          ingest: {state: busy, note: an import started earlier is still running, new: 0, updated: 0}
+          nextSteps: [config]
+      "POST /api/v1/sync/ingest": {status: 409, body: {error: ingest already running}}
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: save and import
+      - click: import now
+      - expectCalls: {route: "POST /api/v1/sync/ingest", count: 1}
+      - expectText: [an earlier import is still running, an import is already running, choose import now again when it ends]
+      - expectNoText: [reading your selected sessions]
+      - expectControl: {role: button, name: import now, disabled: false}
+      - expectNoCalls: "GET /api/v1/sync/ingest/status"
+
+  - name: import-now-whose-status-cannot-be-read-says-so
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      "POST /api/v1/kickstart/sessions/ses-full/commit":
+        body:
+          saved: true
+          configPath: config.yaml
+          ingest: {state: idle, new: 81, updated: 0}
+          nextSteps: [config]
+      "POST /api/v1/sync/ingest": {body: {status: running}}
+      "GET /api/v1/sync/ingest/status": {status: 500, body: {error: the status store is unavailable}}
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: save and import
+      - click: import now
+      - expectText: [the import is running, but peasant did not say how it ended, the status store is unavailable, reload this page]
+      - expectText: [importing]
+
+  - name: a-status-the-page-does-not-know-is-refused
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      "POST /api/v1/kickstart/sessions/ses-full/commit":
+        body:
+          saved: true
+          configPath: config.yaml
+          ingest: {state: idle, new: 81, updated: 0}
+          nextSteps: [config]
+      "POST /api/v1/sync/ingest": {body: {status: running}}
+      "GET /api/v1/sync/ingest/status": {malformed: true, body: {status: paused}}
+    steps:
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: save and import
+      - click: import now
+      - expectText: ["peasant sent an import status", '"paused"', which this page does not know]
+      - expectText: [importing]

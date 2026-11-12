@@ -195,3 +195,47 @@ scans:
       scan: {state: done, done: 2, total: 2, droppedSelections: 9}
       labels: max-plus-one
       refuses: [droppedLabels, breaks the Local API contract]
+# GET /api/v1/sync/ingest/status, which the finish panel reads once as the
+# fallback for a pushed end it may have missed. It is not a kickstart contract
+# type: the page reads the four states the server writes and refuses any other.
+# `end` is what the panel shows from it (null when no end has happened), and
+# `refuses` is text the actionable contract error must contain.
+statuses:
+  requiredNames:
+    - a-finished-import-ends-with-its-counts
+    - a-failed-import-ends-with-its-reason
+    - a-failed-import-without-a-reason-says-so
+    - a-running-import-has-no-end-yet
+    - an-import-that-never-ran-has-no-end
+    - a-finished-import-without-counts-is-refused
+    - a-negative-count-is-refused
+    - an-unknown-status-is-refused
+    - a-body-that-is-not-an-object-is-refused
+  cases:
+    - name: a-finished-import-ends-with-its-counts
+      body: {status: done, result: {new: 4, updated: 2, unchanged: 325, errors: 0, indexed: 0, computed: 0, duration: 1s}}
+      end: {state: idle, new: 4, updated: 2, error: null}
+    - name: a-failed-import-ends-with-its-reason
+      body: {status: error, error: the store is locked by another process}
+      end: {state: failed, new: 0, updated: 0, error: the store is locked by another process}
+    - name: a-failed-import-without-a-reason-says-so
+      body: {status: error}
+      end: {state: failed, new: 0, updated: 0, error: the import ended without a reason}
+    - name: a-running-import-has-no-end-yet
+      body: {status: running}
+      end: null
+    - name: an-import-that-never-ran-has-no-end
+      body: {status: idle}
+      end: null
+    - name: a-finished-import-without-counts-is-refused
+      body: {status: done}
+      refuses: [reports no counts, breaks the Local API contract, GET /api/v1/sync/ingest/status]
+    - name: a-negative-count-is-refused
+      body: {status: done, result: {new: -1, updated: 0}}
+      refuses: [reports no counts, breaks the Local API contract]
+    - name: an-unknown-status-is-refused
+      body: {status: paused}
+      refuses: ['"paused"', which this page does not know, 'idle, running, done, error']
+    - name: a-body-that-is-not-an-object-is-refused
+      body: running
+      refuses: [is not an object, breaks the Local API contract]

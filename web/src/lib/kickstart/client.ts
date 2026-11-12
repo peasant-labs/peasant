@@ -30,6 +30,7 @@ import {
   parseKickstartSession,
   parseKickstartStatus,
   parseKickstartTree,
+  parseSyncIngestStatus,
   type KickstartCommitted,
   type KickstartConflict,
   type KickstartLine,
@@ -40,12 +41,14 @@ import {
   type KickstartStatus,
   type KickstartTree,
   type LocalSettingValue,
+  type SyncIngestStatus,
 } from './model';
 import { refusalAdvice } from './copy';
 import type { KickstartConnectAnswer, KickstartResolution, KickstartScope } from './values';
 
 export const KICKSTART_PATH = '/api/v1/kickstart';
 const INGEST_PATH = '/api/v1/sync/ingest';
+const INGEST_STATUS_PATH = '/api/v1/sync/ingest/status';
 
 const NO_REASON = 'the server gave no reason; retry, then check the peasant server log';
 
@@ -244,6 +247,19 @@ export async function startKickstartImport(): Promise<{ started: boolean }> {
   if (status === 503) throw importUnavailable(text);
   if (status < 200 || status >= 300) throw new KickstartRequestError(INGEST_PATH, status, plainReason(text));
   return { started: true };
+}
+
+/**
+ * How the last import this server ran stands. The panel asks once after it starts
+ * an import and once when its socket comes back, to learn an end it may not have
+ * been pushed; it never asks in a loop, because the topic pushes every change.
+ */
+export async function fetchSyncIngestStatus(): Promise<SyncIngestStatus> {
+  // Not a kickstart route: a refusal is the server's plain sentence, not the
+  // kickstart contract's closed body.
+  const { status, text } = await exchange('GET', INGEST_STATUS_PATH);
+  if (status < 200 || status >= 300) throw new KickstartRequestError(INGEST_STATUS_PATH, status, plainReason(text));
+  return parseSyncIngestStatus(jsonOf(INGEST_STATUS_PATH, status, text), `GET ${INGEST_STATUS_PATH}`);
 }
 
 /**

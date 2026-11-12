@@ -13,6 +13,8 @@ requiredNames:
   - saved-true-with-busy
   - saved-true-with-failed
   - busy-offers-import-now
+  - import-now-after-a-finished-import-pushes-its-end
+  - a-later-import-reports-to-every-kept-saved-session
   - second-commit-refused
   - closed-committed-before-ingest-events
   - ingest-imports-exactly-the-selected-set
@@ -172,6 +174,108 @@ cases:
           - {kind: ingest, session: "{full}", json: {ingest.state: idle}}
       - call: GET /api/v1/kickstart/sessions/{full}
         status: 404
+
+  # The commit's own import ran and ended, and the panel offers "import now"
+  # again. The import it starts is a run like any other: it reports its start and
+  # its end to the saved session, so the panel is never left waiting for an end
+  # that is not pushed.
+  - name: import-now-after-a-finished-import-pushes-its-end
+    world:
+      listings: two-projects
+      gate: true
+      holdIngest: true
+      config: *licenseConfig
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0}}
+      - await: {kind: answers, session: "{full}"}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        json: {saved: true, ingest.state: running}
+      - ingest: {runs: 1}
+      # the commit's own import ends, and a tab that holds the id hears the end
+      # (the commit's answer already said it was running)
+      - events:
+          - {kind: closed, session: "{full}", json: {reason: committed, committed.ingest.state: running}}
+      - releaseIngest: true
+      - events:
+          - {kind: ingest, session: "{full}", json: {ingest.state: idle}}
+      - ingest: {finished: 1}
+      # import now, after that import ended: the start and the end are both pushed
+      - call: POST /api/v1/sync/ingest
+        json: {status: running}
+      - ingest: {runs: 2}
+      - events:
+          - {kind: ingest, session: "{full}", json: {ingest.state: running}}
+      - releaseIngest: true
+      - events:
+          - {kind: ingest, session: "{full}", json: {ingest.state: idle}}
+      # and again: the session keeps hearing every run
+      - ingest: {finished: 2}
+      - call: POST /api/v1/sync/ingest
+        json: {status: running}
+      - events:
+          - {kind: ingest, session: "{full}", json: {ingest.state: running}}
+      - releaseIngest: true
+      - events:
+          - {kind: ingest, session: "{full}", json: {ingest.state: idle}}
+
+  # Every saved session that is kept hears a later import, oldest first, start
+  # then end.
+  - name: a-later-import-reports-to-every-kept-saved-session
+    world:
+      listings: two-projects
+      gate: true
+      holdIngest: true
+      config: *licenseConfig
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0}}
+      - await: {kind: answers, session: "{full}"}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        json: {saved: true, ingest.state: running}
+      - events:
+          - {kind: closed, session: "{full}", json: {reason: committed}}
+      - releaseIngest: true
+      - events:
+          - {kind: ingest, session: "{full}", json: {ingest.state: idle}}
+      - ingest: {finished: 1}
+      # a second setup session is saved while the first one's panel is still open
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: selection}
+        save: {selection: id}
+      - release: true
+      - await: {kind: session, session: "{selection}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{selection}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{selection}
+        body: {revision: "{rev}", selectedIds: []}
+      - await: {kind: answers, session: "{selection}"}
+      - call: POST /api/v1/kickstart/sessions/{selection}/commit
+        json: {saved: true, ingest.state: running}
+      # the second session is closed, and the first, whose panel is still open,
+      # hears that an import began; the second's own answer said so already
+      - events:
+          - {kind: closed, session: "{selection}", json: {reason: committed}}
+          - {kind: ingest, session: "{full}", json: {ingest.state: running}}
+      - releaseIngest: true
+      # the end reaches both, oldest first
+      - events:
+          - {kind: ingest, session: "{full}", json: {ingest.state: idle}}
+          - {kind: ingest, session: "{selection}", json: {ingest.state: idle}}
 
   - name: second-commit-refused
     world:
