@@ -548,6 +548,13 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 				return nil, err
 			}
 		}
+		// V76 detects a stale union entries half before the chain runs: when
+		// the pre-migration version is 75 with residue in the union index,
+		// v76 rebuilds the whole index (minutes on large stores), so warn on
+		// stderr first. The in-migration gate reads the latch v76 records at
+		// its own transactional point; this call only warns, once per run,
+		// and never fails the open.
+		maybePrintSearchIndexRebuildNotice(conn, versionBeforeMigration)
 		if err := sqlitemigration.Migrate(context.Background(), conn, dbSchema); err != nil {
 			pool.Put(conn)
 			_ = pool.Close()
@@ -576,7 +583,7 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 			logConversationTurnCountBackfill(report)
 		}
 
-		// V76 Go-driven phase: while the recount marker exists, fold every
+		// V77 Go-driven phase: while the recount marker exists, fold every
 		// stored session once and write both turn counts. The marker, not the
 		// pre-migration version, decides: the recount clears it in its own
 		// transaction, so an open that failed part way is repeated here and an

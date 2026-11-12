@@ -232,6 +232,12 @@ func TestSearchFilteredFixtures(t *testing.T) {
 		t.Run(c.Name, func(t *testing.T) {
 			t.Parallel()
 			s := openFilteredSearchStore(t)
+			// V76 drops the retired index at open, so rebuild the
+			// pre-consolidation dual-index state the transition fixtures
+			// model before any writes: mirror rows land in the retired
+			// index again and the merged reads keep their exact pre-V76
+			// distribution.
+			storetest.SeedLegacySearchIndex(t, s)
 			for i, session := range family.Sessions {
 				sid, err := schema.NewSessionID(session.ID)
 				if err != nil {

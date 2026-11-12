@@ -1,9 +1,12 @@
 package store_test
 
-// V34 FTS5 behavior, end-to-end through the public store API: the sync triggers
-// must keep session_entries_fts in step with the DELETE+INSERT-per-session
-// IndexSessionEntries write path and with PruneSessions. Lives in package
-// store_test to reuse seedSession + openTestStore.
+// V76 migration tests (package `store_test`, external): the end-to-end FTS5
+// behavior through the public store API: the union sync triggers must keep
+// session_search_fts in step with the DELETE+INSERT-per-session
+// IndexSessionEntries write path and with PruneSessions. V76 re-pointed the
+// session_entries_ai/ad/au triggers at the union index and dropped the
+// retired session_entries_fts. Lives in package store_test to reuse
+// seedSession + openTestStore.
 
 import (
 	"context"
@@ -26,8 +29,10 @@ func ftsMatchCount(t *testing.T, s *store.Store, sessionID, query string) int {
 	}
 	defer s.Pool().Put(conn)
 	var n int
+	// The union FTS index carries the mirror postings the production read
+	// serves; the per-part exclusion keeps carrier rows out of results.
 	if err := sqlitex.ExecuteTransient(conn,
-		`SELECT COUNT(*) FROM session_entries_fts WHERE session_id = ? AND session_entries_fts MATCH ?`,
+		`SELECT COUNT(*) FROM session_search_fts WHERE session_id = ? AND session_search_fts MATCH ?`,
 		&sqlitex.ExecOptions{
 			Args:       []any{sessionID, query},
 			ResultFunc: func(stmt *sqlite.Stmt) error { n = int(stmt.ColumnInt64(0)); return nil },

@@ -301,6 +301,46 @@ func runMigrateCatalogFull(t *testing.T) {
 	assertSessionConverted(t, s, root, sid, genID)
 }
 
+// seedLegacySearchIndex reconstructs the pre-consolidation dual-index state
+// on a store V76 already consolidated at open: the union entries triggers
+// give way to the retired index and its three sync triggers, so
+// migrateConsolidateSearch has work to do. The legacy triggers reuse the
+// shared migrateSearchTrigger text with only the table name swapped, which
+// is exactly how the retired triggers read. Seed it before any writes: with
+// the legacy triggers live, seed and conversion mirror writes land in the
+// retired index (as they did pre-consolidation) and the union carries bodies
+// only, so the empty-vacuum-cap sequence fails the rebuild deterministically
+// instead of fitting inside reused freed pages. Production can no longer
+// reach this state (Open applies V76 first); only tests of the consolidation
+// transaction itself rebuild it.
+func seedLegacySearchIndex(t *testing.T, s *Store) {
+	t.Helper()
+	conn, err := s.pool.Take(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.pool.Put(conn)
+	script := "DROP TRIGGER IF EXISTS session_entries_ai;\n" +
+		"DROP TRIGGER IF EXISTS session_entries_ad;\n" +
+		"DROP TRIGGER IF EXISTS session_entries_au;\n" +
+		"CREATE VIRTUAL TABLE session_entries_fts USING fts5(\n" +
+		"    content_preview,\n" +
+		"    tool_input,\n" +
+		"    tool_output,\n" +
+		"    session_id UNINDEXED,\n" +
+		"    entry_index UNINDEXED,\n" +
+		"    content='session_entries',\n" +
+		"    content_rowid='rowid',\n" +
+		"    tokenize='unicode61 remove_diacritics 2'\n" +
+		");\n" +
+		strings.ReplaceAll(migrateSearchTriggerAI, "session_search_fts", "session_entries_fts") + ";\n" +
+		strings.ReplaceAll(migrateSearchTriggerAD, "session_search_fts", "session_entries_fts") + ";\n" +
+		strings.ReplaceAll(migrateSearchTriggerAU, "session_search_fts", "session_entries_fts") + ";\n"
+	if err := sqlitex.ExecuteScript(conn, script, nil); err != nil {
+		t.Fatalf("seed the retired search index: %v", err)
+	}
+}
+
 // runMigrateSearchConsolidationFull converts, empties the consolidated
 // index, then caps before the rebuild: the one transaction fails with
 // SQLITE_FULL, the retired index stays present with its triggers and no
@@ -312,6 +352,7 @@ func runMigrateCatalogFull(t *testing.T) {
 func runMigrateSearchConsolidationFull(t *testing.T) {
 	t.Helper()
 	s, root := openGenerationStore(t)
+	seedLegacySearchIndex(t, s)
 	sid, _ := seedMigrateEnospcBigSession(t, s, root, 1500)
 	_ = root
 	if outcome, err := s.MigrateSession(context.Background(), sid); err != nil || outcome != MigrateOutcomeConverted {

@@ -240,6 +240,9 @@ func runConcurrencyStagedCAS(t *testing.T) {
 
 func runConcurrencyConsolidation(t *testing.T) {
 	s, _ := openGenerationStore(t)
+	// V76 consolidates at open, so rebuild the pre-consolidation dual-index
+	// state to exercise the consolidation write transaction itself.
+	seedLegacySearchIndex(t, s)
 	ctx, cancel := context.WithCancel(testwait.Context(t))
 	var workers sync.WaitGroup
 	defer func() {

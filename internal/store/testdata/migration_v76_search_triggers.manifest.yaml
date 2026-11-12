@@ -1,0 +1,20 @@
+# Required-name manifest for migration_v76_search_triggers: deletion
+# protection by NAME, never by count.
+requiredNames:
+  - healed-entries-writes-reach-union
+  - rebuild-path-clears-a-pending-rebuild-flag
+  - v75-defect-union-misses-new-entries-writes
+  - predicate-clean-no-window-writes
+  - predicate-delete-leaves-residue
+  - predicate-reused-rowid-leaves-residue
+  - predicate-insert-only-window-clean
+  - predicate-update-same-count-clean
+  - predicate-update-count-changed-residue
+  - open-affected-window-rebuilds-with-notice
+  - open-crossing-in-one-run-silent
+  - open-insert-only-window-silent-resync
+  - open-update-same-count-silent-stale-matches
+  - open-consolidated-after-v75-silent
+  - clean-path-leaves-a-set-rebuild-flag-set
+  - open-true-crossing-from-v74-silent
+  - open-tampered-store-warns-and-rebuilds

@@ -1,4 +1,4 @@
-# The V76 upgrade folds every stored session once and writes both turn counts:
+# The V77 upgrade folds every stored session once and writes both turn counts:
 # turnCount is the number of folded turns, conversationTurnCount is the folded
 # turns on the allowed list. Every session carries stored counts the fold does
 # not produce, so a row that was not recounted, or was recounted when it should

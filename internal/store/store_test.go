@@ -198,8 +198,9 @@ func TestStore_Migrations_ApplyV1(t *testing.T) {
 	// Verify the final schema carries exactly the expected catalog: 34 base
 	// tables from v1-v22 + _install_salt from V23 + session_commands from V24
 	// + lessons from V28 + memory_injection_log from V30 + lesson_sources from
-	// V32 + pulled_transcripts/pulled_annotations from V34 + session_entries_fts
-	// and its FTS5 shadow tables from V35, plus the later projection, publication,
+	// V32 + pulled_transcripts/pulled_annotations from V34 (the V35
+	// session_entries_fts index and its FTS5 shadow tables were retired by
+	// V76), plus the later projection, publication,
 	// annotation, V60 managed-generation and V62 harmonized-content tables. The required NAME set lives
 	// in testdata/schema_catalog.yaml, so a rename, drop or undeclared addition
 	// fails loudly instead of being absorbed by a count.

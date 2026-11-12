@@ -135,7 +135,7 @@ func TestPiProjectionSQLiteOutbound(t *testing.T) {
 				t.Fatal(err)
 			}
 			matches := 0
-			err = sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM session_entries_fts WHERE session_id = ? AND session_entries_fts MATCH 'obsolete OR state'`, &sqlitex.ExecOptions{Args: []any{string(sid)}, ResultFunc: func(stmt *sqlite.Stmt) error { matches = stmt.ColumnInt(0); return nil }})
+			err = sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM session_search_fts WHERE session_id = ? AND session_search_fts MATCH 'obsolete OR state'`, &sqlitex.ExecOptions{Args: []any{string(sid)}, ResultFunc: func(stmt *sqlite.Stmt) error { matches = stmt.ColumnInt(0); return nil }})
 			db.Pool().Put(conn)
 			if err != nil {
 				t.Fatal(err)

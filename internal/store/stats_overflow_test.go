@@ -80,7 +80,7 @@ func LoadStatsOverflowFixtures(t *testing.T) []statsOverflowCase {
 func assertStatsPresence(t *testing.T, got CapturedStats, want v62ExpectedStats, recountedConversationTurnCount ...int) {
 	t.Helper()
 	// These sessions hold no stored entries, so the V74 upgrade backfill copies
-	// the legacy turn count into the conversation column and the V76 recount
+	// the legacy turn count into the conversation column and the V77 recount
 	// keeps both. A document with no turn count leaves the column at its NOT
 	// NULL default zero. A row that states recounted counts passes its
 	// conversation count explicitly.

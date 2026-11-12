@@ -12,7 +12,7 @@ import (
 )
 
 // ConversationTurnCountBackfillReport is the report of an upgrade fold over
-// the stored sessions: the one-time V74 backfill and the V76 turn count
+// the stored sessions: the one-time V74 backfill and the V77 turn count
 // recount. A session with no stored entries cannot be re-folded, so it is
 // named here; re-indexing that session replaces its stored counts with the
 // folded ones. The V74 backfill copies such a session's legacy count; the

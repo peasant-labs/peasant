@@ -18,6 +18,11 @@ func TestSearchFiltersBeforePagination(t *testing.T) {
 		t.Run(c.Name, func(t *testing.T) {
 			t.Parallel()
 			s, _ := openGenerationStore(t)
+			// V76 drops the retired index at open, so rebuild the
+			// pre-consolidation dual-index state the transition fixtures
+			// model: entries writes land in the retired index again and the
+			// merged reads keep their exact pre-V76 distribution.
+			seedLegacySearchIndex(t, s)
 			ctx := context.Background()
 			if any, err := s.HasAnySessions(ctx); err != nil || any {
 				t.Fatalf("empty store has sessions = %v, err = %v", any, err)

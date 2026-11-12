@@ -1333,8 +1333,13 @@ func runMigrateThresholdCase(t *testing.T, c contentMigrationCase) {
 // runMigrateConsolidateCase proves the Phase 3 shapes: the rebuild over
 // the union view, the dropped old index with its retargeted triggers,
 // and the cleared flag. The unconverted variant keeps a settled
-// file-backed session searchable through the consolidated index; the
-// twice variant proves the re-run skips the phase.
+// runMigrateConsolidateCase proves the converted file-backed session stays
+// searchable through the consolidated index. V76 consolidates at open (the
+// retired index is dropped and the entries triggers point at the union
+// index), so the migrate pass must report no consolidation work; the case
+// still pins the consolidated end state (no retired index, retargeted
+// triggers, cleared flag, union serving) and the twice variant proves the
+// re-run is a second no-op.
 func runMigrateConsolidateCase(t *testing.T, c contentMigrationCase) {
 	t.Helper()
 	s, root := openGenerationStore(t)
@@ -1355,8 +1360,8 @@ func runMigrateConsolidateCase(t *testing.T, c contentMigrationCase) {
 	if result.Converted != 1 {
 		t.Fatalf("converted = %d; want 1", result.Converted)
 	}
-	if !result.SearchConsolidated {
-		t.Fatal("search consolidation did not run")
+	if result.SearchConsolidated {
+		t.Fatal("search consolidation ran during migrate; V76 already consolidates at open")
 	}
 	conn, err := s.pool.Take(context.Background())
 	if err != nil {
