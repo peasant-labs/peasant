@@ -8,7 +8,7 @@ cases:
       - path: project/22222222-2222-4222-8222-222222222222.jsonl
         body: '{"type":"user","message":{"role":"user","content":"second"}}'
     block: project/22222222-2222-4222-8222-222222222222.jsonl
-    want: 'Discovering Claude Code sessions... (1/2) · 1 re-read'
+    want: 'Discovering Claude Code sessions... (1/2) · 1 required re-read'
   - name: spinner-clears-counts-before-a-phase-only-harness
     mode: phase-reset
     phase: Discovering Other sessions...

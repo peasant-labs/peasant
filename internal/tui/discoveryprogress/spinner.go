@@ -114,7 +114,7 @@ func (s *Spinner) view() string {
 	if s.total > 0 {
 		line := fmt.Sprintf("%s %s (%d/%d)", ch, s.phase, s.count, s.total)
 		if s.rereads >= 0 {
-			line += fmt.Sprintf(" · %d re-read", s.rereads)
+			line += fmt.Sprintf(" · %d required re-read", s.rereads)
 		}
 		return line
 	}

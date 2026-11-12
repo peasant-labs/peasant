@@ -543,7 +543,7 @@ func validateDiscoveryProgressMatrix(states []discoveryProgressStateFixture, cap
 			}
 		}
 		if state.RequiredRereads != nil && (!slices.Contains(state.WantContains, fmt.Sprintf("(%d/%d)", state.Done, state.Total)) ||
-			!slices.Contains(state.WantContains, fmt.Sprintf("%d re-read", *state.RequiredRereads))) {
+			!slices.Contains(state.WantContains, fmt.Sprintf("%d required re-read", *state.RequiredRereads))) {
 			return fmt.Errorf("screenshot fixture discovery progress %q must assert its exact file and required re-read counts", state.Key)
 		}
 		stateRows[state.Key] = state

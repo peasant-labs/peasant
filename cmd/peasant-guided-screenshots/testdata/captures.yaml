@@ -201,13 +201,13 @@ discoveryProgressStates:
     done: 812
     total: 13631
     requiredRereads: 219
-    wantContains: ["⠋", "Discovering Claude Code sessions...", "(812/13631)", "219 re-read"]
+    wantContains: ["⠋", "Discovering Claude Code sessions...", "(812/13631)", "219 required re-read"]
   - key: complete
     phase: Discovering Claude Code sessions...
     done: 13631
     total: 13631
     requiredRereads: 819
-    wantContains: ["⠋", "Discovering Claude Code sessions...", "(13631/13631)", "819 re-read"]
+    wantContains: ["⠋", "Discovering Claude Code sessions...", "(13631/13631)", "819 required re-read"]
   - key: phase-only
     phase: Discovering Other sessions...
     wantContains: ["⠋", "Discovering Other sessions..."]

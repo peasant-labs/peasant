@@ -61,7 +61,7 @@ local and gitignored.
   and next steps, and a no-warning control, in both themes and both sizes;
 - the bulk collective-pull progress bar — running, canceling, and canceled — mounted from the real
   `pullprogress.Model` over scrubbed synthetic counts, in both themes and both sizes;
-- the inline discovery spinner — mid-run and complete file counts with re-reads, and an adapter
+- the inline discovery spinner — mid-run and complete file counts with required re-reads, and an adapter
   that does not report progress — in both themes and both sizes;
 - synthetic discovery data, required names and text, and exact matrix coverage; and
 - the eight accepted contact-sheet names and pixel dimensions.
