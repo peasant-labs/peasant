@@ -13,6 +13,7 @@ requiredNames:
   - title-is-never-set
   - jsonl-values-never-reach-the-report
   - text-and-protobuf-files-are-sized-not-read
+  - a-record-split-across-chunk-files-is-not-malformed
   - credential-files-are-never-opened
   - workspace-path-is-removed-from-the-default-report
   - wal-and-shm-files-are-not-sessions

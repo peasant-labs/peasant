@@ -22,7 +22,8 @@
 #   no-sentinel     no report holds the sentinel, by default and with metadata
 #   title-empty     Metadata.Title is empty in every capture with metadata
 #   fields          each artifact of want.fields holds those field paths and types; no sentinel
-#   sized           each artifact of want.sized has a size and a file count, and no file of it was opened
+#   sized           each artifact of want.sized has a size, a file count, no field and no malformed
+#                   record, and no file of it was opened
 #   credentials     capture succeeds, no credential file was opened, and no sentinel is reported
 #   workspace-path  Metadata.ProjectPath is empty by default and the store's workspacePath with metadata
 cases:
@@ -161,6 +162,15 @@ cases:
       sized:
         antigravity-cli: [step-output, presence-lock, crash-logs, implicit-context, knowledge, cli-logs, persistent-terminals, cli-summaries]
         antigravity-ide: [step-output, presence-lock, crash-logs, undelivered-messages, ide-summaries]
+  - name: a-record-split-across-chunk-files-is-not-malformed
+    roots:
+      - {tool: antigravity-cli, bodies: [conv-a], indexed: [conv-a]}
+      - {tool: antigravity-ide, bodies: [conv-a], indexed: [conv-a]}
+    check: sized
+    want:
+      sized:
+        antigravity-cli: [transcript-chunks]
+        antigravity-ide: [transcript-chunks]
   - name: credential-files-are-never-opened
     roots:
       - {tool: antigravity-cli, bodies: [conv-a], indexed: [conv-a]}

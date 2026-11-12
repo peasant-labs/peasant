@@ -70,8 +70,8 @@ sessions.
 | Artifact | Format | What the capture records |
 | --- | --- | --- |
 | `conversation-body` | SQLite | table and column names as field paths `$.<table>.<column>` with the JSON type of the column's affinity; kinds `rows:<table>` (row count per table), `step_type:<n>` and `status:<n>` (census of `steps`) |
-| `transcript-log`, `transcript-full-log`, `transcript-chunks` | JSONL | field paths and JSON types; record kinds `<type>/<source>` |
-| `step-output`, `presence-lock`, `crash-logs`, `*.pb`, `knowledge`, `cli-logs`, `persistent-terminals`, `undelivered-messages` | files | file count and total size in `bytes`; the files are never opened |
+| `transcript-log`, `transcript-full-log` | JSONL | field paths and JSON types; record kinds `<type>/<source>` |
+| `transcript-chunks`, `step-output`, `presence-lock`, `crash-logs`, `*.pb`, `knowledge`, `cli-logs`, `persistent-terminals`, `undelivered-messages` | files | file count and total size in `bytes`; the files are never opened |
 | `annotation`, `cli-state`, `ide-state` | protobuf text | field paths and scalar types; never a value |
 | `prompt-history`, `cli-settings`, `daemon-hub`, `agent-messages` | JSON, JSONL | field paths and JSON types |
 | `conversation-index` | SQLite | this session's row only: `step_count` (kind `step_count`), `last_modified_time`, `workspace_uris`, `source` (kind `source:<value>`), and the type of `project_id` |
@@ -83,8 +83,9 @@ the time range comes from `created_at` and the index's `last_modified_time`. `Pr
 the first file URI of `workspace_uris`; the default report removes it, as it removes every
 path. `Title` is never set: an Antigravity title is derived from conversation text.
 
-The chunk files are cut by size, so a record that straddles a cut does not decode and is
-counted in `malformed`.
+The chunk files cut the logs by size, so a record can start in one chunk and end in the next,
+and a fragment can even decode as JSON of the wrong type. The chunks are therefore counted and
+sized, never read; `transcript.jsonl` and `transcript_full.jsonl` carry the shape.
 
 ## The SQLite read guard
 

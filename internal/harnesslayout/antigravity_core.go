@@ -99,8 +99,9 @@ var (
 		FormatJSONL, RoleTranscript, antigravityReadJSONL,
 		"the transcript log without the truncated_fields marker")
 	antigravityChunks = antigravityDeclare("transcript-chunks", antigravitySystemDir+"/logs/chunks/*/*.jsonl",
-		FormatJSONL, RoleAuxiliary, antigravityReadJSONL,
-		"the transcript logs split into chunk files, one directory per log")
+		FormatJSONL, RoleAuxiliary, antigravityReadSize,
+		"the transcript logs cut by size into chunk files, one directory per log; a cut can split a record, "+
+			"so the chunks are counted and sized, never read, and the two full logs carry the shape")
 	antigravityStepOutput = antigravityDeclare("step-output", antigravitySystemDir+"/steps/*/output.txt",
 		FormatText, RoleAuxiliary, antigravityReadSize,
 		"the output of one step; counted and sized, never read")

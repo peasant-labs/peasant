@@ -357,8 +357,10 @@ func TestAntigravityCases(t *testing.T) {
 					for _, name := range names {
 						for _, capture := range scenario.reports[tool].Captures {
 							shape, ok := shapeByName(capture, name)
-							if !ok || shape.Records == 0 || shape.Bytes == 0 {
-								t.Errorf("%s capture %s: %s = %+v, want a file count and a size", tool, capture.Session, name, shape)
+							sized := ok && shape.Records > 0 && shape.Bytes > 0
+							unread := shape.Malformed == 0 && len(shape.Fields) == 0
+							if !sized || !unread {
+								t.Errorf("%s capture %s: %s = %+v, want a file count and a size, no field, and no malformed record", tool, capture.Session, name, shape)
 							}
 						}
 						for _, artifact := range layout.Artifacts {
