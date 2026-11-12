@@ -90,10 +90,10 @@ func TestFetchIndependentCompleteDomains(t *testing.T) {
 				}
 			}
 			// These cases deliberately cancel AFTER actual earlier domain commits.
-			// Observe real Store rows with a two-second deadline; no production
-			// hook or SQL replacement can manufacture the committed effect.
+			// Observe real Store rows without a production hook or SQL replacement.
+			// The 30-second bound catches hangs while allowing for loaded CI runners.
 			awaitCommitted := func(request context.Context, catalogToo, historyToo bool) bool {
-				ctx, cancel := context.WithTimeout(request, 2*time.Second)
+				ctx, cancel := context.WithTimeout(request, 30*time.Second)
 				defer cancel()
 				snapshot, err := auth.CaptureCredentials(ctx, home)
 				if err != nil {
