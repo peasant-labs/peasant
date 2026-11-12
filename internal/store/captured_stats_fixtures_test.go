@@ -63,26 +63,26 @@ type capturedStatsSeed struct {
 }
 
 type capturedStatsCase struct {
-	Name         string                `yaml:"name"`
-	Action       string                `yaml:"action"`
-	Updates      []capturedStatsUpdate `yaml:"updates"`
-	Want         capturedStatsValues   `yaml:"want"`
-	WantMirror   *int64                `yaml:"wantMirror"`
-	WantSeed     *capturedStatsSeed    `yaml:"wantSeed"`
-	CheckSeed    bool                  `yaml:"checkSeed"`
-	NativeTurns  int                   `yaml:"nativeTurns"`
+	Name        string                `yaml:"name"`
+	Action      string                `yaml:"action"`
+	Updates     []capturedStatsUpdate `yaml:"updates"`
+	Want        capturedStatsValues   `yaml:"want"`
+	WantMirror  *int64                `yaml:"wantMirror"`
+	WantSeed    *capturedStatsSeed    `yaml:"wantSeed"`
+	CheckSeed   bool                  `yaml:"checkSeed"`
+	NativeTurns int                   `yaml:"nativeTurns"`
 	// NativeConversationTurns and LegacyConversationTurns are the stored
 	// conversation turn counts. They differ from the folded turn counts so a
 	// read of the wrong column fails.
-	NativeConversationTurns int `yaml:"nativeConversationTurns"`
-	LegacyConversationTurns int `yaml:"legacyConversationTurns"`
-	NativeTools  int                   `yaml:"nativeTools"`
-	NativeOutput int                   `yaml:"nativeOutput"`
-	LegacyTurns  int                   `yaml:"legacyTurns"`
-	LegacyTools  int                   `yaml:"legacyTools"`
-	LegacyOutput int                   `yaml:"legacyOutput"`
-	PeakInput    int                   `yaml:"peakInput"`
-	DurationMs   int64                 `yaml:"durationMs"`
+	NativeConversationTurns int   `yaml:"nativeConversationTurns"`
+	LegacyConversationTurns int   `yaml:"legacyConversationTurns"`
+	NativeTools             int   `yaml:"nativeTools"`
+	NativeOutput            int   `yaml:"nativeOutput"`
+	LegacyTurns             int   `yaml:"legacyTurns"`
+	LegacyTools             int   `yaml:"legacyTools"`
+	LegacyOutput            int   `yaml:"legacyOutput"`
+	PeakInput               int   `yaml:"peakInput"`
+	DurationMs              int64 `yaml:"durationMs"`
 }
 
 func LoadSessionCapturedStatsFixtures(t *testing.T) []capturedStatsCase {
