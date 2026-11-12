@@ -39,6 +39,8 @@ type kickstartIngestCheck struct {
 	Runs int `yaml:"runs"`
 	// Finished waits until this many imports have ended.
 	Finished int `yaml:"finished"`
+	// None requires that no import has started.
+	None bool `yaml:"none"`
 	// SelectionMode and Sessions are the live saved selection the last started
 	// import saw when it began.
 	SelectionMode string   `yaml:"selectionMode"`
@@ -303,6 +305,9 @@ func (w *kickstartWorld) ingestCheck(index int, check kickstartIngestCheck) {
 	w.saving.mu.Lock()
 	started := append([]kickstartIngestRun(nil), w.saving.started...)
 	w.saving.mu.Unlock()
+	if check.None && len(started) != 0 {
+		w.fail(index, "%d imports started, want none", len(started))
+	}
 	if check.Runs > 0 && len(started) != check.Runs {
 		w.fail(index, "%d imports started, want %d", len(started), check.Runs)
 	}

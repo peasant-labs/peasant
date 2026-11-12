@@ -12,6 +12,7 @@ requiredNames:
   - saved-true-with-running
   - saved-true-with-busy
   - saved-true-with-failed
+  - kickstart-save-with-stale-search-index-reports-the-repair
   - busy-offers-import-now
   - import-now-after-a-finished-import-pushes-its-end
   - a-later-import-reports-to-every-kept-saved-session
@@ -134,6 +135,57 @@ cases:
       - configHas: ["license: CC0-1.0", "level: maximum"]
       - events:
           - {kind: closed, session: "{full}", json: {reason: committed, committed.saved: true, committed.ingest.state: failed}}
+
+  # The store's search index needs its one-time repair, which only a command in a
+  # terminal runs. The save stands; the import is not claimed and not started, and
+  # the answer says how to repair. "import now" starts a run, which is refused at
+  # the store the same way, and the panel is pushed that end. The store file is
+  # never opened: the case fails if it changes.
+  - name: kickstart-save-with-stale-search-index-reports-the-repair
+    world:
+      listings: two-projects
+      gate: true
+      staleSearchIndex: true
+      recordings: [11111111-1111-4111-8111-111111111111]
+      config: |
+        version: 1
+        {sources}
+        push:
+          license: ""
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0}}
+      - await: {kind: answers, session: "{full}"}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        json: {saved: true, ingest.state: failed}
+        contains:
+          ingest.error: "`peasant harvest` in a terminal"
+        len: {nextSteps: 5}
+      - call: GET /api/v1/sync/ingest/status
+        json: {status: idle}
+      - ingest: {none: true}
+      - configHas: ["license: CC0-1.0"]
+      - events:
+          - kind: closed
+            session: "{full}"
+            json: {reason: committed, committed.saved: true, committed.ingest.state: failed}
+      # import now: the run is refused where it would open the store, and says so
+      - call: POST /api/v1/sync/ingest
+        json: {status: running}
+      - ingest: {runs: 1, finished: 1}
+      - events:
+          - {kind: ingest, session: "{full}", json: {ingest.state: running}}
+          - {kind: ingest, session: "{full}", json: {ingest.state: failed}}
+      - call: GET /api/v1/sync/ingest/status
+        json: {status: error}
+        contains: {error: "`peasant web start` in a terminal"}
 
   - name: busy-offers-import-now
     world:
