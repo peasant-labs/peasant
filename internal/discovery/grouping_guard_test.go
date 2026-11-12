@@ -3,7 +3,6 @@ package discovery_test
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -17,21 +16,14 @@ func moduleRoot(t *testing.T) string {
 	// The walk below skips hidden directories by matching a "/." segment, so the
 	// root itself must be absolute: a "../.." root would make every path look
 	// hidden.
-	working, err := filepath.Abs(filepath.Join("..", ".."))
+	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatalf("resolve the working directory: %v", err)
 	}
-	candidates := []string{working}
-	if _, file, _, ok := runtime.Caller(0); ok && filepath.IsAbs(file) {
-		candidates = append(candidates, filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..")))
+	if _, err := os.Stat(filepath.Join(root, "go.mod")); err != nil {
+		t.Fatalf("locate the module root: %s holds no accessible go.mod: %v", root, err)
 	}
-	for _, root := range candidates {
-		if _, err := os.Stat(filepath.Join(root, "go.mod")); err == nil {
-			return root
-		}
-	}
-	t.Fatalf("locate the module root: none of %v holds go.mod", candidates)
-	return ""
+	return root
 }
 
 func TestGroupingLivesOnlyInBuildForest(t *testing.T) {
