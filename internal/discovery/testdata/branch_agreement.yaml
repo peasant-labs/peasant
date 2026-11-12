@@ -6,8 +6,9 @@
 #   harness        the harness that recorded the session (claude-code when absent)
 #   subfolder      a folder inside the case's temporary clone, used as the cwd
 #   folderOnly     the recording names no cwd; its project folder decodes to the clone
-#   noDirectory    the recording names no cwd and its project folder decodes to no
-#                  directory: the session has no project directory at all
+#   noDirectory    the recording names no cwd and is filed under a folder that
+#                  cannot exist on any machine (the test checks that before it
+#                  relies on it): the session has no project directory at all
 #   chosenSession  the saved selection names the session by id, not its project
 #   recordedBranch the gitBranch the recording names
 #   stored         the store holds the session (branch storedBranch)
@@ -26,7 +27,15 @@
 #   branchDirs     the directories git was asked for the checked-out branch, by
 #                  the scan and by the filter alike ({clone} and {subfolder} name
 #                  the case's own directories)
-#   remoteDirs     the directories git was asked for the remote, likewise
+#   remoteDirs     the distinct directories git was asked for the remote, likewise
+#   extracts       the harness's own metadata extraction runs over the same
+#                  recording and asks git about the same directories as the scan
+#                  and the filter (branchDirs, remoteDirs)
+#   extractsRemote the remote that extraction stores; it must also be the remote
+#                  the scan listed the session under before the import
+#   upstreamRemote the remote the recorded branch tracks, where the clone's origin
+#                  (headRemote) is another: a fork's feature branch
+#   recordedRemote the remote the recording itself names (a Codex repository_url)
 #
 # requiredNames is the deletion guard: every name below must still be present.
 requiredNames:
@@ -40,6 +49,8 @@ requiredNames:
   - changed-source-remote-falls-back-to-the-directory-in-both
   - no-project-directory-tree-and-filter-ask-git-for-nothing
   - no-project-directory-session-chosen-by-id-is-still-admitted
+  - recorded-branch-upstream-names-the-remote-in-tree-store-and-filter
+  - explicit-recorded-remote-wins-in-tree-store-and-filter
 cases:
   # The working directory is a subfolder of the clone. Both ask that folder, not
   # the clone root: a linked worktree's branch is its own.
@@ -142,13 +153,16 @@ cases:
     matched: true
     branchDirs: ["{subfolder}"]
     remoteDirs: ["{subfolder}"]
-  # The recording names no directory and its project folder decodes to none. The
-  # harness's storage folder is never asked, because it can sit inside an
+  # The recording names no directory and is filed under a folder that decodes to
+  # none. The harness's storage folder is never asked, because it can sit inside an
   # unrelated repository, so the session has no remote and no branch: the scan
-  # lists it with neither, git is asked nothing by either surface, and a choice
-  # of its project does not reach it.
+  # lists it with neither, git is asked nothing by the scan, the filter or the
+  # extraction, the extraction stores no remote, and a choice of its project does
+  # not reach it.
   - name: no-project-directory-tree-and-filter-ask-git-for-nothing
     noDirectory: true
+    extracts: true
+    extractsRemote: ""
     headBranch: main
     headRemote: https://github.com/example-org/dotfiles.git
     chosenBranch: main
@@ -167,5 +181,44 @@ cases:
     treeBranch: ""
     treeRemote: ""
     matched: true
+    branchDirs: []
+    remoteDirs: []
+  # A fork: the clone's origin and its checkout are the fork, but the branch the
+  # session recorded tracks the upstream repository. The session belongs to the
+  # upstream. The scan lists it there before the import, the extraction stores it
+  # there, and the filter admits a choice of the upstream's branch; none of them
+  # asks git about the branch it recorded.
+  - name: recorded-branch-upstream-names-the-remote-in-tree-store-and-filter
+    subfolder: packages/web
+    recordedBranch: feature/fork
+    headBranch: main
+    headRemote: https://github.com/example-org/fork.git
+    upstreamRemote: https://github.com/example-org/upstream.git
+    chosenBranch: feature/fork
+    chosenRemote: https://github.com/example-org/upstream.git
+    treeBranch: feature/fork
+    treeRemote: https://github.com/example-org/upstream.git
+    matched: true
+    extracts: true
+    extractsRemote: https://github.com/example-org/upstream.git
+    branchDirs: []
+    remoteDirs: ["{subfolder}"]
+  # Codex records the repository its session ran in. That recorded remote wins over
+  # whatever the clone answers now, in the scan, the extraction and the filter, and
+  # none of them needs to ask git for it.
+  - name: explicit-recorded-remote-wins-in-tree-store-and-filter
+    harness: codex
+    subfolder: packages/web
+    recordedBranch: main
+    recordedRemote: https://github.com/example-org/recorded.git
+    headBranch: develop
+    headRemote: https://github.com/example-org/fork.git
+    chosenBranch: main
+    chosenRemote: https://github.com/example-org/recorded.git
+    treeBranch: main
+    treeRemote: https://github.com/example-org/recorded.git
+    matched: true
+    extracts: true
+    extractsRemote: https://github.com/example-org/recorded.git
     branchDirs: []
     remoteDirs: []

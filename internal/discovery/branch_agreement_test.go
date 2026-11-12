@@ -27,6 +27,10 @@ type branchAgreementCase struct {
 	Name             string   `yaml:"name"`
 	Harness          string   `yaml:"harness"`
 	ExtractsNoBranch bool     `yaml:"extractsNoBranch"`
+	Extracts         bool     `yaml:"extracts"`
+	ExtractsRemote   *string  `yaml:"extractsRemote"`
+	RecordedRemote   string   `yaml:"recordedRemote"`
+	UpstreamRemote   string   `yaml:"upstreamRemote"`
 	Subfolder        string   `yaml:"subfolder"`
 	FolderOnly       bool     `yaml:"folderOnly"`
 	NoDirectory      bool     `yaml:"noDirectory"`
@@ -48,21 +52,54 @@ type branchAgreementCase struct {
 }
 
 // branchRecordingGit answers every directory with one checked-out branch and one
-// remote, and remembers which directories it was asked about.
+// remote, as a clone whose origin is the remote it answers; the branch named by
+// upstreamBranch tracks upstreamRemote instead, as a fork's feature branch tracks
+// the upstream repository. It remembers which directories it was asked about.
 type branchRecordingGit struct {
 	*testutil.StubGitResolver
-	branchDirs []string
-	remoteDirs []string
+	origin         string
+	upstreamBranch string
+	upstreamRemote string
+	branchDirs     []string
+	remoteDirs     []string
 }
+
+var _ ingest.RecordedBranchRemoteResolver = (*branchRecordingGit)(nil)
 
 func (g *branchRecordingGit) RemoteURL(ctx context.Context, dir string) (string, error) {
 	g.remoteDirs = append(g.remoteDirs, dir)
 	return g.StubGitResolver.RemoteURL(ctx, dir)
 }
 
+func (g *branchRecordingGit) OriginRemoteURL(_ context.Context, dir string) (string, error) {
+	g.remoteDirs = append(g.remoteDirs, dir)
+	return g.origin, nil
+}
+
+func (g *branchRecordingGit) RemoteURLForBranch(_ context.Context, dir, branch string) (string, string, error) {
+	g.remoteDirs = append(g.remoteDirs, dir)
+	if g.upstreamRemote != "" && branch == g.upstreamBranch {
+		return g.upstreamRemote, "upstream/" + branch, nil
+	}
+	return "", "", nil
+}
+
 func (g *branchRecordingGit) Branch(ctx context.Context, dir string) (string, error) {
 	g.branchDirs = append(g.branchDirs, dir)
 	return g.StubGitResolver.Branch(ctx, dir)
+}
+
+// noSuchProjectFolder is the Claude transcript folder of a session that has no
+// project directory: its first segment names a directory no machine has at its
+// root, so the folder decodes to nothing. The agreement test checks that before
+// it relies on it.
+func noSuchProjectFolder(t *testing.T) string {
+	t.Helper()
+	const folder = "-peasant-agreement-fixture-no-such-project-root-3f9a1c"
+	if decoded := ingest.DecodeClaudeSlugOnDisk(folder); decoded != "" {
+		t.Fatalf("precondition: the folder %q decodes to the directory %q on this machine, so a session filed under it has a project directory; rename the folder so it cannot exist", folder, decoded)
+	}
+	return folder
 }
 
 // TestTreeAndImportFilterPlaceASessionOnTheSameBranch runs the real scan (what
@@ -137,6 +174,9 @@ func runBranchAgreementCase(t *testing.T, c branchAgreementCase) {
 		if c.FolderOnly {
 			folder = strings.ReplaceAll(clone, string(filepath.Separator), "-")
 		}
+		if c.NoDirectory {
+			folder = noSuchProjectFolder(t)
+		}
 		recording = filepath.Join(source, folder, sessionID+".jsonl")
 	case ingest.HarnessCodex:
 		// Codex files its rollouts under dated folders of its sessions directory.
@@ -187,7 +227,12 @@ func runBranchAgreementCase(t *testing.T, c branchAgreementCase) {
 		}})
 	}
 	newGit := func() *branchRecordingGit {
-		return &branchRecordingGit{StubGitResolver: &testutil.StubGitResolver{Remote: headRemote, BranchName: c.HeadBranch}}
+		return &branchRecordingGit{
+			StubGitResolver: &testutil.StubGitResolver{Remote: headRemote, BranchName: c.HeadBranch},
+			origin:          headRemote,
+			upstreamBranch:  c.RecordedBranch,
+			upstreamRemote:  c.UpstreamRemote,
+		}
 	}
 	expand := func(dirs []string) []string {
 		out := make([]string, 0, len(dirs))
@@ -241,17 +286,29 @@ func runBranchAgreementCase(t *testing.T, c branchAgreementCase) {
 	assertRemoteDirs(t, "the import filter", filterGit.remoteDirs, wantRemoteDirs)
 
 	// The store: what the harness's own metadata extraction keeps for the session.
-	if c.ExtractsNoBranch {
+	// It asks git about the same directories as the tree and the filter, and the
+	// remote it keeps is the one they showed and judged by.
+	if c.Extracts || c.ExtractsNoBranch || c.ExtractsRemote != nil {
 		extractGit := newGit()
 		extractor := ingest.DefaultAdapterRegistry[harness](&ingest.OSFileSystem{}, extractGit, salt.Salt{})
 		meta, err := extractor.ExtractMetadata(t.Context(), discovered[0])
 		if err != nil {
 			t.Fatalf("extract the metadata the store would keep: %v", err)
 		}
-		if meta.Git.Branch != nil {
+		if c.ExtractsNoBranch && meta.Git.Branch != nil {
 			t.Fatalf("the store would keep the branch %q for a %s session that recorded none", *meta.Git.Branch, harness)
 		}
-		assertBranchDirs(t, "the metadata extraction", extractGit.branchDirs, nil)
+		if c.ExtractsRemote != nil {
+			stored := ""
+			if meta.Git.Remote != nil {
+				stored = *meta.Git.Remote
+			}
+			if stored != *c.ExtractsRemote || stored != listedRemote {
+				t.Fatalf("the store would keep the remote %q, want %q, and the tree listed it under %q before the import", stored, *c.ExtractsRemote, listedRemote)
+			}
+		}
+		assertBranchDirs(t, "the metadata extraction", extractGit.branchDirs, wantDirs)
+		assertRemoteDirs(t, "the metadata extraction", extractGit.remoteDirs, wantRemoteDirs)
 	}
 }
 
@@ -262,8 +319,12 @@ func assertBranchDirs(t *testing.T, who string, got, want []string) {
 	}
 }
 
+// assertRemoteDirs compares the distinct directories git was asked about: one
+// directory is asked several questions (the recorded branch's upstream, then
+// origin), and the rule is which directory, not how many questions.
 func assertRemoteDirs(t *testing.T, who string, got, want []string) {
 	t.Helper()
+	got = slices.Compact(slices.Clone(got))
 	if !slices.Equal(got, want) {
 		t.Fatalf("%s asked git for the remote of %v, want %v", who, got, want)
 	}
@@ -297,8 +358,15 @@ func writeBranchAgreementRecording(t *testing.T, harness ingest.Harness, path, i
 func writeCodexAgreementRollout(t *testing.T, path, id, cwd string, c branchAgreementCase, modified time.Time) {
 	t.Helper()
 	git := ""
-	if c.RecordedBranch != "" {
-		git = fmt.Sprintf(`,"git":{"commit_hash":"abc123","branch":%q,"repository_url":"https://github.com/example-org/demo.git"}`, c.RecordedBranch)
+	if c.RecordedBranch != "" || c.RecordedRemote != "" {
+		git = `,"git":{"commit_hash":"abc123"`
+		if c.RecordedBranch != "" {
+			git += fmt.Sprintf(`,"branch":%q`, c.RecordedBranch)
+		}
+		if c.RecordedRemote != "" {
+			git += fmt.Sprintf(`,"repository_url":%q`, c.RecordedRemote)
+		}
+		git += `}`
 	}
 	lines := []string{
 		fmt.Sprintf(`{"timestamp":"2026-05-30T04:29:24.992Z","type":"session_meta","payload":{"id":%q,"timestamp":"2026-05-30T04:29:04.063Z","cwd":%q,"originator":"codex_vscode","cli_version":"0.133.0","source":"vscode","thread_source":"user","model_provider":"openai"%s}}`, id, cwd, git),

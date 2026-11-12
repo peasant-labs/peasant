@@ -72,19 +72,38 @@ func TestResolveSessionBranchPrecedence(t *testing.T) {
 func TestHarnessBranchSourcesCoverTheAdapterRegistry(t *testing.T) {
 	t.Parallel()
 	for harness := range ingest.DefaultAdapterRegistry {
-		source, declared := ingest.HarnessBranchSources[harness]
+		source, declared := ingest.HarnessBranchSources()[harness]
 		if !declared {
-			t.Errorf("registered harness %q declares no branch source; add it to ingest.HarnessBranchSources", harness)
+			t.Errorf("registered harness %q declares no branch source; declare it in harnessBranchSources in internal/ingest/session_branch.go", harness)
 			continue
 		}
 		if source.String() == ingest.BranchSourceUnknown.String() {
 			t.Errorf("harness %q declares the branch source %d, which is not one of the declared sources", harness, source)
 		}
 	}
-	for harness := range ingest.HarnessBranchSources {
+	for harness := range ingest.HarnessBranchSources() {
 		if _, registered := ingest.DefaultAdapterRegistry[harness]; !registered {
 			t.Errorf("branch source declared for %q, which has no registered adapter", harness)
 		}
+	}
+}
+
+// TestHarnessBranchSourcesCannotBeChangedByACaller holds the declarations to
+// themselves: what HarnessBranchSources hands out is a copy, so a caller that
+// edits it changes nothing the tree, the filter and the store read.
+func TestHarnessBranchSourcesCannotBeChangedByACaller(t *testing.T) {
+	t.Parallel()
+	copied := ingest.HarnessBranchSources()
+	delete(copied, ingest.HarnessCodex)
+	copied[ingest.HarnessClaudeCode] = ingest.BranchSourceRecordingOnly
+	if got := ingest.BranchSourceOf(ingest.HarnessCodex); got != ingest.BranchSourceRecordingOnly {
+		t.Errorf("deleting an entry from the copy changed the declaration of codex to %s", got)
+	}
+	if got := ingest.BranchSourceOf(ingest.HarnessClaudeCode); got != ingest.BranchSourceRecordingOrCheckout {
+		t.Errorf("editing the copy changed the declaration of claude-code to %s", got)
+	}
+	if _, declared := ingest.HarnessBranchSources()[ingest.HarnessCodex]; !declared {
+		t.Error("a later call no longer lists codex")
 	}
 }
 

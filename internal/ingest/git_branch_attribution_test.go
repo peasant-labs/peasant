@@ -13,15 +13,57 @@ import (
 //go:embed testdata/git_branch_attribution.yaml
 var gitBranchAttributionData []byte
 
-// checkoutCountingGit counts the questions asked about the checked-out branch.
+// checkoutCountingGit counts the questions asked about the checked-out branch
+// (calls) and every question asked of git at all (all).
 type checkoutCountingGit struct {
 	*testutil.StubGitResolver
 	calls int
+	all   int
+	// dirs lists the directory of every question, in the order they were asked.
+	dirs []string
 }
+
+func (g *checkoutCountingGit) ask(dir string) {
+	g.all++
+	g.dirs = append(g.dirs, dir)
+}
+
+var _ ingest.RecordedBranchRemoteResolver = (*checkoutCountingGit)(nil)
 
 func (g *checkoutCountingGit) Branch(ctx context.Context, dir string) (string, error) {
 	g.calls++
+	g.ask(dir)
 	return g.StubGitResolver.Branch(ctx, dir)
+}
+
+func (g *checkoutCountingGit) RemoteURL(ctx context.Context, dir string) (string, error) {
+	g.ask(dir)
+	return g.StubGitResolver.RemoteURL(ctx, dir)
+}
+
+func (g *checkoutCountingGit) OriginRemoteURL(ctx context.Context, dir string) (string, error) {
+	g.ask(dir)
+	return g.StubGitResolver.OriginRemoteURL(ctx, dir)
+}
+
+func (g *checkoutCountingGit) RemoteURLForBranch(ctx context.Context, dir, branch string) (string, string, error) {
+	g.ask(dir)
+	return g.StubGitResolver.RemoteURLForBranch(ctx, dir, branch)
+}
+
+func (g *checkoutCountingGit) Worktree(ctx context.Context, dir string) (string, error) {
+	g.ask(dir)
+	return g.StubGitResolver.Worktree(ctx, dir)
+}
+
+func (g *checkoutCountingGit) TrackingBranch(ctx context.Context, dir string) (string, error) {
+	g.ask(dir)
+	return g.StubGitResolver.TrackingBranch(ctx, dir)
+}
+
+func (g *checkoutCountingGit) WalkUpRemoteURL(ctx context.Context, dir string) (string, string, error) {
+	g.ask(dir)
+	return g.StubGitResolver.WalkUpRemoteURL(ctx, dir)
 }
 
 func TestResolveGitBranchAttribution(t *testing.T) {

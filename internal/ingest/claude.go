@@ -1148,7 +1148,8 @@ func (a *ClaudeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 		return nil, parseErr
 	}
 	if firstLine != nil {
-		// Resolve git metadata using the cwd from the first line.
+		// cwd names the project for identity: the first line's working
+		// directory, or the folder the transcript sits in.
 		cwd := firstLine.CWD
 		if cwd == "" {
 			cwd = filepath.Dir(string(session.SourcePath))
@@ -1160,31 +1161,30 @@ func (a *ClaudeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 			cwd = decoded
 		}
 
-		remoteURL, trackingStr := ResolveGitRemote(ctx, a.git, cwd, firstLine.GitBranch, "")
-		remoteErr := error(nil)
-		// If direct remote check fails, walk up parent directories to find one.
-		// This ensures sessions from decoded slug paths (which may point to a
-		// subdirectory) still resolve the correct git remote for project grouping.
-		if (remoteErr != nil || remoteURL == "") && a.git != nil && firstLine.GitBranch == "" {
-			if walkedRemote, _, walkErr := a.git.WalkUpRemoteURL(ctx, cwd); walkErr == nil && walkedRemote != "" {
-				remoteURL = walkedRemote
-				remoteErr = nil
-			}
+		// Git is asked about the session's project directory and nothing else,
+		// the directory the tree and the import filter ask about. A session that
+		// recorded none and whose transcript folder decodes to none has no project
+		// directory, and the storage folder is never asked: it can sit inside an
+		// unrelated repository.
+		gitDir := ExtractionDirectory(session, firstLine.CWD, a.dirExists)
+		remoteURL, trackingStr := ResolveGitRemote(ctx, a.git, gitDir, firstLine.GitBranch, "")
+		worktreeStr, worktreeErr := "", error(nil)
+		if gitDir != "" {
+			worktreeStr, worktreeErr = a.git.Worktree(ctx, gitDir)
 		}
-		worktreeStr, worktreeErr := a.git.Worktree(ctx, cwd)
 
 		// Build GitContext — all fields are nullable.
 		gitInfo := GitContext{}
 
 		// The recorded gitBranch wins; the checkout answers only when the
 		// transcript recorded none.
-		branch := ResolveGitBranch(ctx, a.git, cwd, firstLine.GitBranch)
+		branch := ResolveGitBranch(ctx, a.git, gitDir, firstLine.GitBranch)
 		if branch != "" {
 			b := branch
 			gitInfo.Branch = &b
 		}
 
-		if remoteErr == nil && remoteURL != "" {
+		if remoteURL != "" {
 			r := remoteURL
 			gitInfo.Remote = &r
 		}

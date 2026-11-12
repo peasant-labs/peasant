@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"context"
+	"maps"
 	"path/filepath"
 	"time"
 )
@@ -38,16 +39,18 @@ func (s BranchSource) String() string {
 // by the branch checked out in its directory.
 func (s BranchSource) AsksCheckout() bool { return s != BranchSourceRecordingOnly }
 
-// HarnessBranchSources declares, once per registered harness, where its
+// harnessBranchSources declares, once per registered harness, where its
 // sessions get a branch from. It is keyed like DefaultAdapterRegistry and
 // HarvesterVersionRegistry, and a test holds the three key sets equal.
 // SessionBranchFor reads it, so the tree, the import filter and the store
-// cannot disagree about a harness.
+// cannot disagree about a harness. It is unexported and read through
+// HarnessBranchSources, which hands out a copy, so no caller can change a
+// declaration.
 //
 // Codex records its git context once in session_meta and Strike keeps its branch
 // in a sidecar. Neither extractor ever asks the checkout, so a session of theirs
 // that recorded no branch has none, in the store and everywhere else.
-var HarnessBranchSources = map[Harness]BranchSource{
+var harnessBranchSources = map[Harness]BranchSource{
 	HarnessClaudeCode: BranchSourceRecordingOrCheckout,
 	HarnessCursor:     BranchSourceRecordingOrCheckout,
 	HarnessOpenCode:   BranchSourceRecordingOrCheckout,
@@ -56,11 +59,17 @@ var HarnessBranchSources = map[Harness]BranchSource{
 	HarnessStrike:     BranchSourceRecordingOnly,
 }
 
+// HarnessBranchSources returns a copy of the declarations, one per registered
+// harness.
+func HarnessBranchSources() map[Harness]BranchSource {
+	return maps.Clone(harnessBranchSources)
+}
+
 // BranchSourceOf returns where a harness's sessions get a branch from. A
 // harness with no declaration gets the general rule, which is what every
 // harness had before the declarations existed.
 func BranchSourceOf(harness Harness) BranchSource {
-	if source, declared := HarnessBranchSources[harness]; declared {
+	if source, declared := harnessBranchSources[harness]; declared {
 		return source
 	}
 	return BranchSourceRecordingOrCheckout
@@ -110,16 +119,38 @@ type KnownSessionIndex interface {
 // its own directory reports. The harness's storage directory is never used: it
 // can sit inside an unrelated repository.
 func SessionProjectDirectory(session DiscoveredSession) string {
+	return SessionProjectDirectoryIn(session, osDirectoryExists)
+}
+
+// SessionProjectDirectoryIn is SessionProjectDirectory over any filesystem: an
+// extractor that reads through its adapter's filesystem decodes a Claude
+// transcript folder against that filesystem, and the tree decodes it against the
+// disk. dirExists says whether a path is a directory.
+func SessionProjectDirectoryIn(session DiscoveredSession, dirExists func(string) bool) string {
 	if filepath.IsAbs(session.CWD) {
 		return filepath.Clean(session.CWD)
 	}
 	if session.Harness == HarnessClaudeCode {
 		slug := filepath.Base(filepath.Dir(string(session.SourcePath)))
-		if decoded := DecodeClaudeSlugOnDisk(slug); decoded != "" {
+		if decoded := DecodeClaudeSlug(slug, dirExists); decoded != "" {
 			return decoded
 		}
 	}
 	return ""
+}
+
+// ExtractionDirectory is the directory an extractor asks git about for a session
+// it is reading: the session's project directory, where recordedCWD stands in
+// for a working directory the discovery did not carry. It is the directory the
+// tree and the import filter ask about before the session is stored, so the
+// branch and the remote an extractor stores are the ones the tree showed. It is
+// empty when the session has no project directory, and git is then asked
+// nothing: the harness's storage folder is never used.
+func ExtractionDirectory(session DiscoveredSession, recordedCWD string, dirExists func(string) bool) string {
+	if session.CWD == "" {
+		session.CWD = recordedCWD
+	}
+	return SessionProjectDirectoryIn(session, dirExists)
 }
 
 // sessionBranchEvidence is everything that can say which branch a session

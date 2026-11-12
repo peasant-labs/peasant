@@ -196,23 +196,67 @@ type gitAnswer struct {
 	err   error
 }
 
-// memoizedGit answers each directory's remote and checked-out branch once for a
-// Prepare call. Only the two questions selection asks are remembered; the rest
-// of the resolver is the embedded one.
+type upstreamAnswer struct {
+	remote, tracking string
+	err              error
+}
+
+// memoizedGit answers each directory's remote questions and checked-out branch
+// once for a Prepare call. Only the questions selection asks are remembered: the
+// checkout's remote, origin, the upstream of a recorded branch (the questions
+// ingest.ResolveGitRemote asks) and the checked-out branch; the rest of the
+// resolver is the embedded one. It offers the recorded-branch questions whatever
+// the embedded resolver is, so the remote it answers is always the one
+// ResolveGitRemote names: a resolver that has no upstream configuration to read
+// answers origin through RemoteURL, as ResolveGitRemote does for it directly.
 type memoizedGit struct {
 	ingest.GitResolver
-	remotes  map[string]gitAnswer
-	branches map[string]gitAnswer
+	remotes   map[string]gitAnswer
+	origins   map[string]gitAnswer
+	upstreams map[string]upstreamAnswer
+	branches  map[string]gitAnswer
 }
 
 var _ ingest.GitResolver = (*memoizedGit)(nil)
+var _ ingest.RecordedBranchRemoteResolver = (*memoizedGit)(nil)
 
 func newMemoizedGit(git ingest.GitResolver) *memoizedGit {
 	return &memoizedGit{
 		GitResolver: git,
 		remotes:     make(map[string]gitAnswer),
+		origins:     make(map[string]gitAnswer),
+		upstreams:   make(map[string]upstreamAnswer),
 		branches:    make(map[string]gitAnswer),
 	}
+}
+
+func (m *memoizedGit) OriginRemoteURL(ctx context.Context, dir string) (string, error) {
+	if answer, ok := m.origins[dir]; ok {
+		return answer.value, answer.err
+	}
+	var value string
+	var err error
+	if inner, ok := m.GitResolver.(ingest.RecordedBranchRemoteResolver); ok {
+		value, err = inner.OriginRemoteURL(ctx, dir)
+	} else {
+		value, err = m.RemoteURL(ctx, dir)
+	}
+	m.origins[dir] = gitAnswer{value: value, err: err}
+	return value, err
+}
+
+func (m *memoizedGit) RemoteURLForBranch(ctx context.Context, dir, branch string) (string, string, error) {
+	inner, ok := m.GitResolver.(ingest.RecordedBranchRemoteResolver)
+	if !ok {
+		return "", "", nil
+	}
+	key := dir + "\x00" + branch
+	if answer, ok := m.upstreams[key]; ok {
+		return answer.remote, answer.tracking, answer.err
+	}
+	remote, tracking, err := inner.RemoteURLForBranch(ctx, dir, branch)
+	m.upstreams[key] = upstreamAnswer{remote: remote, tracking: tracking, err: err}
+	return remote, tracking, err
 }
 
 func (m *memoizedGit) RemoteURL(ctx context.Context, dir string) (string, error) {
