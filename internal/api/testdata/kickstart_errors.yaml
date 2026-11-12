@@ -1,0 +1,248 @@
+# Every answer the kickstart routes refuse with: the contract's closed error
+# codes, the status each answers with, and where each code is shown to happen.
+# See kickstart_script_test.go for the step vocabulary. Every call in every
+# kickstart fixture is also held to the contract's record of what its route may
+# answer (kickstart_contract_test.go), so a route cannot answer a status or a
+# code the contract does not declare for it.
+#
+# codes accounts for the whole closed set. A code is driven by a case that
+# asserts it (fixture and case), by a row of one of the tables below, or it is
+# unreachable through a request, and says why. Adding a code to the schema fails
+# the manifest until it is placed here.
+requiredNames:
+  - open-without-a-body-is-refused
+  - body-that-is-not-one-object-is-refused
+  - open-without-a-scope-is-refused
+  - answer-with-nothing-to-do-is-refused
+  - status-that-cannot-inspect-the-file-says-so
+  - server-without-a-configuration-file-is-unavailable-on-every-route
+  - save-while-another-change-holds-the-file-is-busy
+  - foreign-host-is-refused-on-every-route
+codes:
+  kickstart_body_missing: {case: open-without-a-body-is-refused}
+  kickstart_body_invalid: {case: body-that-is-not-one-object-is-refused}
+  kickstart_scope_invalid: {case: open-without-a-scope-is-refused}
+  kickstart_answers_invalid: {case: answer-with-nothing-to-do-is-refused}
+  kickstart_session_committing: {fixture: sessions, case: closed-committed-reason}
+  kickstart_revision_ahead: {fixture: patch, case: unknown-field-key-refused}
+  kickstart_answer_refused: {fixture: patch, case: unknown-field-key-refused}
+  kickstart_scan_not_done: {fixture: patch, case: tree-ids-are-the-only-tree-answer}
+  kickstart_field_unknown: {fixture: patch, case: unknown-field-key-refused}
+  kickstart_field_out_of_scope: {fixture: patch, case: unknown-field-key-refused}
+  kickstart_field_hidden: {fixture: patch, case: hidden-field-answer-refused}
+  kickstart_tree_answer_shape: {fixture: patch, case: tree-ids-are-the-only-tree-answer}
+  kickstart_connect_out_of_scope: {fixture: patch, case: connect-accept-requires-connected}
+  kickstart_connect_not_connected: {fixture: patch, case: connect-accept-requires-connected}
+  kickstart_connect_unknown:
+    unreachable: the closed connect answer set refuses any other token while the body is decoded, which answers kickstart_body_invalid before the plan sees it
+  kickstart_commit_refused: {fixture: commit, case: selection-scope-commit-without-a-config-file-is-refused}
+  kickstart_session_not_found: {fixture: tree, case: preview-unknown-node-refused}
+  kickstart_preview_row_not_found: {fixture: tree, case: preview-unknown-node-refused}
+  kickstart_failed: {table: writer}
+  kickstart_status_unreadable: {case: status-that-cannot-inspect-the-file-says-so}
+  kickstart_config_unreadable: {fixture: commit, case: failed-save-keeps-the-session}
+  kickstart_config_unwritable: {table: commitFailures}
+  kickstart_session_unbuildable:
+    unreachable: a draft the model built once is rebuilt from the same values; only a defect in the model fails, and no request can cause one
+  kickstart_answer_unencodable:
+    unreachable: encoding a list of strings cannot fail; the code guards the encoder
+  kickstart_preview_unreadable: {fixture: tree, case: preview-of-an-unreadable-transcript-reports-the-reason}
+  publishing_contract_breach: {fixture: commit, case: finish-step-outside-the-contract-is-refused-before-any-write}
+  kickstart_unavailable: {case: server-without-a-configuration-file-is-unavailable-on-every-route}
+  kickstart_config_busy: {case: save-while-another-change-holds-the-file-is-busy}
+  kickstart_config_changing: {table: commitFailures}
+# What a refused save is answered with, by the reason it failed. The mapping is
+# commitFailureResponse; a kind the model adds fails here until it has a row.
+commitFailures:
+  - {kind: invalid, code: kickstart_commit_refused}
+  - {kind: read, code: kickstart_config_unreadable}
+  - {kind: lock, code: kickstart_config_busy}
+  - {kind: changed, code: kickstart_config_changing}
+  - {kind: write, code: kickstart_config_unwritable}
+# What a failure no code names is answered with.
+writer:
+  - {failure: a plain error from the session store, code: kickstart_failed}
+cases:
+  # No body is not an empty object: it is its own refusal, on both routes that
+  # take one.
+  - name: open-without-a-body-is-refused
+    world: {listings: two-projects, gate: true}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        status: 400
+        json: {code: kickstart_body_missing}
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        status: 400
+        json: {code: kickstart_body_missing}
+
+  - name: body-that-is-not-one-object-is-refused
+    world: {listings: two-projects, gate: true}
+    steps:
+      # an array, a field the contract does not declare, and a scope that is
+      # not full or selection are bodies the declared shape does not accept
+      - call: POST /api/v1/kickstart/sessions
+        body: [1]
+        status: 400
+        json: {code: kickstart_body_invalid}
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full, reset: true}
+        status: 400
+        json: {code: kickstart_body_invalid}
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: everything}
+        status: 400
+        json: {code: kickstart_body_invalid}
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1, reset: true}
+        status: 400
+        json: {code: kickstart_body_invalid}
+      # nothing was opened or changed by any of them
+      - call: GET /api/v1/kickstart/sessions/{full}
+        json: {revision: 1}
+
+  - name: open-without-a-scope-is-refused
+    world: {listings: two-projects, gate: true}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {}
+        status: 400
+        json: {code: kickstart_scope_invalid}
+      - call: GET /api/v1/kickstart/status
+        absent: [activeSessionId]
+
+  - name: answer-with-nothing-to-do-is-refused
+    world: {listings: two-projects, gate: true}
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: 1}
+        status: 400
+        json: {code: kickstart_answers_invalid}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        json: {revision: 1}
+
+  # The first-run hook reads the file's existence. A file it cannot even look
+  # for is a failure of its own, never "not configured".
+  - name: status-that-cannot-inspect-the-file-says-so
+    world: {listings: two-projects, gate: true}
+    steps:
+      - call: GET /api/v1/kickstart/status
+        json: {configured: false}
+      - blockConfigDir: true
+      - call: GET /api/v1/kickstart/status
+        status: 500
+        json: {code: kickstart_status_unreadable}
+        contains: {error: "could not be inspected"}
+
+  # A server started without a configuration file has nowhere to keep a setup,
+  # and says so on every kickstart route.
+  - name: server-without-a-configuration-file-is-unavailable-on-every-route
+    world: {listings: two-projects, gate: true, unconfigured: true}
+    steps:
+      - call: GET /api/v1/kickstart/status
+        status: 503
+        json: {code: kickstart_unavailable}
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        status: 503
+        json: {code: kickstart_unavailable}
+      - call: GET /api/v1/kickstart/sessions/x
+        status: 503
+        json: {code: kickstart_unavailable}
+      - call: PATCH /api/v1/kickstart/sessions/x
+        body: {revision: 1, values: {content-license: CC0-1.0}}
+        status: 503
+        json: {code: kickstart_unavailable}
+      - call: GET /api/v1/kickstart/sessions/x/tree
+        status: 503
+        json: {code: kickstart_unavailable}
+      - call: GET /api/v1/kickstart/sessions/x/tree/y/preview
+        status: 503
+        json: {code: kickstart_unavailable}
+      - call: POST /api/v1/kickstart/sessions/x/scan
+        status: 503
+        json: {code: kickstart_unavailable}
+      - call: POST /api/v1/kickstart/sessions/x/commit
+        status: 503
+        json: {code: kickstart_unavailable}
+
+  # Another program holds the file: the save waits its turn, says another change
+  # holds it, writes nothing, and leaves the session to try again.
+  - name: save-while-another-change-holds-the-file-is-busy
+    world:
+      listings: two-projects
+      gate: true
+      lockWait: 50ms
+      config: |
+        version: 1
+        push:
+          license: ""
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0}}
+      - holdConfigLock: true
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        status: 503
+        json: {code: kickstart_config_busy}
+        contains: {error: "another change holds the configuration file"}
+      - configFile: unchanged
+      - call: GET /api/v1/kickstart/sessions/{full}
+        json: {scope: full}
+
+  # The host guard answers before any handler: a request whose Host does not name
+  # a loopback address is refused on every route, reads and writes alike.
+  - name: foreign-host-is-refused-on-every-route
+    world: {listings: two-projects, gate: true}
+    steps:
+      - call: GET /api/v1/kickstart/status
+        host: site.example
+        status: 403
+        json: {code: request_host_not_local}
+      - call: POST /api/v1/kickstart/sessions
+        host: site.example
+        body: {scope: full}
+        status: 403
+        json: {code: request_host_not_local}
+      - call: GET /api/v1/kickstart/sessions/x
+        host: site.example
+        status: 403
+        json: {code: request_host_not_local}
+      - call: PATCH /api/v1/kickstart/sessions/x
+        host: site.example
+        body: {revision: 1, values: {content-license: CC0-1.0}}
+        status: 403
+        json: {code: request_host_not_local}
+      - call: GET /api/v1/kickstart/sessions/x/tree
+        host: site.example
+        status: 403
+        json: {code: request_host_not_local}
+      - call: GET /api/v1/kickstart/sessions/x/tree/y/preview
+        host: site.example
+        status: 403
+        json: {code: request_host_not_local}
+      - call: POST /api/v1/kickstart/sessions/x/scan
+        host: site.example
+        status: 403
+        json: {code: request_host_not_local}
+      - call: POST /api/v1/kickstart/sessions/x/commit
+        host: site.example
+        status: 403
+        json: {code: request_host_not_local}
+      # nothing was opened
+      - call: GET /api/v1/kickstart/status
+        absent: [activeSessionId]

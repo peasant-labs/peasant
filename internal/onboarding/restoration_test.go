@@ -17,6 +17,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
+	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
 
@@ -195,8 +196,8 @@ func assertRescanKeepsIDs(t *testing.T, row restorationCase) {
 	if !reflect.DeepEqual(dropped.Labels, row.ExpectDroppedLabels) {
 		t.Fatalf("dropped labels = %v, want %v (read from the forest the answer was given over)", dropped.Labels, row.ExpectDroppedLabels)
 	}
-	if len(dropped.Labels) > onboarding.DroppedLabelsMax {
-		t.Fatalf("dropped labels = %v, want at most %d", dropped.Labels, onboarding.DroppedLabelsMax)
+	if len(dropped.Labels) > schema.LocalKickstartDroppedLabelsMax {
+		t.Fatalf("dropped labels = %v, want at most %d", dropped.Labels, schema.LocalKickstartDroppedLabelsMax)
 	}
 	if len(kept) > len(row.Answered) {
 		t.Fatal("rescan widened the answered set")

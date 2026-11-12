@@ -112,7 +112,9 @@ type kickstartScanResult struct {
 	selection config.SelectionConfig
 	listings  []onboarding.SessionListing
 	claude    bool
-	note      string
+	// notice names the harness folders the scan could not read; empty when it
+	// read every configured one.
+	notice string
 }
 
 func (st *kickstartSessions) runScan(ctx context.Context, sess *kickstartSession, gen uint64, cfg *config.Config) {
@@ -151,7 +153,7 @@ func (st *kickstartSessions) runScan(ctx context.Context, sess *kickstartSession
 		selection: baseline.Selection,
 		listings:  listings,
 		claude:    inventory[defaults.HarnessClaudeCode].SessionCount > 0,
-		note:      providerNote(inventory),
+		notice:    providerNote(inventory),
 	})
 }
 
@@ -185,7 +187,9 @@ func (st *kickstartSessions) finishScan(sess *kickstartSession, gen uint64, resu
 		sess.forest, sess.residual, sess.preparedSelection = result.forest, result.residual, result.selection
 		sess.listings, sess.claudeSessions = result.listings, result.claude
 		sess.scan.state = onboarding.ScanDone
-		sess.scan.phase = result.note
+		// A finished scan has no phase: the notice, if any, is its own field.
+		sess.scan.phase = ""
+		sess.scan.notice = result.notice
 		sess.scan.locked = onboarding.LockedRows(result.forest)
 		sess.scan.droppedCount = dropped.Count
 		sess.scan.droppedLabels = dropped.Labels

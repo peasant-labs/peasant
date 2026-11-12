@@ -67,9 +67,8 @@ func (h *kickstartHandler) handleCommit(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if h.commit == nil {
-		writeAPIError(w, http.StatusServiceUnavailable,
-			"Setup could not be saved because this server has no import to start in internal/api.kickstartHandler.handleCommit. Nothing was changed. Start the dashboard with `peasant web start`, then retry.",
-			"kickstart_unavailable")
+		writeKickstartCode(w, schema.LocalKickstartErrorUnavailable,
+			"Setup could not be saved because this server has no import to start in internal/api.kickstartHandler.handleCommit. Nothing was changed. Start the dashboard with `peasant web start`, then retry.")
 		return
 	}
 	h.commit.serve(w, r, r.PathValue("id"))
@@ -81,9 +80,8 @@ func (c *kickstartCommitter) serve(w http.ResponseWriter, r *http.Request, id st
 	// so a menu the contract refuses leaves the session and the file as they were.
 	steps, err := webNextSteps(env.nextSteps())
 	if err != nil {
-		writeAPIError(w, http.StatusInternalServerError,
-			fmt.Sprintf("The setup was not saved because its finish menu breaks the Local API contract in internal/api.kickstartCommitter.serve: %v. Nothing was written. Report this defect.", err),
-			publishingContractBreachCode)
+		writeKickstartCode(w, schema.LocalKickstartErrorContractBreach,
+			fmt.Sprintf("The setup was not saved because its finish menu breaks the Local API contract in internal/api.kickstartCommitter.serve: %v. Nothing was written. Report this defect.", err))
 		return
 	}
 	draft, err := c.sessions.beginCommit(id)
@@ -216,19 +214,19 @@ func commitFailureResponse(err error) error {
 	}
 	switch failed.Kind {
 	case onboarding.CommitFailureInvalid:
-		return newKickstartError(http.StatusBadRequest, "kickstart_commit_refused",
+		return newKickstartError(schema.LocalKickstartErrorCommitRefused,
 			"The setup was not saved in internal/api.kickstartHandler.handleCommit: %v. Nothing was changed. Correct the answer the message names, then save again.", failed.Err)
 	case onboarding.CommitFailureRead:
-		return newKickstartError(http.StatusInternalServerError, "kickstart_config_unreadable",
+		return newKickstartError(schema.LocalKickstartErrorConfigUnreadable,
 			"The setup was not saved because the configuration file could not be read in internal/api.kickstartHandler.handleCommit: %v. Nothing was changed. Fix or restore the file, then save again.", failed.Err)
 	case onboarding.CommitFailureLock:
-		return newKickstartError(http.StatusServiceUnavailable, "kickstart_config_busy",
+		return newKickstartError(schema.LocalKickstartErrorConfigBusy,
 			"The setup was not saved because another change holds the configuration file in internal/api.kickstartHandler.handleCommit: %v. Nothing was changed. Wait for it to finish, then save again.", failed.Err)
 	case onboarding.CommitFailureChanged:
-		return newKickstartError(http.StatusServiceUnavailable, "kickstart_config_changing",
+		return newKickstartError(schema.LocalKickstartErrorConfigChanging,
 			"The setup was not saved because the configuration file kept changing in internal/api.kickstartHandler.handleCommit: %v. Nothing was written. Stop the other program that edits it, then save again.", failed.Err)
 	default:
-		return newKickstartError(http.StatusInternalServerError, "kickstart_config_unwritable",
+		return newKickstartError(schema.LocalKickstartErrorConfigUnwritable,
 			"The setup was not saved because the configuration file could not be written in internal/api.kickstartHandler.handleCommit: %v. The previous file is unchanged. Fix the directory's permissions or free space, then save again.", failed.Err)
 	}
 }
@@ -239,7 +237,7 @@ func commitFailureResponse(err error) error {
 // what the request did.
 func writeContractStatus(w http.ResponseWriter, status int, value contractValue, breach string) {
 	if err := value.Validate(); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "The answer breaks the Local API contract, so it is not sent: "+err.Error()+". "+breach, publishingContractBreachCode)
+		writeKickstartCode(w, schema.LocalKickstartErrorContractBreach, "The answer breaks the Local API contract, so it is not sent: "+err.Error()+". "+breach)
 		return
 	}
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())

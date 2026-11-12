@@ -309,6 +309,6 @@ cases:
       version: 1
     holdLock: true
     body: '{"key": "push.license", "value": "CC0-1.0"}'
-    status: 500
+    status: 503
     key: push.license
     errorContains: ["another change holds the configuration file", "Nothing was changed"]

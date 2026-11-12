@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -31,9 +32,8 @@ func (h *kickstartHandler) available(w http.ResponseWriter) bool {
 	if h.sessions != nil && h.configPath != "" {
 		return true
 	}
-	writeAPIError(w, http.StatusServiceUnavailable,
-		"Setup could not start because this server was started without a configuration file in internal/api.kickstartHandler. Nothing was changed. Start the dashboard with `peasant web start`, then retry.",
-		"kickstart_unavailable")
+	writeKickstartCode(w, schema.LocalKickstartErrorUnavailable,
+		"Setup could not start because this server was started without a configuration file in internal/api.kickstartHandler. Nothing was changed. Start the dashboard with `peasant web start`, then retry.")
 	return false
 }
 
@@ -48,16 +48,15 @@ func (h *kickstartHandler) handleStatus(w http.ResponseWriter, _ *http.Request) 
 	if _, err := os.Stat(h.configPath); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			slog.Warn("kickstart: read the configuration file", "path", h.configPath, "error", err)
-			writeAPIError(w, http.StatusInternalServerError,
-				fmt.Sprintf("Setup status could not be read because the configuration file %s could not be inspected in internal/api.kickstartHandler.handleStatus: %v. Nothing was changed. Fix the file's permissions, then retry.", h.configPath, err),
-				"kickstart_status_unreadable")
+			writeKickstartCode(w, schema.LocalKickstartErrorStatusUnreadable,
+				fmt.Sprintf("Setup status could not be read because the configuration file %s could not be inspected in internal/api.kickstartHandler.handleStatus: %v. Nothing was changed. Fix the file's permissions, then retry.", h.configPath, err))
 			return
 		}
 		configured = false
 	}
 	status := schema.LocalKickstartStatus{Configured: configured, ActiveSessionID: h.sessions.activeFullSessionID()}
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
-	writeContract(w, &status)
+	writeKickstartContract(w, &status)
 }
 
 // handleOpen answers POST /api/v1/kickstart/sessions: open or join the session
@@ -73,13 +72,13 @@ func (h *kickstartHandler) handleOpen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := request.Validate(); err != nil {
-		writeKickstartError(w, newKickstartError(http.StatusBadRequest, "kickstart_scope_invalid",
+		writeKickstartError(w, newKickstartError(schema.LocalKickstartErrorScopeInvalid,
 			"The setup session could not be opened: %v. No session was opened. Send {\"scope\": \"full\"} or {\"scope\": \"selection\"}.", err))
 		return
 	}
 	scope, err := onboarding.NewModelScope(request.Scope.String())
 	if err != nil {
-		writeKickstartError(w, newKickstartError(http.StatusBadRequest, "kickstart_scope_invalid", "%v", err))
+		writeKickstartError(w, newKickstartError(schema.LocalKickstartErrorScopeInvalid, "%v", err))
 		return
 	}
 	view, err := h.sessions.open(r.Context(), scope)
@@ -88,7 +87,7 @@ func (h *kickstartHandler) handleOpen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
-	writeContract(w, &view)
+	writeKickstartContract(w, &view)
 }
 
 // handleGet answers GET /api/v1/kickstart/sessions/{id}: the reconnect snapshot.
@@ -102,7 +101,7 @@ func (h *kickstartHandler) handleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
-	writeContract(w, &view)
+	writeKickstartContract(w, &view)
 }
 
 // handlePatch answers PATCH /api/v1/kickstart/sessions/{id}: one request's
@@ -118,7 +117,7 @@ func (h *kickstartHandler) handlePatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := request.Validate(); err != nil {
-		writeKickstartError(w, newKickstartError(http.StatusBadRequest, "kickstart_answers_invalid",
+		writeKickstartError(w, newKickstartError(schema.LocalKickstartErrorAnswersInvalid,
 			"The answer was refused in internal/api.kickstartHandler.handlePatch: %v. Nothing was changed.", err))
 		return
 	}
@@ -128,7 +127,7 @@ func (h *kickstartHandler) handlePatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
-	writeContract(w, &result)
+	writeKickstartContract(w, &result)
 }
 
 // handleTree answers GET /api/v1/kickstart/sessions/{id}/tree: the whole forest.
@@ -142,7 +141,7 @@ func (h *kickstartHandler) handleTree(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
-	writeContract(w, &tree)
+	writeKickstartContract(w, &tree)
 }
 
 // handlePreview answers GET /api/v1/kickstart/sessions/{id}/tree/{nodeId}/preview.
@@ -156,7 +155,7 @@ func (h *kickstartHandler) handlePreview(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
-	writeContract(w, &preview)
+	writeKickstartContract(w, &preview)
 }
 
 // handleScan answers POST /api/v1/kickstart/sessions/{id}/scan: restart the
@@ -171,37 +170,61 @@ func (h *kickstartHandler) handleScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
-	writeContract(w, &scan)
+	writeKickstartContract(w, &scan)
 }
 
 // decodeKickstartBody reads exactly one JSON value into a contract request type,
 // which refuses a field the contract does not declare.
 func decodeKickstartBody(w http.ResponseWriter, r *http.Request, into any) error {
 	if r.Body == nil {
-		return newKickstartError(http.StatusBadRequest, "kickstart_body_missing",
+		return newKickstartError(schema.LocalKickstartErrorBodyMissing,
 			"The request has no body in internal/api.decodeKickstartBody. Nothing was changed. Send one JSON object.")
 	}
 	if err := decodeStrict(http.MaxBytesReader(w, r.Body, maxKickstartBody), into); err != nil {
 		if errors.Is(err, io.EOF) {
-			return newKickstartError(http.StatusBadRequest, "kickstart_body_missing",
+			return newKickstartError(schema.LocalKickstartErrorBodyMissing,
 				"The request body is empty in internal/api.decodeKickstartBody. Nothing was changed. Send one JSON object.")
 		}
-		return newKickstartError(http.StatusBadRequest, "kickstart_body_invalid",
+		return newKickstartError(schema.LocalKickstartErrorBodyInvalid,
 			"The request body is not accepted in internal/api.decodeKickstartBody: %v. Nothing was changed. Send one JSON object of the declared shape.", err)
 	}
 	return nil
 }
 
-// writeKickstartError answers a refusal with its status and code. An error that
-// is not a refusal is a server defect and says so.
+// writeKickstartError answers a refusal with its code, and the status the code
+// answers with. An error that is not a refusal is a defect no narrower code
+// names, and says so.
 func writeKickstartError(w http.ResponseWriter, err error) {
 	var refusal *kickstartError
 	if errors.As(err, &refusal) {
-		writeAPIError(w, refusal.status, refusal.message, refusal.code)
+		writeKickstartCode(w, refusal.code, refusal.message)
 		return
 	}
 	slog.Error("kickstart: a request failed", "error", err)
-	writeAPIError(w, http.StatusInternalServerError,
-		fmt.Sprintf("The setup request failed in internal/api.kickstartHandler: %v. Nothing was changed. Retry; if it repeats, report it.", err),
-		"kickstart_failed")
+	writeKickstartCode(w, schema.LocalKickstartErrorFailed,
+		fmt.Sprintf("The setup request failed in internal/api.kickstartHandler: %v. Nothing was changed. Retry; if it repeats, report it.", err))
+}
+
+// writeKickstartCode answers every non-2xx kickstart request that is not the
+// shared 403 or the commit 409: the contract's error body, with the status the
+// code answers with. A message or a code the contract refuses is itself a
+// defect, answered as one rather than sent.
+func writeKickstartCode(w http.ResponseWriter, code schema.LocalKickstartErrorCode, message string) {
+	response := schema.LocalKickstartErrorResponse{Error: message, Code: code}
+	if err := response.Validate(); err != nil {
+		slog.Error("kickstart: an error answer breaks the Local API contract and was replaced", "code", code, "error", err)
+		response = schema.LocalKickstartErrorResponse{
+			Error: fmt.Sprintf("The setup request failed in internal/api.writeKickstartCode: its error answer breaks the Local API contract (%v). Nothing was changed. Retry; if it repeats, report it.", err),
+			Code:  schema.LocalKickstartErrorFailed,
+		}
+	}
+	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
+	w.WriteHeader(response.Code.HTTPStatus())
+	_ = json.NewEncoder(w).Encode(response)
+}
+
+// writeKickstartContract answers a successful kickstart request with a contract
+// value, after checking it the way a client does.
+func writeKickstartContract(w http.ResponseWriter, value contractValue) {
+	writeContractStatus(w, http.StatusOK, value, "Retry; if it repeats, report it.")
 }

@@ -286,6 +286,7 @@ func (r kickstartScanRecord) wire() (schema.LocalKickstartScan, error) {
 	scan := schema.LocalKickstartScan{
 		State:             state,
 		Phase:             r.phase,
+		Notice:            r.notice,
 		Done:              r.done,
 		Total:             r.total,
 		Error:             r.err,

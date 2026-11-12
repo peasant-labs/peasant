@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"sort"
 	"sync"
 	"time"
@@ -79,27 +78,28 @@ const defaultKickstartLockWait = 10 * time.Second
 // progress ticks. A phase change and the end of a scan are always pushed.
 const defaultKickstartScanPush = 200 * time.Millisecond
 
-// kickstartError is a refusal with the HTTP status and code it is answered with.
+// kickstartError is a refusal with the contract's code it is answered with. The
+// HTTP status is the code's own (schema.LocalKickstartErrorCode.HTTPStatus), so
+// no refusal states a status beside its code.
 type kickstartError struct {
-	status  int
-	code    string
+	code    schema.LocalKickstartErrorCode
 	message string
 }
 
 func (e *kickstartError) Error() string { return e.message }
 
-func newKickstartError(status int, code, format string, args ...any) *kickstartError {
-	return &kickstartError{status: status, code: code, message: fmt.Sprintf(format, args...)}
+func newKickstartError(code schema.LocalKickstartErrorCode, format string, args ...any) *kickstartError {
+	return &kickstartError{code: code, message: fmt.Sprintf(format, args...)}
 }
 
 func errKickstartNoSession(id string) *kickstartError {
-	return newKickstartError(http.StatusNotFound, "kickstart_session_not_found",
+	return newKickstartError(schema.LocalKickstartErrorSessionNotFound,
 		"No setup session has the id %q in internal/api.kickstartSessions. It was never opened, it was saved, or it expired after %s without a change, and a server restart drops every session. Nothing was changed. Open a session again with POST %s.",
 		id, defaultKickstartIdle, defaults.RouteKickstartSessions)
 }
 
 func errKickstartCommitting(id string) *kickstartError {
-	return newKickstartError(http.StatusBadRequest, "kickstart_session_committing",
+	return newKickstartError(schema.LocalKickstartErrorSessionCommitting,
 		"Setup session %q is being saved, so this request was not applied in internal/api.kickstartSessions. Nothing was changed. Wait for the save to finish, then reload the session.", id)
 }
 
@@ -241,6 +241,7 @@ func newKickstartSessionID() string {
 type kickstartScanRecord struct {
 	state         onboarding.ScanState
 	phase         string
+	notice        string
 	done, total   int
 	err           string
 	locked        int
@@ -509,7 +510,7 @@ func (st *kickstartSessions) open(ctx context.Context, scope onboarding.ModelSco
 		case needsFile:
 			var err error
 			if loaded, err = st.env.loadConfig(ctx); err != nil {
-				return schema.LocalKickstartSession{}, newKickstartError(http.StatusInternalServerError, "kickstart_config_unreadable",
+				return schema.LocalKickstartSession{}, newKickstartError(schema.LocalKickstartErrorConfigUnreadable,
 					"The setup session could not start because the configuration file %s could not be read in internal/api.kickstartSessions.open: %v. No session was opened and the file was not changed. Fix or restore the file, then open the session again.", st.env.configPath, err)
 			}
 		case failure != nil:
@@ -521,7 +522,7 @@ func (st *kickstartSessions) open(ctx context.Context, scope onboarding.ModelSco
 }
 
 func errKickstartScopeInvalid(scope onboarding.ModelScope) *kickstartError {
-	return newKickstartError(http.StatusBadRequest, "kickstart_scope_invalid",
+	return newKickstartError(schema.LocalKickstartErrorScopeInvalid,
 		"The setup scope %q is not full or selection in internal/api.kickstartSessions.open. No session was opened. Send full or selection.", scope)
 }
 
@@ -546,7 +547,7 @@ func (st *kickstartSessions) createLocked(scope onboarding.ModelScope, loaded *c
 	if err := st.rebuildLocked(sess); err != nil {
 		delete(st.byScope, scope)
 		delete(st.byID, sess.id)
-		return nil, newKickstartError(http.StatusInternalServerError, "kickstart_session_unbuildable",
+		return nil, newKickstartError(schema.LocalKickstartErrorSessionUnbuildable,
 			"The setup session could not start because its first draft could not be built in internal/api.kickstartSessions.open: %v. No session was opened. Report this defect.", err)
 	}
 	st.touchLocked(sess)
@@ -814,7 +815,7 @@ func (st *kickstartSessions) patchLocked(sess *kickstartSession, request schema.
 		return schema.LocalKickstartPatchResult{}, nil, nil, errKickstartCommitting(sess.id)
 	}
 	if request.Revision > sess.revision {
-		return schema.LocalKickstartPatchResult{}, nil, nil, newKickstartError(http.StatusBadRequest, "kickstart_revision_ahead",
+		return schema.LocalKickstartPatchResult{}, nil, nil, newKickstartError(schema.LocalKickstartErrorRevisionAhead,
 			"The answer was sent at revision %d, which is ahead of setup session %q at revision %d, in internal/api.kickstartSessions.patch. Nothing was changed. Send the revision of the last view you rendered.", request.Revision, sess.id, sess.revision)
 	}
 	stale := request.Revision < sess.revision
@@ -880,7 +881,7 @@ func (st *kickstartSessions) patchLocked(sess *kickstartSession, request schema.
 	}
 	if err := st.rebuildLocked(sess); err != nil {
 		sess.restore(before)
-		return schema.LocalKickstartPatchResult{}, nil, nil, newKickstartError(http.StatusBadRequest, "kickstart_answer_refused",
+		return schema.LocalKickstartPatchResult{}, nil, nil, newKickstartError(schema.LocalKickstartErrorAnswerRefused,
 			"The answer was refused when the draft was rebuilt in internal/api.kickstartSessions.patch: %v. Nothing was changed. Send an answer the setup model accepts.", err)
 	}
 	if err := st.refuseHiddenAnswerLocked(sess, plan, facts); err != nil {
@@ -917,7 +918,7 @@ func (st *kickstartSessions) refuseHiddenAnswerLocked(sess *kickstartSession, pl
 			continue
 		}
 		if condition, hidden := sess.model.HiddenBecause(field, write); hidden {
-			return newKickstartError(http.StatusBadRequest, "kickstart_field_hidden",
+			return newKickstartError(schema.LocalKickstartErrorFieldHidden,
 				"The answer for a hidden field was refused in internal/api.kickstartSessions.patch: %s is shown only when %s, and the %s setup session does not meet that now. Nothing was changed. Answer a field the setup shows, or send the answer that reveals this one in the same request.",
 				field.Key(), condition, sess.scope)
 		}
@@ -950,13 +951,13 @@ func (st *kickstartSessions) planLocked(sess *kickstartSession, request schema.L
 	}
 	if request.SelectedIDs != nil {
 		if sess.scan.state != onboarding.ScanDone {
-			return plan, newKickstartError(http.StatusBadRequest, "kickstart_scan_not_done",
+			return plan, newKickstartError(schema.LocalKickstartErrorScanNotDone,
 				"The selected sessions were not applied because the discovery scan has not finished (it is %s) in internal/api.kickstartSessions.patch. Nothing was changed. Answer the tree after the scan reports done, or rescan.", sess.scan.state)
 		}
 		answer := onboarding.ApplyTreeAnswer(sess.forest, request.SelectedIDs)
 		value, err := onboarding.SelectionIDsValue(answer.SessionIDs)
 		if err != nil {
-			return plan, newKickstartError(http.StatusInternalServerError, "kickstart_answer_unencodable", "%v in internal/api.kickstartSessions.patch. Nothing was changed. Report this defect.", err)
+			return plan, newKickstartError(schema.LocalKickstartErrorAnswerUnencodable, "%v in internal/api.kickstartSessions.patch. Nothing was changed. Report this defect.", err)
 		}
 		plan.answers[onboarding.FieldSelection] = value
 	}
@@ -987,12 +988,12 @@ func (st *kickstartSessions) planLocked(sess *kickstartSession, request schema.L
 func (st *kickstartSessions) answerableFieldLocked(sess *kickstartSession, raw string) (onboarding.Field, error) {
 	key, err := onboarding.NewFieldKey(raw)
 	if err != nil {
-		return nil, newKickstartError(http.StatusBadRequest, "kickstart_field_unknown",
+		return nil, newKickstartError(schema.LocalKickstartErrorFieldUnknown,
 			"The field %q is not a setup field in internal/api.kickstartSessions.patch, so the request was not applied. Nothing was changed. %v", raw, err)
 	}
 	field, ok := sess.model.Field(key)
 	if !ok {
-		return nil, newKickstartError(http.StatusBadRequest, "kickstart_field_out_of_scope",
+		return nil, newKickstartError(schema.LocalKickstartErrorFieldOutOfScope,
 			"The field %q is not part of the %s setup session in internal/api.kickstartSessions.patch, so the request was not applied. Nothing was changed. Answer only a field this session's stops carry.", raw, sess.scope)
 	}
 	return field, nil
@@ -1002,12 +1003,12 @@ func (st *kickstartSessions) answerableFieldLocked(sess *kickstartSession, raw s
 // the field reads back, so a string "90" and the number 90 are one answer.
 func (st *kickstartSessions) canonicalAnswerLocked(sess *kickstartSession, field onboarding.Field, raw schema.LocalSettingValue, facts kickstartFacts) (schema.LocalSettingValue, error) {
 	refuse := func(why string) error {
-		return newKickstartError(http.StatusBadRequest, "kickstart_answer_refused",
+		return newKickstartError(schema.LocalKickstartErrorAnswerRefused,
 			"The answer for %s was refused in internal/api.kickstartSessions.patch: %s. Nothing was changed. Send a value this field accepts.", field.Key(), why)
 	}
 	switch field.Kind() {
 	case onboarding.FieldKindTree:
-		return nil, newKickstartError(http.StatusBadRequest, "kickstart_tree_answer_shape",
+		return nil, newKickstartError(schema.LocalKickstartErrorTreeAnswerShape,
 			"The answer for %s was refused in internal/api.kickstartSessions.patch: the selection tree is answered with selectedIds, the session ids it selects, and never with a value. Nothing was changed. Send selectedIds.", field.Key())
 	case onboarding.FieldKindNotice:
 		return nil, refuse("a notice has no answer")
@@ -1025,7 +1026,7 @@ func (st *kickstartSessions) canonicalAnswerLocked(sess *kickstartSession, field
 	default:
 		scratch, _, err := sess.freshWorking(st.env.configPath)
 		if err != nil {
-			return nil, newKickstartError(http.StatusInternalServerError, "kickstart_session_unbuildable", "%v in internal/api.kickstartSessions.patch. Nothing was changed. Report this defect.", err)
+			return nil, newKickstartError(schema.LocalKickstartErrorSessionUnbuildable, "%v in internal/api.kickstartSessions.patch. Nothing was changed. Report this defect.", err)
 		}
 		if err := field.Write(scratch, sess.writeContext(scratch, nil, facts), raw); err != nil {
 			return nil, refuse(err.Error())
@@ -1040,7 +1041,7 @@ func (st *kickstartSessions) canonicalAnswerLocked(sess *kickstartSession, field
 
 func (st *kickstartSessions) connectPlanLocked(sess *kickstartSession, answer schema.LocalKickstartConnectAnswer, facts kickstartFacts) (onboarding.ConnectAnswer, error) {
 	if len(sess.model.ConnectOffers()) == 0 {
-		return onboarding.ConnectUnanswered, newKickstartError(http.StatusBadRequest, "kickstart_connect_out_of_scope",
+		return onboarding.ConnectUnanswered, newKickstartError(schema.LocalKickstartErrorConnectOutOfScope,
 			"The connect answer was refused because the %s setup session has no connect offer in internal/api.kickstartSessions.patch. Nothing was changed. Answer the connect offer only in the full session.", sess.scope)
 	}
 	switch answer {
@@ -1048,12 +1049,12 @@ func (st *kickstartSessions) connectPlanLocked(sess *kickstartSession, answer sc
 		return onboarding.ConnectSkipped, nil
 	case schema.LocalKickstartConnectAccept:
 		if !facts.villageConnected {
-			return onboarding.ConnectUnanswered, newKickstartError(http.StatusBadRequest, "kickstart_connect_not_connected",
+			return onboarding.ConnectUnanswered, newKickstartError(schema.LocalKickstartErrorConnectNotConnected,
 				"The connect offer cannot be accepted because this computer is not connected to peasant online yet, in internal/api.kickstartSessions.patch. Nothing was changed. Sign in with POST /api/v1/sync/login, wait until GET /api/v1/sync/auth reports authenticated, then accept.")
 		}
 		return onboarding.ConnectConnected, nil
 	default:
-		return onboarding.ConnectUnanswered, newKickstartError(http.StatusBadRequest, "kickstart_connect_unknown",
+		return onboarding.ConnectUnanswered, newKickstartError(schema.LocalKickstartErrorConnectUnknown,
 			"The connect answer %q is not accept or skip in internal/api.kickstartSessions.patch. Nothing was changed. Send accept or skip.", answer)
 	}
 }
@@ -1217,7 +1218,7 @@ func (st *kickstartSessions) beginCommit(id string) (kickstartDraft, error) {
 		return kickstartDraft{}, err
 	}
 	if sess.committing {
-		return kickstartDraft{}, newKickstartError(http.StatusBadRequest, "kickstart_session_committing",
+		return kickstartDraft{}, newKickstartError(schema.LocalKickstartErrorSessionCommitting,
 			"Setup session %q is already being saved, so a second save was refused in internal/api.kickstartSessions.beginCommit. Nothing was changed. Wait for the first save to finish.", id)
 	}
 	_, draft, err := sess.freshWorking(st.env.configPath)
@@ -1228,7 +1229,7 @@ func (st *kickstartSessions) beginCommit(id string) (kickstartDraft, error) {
 	applied := draft.Working()
 	facts := st.env.village()
 	if err := sess.model.ApplyAnswers(applied, configAnswers, sess.writeContext(applied, configAnswers, facts)); err != nil {
-		return kickstartDraft{}, newKickstartError(http.StatusInternalServerError, "kickstart_session_unbuildable",
+		return kickstartDraft{}, newKickstartError(schema.LocalKickstartErrorSessionUnbuildable,
 			"The save could not read setup session %q because its answers no longer apply in internal/api.kickstartSessions.beginCommit: %v. Nothing was changed. Report this defect.", id, err)
 	}
 	sess.committing = true

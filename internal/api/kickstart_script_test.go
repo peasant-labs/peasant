@@ -53,6 +53,13 @@ type kickstartListingSets struct {
 type kickstartScript struct {
 	RequiredNames []string        `yaml:"requiredNames"`
 	Cases         []kickstartCase `yaml:"cases"`
+
+	// The three below belong to the error fixture (kickstart_errors_test.go).
+	// Codes places every error code of the contract; CommitFailures and Writer
+	// are the tables a code may be placed in.
+	Codes          map[string]kickstartCodeSource `yaml:"codes"`
+	CommitFailures []kickstartCommitFailure       `yaml:"commitFailures"`
+	Writer         []kickstartWriterRow           `yaml:"writer"`
 }
 
 type kickstartCase struct {
@@ -85,6 +92,15 @@ type kickstartSpec struct {
 	Recordings []string `yaml:"recordings"`
 	// HoldIngest holds each import until a releaseIngest step.
 	HoldIngest bool `yaml:"holdIngest"`
+	// Unreadable names harnesses the scan could not read, each with the reason
+	// discovery gives.
+	Unreadable map[string]string `yaml:"unreadable"`
+	// Unconfigured starts the server without a configuration file path, as a
+	// server started with no configuration is.
+	Unconfigured bool `yaml:"unconfigured"`
+	// LockWait is how long a save waits for the configuration lock before it
+	// says another change holds it. Empty keeps the default.
+	LockWait string `yaml:"lockWait"`
 	// NextSteps replaces the finish menu a save answers with, to reach a menu the
 	// contract refuses.
 	NextSteps []string `yaml:"nextSteps"`
@@ -132,6 +148,14 @@ type kickstartStep struct {
 	Idle string `yaml:"idle"`
 	// SetStoredError changes the local-store failure the next scan meets.
 	SetStoredError *string `yaml:"setStoredError"`
+	// Host sends the request with this Host header.
+	Host string `yaml:"host"`
+	// HoldConfigLock takes the configuration file's lock the way another writer
+	// does, and keeps it until the case ends.
+	HoldConfigLock bool `yaml:"holdConfigLock"`
+	// BlockConfigDir replaces the directory the configuration file lives in with
+	// a regular file, so the file can be neither found nor created.
+	BlockConfigDir bool `yaml:"blockConfigDir"`
 	// Commit holds a session in the state a save puts it in, or frees it. It is
 	// the one seam in the script: a save under way cannot be held open through
 	// the route, and a case that needs the state itself needs it held.
@@ -286,6 +310,8 @@ type kickstartWorld struct {
 	clients map[string]*kickstartWSClient
 
 	gate        chan struct{}
+	unreadable  map[string]string
+	lockWait    time.Duration
 	scanPush    time.Duration
 	storedError atomic.Pointer[string]
 	configPath  string
@@ -321,6 +347,14 @@ func newKickstartWorld(t *testing.T, c kickstartCase, sets kickstartListingSets)
 		}
 		w.scanPush = pushEvery
 	}
+	w.unreadable = c.World.Unreadable
+	if c.World.LockWait != "" {
+		wait, err := time.ParseDuration(c.World.LockWait)
+		if err != nil {
+			t.Fatalf("lockWait %q: %v", c.World.LockWait, err)
+		}
+		w.lockWait = wait
+	}
 	w.connected.Store(c.World.Village == "connected")
 	w.setListings(c.World.Listings)
 	stored := c.World.StoredError
@@ -346,7 +380,11 @@ func newKickstartWorld(t *testing.T, c kickstartCase, sets kickstartListingSets)
 		}
 	}
 	hub := NewHub(&mockDataProvider{})
-	server := NewServer(homes.config(ServerConfig{Hub: hub, ConfigPath: configPath, Config: w.saving.serverConfig()}))
+	servedPath := configPath
+	if c.World.Unconfigured {
+		servedPath = ""
+	}
+	server := NewServer(homes.config(ServerConfig{Hub: hub, ConfigPath: servedPath, Config: w.saving.serverConfig()}))
 	server.kickstartTune = w.tune
 	server.syncTune = w.saving.tuneSync
 	ctx, cancel := context.WithCancel(context.Background())
@@ -389,6 +427,9 @@ func (w *kickstartWorld) tune(env *kickstartEnv) {
 		return kickstartFacts{}
 	}
 	env.scan = w.scan
+	if w.lockWait > 0 {
+		env.lockWait = w.lockWait
+	}
 	env.writeRetention = w.saving.writeRetention(w.configPath)
 	w.saving.tuneEnv(env)
 	env.stored = func(context.Context) ([]store.IngestedSessionRow, error) {
@@ -448,6 +489,9 @@ func (w *kickstartWorld) scan(ctx context.Context, _ *config.Config, _ ingest.Kn
 		progress.SetProgress(index+1, len(listings))
 	}
 	inventory := discovery.ProviderInventory{defaults.HarnessClaudeCode: {SessionCount: len(listings), Enabled: true}}
+	for harness, detail := range w.unreadable {
+		inventory[defaults.Harness(harness)] = discovery.ProviderDiscovery{Enabled: true, State: discovery.DiscoveryFailed, Detail: detail}
+	}
 	relation := discovery.SubagentRelation{}
 	for _, listing := range listings {
 		relation[listing.SessionID] = listing.SubagentIDs
@@ -515,6 +559,10 @@ func (w *kickstartWorld) run(index int, step kickstartStep) {
 		w.commit(index, *step.Commit)
 	case step.ConfigFile != "":
 		w.configFile(index, step.ConfigFile)
+	case step.HoldConfigLock:
+		w.holdConfigLock(index)
+	case step.BlockConfigDir:
+		w.blockConfigDir(index)
 	case step.ReleaseIngest:
 		w.releaseIngest()
 	case step.Ingest != nil:
@@ -583,6 +631,9 @@ func (w *kickstartWorld) call(index int, step kickstartStep) {
 	if body != nil {
 		request.Header.Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 	}
+	if step.Host != "" {
+		request.Host = step.Host
+	}
 	if method != http.MethodGet {
 		if step.Foreign {
 			request.Header.Set(defaults.HeaderOrigin, "http://evil.example")
@@ -602,6 +653,13 @@ func (w *kickstartWorld) call(index int, step kickstartStep) {
 	}
 	if response.StatusCode != want {
 		w.fail(index, "%s %s: status %d, want %d; body: %s", method, path, response.StatusCode, want, raw)
+	}
+	// Every answer a kickstart route sends is held to the contract's record of
+	// what that route may answer.
+	if contract, _ := loadKickstartContract(w.t); contract != nil {
+		if fault := kickstartAnswerFault(contract, method, path, response.StatusCode, raw); fault != "" {
+			w.fail(index, "%s %s: %s", method, path, fault)
+		}
 	}
 	var decoded any
 	if err := json.Unmarshal(raw, &decoded); err != nil {
@@ -1031,5 +1089,35 @@ func (w *kickstartWorld) configFile(index int, want string) {
 		}
 	default:
 		w.fail(index, "configFile %q is not unchanged or absent", want)
+	}
+}
+
+// holdConfigLock takes the configuration file's lock, as another writer of the
+// file does, and keeps it until the case ends.
+func (w *kickstartWorld) holdConfigLock(index int) {
+	w.t.Helper()
+	if err := os.MkdirAll(filepath.Dir(w.configPath), 0o700); err != nil {
+		w.fail(index, "create the configuration directory: %v", err)
+	}
+	held, err := config.OpenConfigFile(w.configPath, time.Now().Add(5*time.Second))
+	if err != nil {
+		w.fail(index, "take the configuration lock: %v", err)
+	}
+	w.t.Cleanup(func() { _ = held.Close() })
+}
+
+// blockConfigDir replaces the directory the configuration file lives in with a
+// regular file, so that file can be neither found nor created.
+func (w *kickstartWorld) blockConfigDir(index int) {
+	w.t.Helper()
+	dir := filepath.Dir(w.configPath)
+	if err := os.RemoveAll(dir); err != nil {
+		w.fail(index, "remove the configuration directory: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(dir), 0o700); err != nil {
+		w.fail(index, "create the directory above it: %v", err)
+	}
+	if err := os.WriteFile(dir, []byte("not a directory"), 0o600); err != nil {
+		w.fail(index, "write the file that stands where the directory was: %v", err)
 	}
 }

@@ -125,11 +125,6 @@ type settingsHandler struct {
 // config.yaml before it is refused. A request should not hang for minutes.
 const defaultSettingsLockWait = 5 * time.Second
 
-// settingsConfigBusyStatus answers an update that could not take the
-// configuration lock. The contract declares 500 for an update that cannot write
-// the file, and a busy lock is that.
-const settingsConfigBusyStatus = http.StatusInternalServerError
-
 func (h *settingsHandler) lockWaitOrDefault() time.Duration {
 	if h.lockWait > 0 {
 		return h.lockWait
@@ -247,11 +242,15 @@ func (h *settingsHandler) handleUpdateSetting(w http.ResponseWriter, r *http.Req
 	file, err := config.OpenConfigFile(h.path, time.Now().Add(h.lockWaitOrDefault()))
 	if err != nil {
 		slog.Warn("settings: take the configuration lock before an update", "path", h.path, "key", request.Key, "error", err)
+		// The contract declares 503 for an update another writer holds up, and 500
+		// for one that cannot write the file at all.
+		status := http.StatusInternalServerError
 		reason := fmt.Sprintf("%s could not be saved: %v; no file was changed; fix the directory's ownership or permissions, then retry.", request.Key, err)
 		if filelock.IsDeadline(err) {
+			status = http.StatusServiceUnavailable
 			reason = fmt.Sprintf("%s could not be saved because another change holds the configuration file %s: %v. Nothing was changed. Wait for it to finish, then retry.", request.Key, h.path, err)
 		}
-		writeSettingRefusal(w, settingsConfigBusyStatus, request.Key, reason)
+		writeSettingRefusal(w, status, request.Key, reason)
 		return
 	}
 	defer func() {

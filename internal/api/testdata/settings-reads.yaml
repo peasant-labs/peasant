@@ -25,6 +25,7 @@ requiredNames:
   - a push method no push applies fails the read with its remedy
   - an invalid file fails the read
   - a start-only setting reports the running value after a file edit
+  - a server without a configuration file refuses the read
 cases:
   - name: a millisecond write budget reads in its configured units
     file: |
@@ -164,3 +165,8 @@ cases:
     status: 500
     code: settings_unreadable
     errorContains: 'unknown push.method \"sideways\"'
+  - name: a server without a configuration file refuses the read
+    setup: unconfigured
+    status: 503
+    code: settings_unavailable
+    errorContains: 'started without a configuration file'
