@@ -1,0 +1,21 @@
+# The completion actions are declared twice: onboarding.NextStep, which both
+# surfaces use, and the contract's schema.LocalKickstartNextStep, which the web
+# sends. The two sets are held equal both ways, in order, and a token outside them
+# is refused by both. Each surface offers part of the set: the terminal words only
+# the four it lists, and the web offers all of the contract's menu. webOnly names
+# the steps the terminal has no copy for: the contract's menu is the terminal's
+# four followed by these, so a step added to the contract fails here until someone
+# decides where it is offered. unknown are tokens neither set holds.
+# requiredNames is the deletion guard: every name below must still be present.
+requiredNames:
+  - terminal-menu-is-the-four-in-order
+  - web-menu-is-the-terminal-four-then-the-web-only-steps
+webOnly: [auto-publish-settings]
+unknown: [village-install, "", Config]
+cases:
+  - name: terminal-menu-is-the-four-in-order
+    menu: terminal
+    want: [config, web-start, village-login, village-push]
+  - name: web-menu-is-the-terminal-four-then-the-web-only-steps
+    menu: web
+    want: [config, web-start, village-login, village-push, auto-publish-settings]

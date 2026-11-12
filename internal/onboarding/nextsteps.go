@@ -7,6 +7,12 @@ import (
 
 // NextStep is one display-only action offered after setup. It carries no
 // callback and installs nothing.
+//
+// The web sends its finish menu over the wire as schema.LocalKickstartNextStep,
+// so this set and the contract's are two declarations of the same tokens.
+// testdata/next_steps.yaml and its test hold them equal both ways, and hold each
+// surface's menu to the contract's: the web offers the contract's whole menu and
+// the terminal the four it has copy for.
 type NextStep string
 
 const (
