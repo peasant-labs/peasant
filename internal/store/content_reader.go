@@ -202,13 +202,18 @@ func buildListContentCaptureIncompleteSessionsQuery(after ingest.SessionID, limi
 	// Ineligible rows are excluded by the QUERY, not after it: a row this build
 	// cannot harness-parse must not consume a LIMIT slot, or a page made only of
 	// such rows would come back empty and read as the end of the table, ending
-	// the recovery walk before the sessions behind it are ever visited.
-	placeholders := make([]string, 0, len(ingest.AllHarnesses))
-	args := make([]any, 0, len(ingest.AllHarnesses)+2)
+	// the recovery walk before the sessions behind it are ever visited. The
+	// eligible harnesses are the ones this build can harvest: content is
+	// recovered by parsing the session again with this build's code for its
+	// harness, so a stored row of a harness this build cannot harvest can
+	// never be recovered here.
+	harvestable := ingest.HarvestableHarnesses()
+	placeholders := make([]string, 0, len(harvestable))
+	args := make([]any, 0, len(harvestable)+2)
 	args = append(args, string(after))
-	for _, known := range ingest.AllHarnesses {
+	for _, harness := range harvestable {
 		placeholders = append(placeholders, "?")
-		args = append(args, string(known))
+		args = append(args, string(harness))
 	}
 	predicate, narrowedArgs := narrowedSessionPredicate("s", scope)
 	args = append(args, narrowedArgs...)
@@ -241,11 +246,11 @@ func (s *Store) ListContentCaptureIncompleteSessionsAfter(ctx context.Context, a
 		}
 		var harness schema.Harness
 		if e := harness.UnmarshalText([]byte(st.ColumnText(1))); e != nil || !harness.IsKnown() {
-			// The WHERE clause binds ingest.AllHarnesses, so every selected row
-			// is parseable. That list is a SUBSET of what this parser accepts,
-			// not the same set, and it must not be widened here: a harness this
-			// build recognises but does not bind is one it does not recover
-			// content for. Reaching this branch means a BOUND harness cannot be
+			// The WHERE clause binds ingest.HarvestableHarnesses(), so every
+			// selected row is parseable. That list is a SUBSET of what this
+			// parser accepts, not the same set, and it must not be widened
+			// here: a harness this build recognises but does not bind is one it
+			// does not recover content for. Reaching this branch means a BOUND harness cannot be
 			// parsed at all, which no stored data can express and which
 			// silently skipping would hide.
 			return fmt.Errorf("store content recovery targets: session %s passed the bound known-harness filter but its harness %q cannot be parsed; the bound harness list and the harness parser disagree inside this build, so no target list can be trusted; upgrade Peasant to a build whose harness list and parser agree", id, st.ColumnText(1))

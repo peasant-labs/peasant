@@ -1,0 +1,5 @@
+requiredNames:
+  - recovery-walk-lists-a-harvestable-value
+  - recovery-walk-excludes-the-archived-value
+  - recovery-walk-excludes-a-layout-only-value
+  - recovery-page-is-not-consumed-by-excluded-rows
