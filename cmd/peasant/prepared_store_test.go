@@ -8,14 +8,14 @@ import (
 )
 
 // openPreparedStore opens the store at path the way a test seeds or inspects
-// the database a command uses, without replaying the migration-state check.
+// the database a command uses, at the head schema.
 //
 // A missing path is first prepared as a copy of the pre-migrated golden
 // database (parent directories included), so the command later finds zero
 // pending migrations. An existing path — one a command already created and
 // migrated through the production open, or one a previous seed prepared — is
-// reopened as is. Either way the file is already at head, so the open skips
-// migrations; the caller's options (index formats, pool size, generation
+// reopened as is. Either way the file is already at head, so the open finds
+// it current; the caller's options (index formats, pool size, generation
 // artifacts) are passed through unchanged, and the process-wide pool override
 // from TestMain stays in force. See storetest.OpenPrepared for the shared
 // implementation.
