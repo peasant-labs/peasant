@@ -19,6 +19,11 @@ import (
 // is killed changes nothing and the next upgrade runs it again. ran reports
 // whether the marker was found.
 //
+// Migration 77's own comment (schema_v77.go) says Open runs this recount.
+// That describes 0.17.0, and the file is frozen because the migration
+// shipped: Open now refuses a store that owes the recount, and only Upgrade
+// runs it.
+//
 // It walks the sessions with foldStoredSessions, the walk the step 74 fill
 // also uses. A session with no stored entries has nothing to fold: it keeps
 // both stored values and is reported. A session whose entries cannot be read
@@ -57,6 +62,8 @@ func recountTurnCountsOnConn(ctx context.Context, conn *sqlite.Conn, progress fu
 		}
 		if hook != nil {
 			if err := hook(done, session.id); err != nil {
+				// "No count was changed" holds because the caller's
+				// deferred end rolls back the transaction on this error.
 				return fmt.Errorf("store: the turn count recount stopped after %d of %d sessions at session %s: %w; no count was changed and the recount stays owed; run `peasant migrate --schema-only` to run it again", done, total, session.id, err)
 			}
 		}

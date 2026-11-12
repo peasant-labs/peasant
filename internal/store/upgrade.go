@@ -66,7 +66,10 @@ var upgradeRecountRuns = map[string]upgradeRecountRun{
 
 // owedRecountsOnConn lists the recounts the store owes: the marker rows in
 // pending_recounts that this build knows, in the order their migrations ran.
-// A store below the migration that creates the table owes none.
+// A store below the migration that creates the table owes none. A marker this
+// build does not know can only come from a newer build, and Open's schema
+// version gate already refuses a store a newer build migrated, so skipping
+// unknown names here never hides an owed recount.
 func owedRecountsOnConn(conn *sqlite.Conn) ([]string, error) {
 	if !tableExistsOnConn(conn, "pending_recounts") {
 		return nil, nil
