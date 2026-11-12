@@ -18,6 +18,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
@@ -178,6 +179,11 @@ func setupSearchFixture(t *testing.T, family searchFixtureFamily, c searchFixtur
 	t.Helper()
 	if c.Setup.Store != searchNone {
 		db := openSeedStore(t, dir, c.Name)
+		// V76 drops the retired index at open, so rebuild the
+		// pre-consolidation dual-index state the transition fixtures model
+		// before any writes: mirror rows land in the retired index again
+		// and the merged reads keep their exact pre-V76 distribution.
+		storetest.SeedLegacySearchIndex(t, db)
 		if c.Setup.Store != searchEmpty {
 			seeds := c.Seeds
 			if seeds == nil {

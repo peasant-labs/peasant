@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 )
 
 // TestTUINamesAnUnreadableDatabase guards #686: with a corrupt analytics
@@ -16,7 +18,11 @@ import (
 // provider not initialized" plus the usage block. It must name the database
 // and the open failure, without usage.
 func TestTUINamesAnUnreadableDatabase(t *testing.T) {
-	t.Parallel()
+	// No t.Parallel: the test stubs the process-global TTY probe, which is
+	// only safe while no other test runs concurrently.
+	previous := tuiTerminalAvailable
+	tuiTerminalAvailable = func() bool { return true }
+	t.Cleanup(func() { tuiTerminalAvailable = previous })
 	dir := t.TempDir()
 	dbPath := string(defaults.ResolveDBFilePathWith(dir))
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
@@ -43,5 +49,42 @@ func TestTUINamesAnUnreadableDatabase(t *testing.T) {
 	}
 	if strings.Contains(out, "Usage:") {
 		t.Errorf("tui printed usage for a runtime failure:\n%s", out)
+	}
+}
+
+// TestTUISkipsResidueRebuildWithoutTerminal proves a non-interactive `peasant
+// tui` fails on the terminal check before opening the store: on an affected
+// store it must not migrate (and rebuild) invisibly on the way to the same
+// refusal. The database file is byte-identical and still at version 75
+// afterwards.
+func TestTUISkipsResidueRebuildWithoutTerminal(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := string(defaults.ResolveDBFilePathWith(dir))
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	union := []storetest.ResidueTerm{{ID: 1, Text: "kangaroo ghost"}, {ID: 2, Text: "keep me"}}
+	legacy := []storetest.ResidueTerm{{ID: 2, Text: "keep me"}}
+	storetest.SeedResidueDB(t, dbPath, 75, union, legacy)
+	before, err := os.ReadFile(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := executeWithDataDir(t, BuildTUICommand(), dir, nil)
+	if err == nil {
+		t.Fatalf("non-interactive tui on an affected store succeeded:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "interactive terminal") {
+		t.Errorf("non-interactive tui must fail on the terminal check, got: %v", err)
+	}
+	after, err := os.ReadFile(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Error("skipped tui run modified the database file")
+	}
+	if version, err := store.SchemaVersionAt(dbPath); err != nil || version != 75 {
+		t.Errorf("store version = %d, err = %v; want the un-migrated 75", version, err)
 	}
 }

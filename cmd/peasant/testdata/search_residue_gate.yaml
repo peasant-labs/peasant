@@ -1,0 +1,31 @@
+# Search-residue gate cases: one per terminal/non-terminal entry point shape.
+# isTTY simulates the terminal the command runs under (stubbed in tests;
+# production reads stdin). db selects the fixture store: affected is a
+# version-75 store with union residue, clean is version-75 without residue,
+# current is already migrated, missing is a fresh install with no file.
+# Non-interactive runs on an affected store refuse; everything else opens.
+cases:
+  - name: terminal-affected-proceeds
+    isTTY: true
+    db: affected
+    wantRefuse: false
+  - name: terminal-clean-proceeds
+    isTTY: true
+    db: clean
+    wantRefuse: false
+  - name: nonterminal-affected-refuses
+    isTTY: false
+    db: affected
+    wantRefuse: true
+  - name: nonterminal-clean-proceeds
+    isTTY: false
+    db: clean
+    wantRefuse: false
+  - name: nonterminal-current-proceeds
+    isTTY: false
+    db: current
+    wantRefuse: false
+  - name: nonterminal-missing-proceeds
+    isTTY: false
+    db: missing
+    wantRefuse: false
