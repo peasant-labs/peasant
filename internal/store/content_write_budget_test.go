@@ -504,10 +504,8 @@ func openWriteBudgetHarmonized(t *testing.T, dbPath string, options ...store.Ope
 		store.WithIndexFormats(store.V2IndexFormat()),
 		store.WithGenerationArtifacts(artifacts, locker),
 	}
-	// WithSkipMigrations is inline (not only in base) so the open-time
-	// rule can see it: the file opens an already-migrated golden copy, so
-	// skipping the migration replay changes nothing. Go spreads a single
-	// slice only, hence the nested append.
+	// The file opens a golden copy built at the current schema, so Open
+	// does not migrate it. Go spreads a single slice only, hence the append.
 	db, err := store.Open(dbPath, append(base, options...)...)
 	if err != nil {
 		t.Fatal(err)

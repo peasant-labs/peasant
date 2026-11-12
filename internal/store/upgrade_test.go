@@ -682,8 +682,8 @@ func runUpgradePrecheckRetiredMissingCase(t *testing.T, c storeUpgradeCase) {
 		t.Fatal(err)
 	}
 	plan := mustPlan(t, path)
-	if len(plan.Steps) != 1 || !plan.Steps[0].Cost.Long() {
-		t.Fatalf("plan = %+v, want the one repair step classified long: the repair will rebuild", plan.Steps)
+	if repair, ok := planStepFor(plan, 76); !ok || !repair.Cost.Long() {
+		t.Fatalf("plan = %+v, want the repair step classified long: the repair will rebuild", plan.Steps)
 	}
 	var notices bytes.Buffer
 	if _, err := Upgrade(t.Context(), path, UpgradeOptions{Notices: &notices}); err != nil {
@@ -746,7 +746,7 @@ func runUpgradeNoticeOptionCase(t *testing.T, _ storeUpgradeCase) {
 		t.Fatal(err)
 	}
 	plan := mustPlan(t, path)
-	if len(plan.Steps) != 1 || plan.Steps[0].Cost != UpgradeCostScalesWithText || plan.Steps[0].Title != searchRepairLongTitle {
+	if repair, ok := planStepFor(plan, 76); !ok || repair.Cost != UpgradeCostScalesWithText || repair.Title != searchRepairLongTitle {
 		t.Fatalf("plan = %+v, want the repair as one long step over the stored text", plan.Steps)
 	}
 	var notices bytes.Buffer
@@ -958,4 +958,15 @@ func runUpgradeDiskNeedLargestCase(t *testing.T, c storeUpgradeCase) {
 	if plan.RequiredFreeBytes != want {
 		t.Errorf("the plan asks for %d bytes, want %d: the database size times the largest factor among its steps (%.4f), not their sum (%.4f)", plan.RequiredFreeBytes, want, largest, sum)
 	}
+}
+
+// planStepFor returns the planned step that produces version, so a case about
+// one step holds when later migrations join the plan.
+func planStepFor(plan UpgradePlan, version int) (UpgradeStep, bool) {
+	for _, step := range plan.Steps {
+		if step.Version == version {
+			return step, true
+		}
+	}
+	return UpgradeStep{}, false
 }

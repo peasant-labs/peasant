@@ -244,7 +244,7 @@ func runPairInstallCase(t *testing.T, document pairInstallDocument, c pairInstal
 	h.seed(fs, installed)
 
 	dbPath := storetest.CopyGoldenDB(t)
-	db, err := store.Open(dbPath, store.WithSkipMigrations(), store.WithWALAutocheckpointDisabled())
+	db, err := store.Open(dbPath, store.WithWALAutocheckpointDisabled())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,7 +409,7 @@ func runMetadataOnlyHarvestCase(t *testing.T) {
 		ingest.HarnessClaudeCode: makeStubAdapter([]ingest.DiscoveredSession{session}, map[ingest.SessionID]*ingest.UnifiedMetadata{session.SessionID: meta}),
 	}
 	dbPath := storetest.CopyGoldenDB(t)
-	db, err := store.Open(dbPath, store.WithSkipMigrations(), store.WithWALAutocheckpointDisabled())
+	db, err := store.Open(dbPath, store.WithWALAutocheckpointDisabled())
 	if err != nil {
 		t.Fatal(err)
 	}

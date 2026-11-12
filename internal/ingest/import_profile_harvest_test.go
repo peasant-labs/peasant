@@ -82,7 +82,7 @@ type importProfileBench struct {
 
 func newImportProfileBench(t *testing.T, fixtures importProfileFixtures) *importProfileBench {
 	t.Helper()
-	db, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
+	db, err := store.Open(storetest.CopyGoldenDB(t))
 	if err != nil {
 		t.Fatal(err)
 	}
