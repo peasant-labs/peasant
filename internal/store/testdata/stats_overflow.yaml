@@ -27,6 +27,26 @@ cases:
     overflow: '{"futureA":null,"futureZ":{"count":7}}'
     keys: [futureA, futureZ]
     expect: converted
+  # conversationTurnCount is a modeled stat: a retained document that carries
+  # it converts with no overflow entry and no stats-overflow diagnostic.
+  - name: conversation-turn-count-is-a-known-stat
+    statsJson: '{"turnCount":4,"inputSubmissionCount":1,"conversationTurnCount":2}'
+    want:
+      turnCount: 4
+      inputSubmissionCount: 1
+    expect: converted
+  # The two count columns come only from the index-time fold and the upgrade
+  # recount. The retained document's numbers (4 and 2) are in its producer's
+  # unit and must not replace the recounted 9 and 7.
+  - name: conversion-keeps-recounted-turn-counts
+    statsJson: '{"turnCount":4,"inputSubmissionCount":1,"conversationTurnCount":2}'
+    recountedTurnCounts: {turnCount: 9, conversationTurnCount: 7}
+    # want is the row the V62 backfill leaves, before the recounted values are
+    # written; after the conversion the row holds the recounted 9.
+    want:
+      turnCount: 4
+      inputSubmissionCount: 1
+    expect: converted
   - name: absent-stays-null-through-conversion
     statsJson: '{"inputSubmissionCount":1,"tokensIn":12,"thoughtTokens":null}'
     want:

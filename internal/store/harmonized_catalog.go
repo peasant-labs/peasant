@@ -381,13 +381,16 @@ func serializeMetadata(gen GenerationRecord, children GenerationChildren, stats 
 // NULL-to-wire mapping) and as absent for the optional pointers.
 func capturedStatsToSessionStats(stats CapturedStats) schema.SessionStats {
 	out := schema.SessionStats{}
-	// The rebuilt metadata document is reused as prior evidence. Its turnCount
-	// is the stored folded turn count, and its conversationTurnCount is absent:
-	// the adapter's own raw value stays in seed_json. Serving surfaces read
-	// capturedStatsToWire, which reports both counts.
+	// The rebuilt metadata document is reused as prior evidence and, during
+	// migration, compared with the retained document it was built from. It
+	// carries each turn number exactly as the stats it is given hold it: the
+	// folded turn count, and the conversation turn count only when present, so
+	// a retained document without the count rebuilds without it. The adapter's
+	// own raw value stays in seed_json.
 	if stats.TurnCount != nil {
 		out.TurnCount = *stats.TurnCount
 	}
+	out.ConversationTurnCount = intPtrToInt64(stats.ConversationTurnCount)
 	out.InputSubmissionCount = stats.InputSubmissionCount
 	if stats.ToolCallCount != nil {
 		out.ToolCallCount = *stats.ToolCallCount

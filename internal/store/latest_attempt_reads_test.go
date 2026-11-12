@@ -27,17 +27,18 @@ import (
 // generation's counts cannot pass by coincidence. Only the count fields are
 // replaced: a complete generation must keep its input-submission count.
 var (
-	authorityStats     = countsFor(11, 22, 33, 66000)
-	latestAttemptStats = countsFor(44, 55, 66, 132000)
+	authorityStats     = countsFor(11, 9, 22, 33, 66000)
+	latestAttemptStats = countsFor(44, 41, 55, 66, 132000)
 )
 
 // countsFor builds a producer-stat document with the supplied counts.
-func countsFor(turnCount, toolCallCount, tokensOut int, durationMs int64) schema.SessionStats {
+func countsFor(turnCount int, conversationTurnCount int64, toolCallCount, tokensOut int, durationMs int64) schema.SessionStats {
 	return schema.SessionStats{
-		TurnCount:     turnCount,
-		ToolCallCount: toolCallCount,
-		TokensOut:     tokensOut,
-		DurationMs:    durationMs,
+		TurnCount:             turnCount,
+		ConversationTurnCount: &conversationTurnCount,
+		ToolCallCount:         toolCallCount,
+		TokensOut:             tokensOut,
+		DurationMs:            durationMs,
 	}
 }
 
@@ -45,6 +46,7 @@ func countsFor(turnCount, toolCallCount, tokensOut int, durationMs int64) schema
 // keeping the fields a complete generation must carry.
 func applyCounts(base, counts schema.SessionStats) schema.SessionStats {
 	base.TurnCount = counts.TurnCount
+	base.ConversationTurnCount = counts.ConversationTurnCount
 	base.ToolCallCount = counts.ToolCallCount
 	base.TokensOut = counts.TokensOut
 	base.DurationMs = counts.DurationMs
@@ -137,6 +139,9 @@ func TestLatestAttemptRefusesFullReadsUniformly(t *testing.T) {
 	snapshot, err := s.ReadSessionContentSelected(ctx, string(sid), ingest.SessionReadSelection{LastGood: true})
 	if err != nil {
 		t.Fatalf("ReadSessionContentSelected(LastGood): %v", err)
+	}
+	if int64(snapshot.Detail.ConversationTurnCount) != *authorityStats.ConversationTurnCount {
+		t.Fatalf("last-good conversation turn count = %d, want the authority's %d", snapshot.Detail.ConversationTurnCount, *authorityStats.ConversationTurnCount)
 	}
 	if snapshot.Detail.TurnCount != authorityStats.TurnCount || snapshot.Detail.ToolCalls != authorityStats.ToolCallCount {
 		t.Fatalf("last-good counts = %d/%d, want the authority's %d/%d", snapshot.Detail.TurnCount, snapshot.Detail.ToolCalls, authorityStats.TurnCount, authorityStats.ToolCallCount)
@@ -291,6 +296,9 @@ func TestLatestAttemptAvailableReadBindsLatestAttempt(t *testing.T) {
 	}
 	if first := snapshot.Entries[0]; first.ContentPreview == nil || !strings.Contains(*first.ContentPreview, "preview text") {
 		t.Fatalf("available entry 0 = %+v, want the latest attempt's own content", first.ContentPreview)
+	}
+	if int64(snapshot.Detail.ConversationTurnCount) != *latestAttemptStats.ConversationTurnCount {
+		t.Fatalf("available conversation turn count = %d, want the latest attempt's %d", snapshot.Detail.ConversationTurnCount, *latestAttemptStats.ConversationTurnCount)
 	}
 	if snapshot.Detail.TurnCount != latestAttemptStats.TurnCount || snapshot.Detail.ToolCalls != latestAttemptStats.ToolCallCount || snapshot.Detail.OutputTokens != latestAttemptStats.TokensOut {
 		t.Fatalf("available counts = %d/%d/%d, want the latest attempt's %d/%d/%d",
