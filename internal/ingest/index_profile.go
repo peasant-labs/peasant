@@ -13,7 +13,17 @@ const defaultIndexProfileSlowLimit = 10
 // audit row and its per-session timings in index_log; a caller may also print
 // the snapshot. It observes per batch, per session and per stage, never per
 // entry.
+//
+// The zero value is the always-on profile every import keeps. Set
+// AnnotationResultDetail before the run to also time each annotation result
+// (the classifier run, dedup lookup, insert and supersede of every result);
+// that detail is per result, and entry-level results make it per entry, so
+// only `harvest --profile-index`, which prints it, asks for it.
 type IndexProfiler struct {
+	// AnnotationResultDetail turns on the per-annotation-result breakdown. Set
+	// it before the run starts; the profiler never changes it.
+	AnnotationResultDetail bool
+
 	mu              sync.Mutex
 	batches         []IndexProfileBatch
 	sessions        []IndexProfileSession
@@ -126,8 +136,9 @@ func FoldProfileStages(segments []IndexProfileStage) []IndexProfileStage {
 	return totals
 }
 
-// Observations returns how many times the profiler was called. It grows with
-// batches, sessions and stages, never with entries.
+// Observations returns how many times the profiler was called, plus one for
+// each annotation result folded in with AnnotationResultDetail. Without that
+// detail it grows with batches, sessions and stages, never with entries.
 func (p *IndexProfiler) Observations() int64 {
 	if p == nil {
 		return 0
@@ -458,6 +469,15 @@ func (s *AnnotationProfileStats) RecordAnnotationResult(typeID string, value str
 	s.AnnotationResults[key] = row
 }
 
+// recordedResults is how many RecordAnnotationResult calls built s.
+func (s AnnotationProfileStats) recordedResults() int {
+	recorded := 0
+	for _, row := range s.AnnotationResults {
+		recorded += row.Count()
+	}
+	return recorded
+}
+
 func (s AnnotationProfileStats) SortedAnnotationResults() []AnnotationProfileBreakdown {
 	if len(s.AnnotationResults) == 0 {
 		return nil
@@ -595,7 +615,7 @@ func (p *IndexProfiler) RecordAnnotation(stats AnnotationProfileStats) {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.observations++
+	p.observations += 1 + int64(stats.recordedResults())
 	p.annotate.Add(stats)
 }
 

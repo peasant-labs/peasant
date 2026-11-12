@@ -393,8 +393,9 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 	reindex := mode == harvestIndexOnly
 
 	// The profiler is always on: the pipeline stores its stage totals with the
-	// run's audit row. --profile-index only decides whether it is also printed.
-	indexProfiler := &ingest.IndexProfiler{}
+	// run's audit row. --profile-index decides whether it is also printed, and
+	// only then adds the per-annotation-result breakdown the printout shows.
+	indexProfiler := &ingest.IndexProfiler{AnnotationResultDetail: flags.profileIndex}
 
 	pipelineCfg := ingest.PipelineConfig{
 		Sources:            sources,

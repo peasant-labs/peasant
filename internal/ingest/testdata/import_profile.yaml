@@ -6,10 +6,15 @@ sessions:
   - {name: second, id: "97100000-0000-4000-8000-000000000002", entries: 3}
 entryLine: '{"sessionId":"{{session}}","type":"user","cwd":"/work/project","message":{"role":"user","content":"synthetic entry {{n}}"}}'
 # The structural case imports the same sessions twice, with few and with many
-# entries each. The profiler's observation count must not move.
+# entries each, through the metrics engine and the classifier annotator. Every
+# entry is an assistant reply with resolution evidence, so the entry-level
+# classifier makes one annotation result per entry. With the always-on profile
+# the observation count must not move; with --profile-index's per-result
+# detail it must grow, which proves the corpus reaches the per-entry path.
 structural:
   smallEntries: 4
   largeEntries: 400
+  entryLine: '{"sessionId":"{{session}}","type":"assistant","uuid":"a{{n}}","cwd":"/work/project","message":{"role":"assistant","model":"claude-synthetic","content":[{"type":"text","text":"step {{n}} completed"}]}}'
 cases:
   - name: new-session-writes-a-refresh-row
   - name: each-refreshed-session-has-exactly-one-refresh-row-per-run

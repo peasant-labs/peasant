@@ -886,12 +886,16 @@ type ProfiledSessionClassifier interface {
 	SessionClassifier
 	// AnnotateWithProfile runs Annotate and records implementation-specific timing
 	// and counters into profiler. A nil profiler must behave like Annotate.
+	// Detail that costs work per annotation result is recorded only when
+	// profiler.AnnotationResultDetail is set; the always-on profile must not
+	// pay per entry.
 	AnnotateWithProfile(ctx context.Context, sessionID SessionID, profiler *IndexProfiler) error
 }
 
 // BufferedSessionClassifier is an optional ANNOTATE-stage fast path. It lets the
 // pipeline prepare annotation writes for many sessions in parallel, then flush
-// those prepared writes through larger serial store batches.
+// those prepared writes through larger serial store batches. Both methods
+// follow AnnotateWithProfile's profiler rule.
 type BufferedSessionClassifier interface {
 	SessionClassifier
 	PrepareAnnotations(ctx context.Context, sessionID SessionID, profiler *IndexProfiler) (SessionAnnotationBatch, error)
