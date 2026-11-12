@@ -56,6 +56,8 @@ let offerSeen = null;
 let ingestCounts = null;
 let importedAfterSetup = null;
 const laterImports = {};
+// The selection the setup saved, as the file holds it, kept in the evidence.
+let savedSelection = null;
 
 function watch(page, label) {
   page.on('console', (message) => {
@@ -249,7 +251,7 @@ test.beforeAll(async ({ browser }) => {
 
 test.afterAll(async () => {
   writeFileSync(join(artifacts, `${theme()}-evidence.json`), JSON.stringify({
-    theme: theme(), shots, probes, consoleErrors, failedResponses, walked, offerSeen, ingestCounts, laterImports, importedAfterSetup,
+    theme: theme(), shots, probes, consoleErrors, failedResponses, walked, offerSeen, ingestCounts, laterImports, importedAfterSetup, savedSelection,
     frames: frames.map(({ tab, kind, revision, reason, scan, ingest }) => ({ tab, kind, revision, reason, scan, ingest })),
     requests: requests.filter((entry) => entry.path.startsWith('/api/')).map((entry) => `${entry.tab} ${entry.method} ${entry.path}${entry.scope === undefined ? '' : ` (scope ${entry.scope})`}`),
   }, null, 2));
@@ -535,6 +537,7 @@ test('save-finish-and-ingest-end', async () => {
 
 test('config-holds-only-the-chosen-selection', async () => {
   const config = readConfig();
+  savedSelection = config.selection;
   expect(config.selection.mode).toBe('selected');
   expect(config.selection.autoIngestNewBranches, 'the answer that was given').toBe(false);
   const projects = config.selection.harnesses['claude-code'].projects;
