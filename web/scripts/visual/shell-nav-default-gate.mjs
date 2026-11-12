@@ -25,7 +25,6 @@ import YAML from 'yaml'
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync } from 'node:fs'
 import { directoryNamedBy, ownedServerSandbox } from './lib/owned-server-sandbox.mjs'
 import { startOwnedServer } from './lib/owned-server-start.mjs'
-import { seedConfiguredConfigHome } from '../journey/lib/configured-sandbox.mjs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
 import { SurfaceGate } from './surface-gate.mjs'
@@ -124,14 +123,10 @@ const STILL_PATTERN = new RegExp(`^${escapeRegExp(ANNOUNCE.stillStopped)} \\d{2}
 // the caller names is theirs: it is used as given and kept. Naming only a configuration directory still
 // leaves the data directory in the sandbox. A relative path is taken from the directory the gate was run
 // in. The root is removed when the gate's process exits; a directory the caller named lies outside it.
-const namedConfigDir = directoryNamedBy('PEASANT_OFFLINE_CONFIG_DIR')
 const sandbox = ownedServerSandbox('offline-gate', {
-  configDir: namedConfigDir,
+  configDir: directoryNamedBy('PEASANT_OFFLINE_CONFIG_DIR'),
   dataDir: directoryNamedBy('PEASANT_OFFLINE_DATA_DIR'),
 })
-// The sandbox's own configuration directory is an installed dashboard: with no configuration file every page
-// is sent to setup. A directory the caller names is theirs, and is left as they made it.
-if (!namedConfigDir) seedConfiguredConfigHome(sandbox.configDir)
 mkdirSync(OUT, { recursive: true })
 const serverLog = join(OUT, 'server.log')
 closeSync(openSync(serverLog, 'w')) // one run per log: earlier runs never mix into the one a failure points to
