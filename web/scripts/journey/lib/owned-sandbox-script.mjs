@@ -2,8 +2,9 @@
 /**
  * A visual script reduced to what `ownedServerSandbox` sees of it, for the
  * tests of that helper: it makes its sandbox, writes a store into the data
- * directory as its server would, prints what it made as one JSON line, and ends
- * the way it is told. It never starts a server.
+ * directory as its server would, prints what it made as one JSON line (with the
+ * configuration file the server would read, or null when there is none), and
+ * ends the way it is told. It never starts a server.
  *
  *   node owned-sandbox-script.mjs --name <script> [--config-dir <dir>] [--data-dir <dir>]
  *     --end <exit|uncaught-error|last-line> [--status <status>]
@@ -14,7 +15,7 @@
  * says how the process ends: `exit` calls process.exit with `--status`,
  * `uncaught-error` throws, `last-line` runs off the end of the module.
  */
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { ownedServerSandbox } from '../../visual/lib/owned-server-sandbox.mjs';
@@ -64,12 +65,16 @@ if (values['config-dir'] !== undefined) named.configDir = values['config-dir'];
 if (values['data-dir'] !== undefined) named.dataDir = values['data-dir'];
 
 const sandbox = ownedServerSandbox(values.name, named);
+// The file the binary reads below the configuration directory it is started with.
+const configFile = join(sandbox.configDir, 'peasant', 'config.yaml');
+const config = existsSync(configFile) ? readFileSync(configFile, 'utf8') : null;
 mkdirSync(join(sandbox.dataDir, 'peasant'), { recursive: true });
 writeFileSync(join(sandbox.dataDir, 'peasant', 'peasant.db'), 'x');
 console.log(JSON.stringify({
   root: sandbox.root,
   dataDir: sandbox.dataDir,
   configDir: sandbox.configDir,
+  config,
   home: sandbox.env.HOME,
   existed: existsSync(sandbox.root),
 }));

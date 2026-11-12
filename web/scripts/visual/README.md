@@ -251,6 +251,9 @@ may open `~/.local/share/peasant` or `~/.config/peasant`.
   script that starts the binary uses them and passes BOTH `...sandbox.args` and `env: sandbox.env` to
   `spawn`. Setting only `--config-dir` is the mistake this replaces: the binary then opens the data
   directory of whoever runs the script.
+- **an owned sandbox starts as an installed dashboard:** `ownedServerSandbox` writes the configured seed
+  (`seedConfiguredConfigHome`) into the config directory it owns, so no page is sent to setup; a config
+  directory you name is used as found, with nothing written into it.
 - **a port that already answers is refused:** `startOwnedServer` checks `/api/v1/health` on the script's
   port before it starts anything and stops with the port and the script's port variable when something
   answers, so a server left from an earlier run is never driven in place of this run's. Its wait ends as
