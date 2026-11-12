@@ -80,7 +80,7 @@ export function KickstartFlow({ scope, title, trail, ariaLabel }: KickstartFlowP
   }, []);
 
   const frame = (body: ReactNode) => (
-    <div className="asb-page ks-page animate-fade-up">
+    <div className="asb-page wizard-page animate-fade-up">
       <Breadcrumbs items={[{ label: 'home', href: '/' }, ...trail]} />
       <h1 className="iu-page-title page-title">{title}</h1>
       {body}
@@ -194,7 +194,7 @@ export function KickstartFlow({ scope, title, trail, ariaLabel }: KickstartFlowP
   return frame(
     <StepWizardFrame
       aria-label={ariaLabel}
-      className="ks-wizard"
+      className="wizard-host"
       steps={steps}
       current={stop.key}
       completed={completed}

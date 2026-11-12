@@ -3,6 +3,11 @@
 # page shows that text as sent, stays on the review so the save can be tried
 # again, and moves to the finish panel only for a save that happened. Bodies
 # below are the server's own words for each code.
+# Every case below is played with the forest of the session it opens answered,
+# because the page reads it whatever the case is about. A case that is about the
+# forest scripts the route itself.
+defaultServer:
+  "GET /api/v1/kickstart/sessions/ses-full/tree": {body: {$tree: forest}}
 requiredNames:
   - invalid-answer-is-shown-and-nothing-moves
   - unreadable-config-is-shown-and-the-save-can-be-retried

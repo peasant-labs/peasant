@@ -65,7 +65,7 @@ export function FinishPanel({
       {committed.diagnostics.length > 0 && (
         <section aria-labelledby="ks-diagnostics-title" className="ks-field">
           <h3 className="ks-field-label" id="ks-diagnostics-title">
-            notes from reading your sessions
+            notes from the save
           </h3>
           <ul className="ks-diagnostics">
             {committed.diagnostics.map((line, index) => (

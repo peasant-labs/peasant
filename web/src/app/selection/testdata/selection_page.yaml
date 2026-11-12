@@ -16,6 +16,14 @@
 #             answer scripted by the case (`held: true` keeps it back until a
 #             `release` step); `redirects` says whether the person is sent to
 #             setup. The request log is the evidence of what the page started.
+# Every case below is played with the previews of the forest's two session rows
+# answered, because focusing or choosing a row asks for its preview whatever the
+# case is about. A case that is about a preview scripts the route itself.
+defaultServer:
+  "GET /api/v1/kickstart/sessions/ses-selection/tree/s-one/preview": {body: {lines: [{kind: text, text: the first lines of this session}]}}
+  "GET /api/v1/kickstart/sessions/ses-selection/tree/s-two/preview": {body: {lines: [{kind: text, text: the first lines of this session}]}}
+  "GET /api/v1/kickstart/sessions/ses-full/tree/s-one/preview": {body: {lines: [{kind: text, text: the first lines of this session}]}}
+  "GET /api/v1/kickstart/sessions/ses-full/tree/s-two/preview": {body: {lines: [{kind: text, text: the first lines of this session}]}}
 requiredNames:
   - own-live-session
   - wizard-undisturbed
@@ -370,8 +378,8 @@ cases:
       - expectText:
           - "nothing was saved: a value changed in your saved settings while you chose sessions. settle it on this page, then save again."
           - saved values that changed while you chose sessions
-          - these were changed in your saved settings after you chose them here
-      - expectNoText: [while you set up, after you answered them here, your setup is saved]
+          - "these saved values changed while you chose sessions; some move because of another choice you made. choose which value to keep for each one."
+      - expectNoText: [while you set up, after you answered them here, after you chose them here, your setup is saved]
       - click: keep mine for sessions to import
       - click: save and import
       - expectText: [your selection is saved, /home/ada/.config/peasant/config.yaml]
@@ -413,7 +421,7 @@ cases:
         expiredBody: nothing was saved, and the answers you had not saved are gone. open a new one to start again from your saved settings.
         reopen: open a new setup
         conflictsTitle: saved values that changed while you set up
-        conflictsHelp: these were changed in your saved settings after you answered them here. choose which value to keep for each one.
+        conflictsHelp: these saved values changed while you set up; some move because of another answer you gave. choose which value to keep for each one.
         saved: your setup is saved
       selection:
         opening: opening the selection
@@ -424,7 +432,7 @@ cases:
         expiredBody: nothing was saved, and the choices you had not saved are gone. reopen it to start again from your saved selection.
         reopen: reopen the selection
         conflictsTitle: saved values that changed while you chose sessions
-        conflictsHelp: these were changed in your saved settings after you chose them here. choose which value to keep for each one.
+        conflictsHelp: these saved values changed while you chose sessions; some move because of another choice you made. choose which value to keep for each one.
         saved: your selection is saved
 
   # A row whose saved value is an object or a list is shown as the server sent
@@ -513,9 +521,9 @@ cases:
       "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
       "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
     steps:
+      # The status request is on the log, so the shell has mounted and run its
+      # effects; the page body is not drawn and has started nothing.
       - expectCalls: {route: "GET /api/v1/kickstart/status", count: 1}
-      - settle: true
-      - settle: true
       - expectNoCalls: "/api/v1/kickstart/sessions"
       - expectNoText: [choose sessions, step 1 of 3]
       - release: "GET /api/v1/kickstart/status"
@@ -523,6 +531,7 @@ cases:
       - expectBody: {route: "POST /api/v1/kickstart/sessions", subset: {scope: selection}}
       - expectText: [choose sessions to import, step 1 of 3, fix the ledger rounding]
       - expectCalls: {route: "GET /api/v1/kickstart/status", count: 1}
+      - expectNoRedirect: true
 
   # With no setup saved the person is sent to setup, and the page starts nothing
   # on the way: no session of any scope, no forest, nothing drawn.
@@ -535,12 +544,11 @@ cases:
       "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
     steps:
       - expectCalls: {route: "GET /api/v1/kickstart/status", count: 1}
-      - settle: true
       - expectNoCalls: "/api/v1/kickstart/sessions"
       - release: "GET /api/v1/kickstart/status"
-      - settle: true
-      - settle: true
-      - settle: true
+      # The wake source is the router's own redirect, taken once the answer says
+      # setup is not saved. The page is held until then and still starts nothing.
+      - expectRedirect: /kickstart
       - expectNoCalls: "/api/v1/kickstart/sessions"
       - expectNoText: [choose sessions, step 1 of 3, fix the ledger rounding]
       - expectCalls: {route: "GET /api/v1/kickstart/status", count: 1}
@@ -558,6 +566,7 @@ cases:
       - expectCalls: {route: "POST /api/v1/kickstart/sessions", count: 1}
       - expectText: [choose sessions to import, step 1 of 3, fix the ledger rounding]
       - expectCalls: {route: "GET /api/v1/kickstart/status", count: 1}
+      - expectNoRedirect: true
 
   # A forest the contract refuses is held back whole. The message says what is
   # wrong, why nothing is drawn, and what to do, and the page offers to try again.

@@ -2,6 +2,13 @@
 # pushes are played on the real WebSocket provider; `push` builds the topic
 # message from a served model. Nothing here polls: a call the page makes that
 # no case scripted is recorded, and the cases assert how many it made.
+# Every case below is played with the forest of the session it opens answered,
+# because the page reads it whatever the case is about. A case that is about the
+# forest scripts the route itself.
+defaultServer:
+  "GET /api/v1/kickstart/sessions/ses-full/tree": {body: {$tree: forest}}
+  "GET /api/v1/kickstart/sessions/ses-full/tree/s-one/preview": {body: {lines: [{kind: text, text: the first lines of this session}]}}
+  "GET /api/v1/kickstart/sessions/ses-full/tree/s-two/preview": {body: {lines: [{kind: text, text: the first lines of this session}]}}
 requiredNames:
   - second-tab-answer-without-reload
   - stale-patch-shows-overwritten-notice
