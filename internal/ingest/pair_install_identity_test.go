@@ -20,10 +20,14 @@ import (
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
+	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/pair_install_identity.yaml
 var pairInstallIdentityYAML []byte
+
+//go:embed testdata/adapter_transcript.yaml
+var pairInstallStoredPairYAML []byte
 
 //go:embed testdata/pair_install_identity.manifest.yaml
 var pairInstallIdentityManifestYAML []byte
@@ -46,6 +50,8 @@ type pairInstallExpect struct {
 	Untouched          []string `yaml:"untouched"`
 	Replaced           []string `yaml:"replaced"`
 	Absent             []string `yaml:"absent"`
+	TranscriptReads    int      `yaml:"transcriptReads"`
+	TranscriptStats    int      `yaml:"transcriptStats"`
 }
 
 type pairInstallCase struct {
@@ -217,6 +223,8 @@ func TestPairInstallIdentity(t *testing.T) {
 				runPairInstallCase(t, document, c)
 			case "gated":
 				runGatedPairInstallCase(t, document, c)
+			case "retained":
+				runRetainedRefreshCase(t, c)
 			case "harvest":
 				runMetadataOnlyHarvestCase(t)
 			default:
@@ -485,5 +493,75 @@ func runMetadataOnlyHarvestCase(t *testing.T) {
 	}
 	if got := fs.Total(testutil.FSOpWriteFile) + fs.Total(testutil.FSOpRename); got != 0 {
 		t.Errorf("file writes and renames in the settled run = %d, want 0", got)
+	}
+}
+
+// runRetainedRefreshCase refreshes the metadata of a stored pair from its own
+// transcript, under a newer adapter revision. The pair read that verifies the
+// stored copy is the one read of the transcript file: the install keeps the
+// file without reading or statting it again, and renames the metadata alone.
+func runRetainedRefreshCase(t *testing.T, c pairInstallCase) {
+	var stored struct {
+		Metadata   string `yaml:"publicationMetadata"`
+		Transcript string `yaml:"publicationTranscript"`
+	}
+	// The stored pair is shared with the adapter-transcript fixture, which
+	// carries other sections this case does not read.
+	if err := yaml.Unmarshal(pairInstallStoredPairYAML, &stored); err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := ingest.NewManagedArtifact([]byte(stored.Metadata), []byte(stored.Transcript))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid := artifact.Metadata.SessionID
+	fs := testutil.NewCountingFS(testutil.NewMemFS())
+	sessionDir := ingest.SessionDir(testOutputDir, string(artifact.Metadata.HostSlug), string(sid), "")
+	metadataPath := ingest.SessionMetadataPath(testOutputDir, string(artifact.Metadata.HostSlug), string(sid), "")
+	transcriptPath := filepath.Join(sessionDir, string(sid)+"--transcript."+string(artifact.Metadata.Source.Format))
+	if err := fs.WriteFile(transcriptPath, artifact.Transcript, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := fs.WriteFile(metadataPath, artifact.MetadataJSON, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	versions := maps.Clone(ingest.HarvesterVersionRegistry)
+	claude := versions[ingest.HarnessClaudeCode]
+	claude.AdapterVersion = 2
+	versions[ingest.HarnessClaudeCode] = claude
+	pipeline, err := newTestPipeline(fs, testutil.DefaultGitResolver(), ingest.DefaultAdapterRegistry, makePipelineConfig(testOutputDir), ingest.WithHarvesterVersions(versions))
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := ingest.DiscoveredSession{SessionID: sid, Harness: artifact.Metadata.ModelHarness, SourceFormat: artifact.Metadata.Source.Format}
+	fs.ResetCounts()
+	transcriptKept, err := pipeline.RefreshStoredMetadata(t.Context(), session, metadataPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if transcriptKept == c.Expect.TranscriptReplaced {
+		t.Errorf("transcript kept = %t, want %t", transcriptKept, !c.Expect.TranscriptReplaced)
+	}
+	if got := fs.Count(testutil.FSOpReadFile, transcriptPath); got != c.Expect.TranscriptReads {
+		t.Errorf("reads of the transcript file = %d, want %d", got, c.Expect.TranscriptReads)
+	}
+	if got := fs.Count(testutil.FSOpStat, transcriptPath); got != c.Expect.TranscriptStats {
+		t.Errorf("stats of the transcript file = %d, want %d", got, c.Expect.TranscriptStats)
+	}
+	if got := fs.Total(testutil.FSOpWriteFile); got != c.Expect.Writes {
+		t.Errorf("WriteFile total = %d, want %d", got, c.Expect.Writes)
+	}
+	if got := fs.Total(testutil.FSOpRename); got != c.Expect.Renames {
+		t.Errorf("Rename total = %d, want %d", got, c.Expect.Renames)
+	}
+	if got := fs.Count(testutil.FSOpRename, metadataPath); got != 1 {
+		t.Errorf("metadata renames = %d, want 1", got)
+	}
+	current, err := ingest.ReadManagedPair(fs, testOutputDir, metadataPath, sid)
+	if err != nil {
+		t.Fatalf("read refreshed pair: %v", err)
+	}
+	if current.Metadata.AdapterVersion == nil || *current.Metadata.AdapterVersion != 2 || string(current.Transcript) != string(artifact.Transcript) {
+		t.Error("the refresh did not install the new metadata beside the unchanged transcript")
 	}
 }

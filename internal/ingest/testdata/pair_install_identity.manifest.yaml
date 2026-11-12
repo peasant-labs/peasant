@@ -6,3 +6,4 @@ requiredNames:
   - unchanged-debug-and-marker-files-are-kept
   - obsolete-owned-file-is-still-pruned
   - interrupted-metadata-only-install-is-consistent-on-the-next-read
+  - retained-metadata-refresh-reads-the-transcript-once

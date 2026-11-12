@@ -79,6 +79,9 @@ func (p *Pipeline) processRetainedSession(ctx context.Context, session Discovere
 		transcript:     candidate.Transcript,
 		metadataName:   metaFilename,
 		metadata:       candidate.MetadataJSON,
+		// original.Transcript was read from this directory and verified by
+		// readArtifactPair above; the candidate carries those same bytes.
+		transcriptReadFromInstalled: true,
 	}
 	installed, err := p.installManagedPair(ctx, sessionDir, string(session.SessionID), pair, session, writeLane)
 	if err != nil {

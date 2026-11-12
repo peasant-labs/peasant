@@ -26,6 +26,13 @@ type installedPair struct {
 	sourceCapture  []byte
 	metadataName   string
 	metadata       []byte
+	// transcriptReadFromInstalled reports that transcript IS the installed
+	// file's content: readArtifactPair read it from the session directory in
+	// this run and verified it against the checksum its metadata records,
+	// refusing a torn or mixed pair. The install then keeps the file without
+	// reading it a second time. Only the stored-copy lane sets it; bytes that
+	// come from anywhere else must be compared with the installed file.
+	transcriptReadFromInstalled bool
 }
 
 // pairInstallResult reports which halves of a pair an install replaced. A half
@@ -99,7 +106,12 @@ func (p *Pipeline) installManagedPair(ctx context.Context, sessionDir, sessionID
 	}
 	var staged []stagedFile
 	var kept keptFiles
-	kept.transcript = p.installedFileEquals(filepath.Join(sessionDir, pair.transcriptName), pair.transcript)
+	// Bytes a verified pair read just took from the installed file are that
+	// file: a second read could learn nothing the first did not, and a torn
+	// pair never reaches here because that read refuses one by its checksum.
+	// Every other candidate is compared with the installed bytes.
+	kept.transcript = pair.transcriptReadFromInstalled ||
+		p.installedFileEquals(filepath.Join(sessionDir, pair.transcriptName), pair.transcript)
 	if kept.transcript {
 		kept.keep(pair.transcriptName)
 	} else {

@@ -48,3 +48,11 @@ func (p *Pipeline) InstallManagedPair(ctx context.Context, sessionDir string, se
 
 // FileCaptureEvidenceName names the private source-capture marker of a session.
 func FileCaptureEvidenceName(sid SessionID) string { return fileCaptureEvidenceName(sid) }
+
+// RefreshStoredMetadata drives the stored-copy metadata refresh of one session
+// with no writer lane, so the external fixture can count its file reads. It
+// reports whether the installed transcript file was kept.
+func (p *Pipeline) RefreshStoredMetadata(ctx context.Context, session DiscoveredSession, metadataPath string) (transcriptKept bool, err error) {
+	result := p.processRetainedSession(ctx, session, metadataPath, nil)
+	return result.transcriptKept, result.result.Error
+}

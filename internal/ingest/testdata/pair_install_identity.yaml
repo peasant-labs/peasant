@@ -12,6 +12,11 @@
 #              while it is held and again after it is released.
 #   harvest -> two full harvests of one session. The second runs under a newer
 #              adapter revision, so only the metadata changes.
+#   retained -> a stored-copy metadata refresh of the pair in
+#              adapter_transcript.yaml under a newer adapter revision. The
+#              verified pair read is the only read of the transcript file; the
+#              install does not stat or read it again, and renames the
+#              metadata alone.
 #
 # transcripts are named bodies. metadataRevision selects the metadata variant;
 # the metadata always records the checksum of metadataFor (default: the pair's
@@ -73,3 +78,6 @@ cases:
     installed: { transcript: first, metadataRevision: 1 }
     candidate: { transcript: first, metadataRevision: 2 }
     expect: { transcriptReplaced: false, metadataReplaced: true }
+  - name: retained-metadata-refresh-reads-the-transcript-once
+    mode: retained
+    expect: { transcriptReplaced: false, metadataReplaced: true, writes: 1, renames: 1, transcriptReads: 1, transcriptStats: 0 }
