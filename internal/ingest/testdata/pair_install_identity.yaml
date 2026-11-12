@@ -1,0 +1,75 @@
+# Pair-install identity cases. Each case seeds an installed pair and installs a
+# candidate through the production write path.
+#
+# mode:
+#   install -> one pair install over a counting filesystem and a real store
+#              with a settled index input proof. The expected counts are the
+#              contract: one WriteFile and one Rename per replaced file, and
+#              one WAL commit frame only when the transcript is replaced
+#              (the proof clear). A kept file has zero of each, and an install
+#              that writes nothing creates no directory.
+#   gated   -> the same install with the metadata rename held; the pair is read
+#              while it is held and again after it is released.
+#   harvest -> two full harvests of one session. The second runs under a newer
+#              adapter revision, so only the metadata changes.
+#
+# transcripts are named bodies. metadataRevision selects the metadata variant;
+# the metadata always records the checksum of metadataFor (default: the pair's
+# own transcript), so a pair whose metadataFor differs is torn.
+transcripts:
+  first: |
+    {"sessionId":"test","type":"user","message":{"role":"user","content":"hi"},"timestamp":"2024-02-19T00:00:00Z"}
+  second: |
+    {"sessionId":"test","type":"user","message":{"role":"user","content":"hi"},"timestamp":"2024-02-19T00:00:00Z"}
+    {"sessionId":"test","type":"user","message":{"role":"user","content":"again"},"timestamp":"2024-02-19T00:00:01Z"}
+cases:
+  - name: identical-pair-installs-nothing
+    mode: install
+    installed: { transcript: first, metadataRevision: 1 }
+    candidate: { transcript: first, metadataRevision: 1 }
+    expect: { transcriptReplaced: false, metadataReplaced: false, writes: 0, renames: 0, walCommits: 0, proofKept: true }
+  - name: metadata-only-change-keeps-the-transcript-file-and-the-index-proof
+    mode: harvest
+  - name: changed-transcript-replaces-both-files-and-clears-the-proof
+    mode: install
+    installed: { transcript: first, metadataRevision: 1 }
+    candidate: { transcript: second, metadataRevision: 1 }
+    expect: { transcriptReplaced: true, metadataReplaced: true, writes: 2, renames: 2, walCommits: 1, proofKept: false }
+  - name: torn-installed-pair-is-replaced-in-full
+    mode: install
+    # The installed transcript is not the one its metadata names. The candidate
+    # metadata is byte-identical to the installed metadata and is still renamed.
+    installed: { transcript: second, metadataFor: first, metadataRevision: 1 }
+    candidate: { transcript: first, metadataRevision: 1 }
+    expect: { transcriptReplaced: true, metadataReplaced: true, writes: 2, renames: 2, walCommits: 1, proofKept: false }
+  - name: unchanged-debug-and-marker-files-are-kept
+    mode: install
+    installed: { transcript: first, metadataRevision: 1, debug: { trace.log: "trace one", other.log: "other one" }, marker: "marker one" }
+    candidate: { transcript: first, metadataRevision: 2, debug: { trace.log: "trace one", other.log: "other two" }, marker: "marker one" }
+    expect:
+      transcriptReplaced: false
+      metadataReplaced: true
+      writes: 2
+      renames: 2
+      walCommits: 0
+      proofKept: true
+      untouched: [debug/trace.log, marker]
+      replaced: [debug/other.log]
+  - name: obsolete-owned-file-is-still-pruned
+    mode: install
+    installed: { transcript: first, metadataRevision: 1, debug: { trace.log: "trace one", stale.log: "no longer produced" }, marker: "stale marker" }
+    candidate: { transcript: first, metadataRevision: 1, debug: { trace.log: "trace one" } }
+    expect:
+      transcriptReplaced: false
+      metadataReplaced: false
+      writes: 0
+      renames: 0
+      walCommits: 0
+      proofKept: true
+      untouched: [debug/trace.log]
+      absent: [debug/stale.log, marker]
+  - name: interrupted-metadata-only-install-is-consistent-on-the-next-read
+    mode: gated
+    installed: { transcript: first, metadataRevision: 1 }
+    candidate: { transcript: first, metadataRevision: 2 }
+    expect: { transcriptReplaced: false, metadataReplaced: true }

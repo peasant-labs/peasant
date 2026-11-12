@@ -1905,6 +1905,10 @@ type indexParseResult struct {
 	im              indexedMeta
 	input           *CapturedIndexInput
 	output          indexformat.Result
+	// bindPublication marks a result that parsed nothing because the stored
+	// index already matches the captured input: the flush binds that index to
+	// the refreshed metadata capture and writes no entry.
+	bindPublication bool
 	// generationCandidate carries a validated managed-generation candidate with its
 	// captured content when the harness's declared output format is a managed
 	// generation. The write path stages and activates it instead of committing
@@ -2185,7 +2189,14 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 		if input.bindsPublication() {
 			result.im.captureRevision = input.expected.PublicationCaptureRevision
 		}
-		if p.capturedInputNeedsWork(input) {
+		if p.capturedInputBindsWithoutParse(input) {
+			// The stored index already describes these bytes under the current
+			// producer; only the metadata capture moved. The flush binds the
+			// index to it in one constant-size write.
+			result.bindPublication = true
+			reason := "stored index already matches captured input and current producer; bound to the refreshed metadata capture"
+			result.logEntry = p.makeIndexLogEntry(im, IndexOutcomeSkipped, 0, result.startedAt, &reason, nil)
+		} else if p.capturedInputNeedsWork(input) {
 			parsed = true
 			// A harness whose declared output format is a managed generation is
 			// produced through its GenerationBuilder, which carries the captured
@@ -2382,6 +2393,48 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 	return result
 }
 
+// bindPublicationIndex performs the bind-only index write for a result that
+// parsed nothing. It re-checks that the saved pair is still the one the input
+// was captured from, then binds through the writer lane. A refused bind is
+// reported as an index error and changes nothing: the session stays unbound
+// and the next harvest selects it again.
+func (p *Pipeline) bindPublicationIndex(ctx context.Context, result indexParseResult, logPrefix string, writeLane *storeWriteLane) (IndexLogEntry, time.Duration) {
+	start := time.Now()
+	sid := result.im.session.SessionID
+	err := ctx.Err()
+	binder, ok := p.metricsStore.(PublicationIndexBinder)
+	if err == nil && (!ok || result.input == nil) {
+		err = fmt.Errorf("%s: bind the index of session %s to its refreshed metadata capture: the store cannot bind without a parse or the captured input is gone; where: ingest.Pipeline.bindPublicationIndex, at the index write; impact: no row changed and the session stays unbound; fix: rerun harvest so the ordinary index path settles it", logPrefix, sid)
+	}
+	if err == nil {
+		// Only an input the capture vouches for is bound to it; any other is
+		// settled without a binding, as the ordinary write would leave it.
+		revision := int64(0)
+		if result.input.bindsPublication() {
+			revision = result.input.expected.PublicationCaptureRevision
+		}
+		err = p.withCurrentIndexInput(ctx, result.input, func() error {
+			var bindErr error
+			p.runStoreWrite(writeLane, func() {
+				bindErr = binder.BindPublicationIndex(ctx, PublicationIndexBind{
+					SessionID:        sid,
+					ExpectedState:    result.input.expected,
+					IndexedInputHash: result.input.inputHash,
+					CaptureRevision:  revision,
+					IndexedAtMs:      time.Now().UnixMilli(),
+				})
+			})
+			return bindErr
+		})
+	}
+	if err == nil {
+		return result.logEntry, time.Since(start)
+	}
+	slog.Warn(logPrefix+": bind index to metadata capture", "session_id", sid, "error", err)
+	errMsg := err.Error()
+	return p.makeIndexLogEntry(result.im, IndexOutcomeError, 0, result.startedAt, nil, &errMsg), time.Since(start)
+}
+
 type indexWriteFlush struct {
 	indexed         []indexedMeta
 	logEntries      []IndexLogEntry
@@ -2418,6 +2471,9 @@ func (p *Pipeline) flushIndexParseResultsOneByOne(ctx context.Context, results [
 		profileSessions: make([]IndexProfileSession, 0, len(results)),
 	}
 	for _, result := range results {
+		if result.bindPublication {
+			result.logEntry, _ = p.bindPublicationIndex(ctx, result, logPrefix, writeLane)
+		}
 		indexedMeta, logEntry, profileSession := p.writeIndexParseResult(ctx, result, outcome, logPrefix, writeLane)
 		if result.releaseStaged != nil {
 			result.releaseStaged()
@@ -2458,6 +2514,12 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 	nativePositions := make([]int, 0)
 	nowMs := time.Now().UnixMilli()
 	for i, result := range results {
+		if result.bindPublication {
+			logEntry, bindDuration := p.bindPublicationIndex(ctx, result, logPrefix, writeLane)
+			flush.writeDuration += bindDuration
+			record(i, indexedMeta{session: result.im.session, startMs: result.im.startMs}, logEntry, p.makeIndexProfileSession(result, logEntry, bindDuration))
+			continue
+		}
 		if result.output == nil || p.metricsStore == nil {
 			record(i, indexedMeta{session: result.im.session, startMs: result.im.startMs}, result.logEntry, p.makeIndexProfileSession(result, result.logEntry, 0))
 			continue
@@ -3752,7 +3814,21 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry, wr
 		transcriptData = writeData
 	}
 
-	if err := p.fs.WriteFile(tmpTranscriptPath, writeData, defaults.PrivateFilePerm); err != nil {
+	// A transcript whose installed bytes already equal the captured ones is
+	// kept in place: it is not written again, not renamed over, and its index
+	// input proof stays. The comparison reads the installed file and trusts no
+	// recorded hash, so a torn pair compares unequal and is replaced in full.
+	// Only a session whose saved pair already lives in this directory has an
+	// installed transcript to compare: a new or relocated session pays no
+	// probe.
+	var kept keptFiles
+	stagedTranscriptPath := tmpTranscriptPath
+	installedHere := metadataPath != "" && filepath.Clean(filepath.Dir(metadataPath)) == filepath.Clean(sessionDir)
+	if installedTranscript := filepath.Join(sessionDir, transcriptFilename); installedHere && p.installedFileEquals(installedTranscript, writeData) {
+		kept.transcript = true
+		kept.keep(transcriptFilename)
+		stagedTranscriptPath = installedTranscript
+	} else if err := p.fs.WriteFile(tmpTranscriptPath, writeData, defaults.PrivateFilePerm); err != nil {
 		result.Error = errors.Join(
 			fmt.Errorf("write transcript for %s: %w", session.SessionID, err),
 			p.fs.RemoveAll(tmpDir),
@@ -3821,7 +3897,7 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry, wr
 			if session.TranscriptOrigin == TranscriptOriginFile {
 				transcriptPath = session.SourcePath.String()
 			} else if session.TranscriptOrigin == TranscriptOriginOpenCodeCurrentSQLite {
-				transcriptPath = tmpTranscriptPath
+				transcriptPath = stagedTranscriptPath
 			}
 			commits, diags := detector.LayeredDetection(ctx, repoPath, sessionStart, sessionEnd, transcriptPath)
 			commitCaptureComplete = len(diags) == 0
@@ -3908,7 +3984,7 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry, wr
 	if err := p.fs.WriteFile(filepath.Join(tmpDir, metaFilename), metaJSON, defaults.PrivateFilePerm); err != nil {
 		return fail(errors.Join(fmt.Errorf("write metadata for %s: %w", session.SessionID, err), p.fs.RemoveAll(tmpDir)))
 	}
-	if err := p.replaceSessionDir(ctx, tmpDir, sessionDir, string(session.SessionID), metaFilename, writeLane); err != nil {
+	if err := p.replaceSessionDir(ctx, tmpDir, sessionDir, string(session.SessionID), metaFilename, kept, writeLane); err != nil {
 		return fail(errors.Join(err, p.fs.RemoveAll(tmpDir)))
 	}
 	if cleanupErr := p.fs.RemoveAll(tmpDir); cleanupErr != nil {
@@ -3947,6 +4023,7 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry, wr
 	}
 
 	return workerResult{
+		transcriptKept:        kept.transcript,
 		commitCaptureComplete: commitCaptureComplete,
 		result:                result,
 		capturedSource:        capturedSource,

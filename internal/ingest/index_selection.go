@@ -88,6 +88,41 @@ func (p *Pipeline) capturedInputNeedsWork(input *CapturedIndexInput) bool {
 			!permanentRefusalIsSettled(expected, target)) && !settled
 }
 
+// capturedInputBindsWithoutParse reports that the stored index already
+// describes a captured input and only its bookkeeping is behind. That is the
+// state a metadata-only install leaves: the transcript file was kept, so the
+// stored input proof still equals the captured input, and the producer that
+// built the index is still current. Re-parsing would reproduce the stored
+// entries, so the write is one constant-size settle: it advances the index
+// time past the save and binds the index to the newer metadata capture.
+//
+// It applies when the pair was saved this run or the index is unbound from a
+// capture the input can vouch for. Every other pending term keeps the
+// ordinary parse: an explicit rebuild, a behind producer or index format, a
+// missing or different input proof, content this build could still certify,
+// and a latest attempt held beside the active authority, whose retry is the
+// parse's to make.
+func (p *Pipeline) capturedInputBindsWithoutParse(input *CapturedIndexInput) bool {
+	if _, ok := p.metricsStore.(PublicationIndexBinder); !ok {
+		return false
+	}
+	target := p.sessionVersionTarget(input.session)
+	state := input.expected
+	if state == nil || p.config.Force || p.config.Reindex || state.LatestAttemptArtifactHash != nil {
+		return false
+	}
+	if state.IndexerVersion < target.IndexerVersion || state.IndexVersion == nil || *state.IndexVersion != target.IndexVersion {
+		return false
+	}
+	if state.IndexedInputHash == nil || *state.IndexedInputHash != input.inputHash {
+		return false
+	}
+	if state.ContentStatus != ContentCaptureComplete && p.certifiesContent(input.session.Harness) && !permanentRefusalIsSettled(state, target) {
+		return false
+	}
+	return input.published || (state.PublicationCaptureRevision > 0 && !state.PublicationBound && input.bindsPublication())
+}
+
 // latestAttemptPreviewSettles reports whether a stored latest attempt has
 // settled against this session's current facts and this build's targets. A
 // settled attempt owes no parser work: re-reading it would reproduce the same

@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"maps"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -55,11 +56,35 @@ func TestRetainedMetadataPublicationPreservesContext(t *testing.T) {
 	if err := filesystem.WriteFile(path, artifact.MetadataJSON, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	transcriptPath := filepath.Join(sessionDir, string(session.SessionID)+"--transcript."+string(artifact.Metadata.Source.Format))
+	transcriptBefore, err := os.Stat(transcriptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 	lane := newStoreWriteLane(1)
 	defer lane.close()
 	result := pipeline.processRetainedSession(t.Context(), session, path, lane)
 	if result.result.Error != nil {
 		t.Fatal(result.result.Error)
+	}
+	// The refresh changes the metadata only: the transcript is the same file
+	// (same inode, same mtime), the one rename is the metadata, and the index
+	// input proof, which names the transcript bytes, is kept.
+	transcriptAfter, err := os.Stat(transcriptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(transcriptBefore, transcriptAfter) || !transcriptBefore.ModTime().Equal(transcriptAfter.ModTime()) {
+		t.Fatal("the metadata refresh replaced the unchanged transcript file")
+	}
+	if len(filesystem.renamed) != 1 || filesystem.renamed[0] != filepath.Base(path) {
+		t.Fatalf("renamed files = %v, want the metadata alone", filesystem.renamed)
+	}
+	if !result.transcriptKept {
+		t.Fatal("the worker did not report the kept transcript to the mirror")
+	}
+	if state := store.states[session.SessionID]; state.IndexedInputHash == nil || *state.IndexedInputHash != proof {
+		t.Fatal("the metadata refresh cleared the index input proof of an unchanged transcript")
 	}
 	current, err := readArtifactPair(filesystem, output, path, session.SessionID)
 	if err != nil {

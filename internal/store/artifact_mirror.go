@@ -14,9 +14,12 @@ import (
 
 var _ ingest.ArtifactMirrorStore = (*Store)(nil)
 
-// PrepareArtifactInstall clears only a settled row's input proof. The autocommit
-// must finish before the caller replaces any file, so process interruption leaves
-// the existing repair selector evidence even when the native source is unchanged.
+// PrepareArtifactInstall clears only a settled row's input proof. The write
+// path calls it only when the installed transcript is about to be replaced:
+// the proof names the transcript bytes, so an install that keeps them keeps
+// the proof. The autocommit must finish before the caller replaces any file,
+// so process interruption leaves the existing repair selector evidence even
+// when the native source is unchanged.
 func (s *Store) PrepareArtifactInstall(ctx context.Context, sid ingest.SessionID) error {
 	if _, err := ingest.NewSessionID(string(sid)); err != nil {
 		return fmt.Errorf("prepare artifact install for %q: %w; no files were replaced; supply a valid session ID and retry harvest", sid, err)
@@ -329,9 +332,11 @@ func (s *Store) mirrorArtifactOnConn(conn *sqlite.Conn, request ingest.ArtifactM
 	}
 	// Record the saved pair's hash, and clear the index input proof when the
 	// pair changed: the prior proof described the previous bytes. One statement,
-	// bound as (new hash, prior hash or NULL, new hash), so a first mirror (no
-	// prior hash) and an unchanged pair both keep the proof, and only a changed
-	// pair clears it.
+	// bound as (transcript kept, new hash, prior hash or NULL, new hash), so a
+	// first mirror (no prior hash) and an unchanged pair both keep the proof.
+	// A pair whose identity moved with its metadata alone also keeps it: the
+	// install left the transcript file in place, and the proof names those
+	// bytes. Every other changed pair clears it.
 	var prior any
 	if priorArtifactHash != nil {
 		prior = *priorArtifactHash
@@ -339,5 +344,5 @@ func (s *Store) mirrorArtifactOnConn(conn *sqlite.Conn, request ingest.ArtifactM
 	if err := sqlitex.ExecuteTransient(conn, "DELETE FROM session_source_unavailability WHERE session_id = ?", &sqlitex.ExecOptions{Args: []any{string(meta.SessionID)}}); err != nil {
 		return fmt.Errorf("clear unavailable source after session %s artifact refresh: %w; refresh was rolled back; restore database access and retry harvest", meta.SessionID, err)
 	}
-	return sqlitex.ExecuteTransient(conn, "UPDATE sessions SET artifact_hash = ?, indexed_input_hash = CASE WHEN ? IS ? THEN indexed_input_hash ELSE NULL END WHERE session_id = ?", &sqlitex.ExecOptions{Args: []any{request.Artifact.ArtifactHash, prior, request.Artifact.ArtifactHash, string(meta.SessionID)}})
+	return sqlitex.ExecuteTransient(conn, "UPDATE sessions SET artifact_hash = ?, indexed_input_hash = CASE WHEN ? OR ? IS ? THEN indexed_input_hash ELSE NULL END WHERE session_id = ?", &sqlitex.ExecOptions{Args: []any{request.Artifact.ArtifactHash, request.TranscriptKept, prior, request.Artifact.ArtifactHash, string(meta.SessionID)}})
 }
