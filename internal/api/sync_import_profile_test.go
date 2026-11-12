@@ -1,22 +1,97 @@
 package api
 
 import (
+	"bytes"
+	_ "embed"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"github.com/peasant-labs/schema"
+	"gopkg.in/yaml.v3"
 )
 
-// TestWebImportStoresAProfile runs the pipeline the web-triggered import
-// builds over one synthetic Claude session and reads the run's stage rows back
-// from the store: the web entry point keeps the profiler on like the commands.
-func TestWebImportStoresAProfile(t *testing.T) {
+//go:embed testdata/web_import_profile.yaml
+var webImportProfileYAML []byte
+
+// TestWebImportsStoreAProfile runs each import entry point of the local web
+// app over one synthetic Claude session and reads the run's stage rows back
+// from the store: every web entry point keeps the profiler on like the
+// commands.
+func TestWebImportsStoreAProfile(t *testing.T) {
 	t.Parallel()
+	var fixture struct {
+		RequiredNames []string `yaml:"requiredNames"`
+		Cases         []struct {
+			Name  string `yaml:"name"`
+			Entry string `yaml:"entry"`
+		} `yaml:"cases"`
+	}
+	decoder := yaml.NewDecoder(bytes.NewReader(webImportProfileYAML))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&fixture); err != nil {
+		t.Fatal(err)
+	}
+	present := make(map[string]bool, len(fixture.Cases))
+	for _, c := range fixture.Cases {
+		present[c.Name] = true
+	}
+	if err := testutil.RequireFixtureNames("web_import_profile.yaml", "cases", fixture.RequiredNames, present); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range fixture.Cases {
+		t.Run(c.Name, func(t *testing.T) {
+			t.Parallel()
+			var preflight bool
+			switch c.Entry {
+			case "import-route":
+			case "kickstart":
+				preflight = true
+			default:
+				t.Fatalf("web_import_profile.yaml: case %q names entry %q; add it to the runner", c.Name, c.Entry)
+			}
+			dataHome := webImportProfileHome(t)
+			h := syncResidueHandler(t, dataHome.data, dataHome.cfg)
+			start, launch, err := h.reserveIngest(preflight)
+			if err != nil || start.AlreadyRunning || launch == nil {
+				t.Fatalf("claim the %s import: start=%+v err=%v", c.Entry, start, err)
+			}
+			finished := make(chan schema.LocalKickstartIngest, 1)
+			launch(func(state schema.LocalKickstartIngest) { finished <- state })
+			select {
+			case state := <-finished:
+				if state.State != schema.LocalKickstartIngestIdle || state.New != 1 {
+					t.Fatalf("the %s import ended as %+v, want idle with one new session", c.Entry, state)
+				}
+			case <-time.After(2 * time.Minute):
+				t.Fatalf("the %s import did not finish", c.Entry)
+			}
+			stages := storedWebImportStages(t, dataHome.data)
+			for _, required := range []ingest.Stage{ingest.StageDiscover, ingest.StageFilter, ingest.StageReport} {
+				if !stages[required] {
+					t.Fatalf("the %s import stored no %s stage row; stored %v", c.Entry, required, stages)
+				}
+			}
+		})
+	}
+}
+
+type webImportProfileFixture struct {
+	data string
+	cfg  *config.Config
+}
+
+// webImportProfileHome writes one synthetic Claude session and a configuration
+// that imports it into a data home of its own.
+func webImportProfileHome(t *testing.T) webImportProfileFixture {
+	t.Helper()
 	root := t.TempDir()
 	const sessionID = "97100000-0000-4000-8000-0000000000e2"
 	source := filepath.Join(root, "native", "-fixtures-synthetic-project", sessionID+".jsonl")
@@ -36,20 +111,12 @@ func TestWebImportStoresAProfile(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(string(defaults.ResolveDBFilePathWith(dataHome))), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	h := syncResidueHandler(t, dataHome, cfg)
-	built, err := h.newIngestPipeline(ingest.NewProgressState(), nil)
-	if err != nil {
-		t.Fatalf("build the web import pipeline: %v", err)
-	}
-	result, err := built.pipeline.Run(t.Context())
-	built.release()
-	if err != nil {
-		t.Fatalf("web import: %v", err)
-	}
-	if result.Census == nil {
-		t.Fatal("the web import reported no refresh census")
-	}
+	return webImportProfileFixture{data: dataHome, cfg: cfg}
+}
 
+// storedWebImportStages reads the stage names of the newest run.
+func storedWebImportStages(t *testing.T, dataHome string) map[ingest.Stage]bool {
+	t.Helper()
 	conn, err := sqlite.OpenConn(string(defaults.ResolveDBFilePathWith(dataHome)), sqlite.OpenReadOnly)
 	if err != nil {
 		t.Fatal(err)
@@ -68,9 +135,5 @@ func TestWebImportStoresAProfile(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	for _, required := range []ingest.Stage{ingest.StageDiscover, ingest.StageFilter, ingest.StageReport} {
-		if !stages[required] {
-			t.Fatalf("the web import stored no %s stage row; stored %v", required, stages)
-		}
-	}
+	return stages
 }

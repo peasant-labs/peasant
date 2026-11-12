@@ -30,7 +30,7 @@ store. The helper classes the entry point and applies this policy.
 | the same command with no terminal (a pipe, a script, CI) | runs, one line per step on standard error | refuses, changes nothing, exits 1 |
 | a generated git hook (`village push --non-interactive`) | runs | skips with the nothing-attempted status; the hook script exits 0, so git is not blocked |
 | `peasant web start` | the parent upgrades before it starts the server | the same, and asks first at a terminal |
-| a server process (the web server, an import started from the web) | never upgrades; refuses a behind store | the same |
+| a server process (the web server, an import started from the web, the import the web setup starts when it is saved) | never upgrades; refuses a behind store before it claims the import | the same |
 | `peasant migrate` | the explicit upgrade | the explicit upgrade; `--confirm` skips the prompt |
 
 Hook mode belongs to `village push` alone: that command declares
@@ -38,7 +38,11 @@ Hook mode belongs to `village push` alone: that command declares
 flag of that name is a terminal or a piped command like any other.
 
 A server refuses to start on a behind store. Its message says what the store
-needs and names `peasant migrate --schema-only`, to run in a terminal.
+needs and names `peasant migrate --schema-only`, to run in a terminal. An
+import a running server starts asks `store.RefuseBehind` first, a read-only
+check that gives the refusal `store.Open` gives: the web setup's import is
+refused before it is claimed, and every web import is refused again where it
+would open the store.
 
 A terminal also asks first when free disk is tight: known, and below twice
 what the plan asks for. Every mode that runs the upgrade prints the plan

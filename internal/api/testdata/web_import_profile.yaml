@@ -1,0 +1,14 @@
+# The import entry points a running local web app starts, and the profile each
+# stores. Both go through syncHandler.reserveIngest and the one pipeline
+# constructor (newIngestPipeline), which keeps the profiler on: the import
+# route claims without a preflight; the kickstart's save claims with one
+# (kickstartCommitter.finish). Each case imports one synthetic Claude session
+# and reads the newest run's stage rows from the store.
+requiredNames:
+  - import-route-stores-a-profile
+  - kickstart-import-stores-a-profile
+cases:
+  - name: import-route-stores-a-profile
+    entry: import-route
+  - name: kickstart-import-stores-a-profile
+    entry: kickstart

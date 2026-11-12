@@ -24,6 +24,9 @@ was tagged but not published links to its tag instead.
 - The local web server refuses to start when the store needs an upgrade and
   names `peasant migrate --schema-only` to run in a terminal. Run
   `peasant web start` in a terminal to upgrade first and then start the server.
+  An import the local web app starts, including the one its setup starts when
+  it is saved, refuses a store that needs an upgrade the same way and changes
+  nothing.
 - `peasant migrate` runs the schema upgrade as its first phase, before its
   session conversion phases. `peasant migrate --dry-run` prints the upgrade
   plan for a store that needs it without changing anything.
@@ -40,12 +43,13 @@ was tagged but not published links to its tag instead.
   the collection.
 - Discovery shows how many files it has processed out of the total and how many
   required re-reading, for example:
-  `Discovering Claude Code sessions... (812/13631) · 219 required re-read`.
+  `discovering claude code sessions... (812/13631) · 219 required re-read`.
+  The setup in the local web app shows the same file count while it scans.
 - Every import keeps its timing profile: `peasant harvest`, the kickstart
-  import and the import started from the local web app each store it with the
-  run's audit row. `harvest --profile-index` now only decides whether the
-  profile is also printed. Each run also records one `refresh` row for every
-  session it refreshed, with the reason.
+  import and the imports started from the local web app (its import and its
+  setup) each store it with the run's audit row. `harvest --profile-index` now
+  only decides whether the profile is also printed. Each run also records one
+  `refresh` row for every session it refreshed, with the reason.
 - A session whose native source could not be read is recorded in the run audit
   as `adapter_capture_failed`. `adapter_refresh_unavailable` now names only the
   warning that a refresh could not run and the previous copy was kept.
