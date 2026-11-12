@@ -60,7 +60,8 @@ type ServerConfig struct {
 	// Nil disables annotation endpoints (returns 503).
 	Store *store.Store
 	// SegmentReader reads stored entries for the transcript segment producer.
-	// Nil falls back to Store; when both are nil the segment reads answer 503.
+	// Nil falls back to the mock store when Provider mocks the sessions
+	// section, then to Store; when none is set the segment reads answer 503.
 	// It is an interface so a focused test can drive the cut, the short-page
 	// arm, and the single-flight guard without a real database.
 	SegmentReader SegmentReader
@@ -168,6 +169,12 @@ func NewServer(cfg ServerConfig) *Server {
 		s.groupedRevision = provider.GroupedScopeRevision()
 	}
 	segmentReader := cfg.SegmentReader
+	if source, ok := cfg.Provider.(mockSegmentSource); ok && segmentReader == nil {
+		// A mocked sessions section serves its sessions' transcripts too:
+		// the analytics store does not hold the mock sessions the detail
+		// read names, so reading it would answer an empty transcript.
+		segmentReader = source.MockSegmentReader()
+	}
 	if segmentReader == nil && cfg.Store != nil {
 		segmentReader = cfg.Store
 	}
