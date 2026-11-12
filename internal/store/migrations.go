@@ -282,9 +282,9 @@ var migrationV24 = createSessionCommands + ";\n" +
 // migrationV74 adds the conversation turn count.
 // migrationV75 adds image entries and session attachments.
 // migrationV76 repairs the v75 search triggers: session_entries_ai/ad/au
-// point at session_search_fts again, the entries half of session_search_fts
-// is brought current without a rebuild, and session_entries_fts is dropped.
-// See schema_v76.go.
+// point at session_search_fts again, the union entries half is rebuilt when
+// the v75 window left residue (cheap re-sync otherwise), and
+// session_entries_fts is dropped. See schema_v76.go.
 
 // dbSchema is the sqlitemigration schema applied on Open().
 var dbSchema = sqlitemigration.Schema{

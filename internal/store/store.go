@@ -543,6 +543,16 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 				return nil, err
 			}
 		}
+		// V76 detects a stale union entries half before the chain runs: when
+		// the pre-migration version is 75 with residue in the union index,
+		// v76 rebuilds the whole index (minutes on large stores), so warn on
+		// stderr first. The in-migration gate re-evaluates the same predicate
+		// at v76's transactional point; this call only warns, once per run.
+		if err := maybePrintSearchIndexRebuildNotice(conn, versionBeforeMigration); err != nil {
+			pool.Put(conn)
+			_ = pool.Close()
+			return nil, err
+		}
 		if err := sqlitemigration.Migrate(context.Background(), conn, dbSchema); err != nil {
 			pool.Put(conn)
 			_ = pool.Close()
