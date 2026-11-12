@@ -1,0 +1,62 @@
+# What a run wrote, for a caller that tells a person how many sessions came in.
+# The summary files a session that was still being written under active; the
+# run stores it like any other. existed names the sessions the store held before
+# the run. A session is written when it has no error and the selection did not
+# leave it out.
+requiredNames:
+  - summary-counts-are-kept
+  - active-session-the-store-lacked-is-new
+  - active-session-the-store-held-is-updated
+  - active-session-that-failed-is-not-counted
+  - active-session-the-selection-left-out-is-not-counted
+  - unchanged-session-is-not-counted
+  - no-result-writes-nothing
+cases:
+  - name: summary-counts-are-kept
+    summary: {new: 3, updated: 2}
+    wantNew: 3
+    wantUpdated: 2
+
+  - name: active-session-the-store-lacked-is-new
+    summary: {new: 1, updated: 1}
+    sessions:
+      - {id: agent-a1, status: active}
+      - {id: agent-b2, status: active}
+    wantNew: 3
+    wantUpdated: 1
+
+  - name: active-session-the-store-held-is-updated
+    summary: {new: 0, updated: 0}
+    existed: [agent-a1]
+    sessions:
+      - {id: agent-a1, status: active}
+      - {id: agent-b2, status: active}
+      - {id: agent-c3, status: active}
+    wantNew: 2
+    wantUpdated: 1
+
+  - name: active-session-that-failed-is-not-counted
+    sessions:
+      - {id: agent-a1, status: active, failed: true}
+    wantNew: 0
+    wantUpdated: 0
+
+  - name: active-session-the-selection-left-out-is-not-counted
+    sessions:
+      - {id: agent-a1, status: active, excluded: true}
+    wantNew: 0
+    wantUpdated: 0
+
+  - name: unchanged-session-is-not-counted
+    existed: [agent-c3]
+    sessions:
+      - {id: agent-c3, status: unchanged}
+      - {id: agent-d4, status: new}
+      - {id: agent-e5, status: updated}
+    wantNew: 0
+    wantUpdated: 0
+
+  - name: no-result-writes-nothing
+    noResult: true
+    wantNew: 0
+    wantUpdated: 0

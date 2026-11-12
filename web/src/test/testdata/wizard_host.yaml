@@ -1,0 +1,31 @@
+# One copy of "the wizard frame owns the viewport". The setup wizard, the
+# selection page and the publish wizard all draw fairtrade's step-wizard frame
+# and all need it to fill the space below the chrome, with the body scrolling
+# between the rail and the foot. That is said once, in app/globals.css, as the
+# `wizard-page` and `wizard-host` classes; a page puts them on its markup and
+# restyles none of the frame's own regions. These cases read the sources that
+# would let a second copy grow back.
+requiredNames:
+  - the-host-classes-are-defined-once
+  - no-other-stylesheet-styles-the-frames-regions
+  - the-frames-regions-are-styled-only-by-the-host-and-the-publish-phone-override
+  - every-page-that-draws-the-frame-uses-the-host-classes
+cases:
+  - name: the-host-classes-are-defined-once
+    stylesheet: src/app/globals.css
+    defined: ['.wizard-page {', '.wizard-host {']
+  - name: no-other-stylesheet-styles-the-frames-regions
+    # Every stylesheet under src except the one that owns the host classes.
+    owner: src/app/globals.css
+    regions: ['.swz-head', '.swz-body', '.swz-foot']
+  - name: the-frames-regions-are-styled-only-by-the-host-and-the-publish-phone-override
+    stylesheet: src/app/globals.css
+    regions: ['.swz-head', '.swz-body', '.swz-foot']
+    # The selectors in front of a region that are allowed: the shared host, and
+    # the publish wizard's own phone rules, which let the page scroll.
+    allowedPrefixes: ['.wizard-host', '.share-wizard']
+  - name: every-page-that-draws-the-frame-uses-the-host-classes
+    pages:
+      - {file: src/components/kickstart/KickstartFlow.tsx, uses: [wizard-page, wizard-host]}
+      - {file: src/app/share/ShareWizardClient.tsx, uses: [wizard-page, wizard-host]}
+      - {file: src/app/share/SharePageClient.tsx, uses: [wizard-page]}

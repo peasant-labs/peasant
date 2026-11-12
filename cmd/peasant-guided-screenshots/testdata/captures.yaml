@@ -197,20 +197,20 @@ pullProgressStates:
 
 discoveryProgressStates:
   - key: mid-run
-    phase: Discovering Claude Code sessions...
+    phase: discovering claude code sessions...
     done: 812
     total: 13631
     requiredRereads: 219
-    wantContains: ["⠋", "Discovering Claude Code sessions...", "(812/13631)", "219 required re-read"]
+    wantContains: ["⠋", "discovering claude code sessions...", "(812/13631)", "219 required re-read"]
   - key: complete
-    phase: Discovering Claude Code sessions...
+    phase: discovering claude code sessions...
     done: 13631
     total: 13631
     requiredRereads: 819
-    wantContains: ["⠋", "Discovering Claude Code sessions...", "(13631/13631)", "819 required re-read"]
+    wantContains: ["⠋", "discovering claude code sessions...", "(13631/13631)", "819 required re-read"]
   - key: phase-only
-    phase: Discovering Other sessions...
-    wantContains: ["⠋", "Discovering Other sessions..."]
+    phase: discovering other sessions...
+    wantContains: ["⠋", "discovering other sessions..."]
     wantAbsent: ["(", ")", "re-read", "1/2"]
 
 selection:

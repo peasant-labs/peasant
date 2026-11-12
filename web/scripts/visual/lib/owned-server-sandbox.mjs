@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { seedConfiguredConfigHome } from '../../journey/lib/configured-sandbox.mjs';
 import { isolatedServerSandbox } from './isolated-sandbox.mjs';
 
 /**
@@ -16,6 +17,12 @@ import { isolatedServerSandbox } from './isolated-sandbox.mjs';
  * Only the root is removed. A directory the caller names lies outside it and is
  * kept, with whatever the server wrote there.
  *
+ * The configuration directory the sandbox owns starts as an installed
+ * dashboard: it gets the configured seed (`seedConfiguredConfigHome`), because
+ * a server with no configuration file sends every page to setup. A
+ * configuration directory the caller names is theirs and is used as found:
+ * nothing is written into it, so one with no configuration file still has none.
+ *
  * @param {string} name names the script in the root's directory name
  * @param {{configDir?: string, dataDir?: string}} [named] directories the caller names itself and keeps
  * @param {Record<string, string | undefined>} [inherited] the environment to extend (default: the script's own)
@@ -28,8 +35,9 @@ export function ownedServerSandbox(name, named = {}, inherited = process.env) {
   let sandbox;
   try {
     sandbox = isolatedServerSandbox(root, named, inherited);
+    if (!named.configDir) seedConfiguredConfigHome(sandbox.configDir);
   } catch (error) {
-    // A refused layout leaves nothing behind.
+    // A refused layout or a seed that could not be written leaves nothing behind.
     rmSync(root, { recursive: true, force: true });
     throw error;
   }

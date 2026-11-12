@@ -6,6 +6,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/onboarding"
 	"github.com/peasant-labs/schema"
 )
 
@@ -112,7 +113,7 @@ func BuildSummaryContent(a *WizardAnswers) string {
 		b.WriteString("  License:      none\n")
 	}
 
-	if a.ClaudeRetentionDays >= 9999 {
+	if onboarding.NeverExpires(a.ClaudeRetentionDays) {
 		b.WriteString("  Retention:    never expire\n")
 	} else if a.ClaudeRetentionDays > 0 {
 		b.WriteString(fmt.Sprintf("  Retention:    %d days\n", a.ClaudeRetentionDays))

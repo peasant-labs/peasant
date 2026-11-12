@@ -251,6 +251,9 @@ may open `~/.local/share/peasant` or `~/.config/peasant`.
   script that starts the binary uses them and passes BOTH `...sandbox.args` and `env: sandbox.env` to
   `spawn`. Setting only `--config-dir` is the mistake this replaces: the binary then opens the data
   directory of whoever runs the script.
+- **an owned sandbox starts as an installed dashboard:** `ownedServerSandbox` writes the configured seed
+  (`seedConfiguredConfigHome`) into the config directory it owns, so no page is sent to setup; a config
+  directory you name is used as found, with nothing written into it.
 - **a port that already answers is refused:** `startOwnedServer` checks `/api/v1/health` on the script's
   port before it starts anything and stops with the port and the script's port variable when something
   answers, so a server left from an earlier run is never driven in place of this run's. Its wait ends as
@@ -268,6 +271,9 @@ may open `~/.local/share/peasant` or `~/.config/peasant`.
     own but anything the binary finds through `HOME` is yours.
   - `scripts/journey/api-binary.test.mjs`, `scripts/journey/run-collective-observations.mjs`: `HOME` and
     the config, data and state XDG variables under their own root. The cache variable is inherited.
+  - `scripts/journey/run-kickstart.mjs`: `HOME` and the config, data and state XDG variables under one
+    temp root per theme, with no `config.yaml` on purpose, so the binary starts unconfigured and the
+    walkthrough can test first-run setup. The cache variable is inherited.
 - **what the binary inherits:** the rest of the script's environment, without `OPENCODE_DB` and
   `OPENCODE_DISABLE_CHANNEL_DB`, which name a database by path past every directory above.
 - **naming a directory yourself:** only `shell-nav-default-gate.mjs` takes one

@@ -717,6 +717,45 @@ func truncateWAL(pool *sqlitex.Pool) {
 	_ = sqlitex.ExecuteTransient(conn, "PRAGMA wal_checkpoint(TRUNCATE);", nil)
 }
 
+// RefuseBehind is the read-only check a server-side entry point runs before
+// work that would open the store at dbPath. It returns nil for a missing, new
+// or current store; the refusal Open gives, a *SchemaBehindError, for a store
+// that is behind or that still owes a recount; and the newer-schema refusal
+// for a store a newer build upgraded. It never opens a connection that could
+// write, so a refusal changes no byte. A server uses it to refuse before it
+// claims work, instead of failing later at Open.
+func RefuseBehind(dbPath string) error {
+	if !isStoreFilePath(dbPath) {
+		return nil
+	}
+	head := CurrentSchemaVersion()
+	version, exists, err := peekSchemaVersion(dbPath)
+	if err != nil || !exists || version == 0 {
+		// A new file is created by Open; Open also refuses a version-zero
+		// file that is not new.
+		return err
+	}
+	if version > head {
+		return newerSchemaError(dbPath, version)
+	}
+	if version < head {
+		return &SchemaBehindError{DBPath: dbPath, From: version, To: head}
+	}
+	conn, err := openReadOnlyNoSidecars(dbPath)
+	if err != nil {
+		return fmt.Errorf("store: open %s read-only to check whether it owes a recount: %w; nothing was changed; check the path and read permissions", dbPath, err)
+	}
+	defer conn.Close()
+	owed, err := owedRecountTitlesOnConn(conn)
+	if err != nil {
+		return fmt.Errorf("store: open %s: %w", dbPath, err)
+	}
+	if len(owed) > 0 {
+		return &SchemaBehindError{DBPath: dbPath, From: head, To: head, Owed: owed}
+	}
+	return nil
+}
+
 // IsSchemaBehind reports whether err is, or wraps, a SchemaBehindError.
 func IsSchemaBehind(err error) bool {
 	var behind *SchemaBehindError

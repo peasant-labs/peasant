@@ -31,31 +31,36 @@ import (
 var publicationCaptureYAML []byte
 
 type publicationCaptureCase struct {
-	Name                     string            `yaml:"name"`
-	Harness                  string            `yaml:"harness"`
-	ID                       string            `yaml:"id"`
-	CWD                      string            `yaml:"cwd"`
-	Provenance               string            `yaml:"provenance"`
-	Files                    map[string]string `yaml:"files"`
-	DatabaseFixture          string            `yaml:"database_fixture"`
-	StripCWD                 bool              `yaml:"strip_cwd"`
-	StripModel               bool              `yaml:"strip_model"`
-	RemoveSource             bool              `yaml:"remove_source"`
-	MismatchIdentity         bool              `yaml:"mismatch_identity"`
-	DisappearDuringExtract   bool              `yaml:"disappear_during_extract"`
-	FailSidecar              bool              `yaml:"fail_sidecar"`
-	ChangeSource             bool              `yaml:"change_source"`
-	MutateIndexFile          string            `yaml:"mutate_index_file"`
-	ExpectedManualIndexed    *int              `yaml:"expected_manual_indexed"`
-	ExpectedManualReadiness  string            `yaml:"expected_manual_readiness"`
-	ReindexRemoveSource      bool              `yaml:"reindex_remove_source"`
-	ReindexChangeManaged     bool              `yaml:"reindex_change_managed"`
-	ReindexRemoveProof       bool              `yaml:"reindex_remove_proof"`
-	ReindexChangeSource      bool              `yaml:"reindex_change_source"`
-	ReindexChangeTree        string            `yaml:"reindex_change_tree"`
-	ReindexConcurrentCapture bool              `yaml:"reindex_concurrent_capture"`
-	ReindexMutateAfterRead   bool              `yaml:"reindex_mutate_after_read"`
-	ReindexUnreadableEntries bool              `yaml:"reindex_unreadable_entries"`
+	Name            string            `yaml:"name"`
+	Harness         string            `yaml:"harness"`
+	ID              string            `yaml:"id"`
+	CWD             string            `yaml:"cwd"`
+	Provenance      string            `yaml:"provenance"`
+	Files           map[string]string `yaml:"files"`
+	DatabaseFixture string            `yaml:"database_fixture"`
+	StripCWD        bool              `yaml:"strip_cwd"`
+	// NoGitRemote marks a session that has no project directory: it recorded no
+	// working directory and nothing else names one. Git is asked nothing about it
+	// (the harness's storage folder is never asked), so it has no remote and its
+	// project identity follows its path.
+	NoGitRemote              bool   `yaml:"no_git_remote"`
+	StripModel               bool   `yaml:"strip_model"`
+	RemoveSource             bool   `yaml:"remove_source"`
+	MismatchIdentity         bool   `yaml:"mismatch_identity"`
+	DisappearDuringExtract   bool   `yaml:"disappear_during_extract"`
+	FailSidecar              bool   `yaml:"fail_sidecar"`
+	ChangeSource             bool   `yaml:"change_source"`
+	MutateIndexFile          string `yaml:"mutate_index_file"`
+	ExpectedManualIndexed    *int   `yaml:"expected_manual_indexed"`
+	ExpectedManualReadiness  string `yaml:"expected_manual_readiness"`
+	ReindexRemoveSource      bool   `yaml:"reindex_remove_source"`
+	ReindexChangeManaged     bool   `yaml:"reindex_change_managed"`
+	ReindexRemoveProof       bool   `yaml:"reindex_remove_proof"`
+	ReindexChangeSource      bool   `yaml:"reindex_change_source"`
+	ReindexChangeTree        string `yaml:"reindex_change_tree"`
+	ReindexConcurrentCapture bool   `yaml:"reindex_concurrent_capture"`
+	ReindexMutateAfterRead   bool   `yaml:"reindex_mutate_after_read"`
+	ReindexUnreadableEntries bool   `yaml:"reindex_unreadable_entries"`
 	// ExpectedManualError is whether the manual reindex fails a session.
 	// ExpectedManualDiagnostic and ExpectedManualDiagnosticText name the
 	// diagnostic that manual run must carry for a refused managed pair: its
@@ -333,12 +338,19 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 			if got := publicationStoredProvenance(t, dbPath, id); got != c.Provenance {
 				t.Fatalf("provenance = %q want %q", got, c.Provenance)
 			}
-			wantProject, wantHost, err := ingest.DeriveProjectIdentifiers(installationSalt, git.Remote, session.CWD)
+			wantRemote, wantPath := git.Remote, session.CWD
+			if c.NoGitRemote {
+				wantRemote, wantPath = "", bundle.Metadata.Project.FilePath
+			}
+			wantProject, wantHost, err := ingest.DeriveProjectIdentifiers(installationSalt, wantRemote, wantPath)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if bundle.Metadata.Project.Hash != wantProject || bundle.Metadata.HostSlug != wantHost || bundle.Metadata.Git.Remote == nil || *bundle.Metadata.Git.Remote != git.Remote || bundle.Metadata.SessionID != id {
+			if bundle.Metadata.Project.Hash != wantProject || bundle.Metadata.HostSlug != wantHost || bundle.Metadata.SessionID != id {
 				t.Fatalf("capture did not follow tracked project repair: %+v", bundle.Metadata)
+			}
+			if c.NoGitRemote != (bundle.Metadata.Git.Remote == nil) || (!c.NoGitRemote && *bundle.Metadata.Git.Remote != git.Remote) {
+				t.Fatalf("capture remote = %v, want %q (no git remote %t)", bundle.Metadata.Git.Remote, wantRemote, c.NoGitRemote)
 			}
 			meta = &bundle.Metadata
 			if len(bundle.Associations) != 1 {

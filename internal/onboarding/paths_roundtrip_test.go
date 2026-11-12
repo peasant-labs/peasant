@@ -20,6 +20,7 @@ type pathFieldFixture struct {
 	Key             string   `yaml:"key"`
 	Path            []string `yaml:"path"`
 	Destination     string   `yaml:"destination"`
+	YAMLType        string   `yaml:"yamlType"`
 	Selection       bool     `yaml:"selection"`
 	Bools           []bool   `yaml:"bools"`
 	Options         []string `yaml:"options"`
@@ -66,21 +67,78 @@ func TestPathsRoundTrip(t *testing.T) {
 			t.Errorf("%s path: %v", fixture.Key, err)
 		}
 		if fixture.Selection {
-			assertSelectionRoundTrip(t, model, field)
+			assertSelectionRoundTrip(t, model, field, fixture.YAMLType)
 			continue
 		}
 		for _, token := range fixture.Options {
-			assertTokenRoundTrip(t, model, field, token, fixture.NeverInDocument)
+			assertTokenRoundTrip(t, model, field, token, fixture)
 		}
 		for _, on := range fixture.Bools {
-			assertBoolRoundTrip(t, model, field, on)
+			assertBoolRoundTrip(t, model, field, on, fixture.YAMLType)
 		}
 	}
 	assertLicenseNone(t, model)
 	assertRetentionNeverTransient(t, model, byKey["claude-retention-days"])
 }
 
-func assertSelectionRoundTrip(t *testing.T, model onboarding.Model, field onboarding.Field) {
+// baseDocument is a document with one key the projection must not disturb. It
+// carries the version key so the projected document parses as a configuration.
+func baseDocument() yaml.Node {
+	return yaml.Node{
+		Kind: yaml.DocumentNode,
+		Content: []*yaml.Node{{
+			Kind: yaml.MappingNode,
+			Tag:  "!!map",
+			Content: []*yaml.Node{
+				{Kind: yaml.ScalarNode, Tag: "!!str", Value: "version"},
+				{Kind: yaml.ScalarNode, Tag: "!!int", Value: strconv.Itoa(defaults.ConfigVersion)},
+				{Kind: yaml.ScalarNode, Tag: "!!str", Value: "untouched"},
+				{Kind: yaml.ScalarNode, Tag: "!!str", Value: "keep-me", LineComment: " sibling comment"},
+			},
+		}},
+	}
+}
+
+// project writes the answered field's edits into a fresh document and returns
+// the document, the node at the field's path, and the configuration the written
+// document parses back to. A document the parser refuses fails the test: the
+// projection must write what the configuration can read.
+func project(t *testing.T, model onboarding.Model, field onboarding.Field, cfg *config.Config) (*yaml.Node, *yaml.Node, *config.Config) {
+	t.Helper()
+	doc := baseDocument()
+	if err := model.ProjectEdits(&doc, config.BaseConfig(), cfg, []onboarding.FieldKey{field.Key()}); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := yaml.Marshal(&doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := config.Parse(encoded)
+	if err != nil {
+		t.Fatalf("%s: the projected document does not parse as a configuration: %v\n%s", field.Key(), err, encoded)
+	}
+	node, ok := onboarding.DocumentPath(&doc, field.YAMLPath())
+	if !ok {
+		t.Fatalf("%s path %v missing after projection:\n%s", field.Key(), field.YAMLPath(), encoded)
+	}
+	sibling, ok := onboarding.DocumentPath(&doc, []string{"untouched"})
+	if !ok || sibling.Value != "keep-me" || sibling.LineComment != " sibling comment" {
+		t.Fatalf("%s: projection disturbed an untouched key: %#v", field.Key(), doc.Content[0].Content)
+	}
+	return &doc, node, parsed
+}
+
+func assertYAMLType(t *testing.T, field onboarding.Field, node *yaml.Node, want string) {
+	t.Helper()
+	if want == "" {
+		t.Fatalf("%s: the fixture names no yamlType for a config field", field.Key())
+	}
+	if got := node.ShortTag(); got != "!!"+want {
+		t.Errorf("%s is written as %s (%q), the configuration gives it type !!%s", field.Key(), got, node.Value, want)
+	}
+}
+
+func assertSelectionRoundTrip(t *testing.T, model onboarding.Model, field onboarding.Field, yamlType string) {
 	t.Helper()
 	cfg := config.BaseConfig()
 	value, err := onboarding.SelectionMappingValue(config.SelectionModeSelected, map[string]config.SelectionHarnessConfig{
@@ -99,26 +157,24 @@ func assertSelectionRoundTrip(t *testing.T, model onboarding.Model, field onboar
 	if string(got) != string(value) {
 		t.Fatalf("selection read = %s, want %s", got, value)
 	}
-	var doc yaml.Node
-	if err := model.ProjectAnswered(&doc, cfg, []onboarding.FieldKey{field.Key()}); err != nil {
-		t.Fatal(err)
-	}
-	node, ok := onboarding.DocumentPath(&doc, field.YAMLPath())
-	if !ok {
-		t.Fatal("selection path missing from the document")
-	}
+	_, node, parsed := project(t, model, field, cfg)
 	if node.Kind != yaml.MappingNode {
 		t.Fatalf("selection document kind = %v, want one mapping", node.Kind)
 	}
+	assertYAMLType(t, field, node, yamlType)
+	back, err := field.Read(parsed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(back) != string(value) {
+		t.Fatalf("selection parsed back as %s, want %s", back, value)
+	}
 }
 
-func assertTokenRoundTrip(t *testing.T, model onboarding.Model, field onboarding.Field, token string, neverInDocument bool) {
+func assertTokenRoundTrip(t *testing.T, model onboarding.Model, field onboarding.Field, token string, fixture pathFieldFixture) {
 	t.Helper()
 	cfg := config.BaseConfig()
 	raw := onboarding.StringValue(token)
-	if _, err := strconv.Atoi(token); err == nil && field.Destination() == onboarding.DestClaudeSettings {
-		raw = onboarding.StringValue(token)
-	}
 	if err := field.Write(cfg, onboarding.WriteContext{Config: cfg}, raw); err != nil {
 		t.Fatalf("write %s %q: %v", field.Key(), token, err)
 	}
@@ -129,39 +185,28 @@ func assertTokenRoundTrip(t *testing.T, model onboarding.Model, field onboarding
 	if !sameToken(got, token) {
 		t.Fatalf("%s read %s, want token %q", field.Key(), got, token)
 	}
-	var doc yaml.Node
-	doc.Kind = yaml.DocumentNode
-	doc.Content = []*yaml.Node{{
-		Kind: yaml.MappingNode,
-		Tag:  "!!map",
-		Content: []*yaml.Node{
-			{Kind: yaml.ScalarNode, Tag: "!!str", Value: "untouched"},
-			{Kind: yaml.ScalarNode, Tag: "!!str", Value: "keep-me", LineComment: " sibling comment"},
-		},
-	}}
-	if err := model.ProjectAnswered(&doc, cfg, []onboarding.FieldKey{field.Key()}); err != nil {
-		t.Fatal(err)
-	}
-	if neverInDocument {
+	if fixture.NeverInDocument {
+		doc := baseDocument()
+		if err := model.ProjectEdits(&doc, config.BaseConfig(), cfg, []onboarding.FieldKey{field.Key()}); err != nil {
+			t.Fatal(err)
+		}
 		if _, ok := onboarding.DocumentPath(&doc, []string{"claudeRetentionDays"}); ok {
 			t.Fatalf("%s was written into the document", field.Key())
 		}
 		return
 	}
-	node, ok := onboarding.DocumentPath(&doc, field.YAMLPath())
-	if !ok {
-		t.Fatalf("%s path %v missing after projection", field.Key(), field.YAMLPath())
+	_, node, parsed := project(t, model, field, cfg)
+	assertYAMLType(t, field, node, fixture.YAMLType)
+	back, err := field.Read(parsed)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if node.Value != token && token != "" {
-		t.Fatalf("%s document value = %q, want %q", field.Key(), node.Value, token)
-	}
-	sibling, ok := onboarding.DocumentPath(&doc, []string{"untouched"})
-	if !ok || sibling.Value != "keep-me" {
-		t.Fatalf("projection disturbed an untouched key: %#v", doc.Content[0].Content)
+	if !sameToken(back, token) {
+		t.Fatalf("%s parsed back as %s from the document, want token %q", field.Key(), back, token)
 	}
 }
 
-func assertBoolRoundTrip(t *testing.T, model onboarding.Model, field onboarding.Field, on bool) {
+func assertBoolRoundTrip(t *testing.T, model onboarding.Model, field onboarding.Field, on bool, yamlType string) {
 	t.Helper()
 	cfg := config.BaseConfig()
 	if err := field.Write(cfg, onboarding.WriteContext{Config: cfg}, onboarding.BoolValue(on)); err != nil {
@@ -171,27 +216,28 @@ func assertBoolRoundTrip(t *testing.T, model onboarding.Model, field onboarding.
 	if err != nil {
 		t.Fatal(err)
 	}
-	parsed, err := onboarding.BoolToken(got)
+	parsedBool, err := onboarding.BoolToken(got)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if parsed != on {
-		t.Fatalf("%s = %t, want %t", field.Key(), parsed, on)
+	if parsedBool != on {
+		t.Fatalf("%s = %t, want %t", field.Key(), parsedBool, on)
 	}
-	var doc yaml.Node
-	if err := model.ProjectAnswered(&doc, cfg, []onboarding.FieldKey{field.Key()}); err != nil {
-		t.Fatal(err)
-	}
-	node, ok := onboarding.DocumentPath(&doc, field.YAMLPath())
-	if !ok {
-		t.Fatalf("%s path missing", field.Key())
-	}
+	_, node, parsed := project(t, model, field, cfg)
+	assertYAMLType(t, field, node, yamlType)
 	want := "false"
 	if on {
 		want = "true"
 	}
 	if node.Value != want {
 		t.Fatalf("%s document = %q, want %q", field.Key(), node.Value, want)
+	}
+	back, err := field.Read(parsed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if backBool, err := onboarding.BoolToken(back); err != nil || backBool != on {
+		t.Fatalf("%s parsed back as %s from the document, want %t", field.Key(), back, on)
 	}
 }
 
@@ -210,7 +256,7 @@ func assertLicenseNone(t *testing.T, model onboarding.Model) {
 		t.Fatalf("license = %q, want empty", cfg.Push.License)
 	}
 	var doc yaml.Node
-	if err := model.ProjectAnswered(&doc, cfg, []onboarding.FieldKey{field.Key()}); err != nil {
+	if err := model.ProjectEdits(&doc, config.BaseConfig(), cfg, []onboarding.FieldKey{field.Key()}); err != nil {
 		t.Fatal(err)
 	}
 	encoded, err := yaml.Marshal(&doc)
@@ -238,7 +284,7 @@ func assertRetentionNeverTransient(t *testing.T, model onboarding.Model, field o
 		t.Fatalf("retention = %d, want 90", cfg.ClaudeRetentionDays)
 	}
 	var doc yaml.Node
-	if err := model.ProjectAnswered(&doc, cfg, []onboarding.FieldKey{field.Key()}); err != nil {
+	if err := model.ProjectEdits(&doc, config.BaseConfig(), cfg, []onboarding.FieldKey{field.Key()}); err != nil {
 		t.Fatal(err)
 	}
 	encoded, err := yaml.Marshal(&doc)

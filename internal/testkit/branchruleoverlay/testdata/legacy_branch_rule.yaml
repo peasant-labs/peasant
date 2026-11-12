@@ -1,0 +1,55 @@
+# The legacy wizard saved a project chosen at project level as a rule with no
+# branch list, so a branch recorded in it later was imported without the
+# new-branch setting. The setup page and the terminal now save the branches the
+# person chose, even when they chose every branch of the project: a checkout is
+# saved whole only when it has no named branch, and a branch that appears later
+# is admitted by autoIngestNewBranches.
+#
+# legacy_goldens.yaml records the old wizard and is not edited. A captured
+# scenario whose project is chosen at project level is measured against its
+# entry here instead: the captured golden with the branch list the project
+# shows added to the project rule, and nothing else changed; the loader refuses an
+# entry that changes anything else. The inventory's claude-code project offers
+# main and feature/x; its opencode project offers main.
+#
+# requiredNames is the deletion guard: every captured scenario whose project is
+# chosen at project level must keep an entry.
+requiredNames:
+  - whole-project-auto-ingest-on
+  - whole-project-auto-ingest-off
+  - mixed-project-and-session
+cases:
+  - name: whole-project-auto-ingest-on
+    reason: the project is chosen with both of its branches, so the rule lists them
+    expected:
+      mode: selected
+      autoIngestNewBranches: true
+      harnesses:
+        claude-code:
+          projects:
+            - gitRemote: "git@github.com:acme/tool.git"
+              branches: [feature/x, main]
+
+  - name: whole-project-auto-ingest-off
+    reason: the project is chosen with both of its branches, so the rule lists them
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - gitRemote: "git@github.com:acme/tool.git"
+              branches: [feature/x, main]
+
+  - name: mixed-project-and-session
+    reason: the claude-code project is chosen with both of its branches; the opencode session stays a session
+    expected:
+      mode: selected
+      autoIngestNewBranches: true
+      harnesses:
+        claude-code:
+          projects:
+            - gitRemote: "git@github.com:acme/tool.git"
+              branches: [feature/x, main]
+        opencode:
+          sessions: [oc-main-1]

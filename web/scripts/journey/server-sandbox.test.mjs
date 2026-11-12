@@ -10,6 +10,7 @@ import { parse } from 'yaml';
 import { isolatedServerSandbox } from '../visual/lib/isolated-sandbox.mjs';
 import { directoryNamedBy, ownedServerSandbox } from '../visual/lib/owned-server-sandbox.mjs';
 import { startOwnedServer } from '../visual/lib/owned-server-start.mjs';
+import { CONFIGURED_SANDBOX_CONFIG } from './lib/configured-sandbox.mjs';
 
 const f = parse(readFileSync(new URL('./testdata/server-sandbox.yaml', import.meta.url), 'utf8'));
 const WEB = fileURLToPath(new URL('../..', import.meta.url));
@@ -73,6 +74,11 @@ const modes = {
     const other = join(root, 'other');
     const named = Object.fromEntries(Object.entries(row.named ?? {}).map(([key, path]) => [key, path.replace('$OTHER', other)]));
     for (const directory of Object.values(named)) { mkdirSync(directory, { recursive: true }); writeFileSync(join(directory, 'marker'), 'theirs'); }
+    // The configuration file in the named configuration directory, before the run and after it.
+    const namedConfigFile = named.configDir && join(named.configDir, 'peasant', 'config.yaml');
+    if (row.existingConfig !== undefined) { mkdirSync(join(named.configDir, 'peasant'), { recursive: true }); writeFileSync(namedConfigFile, row.existingConfig); }
+    const wantConfig = row.config === undefined ? undefined : { seed: CONFIGURED_SANDBOX_CONFIG, absent: null, kept: row.existingConfig }[row.config];
+    assert.ok(row.config === undefined || wantConfig !== undefined, `case ${row.name} has the unknown config ${row.config}, or config: kept without existingConfig`);
     for (const end of row.ends) {
       const how = typeof end === 'number' ? ['--end', 'exit', '--status', end] : ['--end', end];
       const wantStatus = typeof end === 'number' ? end : end === 'uncaught-error' ? 1 : 0;
@@ -87,6 +93,10 @@ const modes = {
       assert.equal(existsSync(said.root), false, `the sandbox is gone after the script ends by ${end}`);
       for (const directory of Object.values(named)) assert.equal(readFileSync(join(directory, 'marker'), 'utf8'), 'theirs', `${directory} is the caller's and is kept after the script ends by ${end}`);
       if (named.dataDir) assert.equal(existsSync(join(named.dataDir, 'peasant', 'peasant.db')), true, 'what the server wrote in the named data directory is kept');
+      if (row.config !== undefined) {
+        assert.equal(said.config, wantConfig, `the configuration file the server reads, after the script ends by ${end}`);
+        if (namedConfigFile) assert.equal(existsSync(namedConfigFile) ? readFileSync(namedConfigFile, 'utf8') : null, wantConfig, `the named configuration directory is as the caller made it after the script ends by ${end}`);
+      }
     }
   },
   'owned-refused'(row, root) {

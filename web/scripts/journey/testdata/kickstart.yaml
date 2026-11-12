@@ -1,0 +1,127 @@
+# The built-binary setup journey: the real binary, a throwaway computer with
+# seeded agent recordings, a real browser. Each name below is one mounted case
+# of scripts/journey/kickstart.journey.mjs; the runner and the case file refuse
+# a catalogue that drops or repeats one.
+requiredNames:
+  - fresh-install-redirects-to-setup
+  - scan-progress-and-tree-selection
+  - second-tab-converges-without-reload
+  - every-stop-the-server-shows
+  - review-summary-and-collapsed-diff
+  - save-finish-and-ingest-end
+  - config-holds-only-the-chosen-selection
+  - concurrent-change-offers-mine-or-theirs
+  - selection-page-saves-only-selection
+  - selection-page-names-the-chosen-branch
+  - import-honours-the-recorded-branch
+  - stored-remote-matches-the-tree
+  - computed-styles-and-themes
+cases:
+  - {name: fresh-install-redirects-to-setup}
+  - {name: scan-progress-and-tree-selection}
+  - {name: second-tab-converges-without-reload}
+  - {name: every-stop-the-server-shows}
+  - {name: review-summary-and-collapsed-diff}
+  - {name: save-finish-and-ingest-end}
+  - {name: config-holds-only-the-chosen-selection}
+  - {name: concurrent-change-offers-mine-or-theirs}
+  - {name: selection-page-saves-only-selection}
+  - {name: selection-page-names-the-chosen-branch}
+  - {name: import-honours-the-recorded-branch}
+  - {name: stored-remote-matches-the-tree}
+  - {name: computed-styles-and-themes}
+# The only requests the journey provokes the server to refuse: the deep links to a
+# project and a transcript that were never recorded, and the save that found a
+# changed field. Anything else refused is a finding.
+expectedRefusals:
+  - "400 GET /api/v1/sync/sessions"
+  - "404 GET /api/v1/projects/resolve"
+  - "409 POST /api/v1/kickstart/sessions/<id>/commit"
+# The screens whose step rail shows its labels, with how many labels each has.
+# Fairtrade's frame draws them when its first and last labels have room for five
+# characters, and falls back to numbers alone otherwise; at the journey's desktop
+# width every screen of the wizard (ten stops) and the selection page (three)
+# has room. The rail check fails on these if the labels were not drawn or not
+# measured, so it cannot pass by looking at nothing or at a rail of numbers.
+railScreens:
+  01-village: 10
+  02-scan-progress: 10
+  03-selection-tree: 10
+  04-second-tab: 10
+  05-privacy: 10
+  06-offer: 10
+  07-review-diff: 10
+  08-review-conflict: 10
+  09-finish: 10
+  10-selection-page: 3
+  11-rerun-prefilled: 10
+# Every screen that is captured and probed, in both themes (one file per theme
+# and name: <theme>-<name>.png under review-capture/).
+screens:
+  - 01-village
+  - 02-scan-progress
+  - 03-selection-tree
+  - 04-second-tab
+  - 05-privacy
+  - 06-offer
+  - 07-review-diff
+  - 08-review-conflict
+  - 09-finish
+  - 10-selection-page
+  - 11-rerun-prefilled
+projects:
+  - {name: dark-desktop, theme: dark, width: 1280, height: 900}
+  - {name: light-desktop, theme: light, width: 1280, height: 900}
+# The commit the branch was cut from. A provenance marker must be absent from
+# its web sources, or it proves nothing about this branch.
+baseCommit: 15cf2d0be79715b8e91e96c314c33ac619cdb16f
+provenance:
+  # Strings only this branch introduces, found in the bundle the binary serves.
+  markers:
+    - wizard-host
+    - set up peasant
+    - your selection is saved
+  routes: [/kickstart/, /selection/]
+# The recordings: the ingest end-to-end fixture's Claude root session is the
+# template. Sessions name a prompt (the first is what the tree shows).
+recordings:
+  template: internal/e2e/testdata/claude-fixture/-home-user-projects-peasant-e2e/6a46bcd8-b365-4608-be7d-5601e2fdd805.jsonl
+  repositories:
+    - name: ledger
+      remote: https://github.com/acme/ledger.git
+      sessions:
+        - {name: rounding, branch: main, startedAt: "2026-02-03T09:00:00Z", prompts: ["Fix the ledger rounding when a discount applies after tax.", "Add a test for the rounding of a zero discount."]}
+        - {name: csv-export, branch: main, startedAt: "2026-02-04T09:00:00Z", prompts: ["Add a CSV export for the monthly ledger.", "Include the account code in each exported row."]}
+        - {name: tax-report, branch: feature/tax-report, startedAt: "2026-02-05T09:00:00Z", prompts: ["Draft the tax report totals query.", "Group the totals by quarter."]}
+    - name: marketing-site
+      remote: https://github.com/acme/marketing-site.git
+      sessions:
+        - {name: hero-copy, branch: main, startedAt: "2026-02-06T09:00:00Z", prompts: ["Tighten the hero copy on the pricing page.", "Keep it to one sentence."]}
+        # Recorded on a branch the main clone has since moved off: the clone is on main now.
+        - {name: stray, branch: feature/stray, sharedClone: true, startedAt: "2026-02-07T09:00:00Z", prompts: ["Try a darker footer on the pricing page.", "Compare it with the light one."]}
+  # Generated sessions that a scan reads but the journey never selects: enough that
+  # the scan's progress is on screen long enough to be seen.
+  filler: {repositories: 4, sessions: 80}
+# What the person chooses on the journey: the ledger project's main branch only.
+# `imported` is what the finish panel reports for the import that follows the
+# save: every chosen session is new, none is updated. The seeded recordings are
+# as old as their sessions, so none is counted as still being written.
+chosen:
+  repository: ledger
+  branch: main
+  imported: 2
+  left: [tax-report, hero-copy, stray]
+# The selection page adds one session to what is stored. Its import brings in
+# that one as new; the sessions stored already are unchanged, so none is new or
+# updated again.
+selectionPage:
+  session: tax-report
+  imported: 1
+# The selection page's own case: one branch of a project whose clone has since
+# moved off the branch an older session recorded. `imported` is the sessions
+# that branch adds to what is stored (new; none already stored is updated).
+branchChoice:
+  repository: marketing-site
+  branch: main
+  recordedElsewhere: stray
+  imported: 1

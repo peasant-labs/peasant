@@ -1,0 +1,69 @@
+# Waiting for the browser sign-in to land. `answers` are what each check of the
+# sign-in gets, in order (the last repeats); `fail: true` is a check that could
+# not be made. `steps` move the clock (`advance`, in milliseconds) or stop the
+# wait (`stop`), then say how many checks have been made so far (`checks`) and,
+# when the wait has ended, how (`outcome`). A step without `outcome` says the
+# wait is still going.
+requiredNames:
+  - the-default-pause-between-checks-is-two-seconds
+  - the-popup-wait-asks-only-after-a-pause
+  - the-setup-wait-asks-at-once
+  - a-check-that-fails-is-asked-again
+  - a-sign-in-that-never-lands-times-out
+  - a-wait-with-no-limit-keeps-asking
+  - stopping-ends-the-wait-and-asks-no-more
+  - stopping-before-the-first-pause-asks-nothing
+cases:
+  # No pollMs: the declared pause, which is what the popup and the setup flow
+  # use. Twenty seconds of a sign-in that never lands is ten checks, not more.
+  - name: the-default-pause-between-checks-is-two-seconds
+    options: {checkNow: true}
+    answers: [{authenticated: false}]
+    steps:
+      - {advance: 0, checks: 1}
+      - {advance: 1999, checks: 1}
+      - {advance: 1, checks: 2}
+      - {advance: 18000, checks: 11}
+  - name: the-popup-wait-asks-only-after-a-pause
+    options: {pollMs: 100}
+    answers: [{authenticated: true}]
+    steps:
+      - {advance: 99, checks: 0}
+      - {advance: 1, checks: 1, outcome: signed-in}
+  - name: the-setup-wait-asks-at-once
+    options: {pollMs: 100, checkNow: true}
+    answers: [{authenticated: false}, {authenticated: true}]
+    steps:
+      - {advance: 0, checks: 1}
+      - {advance: 99, checks: 1}
+      - {advance: 1, checks: 2, outcome: signed-in}
+  - name: a-check-that-fails-is-asked-again
+    options: {pollMs: 100}
+    answers: [{fail: true}, {authenticated: false}, {authenticated: true}]
+    steps:
+      - {advance: 100, checks: 1}
+      - {advance: 100, checks: 2}
+      - {advance: 100, checks: 3, outcome: signed-in}
+  - name: a-sign-in-that-never-lands-times-out
+    options: {pollMs: 100, timeoutMs: 250, checkNow: true}
+    answers: [{authenticated: false}]
+    steps:
+      - {advance: 200, checks: 3}
+      - {advance: 100, checks: 4, outcome: timed-out}
+  - name: a-wait-with-no-limit-keeps-asking
+    options: {pollMs: 100}
+    answers: [{authenticated: false}]
+    steps:
+      - {advance: 10000, checks: 100}
+  - name: stopping-ends-the-wait-and-asks-no-more
+    options: {pollMs: 100}
+    answers: [{authenticated: false}]
+    steps:
+      - {advance: 100, checks: 1}
+      - {stop: true, advance: 0, checks: 1, outcome: stopped}
+      - {advance: 1000, checks: 1, outcome: stopped}
+  - name: stopping-before-the-first-pause-asks-nothing
+    options: {pollMs: 100}
+    answers: [{authenticated: true}]
+    steps:
+      - {stop: true, advance: 1000, checks: 0, outcome: stopped}

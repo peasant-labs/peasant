@@ -8,6 +8,12 @@
 # setup readonly-directory is the text in file, in a directory the server may
 # not write to.
 #
+# interleave lists what another writer leaves in config.yaml between the update's
+# read and its swap, a writer that ignores the lock; the update recomputes once
+# against what is there. holdLock has another writer hold the lock for the whole
+# request. fileEquals is the exact file a refusal leaves when the other writer
+# changed it.
+#
 # A 200 case names the key, the saved value and effective value as JSON, and
 # text the saved file must and must not hold. A GET after it must return the
 # same row, and the running server must apply the saved value. Any other
@@ -40,6 +46,9 @@ requiredNames:
   - an integer write names the number
   - a string write names the text
   - a string list write names the list
+  - an update keeps a change another writer made while it was prepared
+  - an update that finds the file changed twice is refused
+  - an update that cannot take the lock is refused after the wait
 cases:
   - name: a write budget cannot be edited by the dashboard
     file: |
@@ -170,7 +179,7 @@ cases:
     body: '{"key": "selection.mode", "value": "selected"}'
     status: 400
     key: selection.mode
-    errorContains: ["change it with peasant kickstart or peasant config", "Nothing was changed"]
+    errorContains: ["change it on the selection page", "Nothing was changed"]
   - name: a request with an undeclared field is refused
     file: |
       version: 1
@@ -254,3 +263,52 @@ cases:
     value: '["claude-code", "codex"]'
     effective: '["claude-code", "codex"]'
     fileContains: ["sources:", "- claude-code", "- codex"]
+  # The update reads the file under the lock and swaps it only if it is still
+  # what was read. A writer that ignores the lock can still replace the file, so a
+  # swap that finds it changed recomputes once against the new bytes and keeps
+  # that writer's change.
+  - name: an update keeps a change another writer made while it was prepared
+    file: |
+      version: 1
+      push:
+        license: ""
+    interleave:
+      - |
+        version: 1
+        push:
+          license: ""
+          visibility: group
+    body: '{"key": "push.license", "value": "CC0-1.0"}'
+    status: 200
+    key: push.license
+    value: '"CC0-1.0"'
+    effective: '"CC0-1.0"'
+    fileContains: ["license: CC0-1.0", "visibility: group"]
+  - name: an update that finds the file changed twice is refused
+    file: |
+      version: 1
+    interleave:
+      - |
+        version: 1
+        push:
+          visibility: group
+      - |
+        version: 1
+        push:
+          visibility: public
+    body: '{"key": "push.license", "value": "CC0-1.0"}'
+    status: 500
+    key: push.license
+    errorContains: ["changed again", "Nothing was changed"]
+    fileEquals: |
+      version: 1
+      push:
+        visibility: public
+  - name: an update that cannot take the lock is refused after the wait
+    file: |
+      version: 1
+    holdLock: true
+    body: '{"key": "push.license", "value": "CC0-1.0"}'
+    status: 503
+    key: push.license
+    errorContains: ["another change holds the configuration file", "Nothing was changed"]

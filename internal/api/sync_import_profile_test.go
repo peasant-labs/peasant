@@ -37,12 +37,12 @@ func TestWebImportStoresAProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := syncResidueHandler(t, dataHome, cfg)
-	pipeline, closeStore, _, err := h.newIngestPipeline(ingest.NewProgressState(), nil)
+	built, err := h.newIngestPipeline(ingest.NewProgressState(), nil)
 	if err != nil {
 		t.Fatalf("build the web import pipeline: %v", err)
 	}
-	result, err := pipeline.Run(t.Context())
-	closeStore()
+	result, err := built.pipeline.Run(t.Context())
+	built.release()
 	if err != nil {
 		t.Fatalf("web import: %v", err)
 	}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/coder/websocket"
@@ -32,6 +33,31 @@ type Hub struct {
 	subscribeCh   chan subscribeMsg
 	unsubscribeCh chan unsubscribeMsg
 	broadcastCh   chan broadcastMsg
+
+	// kickstart answers a kickstart subscription with the live sessions. The
+	// server attaches it before the hub runs; a hub with none sends no
+	// kickstart snapshot.
+	kickstartMu sync.RWMutex
+	kickstart   kickstartSnapshotSource
+}
+
+// kickstartSnapshotSource yields one session event per live kickstart session.
+// An empty sessionID names every live session; otherwise only that session.
+type kickstartSnapshotSource interface {
+	snapshotEvents(sessionID string) []schema.LocalKickstartEvent
+}
+
+// attachKickstart sets the source a kickstart subscription is answered from.
+func (h *Hub) attachKickstart(source kickstartSnapshotSource) {
+	h.kickstartMu.Lock()
+	h.kickstart = source
+	h.kickstartMu.Unlock()
+}
+
+func (h *Hub) kickstartSource() kickstartSnapshotSource {
+	h.kickstartMu.RLock()
+	defer h.kickstartMu.RUnlock()
+	return h.kickstart
 }
 
 type broadcastMsg struct {
@@ -201,6 +227,18 @@ func (h *Hub) Broadcast(topic ChannelTopic, msg ServerMessage) {
 	h.broadcastCh <- broadcastMsg{topic: topic, message: msg}
 }
 
+// broadcastContext is Broadcast that gives up when ctx is done, so a task that
+// outlives the hub loop at shutdown never blocks on a channel nobody drains.
+// It reports whether the hub accepted the message.
+func (h *Hub) broadcastContext(ctx context.Context, topic ChannelTopic, msg ServerMessage) bool {
+	select {
+	case h.broadcastCh <- broadcastMsg{topic: topic, message: msg}:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
 // RefreshQuality fetches current quality data and broadcasts to subscribers.
 // Called after annotation mutations that affect quality metrics.
 func (h *Hub) RefreshQuality(ctx context.Context) {
@@ -342,6 +380,14 @@ func (h *Hub) sendSnapshots(ctx context.Context, conn *Conn, subs []ChannelSubsc
 			// Turn content is the directory and segment reads. A header
 			// projection fault is logged and does not drop this frame.
 			msg = sessionDetailFrame(sub, detail)
+		case TopicKickstart:
+			// One session snapshot per live session id, never a map of sessions.
+			if source := h.kickstartSource(); source != nil {
+				for _, event := range source.snapshotEvents(sub.ID) {
+					conn.Send(ServerMessage{Type: MsgKickstart, Data: &event})
+				}
+			}
+			continue
 		case TopicProjectFamiliarity:
 			projectHash, hashErr := schema.NewProjectHash(sub.ID)
 			if hashErr != nil {

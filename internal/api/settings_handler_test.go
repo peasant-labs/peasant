@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -60,6 +61,9 @@ const (
 	// settingUpdateReadOnlyDirectory is the file in a directory the server
 	// may not write to.
 	settingUpdateReadOnlyDirectory settingUpdateSetup = "readonly-directory"
+	// settingUpdateUnconfigured is a server started with no configuration file
+	// path at all.
+	settingUpdateUnconfigured settingUpdateSetup = "unconfigured"
 )
 
 type settingUpdateCase struct {
@@ -74,6 +78,16 @@ type settingUpdateCase struct {
 	FileContains  []string           `yaml:"fileContains"`
 	FileOmits     []string           `yaml:"fileOmits"`
 	ErrorContains []string           `yaml:"errorContains"`
+	// Interleave lists what another writer leaves in the file between the
+	// update's read and its swap, one entry for each time the update gets there.
+	Interleave []string `yaml:"interleave"`
+	// HoldLock has another writer hold the configuration lock for the whole
+	// request.
+	HoldLock bool `yaml:"holdLock"`
+	// FileEquals is the exact file a refusal leaves, for a case whose other
+	// writer changed the file under it. Without it a refusal leaves the file as
+	// it was.
+	FileEquals string `yaml:"fileEquals"`
 }
 
 // TestSettingsServeEveryConfigKey reads testdata/settings-keys.yaml. Every
@@ -183,6 +197,23 @@ func TestSettingsUpdateFixtures(t *testing.T) {
 			handler := newTestSettingsHandler(t, path)
 			running := config.BaseConfig()
 			handler.live = newLiveConfig(running)
+			writes := 0
+			handler.afterRead = func() {
+				if writes < len(c.Interleave) {
+					if err := os.WriteFile(path, []byte(c.Interleave[writes]), defaults.PublicFilePerm); err != nil {
+						t.Error(err)
+					}
+					writes++
+				}
+			}
+			if c.HoldLock {
+				handler.lockWait = 50 * time.Millisecond
+				holder, err := config.OpenConfigFile(path, time.Now().Add(5*time.Second))
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = holder.Close() })
+			}
 
 			recorder := httptest.NewRecorder()
 			handler.handleUpdateSetting(recorder, httptest.NewRequest(http.MethodPatch, defaults.RouteSettings.String(), strings.NewReader(c.Body)))
@@ -203,7 +234,11 @@ func TestSettingsUpdateFixtures(t *testing.T) {
 						t.Errorf("refusal %q does not say %q", refusal.Error, text)
 					}
 				}
-				if after := snapshotConfigPath(t, path); after != before {
+				if c.FileEquals != "" {
+					if written, err := os.ReadFile(path); err != nil || string(written) != c.FileEquals {
+						t.Errorf("a refused update left %q (%v), want exactly the other writer's %q", written, err, c.FileEquals)
+					}
+				} else if after := snapshotConfigPath(t, path); after != before {
 					t.Errorf("a refused update changed the configuration path:\nbefore: %s\nafter:  %s", before, after)
 				}
 				if handler.live.load() != running {
@@ -288,6 +323,9 @@ func TestSettingsReadFixtures(t *testing.T) {
 			}
 			path := filepath.Join(t.TempDir(), "config.yaml")
 			arrangeConfigPath(t, c.Setup, c.File, path)
+			if c.Setup == settingUpdateUnconfigured {
+				path = ""
+			}
 			handler := newTestSettingsHandler(t, path)
 			if c.RunningFile != "" {
 				running := config.BaseConfig()
@@ -461,7 +499,7 @@ func assertExactSettingKeys(t *testing.T, what string, got map[string]bool, want
 func arrangeConfigPath(t *testing.T, setup settingUpdateSetup, file, path string) string {
 	t.Helper()
 	switch setup {
-	case settingUpdateMissing:
+	case settingUpdateMissing, settingUpdateUnconfigured:
 	case settingUpdateDirectory:
 		if err := os.Mkdir(path, defaults.PrivateDirPerm); err != nil {
 			t.Fatal(err)
@@ -643,5 +681,33 @@ func TestLiveConfigKeepsReadOnlyKeysOnSave(t *testing.T) {
 	}
 	if applied == running || field(running, catalog[0]) != 7 {
 		t.Error("apply changed the running snapshot in place instead of replacing it")
+	}
+}
+
+// TestSettingsReadErrorCodesAreDeclared holds the codes GET /api/v1/settings
+// writes to the contract's record of them: the same set of tokens, and the
+// status each answers with. The settings routes keep the shared error body, so
+// the codes are tokens the record documents, not a closed set in the types.
+func TestSettingsReadErrorCodesAreDeclared(t *testing.T) {
+	t.Parallel()
+	declared, reason := loadSettingsErrorsContract(t)
+	if declared == nil {
+		t.Skipf("the settings error record is not on this machine: %s; make check reads it from the module cache", reason)
+	}
+	written := map[string]string{
+		"500": strings.Join([]string{settingsUnreadableCode, settingsAutoPublishUnreadableCode, settingsValueNotAppliedCode, publishingContractBreachCode}, ","),
+		"503": strings.Join([]string{settingsUnavailableCode, autoPublishUnavailableCode}, ","),
+	}
+	for status, codes := range written {
+		got := strings.Split(codes, ",")
+		slices.Sort(got)
+		want := append([]string(nil), declared["getSettings"][status]...)
+		slices.Sort(want)
+		if !slices.Equal(got, want) {
+			t.Errorf("GET /api/v1/settings writes %v with %s, the contract declares %v", got, status, want)
+		}
+	}
+	if len(declared["getSettings"]) != len(written) {
+		t.Errorf("the contract declares statuses %v for GET /api/v1/settings, the handler writes %v", declared["getSettings"], written)
 	}
 }

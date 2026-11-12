@@ -1,0 +1,130 @@
+# The same chosen sessions save the same config.yaml whichever surface chose them.
+#
+# The terminal chooses by ticking rows. The web setup page reports the ids of the
+# sessions it chose and nothing else. Each case drives the mounted terminal over a
+# real scan with the named keys, checks that the sessions the terminal ended up
+# choosing are exactly `chosen`, then gives the web path those same ids and
+# compares the two saved selections as YAML bytes. Both must also equal
+# `expected`, so a derivation that is wrong in the same way on both surfaces
+# fails too.
+#
+# A checkout is saved with the branches it shows, even when it shows one, because
+# choosing a branch saves that branch. A branch that appears later is admitted by
+# autoIngestNewBranches, not by a rule with no branch list.
+#
+# requiredNames is the deletion guard: each gesture below must keep a case.
+requiredNames:
+  - project-row
+  - single-branch-row
+  - every-branch-row-of-a-multi-branch-project
+  - select-all
+  - project-row-of-a-single-branch-project
+  - branch-row-of-a-single-branch-project
+  - project-row-of-a-checkout-with-no-named-branch
+inventories:
+  - name: two-branches
+    paths:
+      - {key: clone-a, state: directory}
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", pathKey: clone-a, branch: main, sessionId: 11111111-1111-4111-8111-111111111111, title: main one}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", pathKey: clone-a, branch: main, sessionId: 22222222-2222-4222-8222-222222222222, title: main two}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", pathKey: clone-a, branch: release, sessionId: 33333333-3333-4333-8333-333333333333, title: release one}
+  - name: one-branch
+    paths:
+      - {key: clone-b, state: directory}
+    listings:
+      - {harness: claude-code, projectName: solo, gitRemote: "git@github.com:acme/solo.git", pathKey: clone-b, branch: main, sessionId: 44444444-4444-4444-8444-444444444444, title: solo main}
+  - name: no-named-branch
+    paths:
+      - {key: clone-c, state: directory}
+    listings:
+      - {harness: claude-code, projectName: notes, gitRemote: "git@github.com:acme/notes.git", pathKey: clone-c, sessionId: 55555555-5555-4555-8555-555555555555, title: notes one}
+      - {harness: claude-code, projectName: notes, gitRemote: "git@github.com:acme/notes.git", pathKey: clone-c, sessionId: 66666666-6666-4666-8666-666666666666, title: notes two}
+cases:
+  - name: project-row
+    inventory: two-branches
+    actions: [toggle]
+    chosen:
+      - 11111111-1111-4111-8111-111111111111
+      - 22222222-2222-4222-8222-222222222222
+      - 33333333-3333-4333-8333-333333333333
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      projects:
+        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [clone-a], branches: [main, release]}
+
+  - name: single-branch-row
+    inventory: two-branches
+    actions: [expand, down, toggle]
+    chosen:
+      - 11111111-1111-4111-8111-111111111111
+      - 22222222-2222-4222-8222-222222222222
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      projects:
+        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [clone-a], branches: [main]}
+
+  - name: every-branch-row-of-a-multi-branch-project
+    inventory: two-branches
+    # Ticking a branch row opens it, so the next branch row is three rows down:
+    # past the two sessions of the branch just ticked.
+    actions: [expand, down, toggle, down, down, down, toggle]
+    chosen:
+      - 11111111-1111-4111-8111-111111111111
+      - 22222222-2222-4222-8222-222222222222
+      - 33333333-3333-4333-8333-333333333333
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      projects:
+        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [clone-a], branches: [main, release]}
+
+  - name: select-all
+    inventory: two-branches
+    actions: [select-all]
+    chosen:
+      - 11111111-1111-4111-8111-111111111111
+      - 22222222-2222-4222-8222-222222222222
+      - 33333333-3333-4333-8333-333333333333
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      projects:
+        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [clone-a], branches: [main, release]}
+
+  # The only branch of a checkout: ticking the project and ticking the branch
+  # choose the same session, so they save the same rule.
+  - name: project-row-of-a-single-branch-project
+    inventory: one-branch
+    actions: [toggle]
+    chosen: [44444444-4444-4444-8444-444444444444]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      projects:
+        - {harness: claude-code, gitRemote: "git@github.com:acme/solo.git", pathKeys: [clone-b], branches: [main]}
+
+  - name: branch-row-of-a-single-branch-project
+    inventory: one-branch
+    actions: [expand, down, toggle]
+    chosen: [44444444-4444-4444-8444-444444444444]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      projects:
+        - {harness: claude-code, gitRemote: "git@github.com:acme/solo.git", pathKeys: [clone-b], branches: [main]}
+
+  # No branch is named, so there is none to save: the checkout is the rule.
+  - name: project-row-of-a-checkout-with-no-named-branch
+    inventory: no-named-branch
+    actions: [toggle]
+    chosen:
+      - 55555555-5555-4555-8555-555555555555
+      - 66666666-6666-4666-8666-666666666666
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      projects:
+        - {harness: claude-code, gitRemote: "git@github.com:acme/notes.git", pathKeys: [clone-c]}

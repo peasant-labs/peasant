@@ -12,6 +12,12 @@ requiredNames:
   - pathless-rule-uses-resolved-clone-path
   - git-resolution-skipped-when-not-needed
   - auto-ingest-new-branches-follows-config
+  - recorded-branch-wins-over-current-head
+  - recorded-branch-admits-when-current-head-moved
+  - head-used-only-when-no-branch-recorded
+  - branch-list-never-admits-a-session-in-a-detached-checkout
+  - branch-list-never-admits-a-branchless-session-with-auto-ingest-on
+  - match-withheld-conflicts-are-counted-in-the-summary
 cases:
   - name: prepare-builds-complete-cohort
     harness: claude-code
@@ -72,6 +78,10 @@ cases:
       - aaaa1111-1111-4111-8111-111111111111
       - claude-code
       - name "demo"
+      - /config/chosen.yaml
+    summaryContains:
+      - 1 session was left out
+      - the selection rules for its project disagree
       - /config/chosen.yaml
   - name: match-unknown-session-fails-closed
     harness: claude-code
@@ -152,3 +162,110 @@ cases:
     expectGitCalls: 2
     expectMatch: true
     expectMatchWhenDisabled: false
+  # A session belongs to the branch its transcript recorded, the branch the tree
+  # groups it under. The clone has moved on since: git is asked for the remote
+  # only, and the checked-out branch never replaces a recorded one.
+  - name: recorded-branch-wins-over-current-head
+    harness: claude-code
+    projects:
+      - gitRemote: https://github.com/acme/tool.git
+        branches: [main]
+    sessions:
+      - id: aaaa1111-1111-4111-8111-111111111111
+        cwd: /workspace/tool
+        branch: feature/stray
+    gitRemote: https://github.com/acme/tool.git
+    gitBranch: main
+    expectGitCalls: 1
+    expectMatch: false
+  - name: recorded-branch-admits-when-current-head-moved
+    harness: claude-code
+    projects:
+      - gitRemote: https://github.com/acme/tool.git
+        branches: [main]
+    sessions:
+      - id: aaaa1111-1111-4111-8111-111111111111
+        cwd: /workspace/tool
+        branch: main
+    gitRemote: https://github.com/acme/tool.git
+    gitBranch: feature/moved
+    expectGitCalls: 1
+    expectMatch: true
+  # Only a session that recorded no branch is placed by the checkout, and the
+  # directory is asked once however many sessions share it.
+  - name: head-used-only-when-no-branch-recorded
+    harness: claude-code
+    projects:
+      - gitRemote: https://github.com/acme/tool.git
+        branches: [main]
+    sessions:
+      - id: aaaa1111-1111-4111-8111-111111111111
+        cwd: /workspace/tool
+      - id: bbbb2222-2222-4222-8222-222222222222
+        cwd: /workspace/tool
+        branch: feature/stray
+    gitRemote: https://github.com/acme/tool.git
+    gitBranch: main
+    expectGitCalls: 2
+    checkSecondMatch: true
+    expectMatch: true
+    expectSecondMatch: false
+  # A rule that lists branches never admits a session that has no branch, and
+  # autoIngestNewBranches only admits a branch outside the list, not the absence
+  # of one. A detached checkout is on no branch: git reports HEAD, which is not a
+  # branch name, so the session is branchless and is not admitted as a new branch.
+  - name: branch-list-never-admits-a-session-in-a-detached-checkout
+    harness: claude-code
+    autoIngestNewBranches: true
+    projects:
+      - gitRemote: https://github.com/acme/tool.git
+        branches: [main]
+    sessions:
+      - id: aaaa1111-1111-4111-8111-111111111111
+        cwd: /workspace/tool
+    gitRemote: https://github.com/acme/tool.git
+    gitBranch: HEAD
+    expectGitCalls: 2
+    expectMatch: false
+  - name: branch-list-never-admits-a-branchless-session-with-auto-ingest-on
+    harness: claude-code
+    autoIngestNewBranches: true
+    projects:
+      - gitRemote: https://github.com/acme/tool.git
+        branches: [main]
+    sessions:
+      - id: aaaa1111-1111-4111-8111-111111111111
+        cwd: /workspace/tool
+    gitRemote: https://github.com/acme/tool.git
+    gitBranch: ""
+    expectGitCalls: 2
+    expectMatch: false
+  # Two sessions of one project are withheld by the same disagreement: the summary
+  # counts both, and names the file to edit.
+  - name: match-withheld-conflicts-are-counted-in-the-summary
+    harness: claude-code
+    projects:
+      - name: demo
+        branches: [main]
+      - name: demo
+        branches: [other]
+    sessions:
+      - id: aaaa1111-1111-4111-8111-111111111111
+        projectName: demo
+        cwd: /workspace/demo
+      - id: bbbb2222-2222-4222-8222-222222222222
+        projectName: demo
+        cwd: /workspace/demo
+    gitBranch: main
+    checkSecondMatch: true
+    expectGitCalls: 2
+    expectMatch: false
+    expectSecondMatch: false
+    expectConflictCount: 2
+    noticeContains:
+      - aaaa1111-1111-4111-8111-111111111111
+      - bbbb2222-2222-4222-8222-222222222222
+    summaryContains:
+      - 2 sessions were left out
+      - the selection rules for their projects disagree
+      - /config/chosen.yaml

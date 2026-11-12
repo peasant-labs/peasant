@@ -6,6 +6,9 @@ requiredNames:
   - harvest-index-only-skips-filter
   - harvest-all-skips-filter
   - harvest-explicit-session-skips-filter
+  - harvest-selected-admits-the-session-recorded-on-the-chosen-branch
+  - harvest-selected-refuses-a-session-recorded-on-another-branch
+  - harvest-selected-places-an-unrecorded-session-where-the-store-put-it
 ids:
   selected: 11111111-1111-4111-8111-111111111111
   other: 22222222-2222-4222-8222-222222222222
@@ -35,3 +38,30 @@ cases:
       - 22222222-2222-4222-8222-222222222222
     expectAbsent:
       - 11111111-1111-4111-8111-111111111111
+  # The clone sits on the chosen branch. A session recorded on that branch is
+  # imported; a session recorded on another branch is not, whatever the clone
+  # has checked out now.
+  - name: harvest-selected-admits-the-session-recorded-on-the-chosen-branch
+    branchRule: true
+    expectFilter: true
+    expectImported:
+      - 44444444-4444-4444-8444-444444444444
+  - name: harvest-selected-refuses-a-session-recorded-on-another-branch
+    branchRule: true
+    recordedElsewhere: true
+    expectFilter: true
+    expectAbsent:
+      - 44444444-4444-4444-8444-444444444444
+  # The first harvest stores a session that recorded no branch while the clone
+  # sits on the chosen branch. The clone then moves on. The next selected harvest
+  # judges the unchanged session by the branch the store holds, as the setup tree
+  # lists it, so it is not left out.
+  - name: harvest-selected-places-an-unrecorded-session-where-the-store-put-it
+    branchRule: true
+    unrecorded: true
+    preludeAll: true
+    moveClone: true
+    expectFilter: true
+    expectNoLeftOutNotice: true
+    expectImported:
+      - 44444444-4444-4444-8444-444444444444

@@ -6,7 +6,7 @@ cases:
         body: '{"type":"user","message":{"role":"user","content":"first"}}'
       - path: project/22222222-2222-4222-8222-222222222222.jsonl
         body: '{"type":"user","message":{"role":"user","content":"second"}}'
-    phase: Discovering Claude Code sessions...
+    phase: discovering claude code sessions...
     counts: [0, 1, 2]
     total: 2
     # No evidence cache is attached, so every finished source had to be read.

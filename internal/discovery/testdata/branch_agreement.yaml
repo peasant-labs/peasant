@@ -1,0 +1,224 @@
+# The tree and the import filter place one session on one branch. Each case
+# writes a real Claude recording, then runs the real scan (the tree's listing)
+# and the real selection filter over it, with the same stored-session index and
+# a git double that answers headBranch for every directory it is asked about.
+#
+#   harness        the harness that recorded the session (claude-code when absent)
+#   subfolder      a folder inside the case's temporary clone, used as the cwd
+#   folderOnly     the recording names no cwd; its project folder decodes to the clone
+#   noDirectory    the recording names no cwd and is filed under a folder that
+#                  cannot exist on any machine (the test checks that before it
+#                  relies on it): the session has no project directory at all
+#   chosenSession  the saved selection names the session by id, not its project
+#   recordedBranch the gitBranch the recording names
+#   stored         the store holds the session (branch storedBranch)
+#   sourceChanged  the recording changed after the store imported it
+#   chosenBranch   the saved selection names this branch of the project
+#   treeBranch     the branch the scan lists the session under
+#   storedRemote   the remote the store holds for the session (the shared one when
+#                  absent); headRemote is what git answers for every directory,
+#                  chosenRemote the remote of the saved selection, and treeRemote
+#                  the remote the scan lists the session under; each is the shared
+#                  remote when absent (treeRemote: "" is a session listed with none)
+#   matched        whether the filter admits the session
+#   extractsNoBranch  the harness's own metadata extraction, run over the same
+#                  recording, stores no branch and never asks git for one: the
+#                  store agrees with the tree and the filter
+#   branchDirs     the directories git was asked for the checked-out branch, by
+#                  the scan and by the filter alike ({clone} and {subfolder} name
+#                  the case's own directories)
+#   remoteDirs     the distinct directories git was asked for the remote, likewise
+#   extracts       the harness's own metadata extraction runs over the same
+#                  recording and asks git about the same directories as the scan
+#                  and the filter (branchDirs, remoteDirs)
+#   extractsRemote the remote that extraction stores; it must also be the remote
+#                  the scan listed the session under before the import
+#   upstreamRemote the remote the recorded branch tracks, where the clone's origin
+#                  (headRemote) is another: a fork's feature branch
+#   recordedRemote the remote the recording itself names (a Codex repository_url)
+#
+# requiredNames is the deletion guard: every name below must still be present.
+requiredNames:
+  - no-recorded-branch-tree-and-filter-ask-the-same-directory
+  - no-recorded-directory-tree-and-filter-ask-the-decoded-folder
+  - recorded-branch-tree-and-filter-ask-no-directory
+  - no-recorded-branch-uses-stored-branch
+  - changed-source-falls-back-to-the-checkout-in-both
+  - recording-only-harness-tree-filter-and-store-all-say-no-branch
+  - stored-remote-changed-tree-and-filter-agree
+  - changed-source-remote-falls-back-to-the-directory-in-both
+  - no-project-directory-tree-and-filter-ask-git-for-nothing
+  - no-project-directory-session-chosen-by-id-is-still-admitted
+  - recorded-branch-upstream-names-the-remote-in-tree-store-and-filter
+  - explicit-recorded-remote-wins-in-tree-store-and-filter
+cases:
+  # The working directory is a subfolder of the clone. Both ask that folder, not
+  # the clone root: a linked worktree's branch is its own.
+  - name: no-recorded-branch-tree-and-filter-ask-the-same-directory
+    subfolder: packages/web
+    headBranch: main
+    chosenBranch: main
+    treeBranch: main
+    matched: true
+    branchDirs: ["{subfolder}"]
+    remoteDirs: ["{subfolder}"]
+  - name: no-recorded-directory-tree-and-filter-ask-the-decoded-folder
+    folderOnly: true
+    headBranch: main
+    chosenBranch: main
+    treeBranch: main
+    matched: true
+    branchDirs: ["{clone}"]
+    remoteDirs: ["{clone}"]
+  - name: recorded-branch-tree-and-filter-ask-no-directory
+    subfolder: packages/web
+    recordedBranch: feature/stray
+    headBranch: main
+    chosenBranch: main
+    treeBranch: feature/stray
+    matched: false
+    branchDirs: []
+    remoteDirs: ["{subfolder}"]
+  # The clone has moved to develop since the store imported the session with
+  # main. Both read the store: neither asks git.
+  - name: no-recorded-branch-uses-stored-branch
+    subfolder: packages/web
+    stored: true
+    storedBranch: main
+    headBranch: develop
+    chosenBranch: main
+    treeBranch: main
+    matched: true
+    branchDirs: []
+    remoteDirs: []
+  # A recording that changed after the import is not stored evidence. Both ask
+  # the checkout, which has moved to develop.
+  - name: changed-source-falls-back-to-the-checkout-in-both
+    subfolder: packages/web
+    stored: true
+    sourceChanged: true
+    storedBranch: main
+    headBranch: develop
+    chosenBranch: main
+    treeBranch: develop
+    matched: false
+    branchDirs: ["{subfolder}"]
+    remoteDirs: ["{subfolder}"]
+  # Codex records its git context once in session_meta, and this rollout names
+  # none. The clone sits on the chosen branch, but a Codex session that recorded
+  # no branch has none: the tree lists it branchless, the filter does not admit
+  # it, and the metadata extraction stores no branch. Nobody asks git.
+  - name: recording-only-harness-tree-filter-and-store-all-say-no-branch
+    harness: codex
+    subfolder: packages/web
+    headBranch: main
+    chosenBranch: main
+    treeBranch: ""
+    matched: false
+    extractsNoBranch: true
+    branchDirs: []
+    remoteDirs: ["{subfolder}"]
+  # The clone's remote has changed since the store imported the session. Both read
+  # the store's remote, which is the one the person chose in the tree: neither
+  # asks git, so the filter does not judge the session by a repository the tree
+  # never showed.
+  - name: stored-remote-changed-tree-and-filter-agree
+    subfolder: packages/web
+    stored: true
+    storedBranch: main
+    storedRemote: https://github.com/example-org/stored.git
+    headBranch: main
+    headRemote: https://github.com/example-org/moved.git
+    chosenBranch: main
+    chosenRemote: https://github.com/example-org/stored.git
+    treeBranch: main
+    treeRemote: https://github.com/example-org/stored.git
+    matched: true
+    branchDirs: []
+    remoteDirs: []
+  # A recording that changed after the import is not stored evidence. Both ask
+  # the one directory, which now answers with the moved remote.
+  - name: changed-source-remote-falls-back-to-the-directory-in-both
+    subfolder: packages/web
+    stored: true
+    sourceChanged: true
+    storedBranch: develop
+    storedRemote: https://github.com/example-org/stored.git
+    headBranch: develop
+    headRemote: https://github.com/example-org/moved.git
+    chosenBranch: develop
+    chosenRemote: https://github.com/example-org/moved.git
+    treeBranch: develop
+    treeRemote: https://github.com/example-org/moved.git
+    matched: true
+    branchDirs: ["{subfolder}"]
+    remoteDirs: ["{subfolder}"]
+  # The recording names no directory and is filed under a folder that decodes to
+  # none. The harness's storage folder is never asked, because it can sit inside an
+  # unrelated repository, so the session has no remote and no branch: the scan
+  # lists it with neither, git is asked nothing by the scan, the filter or the
+  # extraction, the extraction stores no remote, and a choice of its project does
+  # not reach it.
+  - name: no-project-directory-tree-and-filter-ask-git-for-nothing
+    noDirectory: true
+    extracts: true
+    extractsRemote: ""
+    headBranch: main
+    headRemote: https://github.com/example-org/dotfiles.git
+    chosenBranch: main
+    treeBranch: ""
+    treeRemote: ""
+    matched: false
+    branchDirs: []
+    remoteDirs: []
+  # The same session is still selected by its id, as before.
+  - name: no-project-directory-session-chosen-by-id-is-still-admitted
+    noDirectory: true
+    chosenSession: true
+    headBranch: main
+    headRemote: https://github.com/example-org/dotfiles.git
+    chosenBranch: main
+    treeBranch: ""
+    treeRemote: ""
+    matched: true
+    branchDirs: []
+    remoteDirs: []
+  # A fork: the clone's origin and its checkout are the fork, but the branch the
+  # session recorded tracks the upstream repository. The session belongs to the
+  # upstream. The scan lists it there before the import, the extraction stores it
+  # there, and the filter admits a choice of the upstream's branch; none of them
+  # asks git about the branch it recorded.
+  - name: recorded-branch-upstream-names-the-remote-in-tree-store-and-filter
+    subfolder: packages/web
+    recordedBranch: feature/fork
+    headBranch: main
+    headRemote: https://github.com/example-org/fork.git
+    upstreamRemote: https://github.com/example-org/upstream.git
+    chosenBranch: feature/fork
+    chosenRemote: https://github.com/example-org/upstream.git
+    treeBranch: feature/fork
+    treeRemote: https://github.com/example-org/upstream.git
+    matched: true
+    extracts: true
+    extractsRemote: https://github.com/example-org/upstream.git
+    branchDirs: []
+    remoteDirs: ["{subfolder}"]
+  # Codex records the repository its session ran in. That recorded remote wins over
+  # whatever the clone answers now, in the scan, the extraction and the filter, and
+  # none of them needs to ask git for it.
+  - name: explicit-recorded-remote-wins-in-tree-store-and-filter
+    harness: codex
+    subfolder: packages/web
+    recordedBranch: main
+    recordedRemote: https://github.com/example-org/recorded.git
+    headBranch: develop
+    headRemote: https://github.com/example-org/fork.git
+    chosenBranch: main
+    chosenRemote: https://github.com/example-org/recorded.git
+    treeBranch: main
+    treeRemote: https://github.com/example-org/recorded.git
+    matched: true
+    extracts: true
+    extractsRemote: https://github.com/example-org/recorded.git
+    branchDirs: []
+    remoteDirs: []

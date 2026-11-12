@@ -1,0 +1,679 @@
+# The standalone selection page, played on the mounted route with the HTTP and
+# WebSocket boundary scripted from the shared kickstart fixtures (served
+# sessions in src/test/fixtures/kickstart/models.yaml, forests in trees.yaml).
+# Nothing here re-describes the server: the page draws what a `selection`
+# session serves and sends what a reader does.
+#
+# `kind` says how the test plays a case:
+#   page      one page, `server` scripts the answers, `steps` act and assert
+#   tabs      several pages of one browser (`tabs` lists them in mount order),
+#             each step names the tab it acts on, or `all` for a topic push
+#   parity    the same reader actions on the wizard and on this page, with
+#             `{session}`, `{model}` and `{answered}` filled in for each
+#   settings  the settings page's link to this page
+#   copy      the words of each scope against the scopes the module lists
+#   gate      the page inside the shell's first-run decision, with the status
+#             answer scripted by the case (`held: true` keeps it back until a
+#             `release` step); `redirects` says whether the person is sent to
+#             setup. The request log is the evidence of what the page started.
+# Every case below is played with the previews of the forest's two session rows
+# answered, because focusing or choosing a row asks for its preview whatever the
+# case is about. A case that is about a preview scripts the route itself.
+defaultServer:
+  "GET /api/v1/kickstart/sessions/ses-selection/tree/s-one/preview": {body: {lines: [{kind: text, text: the first lines of this session}]}}
+  "GET /api/v1/kickstart/sessions/ses-selection/tree/s-two/preview": {body: {lines: [{kind: text, text: the first lines of this session}]}}
+  "GET /api/v1/kickstart/sessions/ses-full/tree/s-one/preview": {body: {lines: [{kind: text, text: the first lines of this session}]}}
+  "GET /api/v1/kickstart/sessions/ses-full/tree/s-two/preview": {body: {lines: [{kind: text, text: the first lines of this session}]}}
+requiredNames:
+  - own-live-session
+  - wizard-undisturbed
+  - saves-only-selection-keys
+  - same-node-ids-equal-wizard-selection
+  - reachable-from-settings
+  - same-tree-preview-conflicts-commit-and-ingest
+  - two-selection-tabs-share-one-session
+  - commit-ends-only-the-selection-session
+  - status-scope-token-is-selection
+  - ending-copy-names-the-selection
+  - expiry-copy-names-the-selection
+  - copy-covers-every-scope
+  - conflict-row-shows-structured-value-readably
+  - selection-stops-render-through-the-step-wizard-frame
+  - selection-opens-no-session-before-the-status-answer
+  - unconfigured-selection-redirects-without-opening-a-session
+  - a-failed-status-read-opens-the-page-without-redirecting
+  - a-forest-with-a-bad-row-is-refused-whole-and-says-what-to-do
+  - a-done-scan-draws-its-notice-as-the-server-wrote-it
+  - a-done-scan-with-no-notice-draws-none
+  - a-phase-on-a-done-scan-is-not-drawn
+  - a-notice-is-drawn-only-once-the-scan-is-done
+  - a-preview-row-that-is-gone-says-so-and-the-session-goes-on
+  - saved-choices-no-longer-on-disk-name-their-labels
+cases:
+  # The page opens a session of its own and draws only the stops the server
+  # serves for it. Events of the wizard's session are not its own.
+  - name: own-live-session
+    kind: page
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": [{body: {$tree: forest}}, {body: {$tree: forest-two-selected}}]
+    steps:
+      - expectBody: {route: "POST /api/v1/kickstart/sessions", subset: {scope: selection}}
+      - expectCalls: {route: "POST /api/v1/kickstart/sessions", count: 1}
+      - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-selection/tree", count: 1}
+      - expectText: [choose sessions, choose sessions to import, step 1 of 3, fix the ledger rounding]
+      - expectRows: [p-ledger, g-main, s-one, s-two, p-locked]
+      - expectControl: {role: checkbox, name: fix the ledger rounding, checked: true}
+      - expectControl: {role: checkbox, name: add a CSV export, checked: false}
+      # None of the wizard's other stops is here.
+      - expectNoText: [peasant online, publication, privacy, content license, claude retention, step 1 of 8]
+      - expectControl: {role: button, name: continue}
+      # The wizard's session is another session of another scope: its snapshot
+      # on the shared topic changes nothing on this page.
+      - push: {kind: session, model: fresh}
+      - expectText: [step 1 of 3, choose sessions to import]
+      - expectNoText: [peasant online, step 1 of 8]
+      # This session's own answer, from another tab, is drawn without a reload.
+      - push: {kind: answers, model: selection-scope-two-selected}
+      - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-selection/tree", count: 2}
+      - expectControl: {role: checkbox, name: add a CSV export, checked: true}
+      - expectNoReload: true
+      - expectCalls: {route: "POST /api/v1/kickstart/sessions", count: 1}
+      - expectNoCalls: "ses-full"
+
+  # What the reader does here reaches the server as the selection and nothing
+  # else, and the commit is of this page's own session.
+  - name: saves-only-selection-keys
+    kind: page
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": [{body: {$tree: forest}}, {body: {$tree: forest-two-selected}}]
+      "PATCH /api/v1/kickstart/sessions/ses-selection": {body: {revision: 4, stale: false, view: {$model: selection-scope-two-selected}}}
+      "POST /api/v1/kickstart/sessions/ses-selection/commit":
+        body:
+          saved: true
+          configPath: /home/ada/.config/peasant/config.yaml
+          ingest: {state: running, new: 0, updated: 0}
+          nextSteps: [config, web-start, village-login, village-push, auto-publish-settings]
+    steps:
+      # The page offers no answer but the tree: no choice, no toggle, no connect.
+      - expectNoControlMatching: {role: radio, pattern: ".*"}
+      - expectControl: {role: button, name: "yes", present: false}
+      - check: add a CSV export
+      - expectBody: {route: "PATCH /api/v1/kickstart/sessions/ses-selection", subset: {revision: 1, selectedIds: [s-one, s-two]}}
+      # Every write names the revision and the selected ids, never a field value.
+      - expectBodyKeys: {route: "PATCH /api/v1/kickstart/sessions/ses-selection", only: [revision, selectedIds]}
+      - click: continue
+      - expectText: [your choices, "selection: 1 session you chose"]
+      - click: save and import
+      - expectCalls: {route: "POST /api/v1/kickstart/sessions/ses-selection/commit", count: 1}
+      - expectText: [your selection is saved, /home/ada/.config/peasant/config.yaml, nothing was published and no hook was installed]
+      # Nothing was sent to the wizard's session, and nothing else was written.
+      - expectNoCalls: "ses-full"
+      - expectNoCalls: "^PUT |^DELETE |/api/v1/settings"
+      - expectCalls: {route: "POST /api/v1/kickstart/sessions", count: 1}
+
+  # The scope token the page opens its session with is the closed set's
+  # `selection`, and a token the page does not know is refused, never read as
+  # another scope. The page does not read the status itself; the shell's first-run
+  # decision reads it once.
+  - name: status-scope-token-is-selection
+    kind: page
+    scopeToken: selection
+    server:
+      "POST /api/v1/kickstart/sessions": [{body: {$model: selection-scope}}, {body: {$model: selection-scope, scope: replaced}, malformed: true}]
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+    steps:
+      - expectBody: {route: "POST /api/v1/kickstart/sessions", nth: 0, subset: {scope: selection}}
+      - expectBodyKeys: {route: "POST /api/v1/kickstart/sessions", only: [scope]}
+      # The status is read once, by the shell's first-run decision; the page does not read it.
+      - expectCalls: {route: "GET /api/v1/kickstart/status", count: 1}
+      - expectText: [step 1 of 3]
+      # The server ends the session; opening a new one asks for the same scope,
+      # and an answer that names a scope outside the closed set is refused.
+      - push: {kind: closed, sessionId: ses-selection, revision: 2, reason: expired}
+      - expectText: [this selection session timed out]
+      - click: reopen the selection
+      - expectBody: {route: "POST /api/v1/kickstart/sessions", nth: 1, subset: {scope: selection}}
+      - expectText: [the selection could not be opened, breaks the Local API contract, scope]
+      - expectNoText: [choose sessions to import]
+
+  # The tree, its preview, the conflict rows, the save and the import are the
+  # wizard's own, on this page's session.
+  - name: same-tree-preview-conflicts-commit-and-ingest
+    kind: page
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": [{body: {$tree: forest}}, {body: {$tree: forest-two-selected}}]
+      "GET /api/v1/kickstart/sessions/ses-selection/tree/s-one/preview":
+        body:
+          lines:
+            - {kind: label, text: the first lines of this session}
+            - {kind: text, text: fix the rounding in the ledger totals}
+      "PATCH /api/v1/kickstart/sessions/ses-selection": {body: {revision: 4, stale: false, view: {$model: selection-scope-two-selected}}}
+      "POST /api/v1/kickstart/sessions/ses-selection/commit":
+        - status: 409
+          body:
+            error: a value you answered changed in your saved settings
+            conflicts:
+              - {field: transcripts, stop: selection, label: sessions to import, mine: [s-one, s-two], theirs: [s-one]}
+        - body:
+            saved: true
+            configPath: /home/ada/.config/peasant/config.yaml
+            ingest: {state: running, new: 0, updated: 0}
+            nextSteps: [config, web-start, village-login, village-push, auto-publish-settings]
+    steps:
+      # The tree: the server's rows, with the server's states.
+      - expectRows: [p-ledger, g-main, s-one, s-two, p-locked]
+      - expectControl: {role: checkbox, name: "ambiguous-rule, locked", disabled: true}
+      # The preview of the row the reader is on.
+      - focus: fix the ledger rounding
+      - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-selection/tree/s-one/preview", count: 1}
+      - expectText: [the first lines of this session, fix the rounding in the ledger totals]
+      # A toggle sends the ids and reads the forest again.
+      - check: add a CSV export
+      - expectBody: {route: "PATCH /api/v1/kickstart/sessions/ses-selection", subset: {revision: 1, selectedIds: [s-one, s-two]}}
+      - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-selection/tree", count: 2}
+      # The commit is refused with the row that changed; nothing is saved.
+      - click: continue
+      - click: save and import
+      - expectText: [nothing was saved, saved values that changed while you chose sessions, sessions to import, your answer, saved now]
+      - expectControl: {role: button, name: keep mine for sessions to import}
+      - expectControl: {role: button, name: take theirs for sessions to import}
+      - expectNoText: [your selection is saved]
+      # The reader settles the row and the save goes through.
+      - click: keep mine for sessions to import
+      - expectBody: {route: "PATCH /api/v1/kickstart/sessions/ses-selection", subset: {revision: 4, resolutions: {transcripts: mine}}}
+      - click: save and import
+      - expectCalls: {route: "POST /api/v1/kickstart/sessions/ses-selection/commit", count: 2}
+      - expectText: [your selection is saved, /home/ada/.config/peasant/config.yaml, importing]
+      # The import's progress is pushed on the topic for this session only.
+      - push: {kind: ingest, sessionId: ses-full, revision: 9, ingest: {state: failed, error: not this session, new: 0, updated: 0}}
+      - expectNoText: [not this session]
+      - push: {kind: ingest, sessionId: ses-selection, revision: 5, ingest: {state: idle, new: 12, updated: 3}}
+      - expectText: [import finished]
+      - expectNoReload: true
+      - expectNoCalls: "ses-full"
+
+  # Two tabs on this page are one live session: one is opened, the other
+  # joins it, and an answer in one is drawn in the other with no reload.
+  - name: two-selection-tabs-share-one-session
+    kind: tabs
+    tabs: [first, second]
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": [{body: {$tree: forest}}, {body: {$tree: forest}}, {body: {$tree: forest-two-selected}}]
+      "PATCH /api/v1/kickstart/sessions/ses-selection": {body: {revision: 4, stale: false, view: {$model: selection-scope-two-selected}}}
+    steps:
+      - {tab: all, expectText: [step 1 of 3, choose sessions to import]}
+      # Each tab asks for the scope and is given the same session.
+      - {tab: first, expectCalls: {route: "POST /api/v1/kickstart/sessions", count: 2}}
+      - {tab: first, expectBody: {route: "POST /api/v1/kickstart/sessions", nth: 0, subset: {scope: selection}}}
+      - {tab: first, expectBody: {route: "POST /api/v1/kickstart/sessions", nth: 1, subset: {scope: selection}}}
+      - {tab: first, check: add a CSV export}
+      - {tab: first, expectBody: {route: "PATCH /api/v1/kickstart/sessions/ses-selection", subset: {revision: 1, selectedIds: [s-one, s-two]}}}
+      - {tab: second, expectControl: {role: checkbox, name: add a CSV export, checked: false}}
+      # The server tells every tab of the topic; the other tab draws the answer.
+      - {tab: all, push: {kind: answers, model: selection-scope-two-selected}}
+      - {tab: second, expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-selection/tree", count: 4}}
+      - {tab: second, expectControl: {role: checkbox, name: add a CSV export, checked: true}}
+      - {tab: second, expectNoReload: true}
+      # No third session was opened and no snapshot was fetched to get there.
+      - {tab: second, expectCalls: {route: "POST /api/v1/kickstart/sessions", count: 2}}
+      - {tab: second, expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-selection", count: 0}}
+
+  # A save on this page ends this page's session. A wizard open beside it keeps
+  # its own session, its stop, and its answers.
+  - name: commit-ends-only-the-selection-session
+    kind: tabs
+    tabs: [wizard, selection]
+    server:
+      "POST /api/v1/kickstart/sessions": [{body: {$model: second-tab-answer}}, {body: {$model: selection-scope}}]
+      "GET /api/v1/kickstart/sessions/ses-full/tree": {body: {$tree: forest}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+      "POST /api/v1/kickstart/sessions/ses-selection/commit":
+        body:
+          saved: true
+          configPath: /home/ada/.config/peasant/config.yaml
+          ingest: {state: running, new: 0, updated: 0}
+          nextSteps: [config, web-start, village-login, village-push, auto-publish-settings]
+    steps:
+      - {tab: wizard, expectText: [step 1 of 8, peasant online]}
+      - {tab: selection, expectText: [step 1 of 3]}
+      - {tab: selection, click: continue}
+      - {tab: selection, click: save and import}
+      - {tab: selection, expectText: [your selection is saved]}
+      # The server closes the selection session on the topic that both tabs hear.
+      - tab: all
+        push:
+          kind: closed
+          sessionId: ses-selection
+          revision: 5
+          reason: committed
+          committed:
+            saved: true
+            configPath: /home/ada/.config/peasant/config.yaml
+            ingest: {state: running, new: 0, updated: 0}
+            nextSteps: [config, web-start, village-login, village-push, auto-publish-settings]
+      - {tab: selection, expectText: [your selection is saved]}
+      - {tab: wizard, expectNoText: [your setup is saved, your selection is saved, this setup session timed out, this selection session timed out]}
+      - {tab: wizard, expectText: [step 1 of 8, peasant online]}
+      - {tab: wizard, expectControl: {role: button, name: continue}}
+      # The import it started is the selection session's, not the wizard's.
+      - {tab: all, push: {kind: ingest, sessionId: ses-selection, revision: 6, ingest: {state: idle, new: 12, updated: 3}}}
+      - {tab: selection, expectText: [import finished]}
+      - {tab: wizard, expectNoText: [import finished]}
+      - {tab: wizard, expectNoCalls: "/ses-full/commit"}
+
+  # Open the page while a wizard session holds answers, change and save the
+  # selection, and the wizard has the answers, the stop and the revision it
+  # had: its next write still carries its own revision.
+  - name: wizard-undisturbed
+    kind: tabs
+    tabs: [wizard, selection]
+    server:
+      "POST /api/v1/kickstart/sessions": [{body: {$model: second-tab-answer}}, {body: {$model: selection-scope}}]
+      "GET /api/v1/kickstart/sessions/ses-full/tree": {body: {$tree: forest}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": [{body: {$tree: forest}}, {body: {$tree: forest-two-selected}}]
+      "PATCH /api/v1/kickstart/sessions/ses-selection": {body: {revision: 4, stale: false, view: {$model: selection-scope-two-selected}}}
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
+      "POST /api/v1/kickstart/sessions/ses-selection/commit":
+        body:
+          saved: true
+          configPath: /home/ada/.config/peasant/config.yaml
+          ingest: {state: running, new: 0, updated: 0}
+          nextSteps: [config, web-start, village-login, village-push, auto-publish-settings]
+    steps:
+      # The wizard holds an answer of its own, on its publication stop.
+      - {tab: wizard, click: continue}
+      - {tab: wizard, click: continue}
+      - {tab: wizard, expectText: [publication preference]}
+      - {tab: wizard, expectControl: {role: radio, name: plan to publish later, checked: true}}
+      # The selection page changes the selection and saves it.
+      - {tab: selection, check: add a CSV export}
+      - {tab: selection, expectBody: {route: "PATCH /api/v1/kickstart/sessions/ses-selection", subset: {revision: 1, selectedIds: [s-one, s-two]}}}
+      - {tab: all, push: {kind: answers, model: selection-scope-two-selected}}
+      - {tab: selection, click: continue}
+      - {tab: selection, click: save and import}
+      - {tab: selection, expectText: [your selection is saved]}
+      - tab: all
+        push:
+          kind: closed
+          sessionId: ses-selection
+          revision: 5
+          reason: committed
+          committed:
+            saved: true
+            configPath: /home/ada/.config/peasant/config.yaml
+            ingest: {state: running, new: 0, updated: 0}
+            nextSteps: [config, web-start, village-login, village-push, auto-publish-settings]
+      # The wizard is where it was, with its answer and without a notice.
+      - {tab: wizard, expectText: [publication preference]}
+      - {tab: wizard, expectNoText: [your setup is saved, your selection is saved, another tab changed, this setup session timed out]}
+      - {tab: wizard, expectControl: {role: radio, name: plan to publish later, checked: true}}
+      - {tab: wizard, expectControl: {role: radio, name: "keep local, do not publish", checked: false}}
+      # The wizard never heard from the server about its own session, and the
+      # selection page wrote nothing to it.
+      - {tab: wizard, expectNoCalls: "^(PATCH|GET) /api/v1/kickstart/sessions/ses-full$|^POST /api/v1/kickstart/sessions/ses-full/(commit|scan)$"}
+      # Its next write carries the revision it last drew (2), not a revision of
+      # the selection session (4, 5).
+      - {tab: wizard, choose: "keep local, do not publish"}
+      - {tab: wizard, expectBody: {route: "PATCH /api/v1/kickstart/sessions/ses-full", subset: {revision: 2, values: {publication-preference: keep-local}}}}
+
+  # The wizard's selection stop and this page draw the same forest and send the
+  # same ids for the same reader actions.
+  - name: same-node-ids-equal-wizard-selection
+    kind: parity
+    rows: [p-ledger, g-main, s-one, s-two, p-locked]
+    selectedIds: [s-one, s-two]
+    wizard: {session: ses-full, model: fresh, answered: selected-two, before: [{click: continue}]}
+    selection: {session: ses-selection, model: selection-scope, answered: selection-scope-two-selected, before: []}
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: "{model}"}}
+      "GET /api/v1/kickstart/sessions/{session}/tree": [{body: {$tree: forest}}, {body: {$tree: forest-two-selected}}]
+      "PATCH /api/v1/kickstart/sessions/{session}": {body: {revision: 4, stale: false, view: {$model: "{answered}"}}}
+    steps:
+      - expectRows: [p-ledger, g-main, s-one, s-two, p-locked]
+      - expectControl: {role: checkbox, name: fix the ledger rounding, checked: true}
+      - expectControl: {role: checkbox, name: add a CSV export, checked: false}
+      - check: add a CSV export
+      - expectBody: {route: "PATCH /api/v1/kickstart/sessions/{session}", subset: {selectedIds: [s-one, s-two]}}
+      - expectBodyKeys: {route: "PATCH /api/v1/kickstart/sessions/{session}", only: [revision, selectedIds]}
+      - expectRows: [p-ledger, g-main, s-one, s-two, p-locked]
+      - expectControl: {role: checkbox, name: add a CSV export, checked: true}
+
+  # The settings page's selection row leads here, to a route that exists. The
+  # route is outside the registry, and the first-run redirect covers it: it
+  # saves into the settings file that setup creates, so an install that has
+  # not been set up is sent to setup first.
+  - name: reachable-from-settings
+    kind: settings
+    link: {name: choose sessions, href: /selection}
+    # Not a section of the registry, but a top-level page the redirect covers.
+    coveredPaths: [/selection, /selection/]
+
+  # The words about the session's ending are the selection's own: a refused
+  # save, the rows that moved, and the saved heading name the selection and
+  # never the wizard's setup.
+  - name: ending-copy-names-the-selection
+    kind: page
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+      "PATCH /api/v1/kickstart/sessions/ses-selection": {body: {revision: 1, stale: false}}
+      "POST /api/v1/kickstart/sessions/ses-selection/commit":
+        - status: 409
+          body:
+            error: a value you answered changed in your saved settings
+            conflicts:
+              - {field: transcripts, stop: selection, label: sessions to import, mine: [s-one, s-two], theirs: [s-one]}
+        - body:
+            saved: true
+            configPath: /home/ada/.config/peasant/config.yaml
+            ingest: {state: running, new: 0, updated: 0}
+            nextSteps: [config]
+    steps:
+      - click: continue
+      - click: save and import
+      - expectText:
+          - "nothing was saved: a value changed in your saved settings while you chose sessions. settle it on this page, then save again."
+          - saved values that changed while you chose sessions
+          - "these saved values changed while you chose sessions; some move because of another choice you made. choose which value to keep for each one."
+      - expectNoText: [while you set up, after you answered them here, after you chose them here, your setup is saved]
+      - click: keep mine for sessions to import
+      - click: save and import
+      - expectText: [your selection is saved, /home/ada/.config/peasant/config.yaml]
+      - expectNoText: [your setup is saved, setup, set up]
+
+  # A selection session that timed out says so in the selection's words, and
+  # reopening it names the selection too, also when the reopen fails.
+  - name: expiry-copy-names-the-selection
+    kind: page
+    server:
+      "POST /api/v1/kickstart/sessions":
+        - body: {$model: selection-scope}
+        - status: 500
+          body: {code: kickstart_config_unreadable, error: peasant could not read the saved selection}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+    steps:
+      - push: {kind: closed, sessionId: ses-selection, revision: 2, reason: expired}
+      - expectText:
+          - this selection session timed out
+          - "nothing was saved, and the choices you had not saved are gone. reopen it to start again from your saved selection."
+      - expectControl: {role: button, name: reopen the selection}
+      - expectNoText: [this setup session timed out, answers you had not saved]
+      - expectControl: {role: button, name: open a new setup, present: false}
+      - click: reopen the selection
+      - expectText: [the selection could not be opened, peasant could not read the saved selection]
+      - expectNoText: [setup could not start]
+
+  # Every scope the module lists has words of its own, in lowercase chrome, and
+  # the wizard's words are the ones its pages have always said.
+  - name: copy-covers-every-scope
+    kind: copy
+    scopes:
+      full:
+        opening: opening setup
+        openFailed: setup could not start
+        refusedOne: "nothing was saved: a value changed in your saved settings while you set up. settle it on this page, then save again."
+        refusedMany: "nothing was saved: some values changed in your saved settings while you set up. settle them on this page, then save again."
+        expiredTitle: this setup session timed out
+        expiredBody: nothing was saved, and the answers you had not saved are gone. open a new one to start again from your saved settings.
+        reopen: open a new setup
+        conflictsTitle: saved values that changed while you set up
+        conflictsHelp: these saved values changed while you set up; some move because of another answer you gave. choose which value to keep for each one.
+        saved: your setup is saved
+      selection:
+        opening: opening the selection
+        openFailed: the selection could not be opened
+        refusedOne: "nothing was saved: a value changed in your saved settings while you chose sessions. settle it on this page, then save again."
+        refusedMany: "nothing was saved: some values changed in your saved settings while you chose sessions. settle them on this page, then save again."
+        expiredTitle: this selection session timed out
+        expiredBody: nothing was saved, and the choices you had not saved are gone. reopen it to start again from your saved selection.
+        reopen: reopen the selection
+        conflictsTitle: saved values that changed while you chose sessions
+        conflictsHelp: these saved values changed while you chose sessions; some move because of another choice you made. choose which value to keep for each one.
+        saved: your selection is saved
+
+  # A row whose saved value is an object or a list is shown as the server sent
+  # it, one key and value to a line in a mono block, not as one line of JSON. A
+  # long one is collapsed. A scalar is a phrase, as before.
+  - name: conflict-row-shows-structured-value-readably
+    kind: page
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+      "POST /api/v1/kickstart/sessions/ses-selection/commit":
+        status: 409
+        body:
+          error: a value you answered changed in your saved settings
+          conflicts:
+            - field: selection
+              stop: selection
+              label: sessions to import
+              mine:
+                mode: selected
+                harnesses: {claude: {projects: [{name: ledger, branches: [main]}]}}
+              theirs: {mode: all}
+            - field: session-ids
+              stop: selection
+              label: chosen session ids
+              mine: [s-one]
+              theirs: [s-01, s-02, s-03, s-04, s-05, s-06, s-07, s-08, s-09, s-10]
+            - {field: publication-preference, stop: selection, label: publication preference, mine: share-later, theirs: keep-local}
+    steps:
+      - click: continue
+      - click: save and import
+      - expectText: [saved values that changed while you chose sessions, sessions to import, chosen session ids, publication preference]
+      # Scalars stay phrases; the two structured sides of the first row and the
+      # two lists of the second are blocks, and only the long one is collapsed.
+      - expectText: [share-later, keep-local]
+      - expectBlocks:
+          - lines: ["mode: selected", "harnesses:", "  claude:", "    projects:", "      - name: ledger", "        branches:", "          - main"]
+            collapsed: false
+          - lines: ["mode: all"]
+            collapsed: false
+          - lines: ["- s-one"]
+            collapsed: false
+          - lines: ["- s-01", "- s-02", "- s-03", "- s-04", "- s-05", "- s-06", "- s-07", "- s-08", "- s-09", "- s-10"]
+            collapsed: true
+      - expectDetails: {summary: show 10 lines, open: false}
+      # None of it is one line of JSON.
+      - expectNoText: ['{"mode"', '"harnesses"', '["s-']
+      - expectControl: {role: group, name: "your answer, sessions to import"}
+      - expectControl: {role: group, name: "saved now, chosen session ids"}
+
+  # The stops are fairtrade's step-wizard frame: its rail is named for the page,
+  # each marker carries its stop's title in its accessible name, the foot holds
+  # back and the stop's one action, and the count is spoken. Where the labels
+  # sit inside the rail is the frame's own business, checked on its mounted rows
+  # in both themes; this page checks that its stops are the frame's steps.
+  - name: selection-stops-render-through-the-step-wizard-frame
+    kind: page
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+    steps:
+      - expectText: [step 1 of 3]
+      - expectControl: {role: navigation, name: choose sessions progress}
+      - expectControl: {role: button, name: 1 choose sessions to import, disabled: false}
+      - expectControl: {role: button, name: 2 review, disabled: true}
+      - expectControl: {role: button, name: 3 ingest, disabled: true}
+      - expectControl: {role: button, name: back, disabled: true}
+      - expectControl: {role: button, name: continue, disabled: false}
+      - click: continue
+      - expectText: [step 2 of 3]
+      # The stop that was left is done: reachable by its marker, named for its title.
+      - expectControl: {role: button, name: choose sessions to import, disabled: false}
+      - expectControl: {role: button, name: 2 review, disabled: false}
+      - expectControl: {role: button, name: back, disabled: false}
+      # The review stop's one action is in the foot.
+      - expectControl: {role: button, name: save and import, disabled: false}
+      - expectControl: {role: button, name: 3 ingest, disabled: true}
+
+  # The page opens a session of its own as soon as it is drawn, so its body waits
+  # for the shell's status answer. Nothing is started before it arrives.
+  - name: selection-opens-no-session-before-the-status-answer
+    kind: gate
+    redirects: false
+    server:
+      "GET /api/v1/kickstart/status": {body: {configured: true}, held: true}
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+    steps:
+      # The status request is on the log, so the shell has mounted and run its
+      # effects; the page body is not drawn and has started nothing.
+      - expectCalls: {route: "GET /api/v1/kickstart/status", count: 1}
+      - expectNoCalls: "/api/v1/kickstart/sessions"
+      - expectNoText: [choose sessions, step 1 of 3]
+      - release: "GET /api/v1/kickstart/status"
+      - expectCalls: {route: "POST /api/v1/kickstart/sessions", count: 1}
+      - expectBody: {route: "POST /api/v1/kickstart/sessions", subset: {scope: selection}}
+      - expectText: [choose sessions to import, step 1 of 3, fix the ledger rounding]
+      - expectCalls: {route: "GET /api/v1/kickstart/status", count: 1}
+      - expectNoRedirect: true
+
+  # With no setup saved the person is sent to setup, and the page starts nothing
+  # on the way: no session of any scope, no forest, nothing drawn.
+  - name: unconfigured-selection-redirects-without-opening-a-session
+    kind: gate
+    redirects: true
+    server:
+      "GET /api/v1/kickstart/status": {body: {configured: false}, held: true}
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+    steps:
+      - expectCalls: {route: "GET /api/v1/kickstart/status", count: 1}
+      - expectNoCalls: "/api/v1/kickstart/sessions"
+      - release: "GET /api/v1/kickstart/status"
+      # The wake source is the router's own redirect, taken once the answer says
+      # setup is not saved. The page is held until then and still starts nothing.
+      - expectRedirect: /kickstart
+      - expectNoCalls: "/api/v1/kickstart/sessions"
+      - expectNoText: [choose sessions, step 1 of 3, fix the ledger rounding]
+      - expectCalls: {route: "GET /api/v1/kickstart/status", count: 1}
+
+  # A status that cannot be read is not "not set up": nothing is redirected, and
+  # the page opens as it did before it waited.
+  - name: a-failed-status-read-opens-the-page-without-redirecting
+    kind: gate
+    redirects: false
+    server:
+      "GET /api/v1/kickstart/status": {status: 500, body: {code: kickstart_status_unreadable, error: the server could not read its settings}}
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+    steps:
+      - expectCalls: {route: "POST /api/v1/kickstart/sessions", count: 1}
+      - expectText: [choose sessions to import, step 1 of 3, fix the ledger rounding]
+      - expectCalls: {route: "GET /api/v1/kickstart/status", count: 1}
+      - expectNoRedirect: true
+
+  # A forest the contract refuses is held back whole. The message says what is
+  # wrong, why nothing is drawn, and what to do, and the page offers to try again.
+  - name: a-forest-with-a-bad-row-is-refused-whole-and-says-what-to-do
+    kind: page
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: unknown-kind-and-state}, malformed: true}
+    steps:
+      - expectText:
+          - the sessions could not be listed
+          # what: the list of sessions, and the rows in it that the contract does not allow
+          - the list of sessions
+          - row 2
+          - row 3
+          # why: what each row held, and what it may hold
+          - folder
+          - partial
+          # what it means: none of it is drawn, and nothing was changed
+          - none of it is drawn
+          - nothing was changed
+          # what to do
+          - same version
+          - reload
+      - expectControl: {role: button, name: try again}
+      # No row is drawn, not even the one the contract accepts.
+      - expectRows: []
+      - expectNoCalls: "PATCH"
+
+  # A finished scan says what it could not read in its own field. The words are
+  # the server's, drawn as sent (their case and the folder names are not changed)
+  # under a lowercase label of the page's own.
+  - name: a-done-scan-draws-its-notice-as-the-server-wrote-it
+    kind: page
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+    steps:
+      - push: {kind: scan, sessionId: ses-selection, revision: 2, scan: {state: done, done: 2, total: 2, notice: "Could not read 1 of 2 harness folders: Codex (/home/ada/.codex/sessions: permission denied)."}}
+      - expectText:
+          - "note from the scan:"
+          - "Could not read 1 of 2 harness folders: Codex (/home/ada/.codex/sessions: permission denied)."
+      - expectOrder: ["note from the scan:", fix the ledger rounding]
+
+  - name: a-done-scan-with-no-notice-draws-none
+    kind: page
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+    steps:
+      - push: {kind: scan, sessionId: ses-selection, revision: 2, scan: {state: done, done: 2, total: 2}}
+      - expectText: [fix the ledger rounding]
+      - expectNoText: ["note from the scan:"]
+
+  # The progress line's phase is for a scan that is running. A phase left on a
+  # done scan is not drawn, and is not where the notice is read from.
+  - name: a-phase-on-a-done-scan-is-not-drawn
+    kind: page
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+    steps:
+      - push: {kind: scan, sessionId: ses-selection, revision: 2, scan: {state: done, done: 2, total: 2, phase: "reading sessions of claude code (1 folder could not be read)"}}
+      - expectText: [fix the ledger rounding]
+      - expectNoText: ["reading sessions of claude code", "folder could not be read", "note from the scan:"]
+      - push: {kind: scan, sessionId: ses-selection, revision: 3, scan: {state: done, done: 2, total: 2, phase: "reading sessions of claude code (1 folder could not be read)", notice: "Could not read 1 harness folder: Claude Code."}}
+      - expectText: ["note from the scan:", "Could not read 1 harness folder: Claude Code."]
+      - expectNoText: ["reading sessions of claude code"]
+
+  - name: a-notice-is-drawn-only-once-the-scan-is-done
+    kind: page
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+    steps:
+      - push: {kind: scan, sessionId: ses-selection, revision: 2, scan: {state: running, done: 1, total: 2, phase: reading sessions, notice: Could not read 1 harness folder.}}
+      - expectText: [reading sessions]
+      - expectNoText: ["note from the scan:", Could not read 1 harness folder.]
+      - push: {kind: scan, sessionId: ses-selection, revision: 3, scan: {state: done, done: 2, total: 2, notice: Could not read 1 harness folder.}}
+      - expectText: ["note from the scan:", Could not read 1 harness folder.]
+      - expectNoText: [reading sessions]
+
+  # A preview row that is gone is a refusal of its own code, not the end of the
+  # session: the preview says so in the server's words and the page goes on.
+  - name: a-preview-row-that-is-gone-says-so-and-the-session-goes-on
+    kind: page
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree/s-one/preview":
+        status: 404
+        body:
+          code: kickstart_preview_row_not_found
+          error: "No row has the id \"s-one\" in the forest of the selection session. Nothing was changed. Scan again, then choose a row."
+    steps:
+      - focus: fix the ledger rounding
+      - expectText: [No row has the id, "Scan again, then choose a row."]
+      - expectNoText: [this selection session timed out]
+      - expectControl: {role: button, name: continue, disabled: false}
+
+  # The saved choices a scan did not find are named. The server sends at most a
+  # few of their labels with the count, and the page draws them as sent.
+  - name: saved-choices-no-longer-on-disk-name-their-labels
+    kind: page
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+    steps:
+      - push: {kind: scan, sessionId: ses-selection, revision: 2, scan: {state: done, done: 2, total: 2, droppedSelections: 5, droppedLabels: [old-ledger, scratch, demo]}}
+      - expectText: ["saved choices are no longer on disk: old-ledger, scratch, demo."]

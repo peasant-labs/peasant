@@ -407,25 +407,11 @@ func ftueDiscoverWith(
 	cfg *config.Config,
 	fs ingest.FileSystem,
 	git ingest.GitResolver,
-	known knownSessionIndex,
+	known ingest.KnownSessionIndex,
 	evidence ingest.ClaudeEvidenceCache,
 	spinner *discoverySpinner,
 ) (ftue.ProviderInventory, []ftue.SessionListing, kickstart.SubagentRelation) {
-	return discovery.Scan(ctx, cfg, fs, git, knownLookup{index: known}, evidence, spinner)
-}
-
-// resolveSessionGit walks git for one discovered session's remote and branch.
-// This is the multi-second part of a scan: one process per lookup, per session.
-// claudeProjectDir is the decoded Claude project directory when there is one,
-// and branchName is the branch the session data already carries.
-func resolveSessionGit(
-	ctx context.Context,
-	git ingest.GitResolver,
-	d ingest.DiscoveredSession,
-	claudeProjectDir string,
-	branchName string,
-) (string, string) {
-	return discovery.ResolveSessionGit(ctx, git, d, claudeProjectDir, branchName)
+	return discovery.Scan(ctx, cfg, fs, git, known, evidence, spinner)
 }
 
 // resolveListingOrigin turns discovery's typed origin evidence into the menu
@@ -536,7 +522,7 @@ func buildFTUEIngestRunnerWithProgress(cmd *cobra.Command, configPath string) (f
 			return nil, fmt.Errorf("resolve output path: %w", err)
 		}
 
-		staleness := configStaleness(cfg)
+		staleness := cfg.StalenessWindow()
 
 		// Map selected sessions to AllowedSessionIDs filter, expanding
 		// parent sessions to include their subagent children.

@@ -1,0 +1,947 @@
+# Saving a setup session: POST /api/v1/kickstart/sessions/{id}/commit, the import
+# it starts, and what each tab hears.
+#
+# Every case runs against the mounted server (see kickstart_script_test.go for
+# the step vocabulary and kickstart_commit_test.go for the commit steps). A
+# world sets gate so a scan runs when the case releases it. A world that sets
+# holdIngest holds each import until a releaseIngest step. A world with
+# recordings runs the real import over them; any other world finishes an import
+# at once and never reads the machine's own sessions. {sources} in a world's
+# configuration names those recordings as the only source.
+requiredNames:
+  - saved-true-with-running
+  - saved-true-with-busy
+  - saved-true-with-failed
+  - kickstart-save-with-stale-search-index-reports-the-repair
+  - busy-offers-import-now
+  - import-now-after-a-finished-import-pushes-its-end
+  - a-later-import-reports-to-every-kept-saved-session
+  - second-commit-refused
+  - closed-committed-before-ingest-events
+  - ingest-imports-exactly-the-selected-set
+  - ingest-survives-a-closed-page
+  - live-snapshot-published-before-ingest
+  - next-steps-web-has-five
+  - auto-publish-next-step-targets-the-real-section
+  - other-scope-commit-creates-mine-theirs-rows-on-next-diff
+  - no-reset-in-any-response
+  - failed-save-keeps-the-session
+  - retention-shown-unanswered-writes-the-shown-value
+  - summary-names-never-expire-for-the-sentinel
+  - retention-failure-is-told-as-a-note-about-the-save
+  - take-theirs-summary-shows-the-file-value
+  - coupled-field-change-yields-a-row
+  - selection-scope-commit-without-a-config-file-is-refused
+  - commit-owns-the-selection-keys-its-model-writes
+  - finish-step-outside-the-contract-is-refused-before-any-write
+  - finish-body-breach-after-a-save-is-withheld-like-a-refusal
+cases:
+  - name: saved-true-with-running
+    world:
+      listings: two-projects
+      gate: true
+      config: &licenseConfig |
+        version: 1
+        push:
+          visibility: private
+          license: ""
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0, claude-retention-days: 365}}
+      - await: {kind: answers, session: "{full}"}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        noReset: true
+        json: {saved: true, ingest.state: running}
+        contains: {configPath: config.yaml}
+        len: {nextSteps: 5}
+      # the session ends first, and the import's end follows under the same id
+      - events:
+          - kind: closed
+            session: "{full}"
+            json: {reason: committed, committed.saved: true, committed.ingest.state: running}
+          - {kind: ingest, session: "{full}", json: {ingest.state: idle}, absent: [view, committed]}
+      - configHas: ["license: CC0-1.0"]
+      # the Claude retention is written after the configuration is saved
+      - retention: {calls: [365], sawSavedFile: true}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        status: 404
+
+  - name: saved-true-with-busy
+    world:
+      listings: two-projects
+      gate: true
+      holdIngest: true
+      config: *licenseConfig
+    steps:
+      # an import is already running when the save arrives
+      - call: POST /api/v1/sync/ingest
+        json: {status: running}
+      - ingest: {runs: 1}
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0}}
+      - await: {kind: answers, session: "{full}"}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        json: {saved: true, ingest.state: busy}
+        contains: {ingest.note: still running}
+        len: {nextSteps: 5}
+      # the save did not start a second import, and it stands
+      - ingest: {runs: 1}
+      - configHas: ["license: CC0-1.0"]
+      - events:
+          - {kind: closed, session: "{full}", json: {reason: committed, committed.saved: true, committed.ingest.state: busy}}
+
+  - name: saved-true-with-failed
+    world:
+      listings: two-projects
+      gate: true
+      # a redaction level this version cannot apply: the import refuses to start
+      config: |
+        version: 1
+        redaction:
+          level: maximum
+        push:
+          visibility: private
+          license: ""
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0}}
+      - await: {kind: answers, session: "{full}"}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        json: {saved: true, ingest.state: failed}
+        contains: {ingest.error: maximum}
+        len: {nextSteps: 5}
+      # saved is never retracted: the file holds the answer
+      - configHas: ["license: CC0-1.0", "level: maximum"]
+      - events:
+          - {kind: closed, session: "{full}", json: {reason: committed, committed.saved: true, committed.ingest.state: failed}}
+
+  # The store's search index needs its one-time repair, which only a command in a
+  # terminal runs. The save stands; the import is not claimed and not started, and
+  # the answer says how to repair. "import now" starts a run, which is refused at
+  # the store the same way, and the panel is pushed that end. The store file is
+  # never opened: the case fails if it changes.
+  - name: kickstart-save-with-stale-search-index-reports-the-repair
+    world:
+      listings: two-projects
+      gate: true
+      staleSearchIndex: true
+      recordings: [11111111-1111-4111-8111-111111111111]
+      config: |
+        version: 1
+        {sources}
+        push:
+          license: ""
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0}}
+      - await: {kind: answers, session: "{full}"}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        json: {saved: true, ingest.state: failed}
+        contains:
+          ingest.error: "`peasant harvest` in a terminal"
+        len: {nextSteps: 5}
+      - call: GET /api/v1/sync/ingest/status
+        json: {status: idle}
+      - ingest: {none: true}
+      - configHas: ["license: CC0-1.0"]
+      - events:
+          - kind: closed
+            session: "{full}"
+            json: {reason: committed, committed.saved: true, committed.ingest.state: failed}
+      # import now: the run is refused where it would open the store, and says so
+      - call: POST /api/v1/sync/ingest
+        json: {status: running}
+      - ingest: {runs: 1, finished: 1}
+      - events:
+          - {kind: ingest, session: "{full}", json: {ingest.state: running}}
+          - {kind: ingest, session: "{full}", json: {ingest.state: failed}}
+      - call: GET /api/v1/sync/ingest/status
+        json: {status: error}
+        contains: {error: "`peasant web start` in a terminal"}
+
+  - name: busy-offers-import-now
+    world:
+      listings: two-projects
+      gate: true
+      holdIngest: true
+      config: *licenseConfig
+    steps:
+      - call: POST /api/v1/sync/ingest
+        json: {status: running}
+      - ingest: {runs: 1}
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0}}
+      - await: {kind: answers, session: "{full}"}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        json: {saved: true, ingest.state: busy}
+      - events:
+          - {kind: closed, session: "{full}", json: {committed.ingest.state: busy}}
+      # the import that was running ends. It began before the save, so it says
+      # nothing to the saved session.
+      - releaseIngest: true
+      - ingest: {finished: 1}
+      # import now: the existing route, with no session open and none named
+      - call: POST /api/v1/sync/ingest
+        json: {status: running}
+      - ingest: {runs: 2}
+      - events:
+          - {kind: ingest, session: "{full}", json: {ingest.state: running}}
+      - releaseIngest: true
+      - events:
+          - {kind: ingest, session: "{full}", json: {ingest.state: idle}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        status: 404
+
+  # The commit's own import ran and ended, and the panel offers "import now"
+  # again. The import it starts is a run like any other: it reports its start and
+  # its end to the saved session, so the panel is never left waiting for an end
+  # that is not pushed.
+  - name: import-now-after-a-finished-import-pushes-its-end
+    world:
+      listings: two-projects
+      gate: true
+      holdIngest: true
+      config: *licenseConfig
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0}}
+      - await: {kind: answers, session: "{full}"}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        json: {saved: true, ingest.state: running}
+      - ingest: {runs: 1}
+      # the commit's own import ends, and a tab that holds the id hears the end
+      # (the commit's answer already said it was running)
+      - events:
+          - {kind: closed, session: "{full}", json: {reason: committed, committed.ingest.state: running}}
+      - releaseIngest: true
+      - events:
+          - {kind: ingest, session: "{full}", json: {ingest.state: idle}}
+      - ingest: {finished: 1}
+      # import now, after that import ended: the start and the end are both pushed
+      - call: POST /api/v1/sync/ingest
+        json: {status: running}
+      - ingest: {runs: 2}
+      - events:
+          - {kind: ingest, session: "{full}", json: {ingest.state: running}}
+      - releaseIngest: true
+      - events:
+          - {kind: ingest, session: "{full}", json: {ingest.state: idle}}
+      # and again: the session keeps hearing every run
+      - ingest: {finished: 2}
+      - call: POST /api/v1/sync/ingest
+        json: {status: running}
+      - events:
+          - {kind: ingest, session: "{full}", json: {ingest.state: running}}
+      - releaseIngest: true
+      - events:
+          - {kind: ingest, session: "{full}", json: {ingest.state: idle}}
+
+  # Every saved session that is kept hears a later import, oldest first, start
+  # then end.
+  - name: a-later-import-reports-to-every-kept-saved-session
+    world:
+      listings: two-projects
+      gate: true
+      holdIngest: true
+      config: *licenseConfig
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0}}
+      - await: {kind: answers, session: "{full}"}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        json: {saved: true, ingest.state: running}
+      - events:
+          - {kind: closed, session: "{full}", json: {reason: committed}}
+      - releaseIngest: true
+      - events:
+          - {kind: ingest, session: "{full}", json: {ingest.state: idle}}
+      - ingest: {finished: 1}
+      # a second setup session is saved while the first one's panel is still open
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: selection}
+        save: {selection: id}
+      - release: true
+      - await: {kind: session, session: "{selection}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{selection}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{selection}
+        body: {revision: "{rev}", selectedIds: []}
+      - await: {kind: answers, session: "{selection}"}
+      - call: POST /api/v1/kickstart/sessions/{selection}/commit
+        json: {saved: true, ingest.state: running}
+      # the second session is closed, and the first, whose panel is still open,
+      # hears that an import began; the second's own answer said so already
+      - events:
+          - {kind: closed, session: "{selection}", json: {reason: committed}}
+          - {kind: ingest, session: "{full}", json: {ingest.state: running}}
+      - releaseIngest: true
+      # the end reaches both, oldest first
+      - events:
+          - {kind: ingest, session: "{full}", json: {ingest.state: idle}}
+          - {kind: ingest, session: "{selection}", json: {ingest.state: idle}}
+
+  - name: second-commit-refused
+    world:
+      listings: two-projects
+      gate: true
+      config: *licenseConfig
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0}}
+      # a save under way refuses another, and an answer, with its reason
+      - commit: {session: full, action: begin}
+      - commit: {session: full, action: begin, error: "already being saved"}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        status: 400
+        json: {code: kickstart_session_committing}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC-BY-4.0}}
+        status: 400
+        json: {code: kickstart_session_committing}
+      - call: POST /api/v1/kickstart/sessions/{full}/scan
+        status: 400
+        json: {code: kickstart_session_committing}
+      - commit: {session: full, action: abort}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        json: {saved: true}
+      # once saved, the session is gone and a second save finds none
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        status: 404
+        json: {code: kickstart_session_not_found}
+      - configHas: ["license: CC0-1.0"]
+
+  - name: closed-committed-before-ingest-events
+    world:
+      listings: two-projects
+      gate: true
+      holdIngest: true
+      config: *licenseConfig
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0}}
+      - await: {kind: answers, session: "{full}"}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        json: {saved: true, ingest.state: running}
+      # the import is still running, and the only thing published is the end of the session
+      - ingest: {runs: 1}
+      - events:
+          - {kind: closed, session: "{full}", json: {reason: committed, committed.ingest.state: running}}
+      - releaseIngest: true
+      - events:
+          - {kind: ingest, session: "{full}", json: {ingest.state: idle}}
+
+  - name: ingest-imports-exactly-the-selected-set
+    world:
+      listings: two-projects
+      gate: true
+      recordings: [11111111-1111-4111-8111-111111111111, 22222222-2222-4222-8222-222222222222]
+      config: |
+        version: 1
+        {sources}
+        push:
+          license: ""
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", selectedIds: [11111111-1111-4111-8111-111111111111]}
+      - await: {kind: answers, session: "{full}"}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        json: {saved: true, ingest.state: running}
+      # the session ends, then the import ends with the counts the finish panel
+      # shows: one session was chosen, so one is new, and nothing was updated
+      - events:
+          - {kind: closed, session: "{full}", json: {reason: committed}}
+          - {kind: ingest, session: "{full}", json: {ingest.state: idle, ingest.new: 1, ingest.updated: 0}}
+      - ingest:
+          runs: 1
+          selectionMode: selected
+          sessions: [11111111-1111-4111-8111-111111111111]
+          present: [11111111-1111-4111-8111-111111111111]
+          absent: [22222222-2222-4222-8222-222222222222]
+
+  - name: ingest-survives-a-closed-page
+    world:
+      listings: two-projects
+      gate: true
+      holdIngest: true
+      config: *licenseConfig
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - ws: {client: tab, subscribe: true}
+      - wsEvents:
+          client: tab
+          events:
+            - {kind: session, session: "{full}"}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0}}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        json: {saved: true, ingest.state: running}
+      # the page is closed: no session is open, and the import is still running
+      - call: GET /api/v1/kickstart/sessions/{full}
+        status: 404
+      - call: GET /api/v1/kickstart/status
+        absent: [activeSessionId]
+      - ingest: {runs: 1}
+      # the import ends and a tab that still holds the id hears about it
+      - releaseIngest: true
+      - wsEvents:
+          client: tab
+          events:
+            - {kind: answers, session: "{full}"}
+            - {kind: closed, session: "{full}", json: {reason: committed}}
+            - {kind: ingest, session: "{full}", json: {ingest.state: idle}}
+
+  - name: live-snapshot-published-before-ingest
+    world:
+      listings: two-projects
+      gate: true
+      holdIngest: true
+      config: |
+        version: 1
+        push:
+          license: ""
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", selectedIds: [11111111-1111-4111-8111-111111111111]}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        json: {saved: true}
+      # the import began, and the server it began in already applied what was saved
+      - ingest:
+          runs: 1
+          selectionMode: selected
+          sessions: [11111111-1111-4111-8111-111111111111]
+
+  - name: next-steps-web-has-five
+    world:
+      listings: two-projects
+      gate: true
+      config: *licenseConfig
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0}}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        json:
+          saved: true
+          nextSteps.0: config
+          nextSteps.1: web-start
+          nextSteps.2: village-login
+          nextSteps.3: village-push
+          nextSteps.4: auto-publish-settings
+        len: {nextSteps: 5}
+      - await: {kind: closed, session: "{full}", len: {committed.nextSteps: 5}}
+
+  - name: auto-publish-next-step-targets-the-real-section
+    world:
+      listings: two-projects
+      gate: true
+      config: *licenseConfig
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {publish-automatically: "true"}}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        json: {saved: true, nextSteps.4: auto-publish-settings}
+      # the server names the step; the finish panel links the settings section
+      # automatic-publishing, which the settings page has. The save installs no hook.
+      - settingsSection: automatic-publishing
+      - configHas: ["autoPublishIntent: true", "sharePreference: share-later"]
+
+  - name: other-scope-commit-creates-mine-theirs-rows-on-next-diff
+    world:
+      listings: two-projects
+      gate: true
+      config: |
+        version: 1
+        push:
+          visibility: private
+          license: ""
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: selection}
+        save: {selection: id}
+      - release: true
+      - await: {kind: session, session: "{selection}", json: {view.scan.state: done}}
+      # the wizard answers the license and the sessions to import
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0}, selectedIds: [22222222-2222-4222-8222-222222222222]}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        len: {conflicts: 0}
+        json: {"stops[key=review].diff.file": config.yaml}
+      # the selection page saves a different set, then the file changes in a field
+      # the wizard never answered
+      - call: GET /api/v1/kickstart/sessions/{selection}
+        save: {srev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{selection}
+        body: {revision: "{srev}", selectedIds: [11111111-1111-4111-8111-111111111111]}
+      - call: POST /api/v1/kickstart/sessions/{selection}/commit
+        json: {saved: true}
+      - editConfig: {from: "visibility: private", to: "visibility: group"}
+      # the wizard's next diff shows one row, for the field it answered
+      - call: GET /api/v1/kickstart/sessions/{full}
+        len: {conflicts: 1}
+        json:
+          conflicts.0.field: transcripts
+          conflicts.0.stop: selection
+          "stops[key=review].diff.file": config.yaml
+      # its save is refused with that row and writes nothing
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        status: 409
+        len: {conflicts: 1}
+        json: {conflicts.0.field: transcripts}
+        contains: {error: "1 setting(s) the save writes changed in the configuration file"}
+        noReset: true
+      - configHas: ['license: ""', "visibility: group"]
+      # every tab of the wizard hears the row
+      - await: {kind: conflicts, session: "{full}", len: {view.conflicts: 1}}
+      # the user keeps theirs; the save then goes through with the change nobody asked about
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", resolutions: {transcripts: theirs}}
+        len: {view.conflicts: 0}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        json: {saved: true}
+      - configHas: ["license: CC0-1.0", "visibility: group"]
+
+  - name: no-reset-in-any-response
+    world:
+      listings: two-projects
+      gate: true
+      config: *licenseConfig
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+        noReset: true
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+        noReset: true
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0}}
+        noReset: true
+      - editConfig: {from: 'license: ""', to: "license: CC-BY-4.0"}
+      # the refusal, the success and the missing session carry no reset control
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        status: 409
+        noReset: true
+      - call: GET /api/v1/kickstart/sessions/{full}
+        noReset: true
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", resolutions: {content-license: mine}}
+        noReset: true
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        noReset: true
+        json: {saved: true}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        status: 404
+        noReset: true
+
+  # A save that fails before it writes anything frees the session: the answers
+  # are still there and the next save can go through.
+  - name: failed-save-keeps-the-session
+    world:
+      listings: two-projects
+      gate: true
+      config: *licenseConfig
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0}}
+      # another program leaves a file the configuration cannot read
+      - writeConfig: |
+          version: 1
+          redaction:
+            level: bogus
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        status: 500
+        json: {code: kickstart_config_unreadable}
+        noReset: true
+      # the page still shows the session, without a diff it cannot compute
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+        json: {scope: full}
+        absent: ["stops[key=review].diff"]
+      - writeConfig: *licenseConfig
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        json: {saved: true}
+      - configHas: ["license: CC0-1.0"]
+
+  # The retention stop shows a period (the one Claude Code already has, or the
+  # recommended one) and the review promises to apply it. The save applies the
+  # period that was shown, answered or not, as the terminal's finish step does.
+  - name: retention-shown-unanswered-writes-the-shown-value
+    world:
+      listings: two-projects
+      gate: true
+      config: *licenseConfig
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0}}
+      # the retention question was never answered, and the review says what the save does
+      - call: GET /api/v1/kickstart/sessions/{full}
+        contains:
+          "stops[key=review].summary.values": "claude code source retention: 90 days"
+          "stops[key=review].summary.effects": "apply claude code retention after config saves"
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        json: {saved: true}
+      - retention: {calls: [90], sawSavedFile: true}
+
+  # The never-expire period is stored as 99999 days. The review says "never
+  # expire" in the words of the retention stop, and never prints the number.
+  - name: summary-names-never-expire-for-the-sentinel
+    world:
+      listings: two-projects
+      gate: true
+      config: *licenseConfig
+      retentionDays: 99999
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        contains:
+          "stops[key=review].summary.values": "claude code source retention: never expire"
+
+  # Claude Code's retention period is written after the configuration is saved. A
+  # refusal to write it never retracts the save; it travels in the committed
+  # body's notes, in words that say the setup was saved and which part was not.
+  - name: retention-failure-is-told-as-a-note-about-the-save
+    world:
+      listings: two-projects
+      gate: true
+      config: *licenseConfig
+      retentionFails: settings.json is read-only
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0}}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        json:
+          saved: true
+          diagnostics.0: "the setup was saved, but claude code's retention period was not applied: settings.json is read-only"
+        len: {diagnostics: 1}
+        absent: [ingest.note]
+      - configHas: ["license: CC0-1.0"]
+      - retention: {calls: [90], sawSavedFile: true}
+
+  # The review summary explains what the save will write. After the user takes the
+  # file's side of a row, that is the value the file holds now, not the answer the
+  # user gave up and not the file as it was when the session opened.
+  - name: take-theirs-summary-shows-the-file-value
+    world:
+      listings: two-projects
+      gate: true
+      config: *licenseConfig
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        contains: {"stops[key=review].summary.values": "later publish license: CC0-1.0"}
+      # another writer lands a different license, and the user keeps it
+      - editConfig: {from: 'license: ""', to: "license: CC-BY-4.0"}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        len: {conflicts: 1}
+        json: {conflicts.0.field: content-license}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", resolutions: {content-license: theirs}}
+        len: {view.conflicts: 0}
+        contains: {"view.stops[key=review].summary.values": "later publish license: CC-BY-4.0"}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        contains: {"stops[key=review].summary.values": "later publish license: CC-BY-4.0"}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        json: {saved: true}
+      - configHas: ["license: CC-BY-4.0"]
+
+  # An answer can move a field the user did not answer: publishing automatically
+  # sets the share preference. If another writer changed that field since the
+  # session opened, the save would replace their change silently, so the review
+  # shows a row for it and the save is refused until the user chooses.
+  - name: coupled-field-change-yields-a-row
+    world:
+      listings: two-projects
+      gate: true
+      config: |
+        version: 1
+        push:
+          sharePreference: share-later
+          license: ""
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {publish-automatically: "true"}}
+      - editConfig: {from: "sharePreference: share-later", to: 'sharePreference: ""'}
+      # the review finds the row before any save is tried
+      - call: GET /api/v1/kickstart/sessions/{full}
+        len: {conflicts: 1}
+        json:
+          conflicts.0.field: publication-preference
+          conflicts.0.stop: publication
+        save: {rev: revision}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        status: 409
+        len: {conflicts: 1}
+        json: {conflicts.0.field: publication-preference}
+        contains: {error: "1 setting(s) the save writes changed in the configuration file"}
+        noReset: true
+      - configHas: ['sharePreference: ""']
+      # the user keeps the other writer's value; the answer they gave still saves
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", resolutions: {publication-preference: theirs}}
+        len: {view.conflicts: 0}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", resolutions: {publication-preference: theirs}}
+        json: {stale: true}
+        len: {view.conflicts: 0}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        json: {saved: true}
+      - configHas: ['sharePreference: ""', "autoPublishIntent: true"]
+
+  # The selection page edits a configuration that setup wrote. With none, saving
+  # would write the whole default document and end first-run setup unanswered.
+  - name: selection-scope-commit-without-a-config-file-is-refused
+    world:
+      listings: two-projects
+      gate: true
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: selection}
+        save: {selection: id}
+      - release: true
+      - await: {kind: session, session: "{selection}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{selection}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{selection}
+        body: {revision: "{rev}", selectedIds: [11111111-1111-4111-8111-111111111111]}
+      - call: POST /api/v1/kickstart/sessions/{selection}/commit
+        status: 400
+        json: {code: kickstart_commit_refused}
+        contains: {error: "run setup first at /kickstart"}
+        noReset: true
+      - configFile: absent
+      # the session stays, so the answers are not lost
+      - call: GET /api/v1/kickstart/sessions/{selection}
+        json: {scope: selection}
+
+  # The live configuration takes the read-only keys a commit's model writes. The
+  # model names its own paths, so the selection page's save reaches the running
+  # server without a second list of keys.
+  - name: commit-owns-the-selection-keys-its-model-writes
+    world:
+      listings: two-projects
+      gate: true
+      holdIngest: true
+      config: *licenseConfig
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: selection}
+        save: {selection: id}
+      - release: true
+      - await: {kind: session, session: "{selection}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{selection}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{selection}
+        body: {revision: "{rev}", selectedIds: [11111111-1111-4111-8111-111111111111]}
+      - call: POST /api/v1/kickstart/sessions/{selection}/commit
+        json: {saved: true, ingest.state: running}
+      - ingest:
+          runs: 1
+          selectionMode: selected
+          sessions: [11111111-1111-4111-8111-111111111111]
+
+  # The finish menu is read through the contract's closed set before anything is
+  # written, so a step the contract does not know leaves the file and the session
+  # exactly as they were.
+  - name: finish-step-outside-the-contract-is-refused-before-any-write
+    world:
+      listings: two-projects
+      gate: true
+      config: *licenseConfig
+      nextSteps: [config, web-resume]
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0}}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        status: 500
+        json: {code: publishing_contract_breach}
+        contains: {error: "web-resume"}
+      - configFile: unchanged
+      - call: GET /api/v1/kickstart/sessions/{full}
+        json: {scope: full}
+
+  # A body the contract refuses after the save is withheld the way a refused
+  # save's body is, with the same status and code, and its text says the save
+  # stands. A step listed twice passes the closed set and fails the contract.
+  - name: finish-body-breach-after-a-save-is-withheld-like-a-refusal
+    world:
+      listings: two-projects
+      gate: true
+      config: *licenseConfig
+      nextSteps: [config, config]
+    steps:
+      - call: POST /api/v1/kickstart/sessions
+        body: {scope: full}
+        save: {full: id}
+      - release: true
+      - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
+      - call: GET /api/v1/kickstart/sessions/{full}
+        save: {rev: revision}
+      - call: PATCH /api/v1/kickstart/sessions/{full}
+        body: {revision: "{rev}", values: {content-license: CC0-1.0}}
+      - call: POST /api/v1/kickstart/sessions/{full}/commit
+        status: 500
+        json: {code: publishing_contract_breach}
+        contains: {error: "The setup was saved"}
+      - configHas: ["license: CC0-1.0"]

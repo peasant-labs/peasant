@@ -1,0 +1,241 @@
+# What the model accepts and refuses at the boundary. `frame` is the data of a
+# kickstart topic message; `{$model: name}` is a served session from
+# src/test/fixtures/kickstart/models.yaml. `accepts` names the event class the
+# visitor reaches; `refuses` is text the actionable error must contain.
+requiredNames:
+  - session-event-is-a-snapshot
+  - answers-event-is-a-snapshot
+  - conflicts-event-is-a-snapshot
+  - scan-event-carries-only-scan
+  - ingest-event-carries-only-ingest
+  - closed-committed-carries-the-finish-body
+  - closed-expired-carries-none
+  - snapshot-without-view-refused
+  - scan-event-with-view-refused
+  - view-of-another-session-refused
+  - view-revision-mismatch-refused
+  - committed-closure-without-finish-body-refused
+  - expired-closure-with-finish-body-refused
+  - unknown-event-kind-refused
+  - unknown-scope-in-view-refused
+  - unknown-node-state-in-view-refused
+  - unknown-close-reason-refused
+cases:
+  - name: session-event-is-a-snapshot
+    frame: {kind: session, sessionId: ses-full, revision: 1, view: {$model: fresh}}
+    accepts: snapshot
+  - name: answers-event-is-a-snapshot
+    frame: {kind: answers, sessionId: ses-full, revision: 2, view: {$model: second-tab-answer}}
+    accepts: snapshot
+  - name: conflicts-event-is-a-snapshot
+    frame: {kind: conflicts, sessionId: ses-full, revision: 3, view: {$model: conflicted}}
+    accepts: snapshot
+  - name: scan-event-carries-only-scan
+    frame: {kind: scan, sessionId: ses-full, revision: 2, scan: {state: running, phase: reading, done: 2, total: 4}}
+    accepts: scan
+  - name: ingest-event-carries-only-ingest
+    frame: {kind: ingest, sessionId: ses-full, revision: 4, ingest: {state: running, new: 3, updated: 1}}
+    accepts: ingest
+  - name: closed-committed-carries-the-finish-body
+    frame:
+      kind: closed
+      sessionId: ses-full
+      revision: 4
+      reason: committed
+      committed:
+        saved: true
+        configPath: /home/ada/.config/peasant/config.yaml
+        ingest: {state: running, new: 0, updated: 0}
+        nextSteps: [config, web-start, village-login, village-push, auto-publish-settings]
+    accepts: closed
+  - name: closed-expired-carries-none
+    frame: {kind: closed, sessionId: ses-full, revision: 4, reason: expired}
+    accepts: closed
+  - name: snapshot-without-view-refused
+    frame: {kind: session, sessionId: ses-full, revision: 1}
+    refuses: carries no view
+  - name: scan-event-with-view-refused
+    frame: {kind: scan, sessionId: ses-full, revision: 1, view: {$model: fresh}, scan: {state: done, done: 4, total: 4}}
+    refuses: belongs to another kind of event
+  - name: view-of-another-session-refused
+    frame: {kind: session, sessionId: ses-selection, revision: 1, view: {$model: fresh}}
+    refuses: one event carries one session
+  - name: view-revision-mismatch-refused
+    frame: {kind: session, sessionId: ses-full, revision: 9, view: {$model: fresh}}
+    refuses: revision
+  - name: committed-closure-without-finish-body-refused
+    frame: {kind: closed, sessionId: ses-full, revision: 4, reason: committed}
+    refuses: finish body
+  - name: expired-closure-with-finish-body-refused
+    frame:
+      kind: closed
+      sessionId: ses-full
+      revision: 4
+      reason: expired
+      committed:
+        saved: true
+        configPath: config.yaml
+        ingest: {state: idle, new: 0, updated: 0}
+        nextSteps: [config]
+    refuses: finish body
+  - name: unknown-event-kind-refused
+    frame: {kind: replaced, sessionId: ses-full, revision: 1}
+    refuses: kind
+  - name: unknown-scope-in-view-refused
+    frame: {kind: session, sessionId: ses-full, revision: 1, view: {$model: fresh, scope: everything}}
+    refuses: scope
+  - name: unknown-node-state-in-view-refused
+    frame: {kind: scan, sessionId: ses-full, revision: 1, scan: {state: finished, done: 1, total: 1}}
+    refuses: state
+  - name: unknown-close-reason-refused
+    frame: {kind: closed, sessionId: ses-full, revision: 1, reason: replaced}
+    refuses: reason
+# The forest is read through the contract's own schema: a body it accepts comes
+# out as it went in, and one it refuses is refused whole, with the error that
+# says where. `tree` names a forest in src/test/fixtures/kickstart/trees.yaml;
+# `body` states one. `refuses` is text the actionable error must contain.
+trees:
+  requiredNames:
+    - the-forest-comes-out-as-the-contract-served-it
+    - an-unknown-kind-or-state-refuses-the-whole-forest
+    - a-total-or-a-cursor-is-refused
+    - a-row-without-an-id-is-refused
+    - a-row-without-a-label-is-refused
+  cases:
+    - name: the-forest-comes-out-as-the-contract-served-it
+      tree: forest
+    - name: an-unknown-kind-or-state-refuses-the-whole-forest
+      tree: unknown-kind-and-state
+      # what (the list, which rows), why (what each held and what is allowed), what
+      # it means (none of it is drawn, nothing changed) and what to do (same version, reload).
+      refuses:
+        - the list of sessions
+        - row 2 ("not a kind")
+        - 'holds "folder" for kind'
+        - row 3 ("not a state")
+        - 'holds "partial" for state'
+        - none of it is drawn
+        - breaks the Local API contract
+        - nothing was changed
+        - same version
+        - reload
+    - name: a-total-or-a-cursor-is-refused
+      body: {nodes: [], total: 0}
+      refuses: [total, breaks the Local API contract]
+    - name: a-row-without-an-id-is-refused
+      body:
+        nodes:
+          - {kind: project, state: none, label: no id}
+          - {id: p-ok, kind: project, state: none, label: ok}
+      refuses: ['row 1 ("no id")', 'has none for id']
+    - name: a-row-without-a-label-is-refused
+      body:
+        nodes:
+          - {id: p-ok, kind: project, state: none}
+      refuses: ['row 1 (id p-ok)', 'has none for label']
+# The refusal body every kickstart route answers on 400, 404, 500 and 503:
+# `{error, code}` with the code from the contract's closed set, read by one
+# parser. `accepts: every-code` is played once for each code the schema lists;
+# `refuses` is text the actionable contract error must contain.
+errors:
+  requiredNames:
+    - every-code-the-contract-lists-is-accepted
+    - an-unknown-code-is-refused-and-says-what-to-do
+    - a-missing-code-is-refused
+    - an-empty-sentence-is-refused
+    - another-field-is-refused
+  cases:
+    - name: every-code-the-contract-lists-is-accepted
+      accepts: every-code
+    - name: an-unknown-code-is-refused-and-says-what-to-do
+      body: {code: kickstart_brand_new, error: something peasant says that this page has no code for}
+      refuses:
+        - 'names the code "kickstart_brand_new"'
+        - codes this page knows
+        - what went wrong cannot be told
+        - breaks the Local API contract
+        - nothing was changed
+        - same version
+        - reload
+    - name: a-missing-code-is-refused
+      body: {error: the server says what happened but not which refusal it is}
+      refuses: [names no code, codes this page knows, breaks the Local API contract]
+    - name: an-empty-sentence-is-refused
+      body: {code: kickstart_failed, error: ""}
+      refuses: [no sentence saying what went wrong]
+    - name: another-field-is-refused
+      body: {code: kickstart_failed, error: a sentence, detail: a field the contract does not have}
+      refuses: [detail, breaks the Local API contract]
+# The scan the server pushes and answers: what a finished scan could not read is
+# its own `notice` field, and the dropped labels are bounded by the contract's
+# own maximum. `labels` is how many dropped labels the case sends, as `max` or
+# `max-plus-one` of the schema's exported maximum, so the number is never
+# written here. `refuses` is text the actionable contract error must contain.
+scans:
+  requiredNames:
+    - a-notice-is-read-from-its-own-field
+    - a-scan-without-a-notice-has-none
+    - a-blank-notice-is-refused
+    - dropped-labels-up-to-the-contract-maximum-are-accepted
+    - one-more-than-the-maximum-of-dropped-labels-is-refused
+  cases:
+    - name: a-notice-is-read-from-its-own-field
+      scan: {state: done, done: 2, total: 2, phase: an older note carried in the phase, notice: "Could not read 1 harness folder: Codex."}
+      expect: {notice: "Could not read 1 harness folder: Codex.", phase: an older note carried in the phase}
+    - name: a-scan-without-a-notice-has-none
+      scan: {state: done, done: 2, total: 2}
+      expect: {notice: null, phase: null}
+    - name: a-blank-notice-is-refused
+      scan: {state: done, done: 2, total: 2, notice: "   "}
+      refuses: [notice, breaks the Local API contract]
+    - name: dropped-labels-up-to-the-contract-maximum-are-accepted
+      scan: {state: done, done: 2, total: 2, droppedSelections: 9}
+      labels: max
+    - name: one-more-than-the-maximum-of-dropped-labels-is-refused
+      scan: {state: done, done: 2, total: 2, droppedSelections: 9}
+      labels: max-plus-one
+      refuses: [droppedLabels, breaks the Local API contract]
+# GET /api/v1/sync/ingest/status, which the finish panel reads once as the
+# fallback for a pushed end it may have missed. It is not a kickstart contract
+# type: the page reads the four states the server writes and refuses any other.
+# `end` is what the panel shows from it (null when no end has happened), and
+# `refuses` is text the actionable contract error must contain.
+statuses:
+  requiredNames:
+    - a-finished-import-ends-with-its-counts
+    - a-failed-import-ends-with-its-reason
+    - a-failed-import-without-a-reason-says-so
+    - a-running-import-has-no-end-yet
+    - an-import-that-never-ran-has-no-end
+    - a-finished-import-without-counts-is-refused
+    - a-negative-count-is-refused
+    - an-unknown-status-is-refused
+    - a-body-that-is-not-an-object-is-refused
+  cases:
+    - name: a-finished-import-ends-with-its-counts
+      body: {status: done, result: {new: 4, updated: 2, unchanged: 325, errors: 0, indexed: 0, computed: 0, duration: 1s}}
+      end: {state: idle, new: 4, updated: 2, error: null}
+    - name: a-failed-import-ends-with-its-reason
+      body: {status: error, error: the store is locked by another process}
+      end: {state: failed, new: 0, updated: 0, error: the store is locked by another process}
+    - name: a-failed-import-without-a-reason-says-so
+      body: {status: error}
+      end: {state: failed, new: 0, updated: 0, error: the import ended without a reason}
+    - name: a-running-import-has-no-end-yet
+      body: {status: running}
+      end: null
+    - name: an-import-that-never-ran-has-no-end
+      body: {status: idle}
+      end: null
+    - name: a-finished-import-without-counts-is-refused
+      body: {status: done}
+      refuses: [reports no counts, breaks the Local API contract, GET /api/v1/sync/ingest/status]
+    - name: a-negative-count-is-refused
+      body: {status: done, result: {new: -1, updated: 0}}
+      refuses: [reports no counts, breaks the Local API contract]
+    - name: an-unknown-status-is-refused
+      body: {status: paused}
+      refuses: ['"paused"', which this page does not know, 'idle, running, done, error']
+    - name: a-body-that-is-not-an-object-is-refused
+      body: running
+      refuses: [is not an object, breaks the Local API contract]

@@ -14,6 +14,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/onboarding"
 	"github.com/peasant-labs/peasant/internal/projectlabel"
 	"github.com/peasant-labs/peasant/internal/tui/mdrender"
 	"github.com/peasant-labs/peasant/internal/tui/search"
@@ -1903,25 +1904,11 @@ func (p *IngestPage) ingestCompletion() IngestCompletion {
 // RetentionPage
 // ---------------------------------------------------------------------------
 
-// retentionOption represents a selectable cleanup period.
-type retentionOption struct {
-	days        int // 0 means "never clean up" (sets a very large value)
-	label       string
-	description string
-	recommended bool
-}
-
-// retentionOptions defines the available cleanup period choices.
-var retentionOptions = []retentionOption{
-	{days: 30, label: "30 days", description: "Claude Code default — transcripts are deleted after 30 days of inactivity."},
-	{days: 90, label: "90 days", description: "Keep transcripts for 3 months."},
-	{days: 365, label: "1 year", description: "Keep transcripts for a full year."},
-	{days: 0, label: "Never expire", recommended: true, description: "Transcripts are never automatically deleted. Recommended for Peasant users."},
-}
-
 // RetentionPage lets users view and change Claude Code's cleanupPeriodDays setting.
+// Its choices are the shared setup model's retention menu (see menus.go).
 type RetentionPage struct {
 	title       string
+	options     []retentionOption
 	currentDays int  // current setting (-1 = not set / using default)
 	hasExisting bool // whether a value was explicitly set
 	cursor      int
@@ -1930,16 +1917,21 @@ type RetentionPage struct {
 
 // NewRetentionPage creates a retention page pre-loaded with the current setting.
 func NewRetentionPage(title string, currentDays int, hasExisting bool) *RetentionPage {
-	// Default cursor to "Never expire" (last option).
-	cursor := len(retentionOptions) - 1
+	options := retentionMenu()
+	// Default cursor to the recommended option (never expire).
+	cursor := len(options) - 1
+	for i, opt := range options {
+		if opt.recommended {
+			cursor = i
+			break
+		}
+	}
 	if hasExisting {
-		// Try to match current setting to an option.
-		for i, opt := range retentionOptions {
-			if opt.days == 0 && currentDays >= 9999 {
-				cursor = i
-				break
-			}
-			if opt.days == currentDays {
+		// Try to match current setting to an option. Any stored period that keeps
+		// transcripts forever matches the never-expire option.
+		for i, opt := range options {
+			if opt.days == currentDays ||
+				(opt.days == onboarding.NeverExpireDays && onboarding.NeverExpires(currentDays)) {
 				cursor = i
 				break
 			}
@@ -1947,6 +1939,7 @@ func NewRetentionPage(title string, currentDays int, hasExisting bool) *Retentio
 	}
 	return &RetentionPage{
 		title:       title,
+		options:     options,
 		currentDays: currentDays,
 		hasExisting: hasExisting,
 		cursor:      cursor,
@@ -1957,14 +1950,10 @@ func (p *RetentionPage) Title() string    { return p.title }
 func (p *RetentionPage) IsComplete() bool { return p.confirmed }
 func (p *RetentionPage) Init() tea.Cmd    { return nil }
 
-// SelectedDays returns the chosen cleanup period in days.
-// Returns 99999 for "never expire".
+// SelectedDays returns the chosen cleanup period in days. Never expire is
+// onboarding.NeverExpireDays.
 func (p *RetentionPage) SelectedDays() int {
-	opt := retentionOptions[p.cursor]
-	if opt.days == 0 {
-		return 99999
-	}
-	return opt.days
+	return p.options[p.cursor].days
 }
 
 func (p *RetentionPage) Reset() { p.confirmed = false }
@@ -1978,15 +1967,15 @@ func (p *RetentionPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 				p.cursor--
 			}
 		case defaults.KeyDown.String(), defaults.KeyVimDown.String():
-			if p.cursor < len(retentionOptions)-1 {
+			if p.cursor < len(p.options)-1 {
 				p.cursor++
 			}
 		case defaults.KeyEnter.String():
 			p.confirmed = true
 		default:
-			if len(msg.String()) == 1 && msg.String()[0] >= '1' && msg.String()[0] <= '4' {
+			if len(msg.String()) == 1 && msg.String()[0] >= '1' && msg.String()[0] <= byte('0'+len(p.options)) {
 				idx := int(msg.String()[0] - '1')
-				if idx < len(retentionOptions) {
+				if idx < len(p.options) {
 					p.cursor = idx
 					p.confirmed = true
 				}
@@ -2011,7 +2000,7 @@ func (p *RetentionPage) View(width, height int) string {
 		b.WriteString(OptionSelected.Render("⚠  Current setting: not set (defaults to 30 days)"))
 		b.WriteString(TextBg.Render("\n"))
 		b.WriteString(HelpBar.Render("   Your transcripts will be deleted after 30 days of inactivity!"))
-	} else if p.currentDays >= 9999 {
+	} else if onboarding.NeverExpires(p.currentDays) {
 		b.WriteString(DescriptionStyle.Render("   Current setting: never expire"))
 	} else {
 		b.WriteString(fmt.Sprintf("   Current setting: %d days", p.currentDays))
@@ -2025,7 +2014,7 @@ func (p *RetentionPage) View(width, height int) string {
 	b.WriteString(DescriptionStyle.Render("Choose how long Claude Code should keep transcripts:"))
 	b.WriteString(TextBg.Render("\n\n"))
 
-	for i, opt := range retentionOptions {
+	for i, opt := range p.options {
 		radio := "○"
 		if i == p.cursor {
 			radio = "●"
@@ -2059,43 +2048,11 @@ func (p *RetentionPage) View(width, height int) string {
 // PrivacyPreferencePage
 // ---------------------------------------------------------------------------
 
-type privacyOption struct {
-	level       redact.RedactionLevel
-	label       string
-	recommended bool
-	description string
-	// keeps names what redaction deliberately does NOT touch. It is a statement
-	// about scope rather than about output, so unlike the before/after examples it
-	// cannot be derived by running the redactor - nothing is produced to compare.
-	keeps string
-}
-
-// privacyOptions offers exactly the levels a user may choose.
-//
-// It is one option, and that is the point rather than an accident of trimming.
-// Maximum is absent because every command refuses to run under it, so a wizard
-// that could write it would produce a configuration that breaks the next import
-// and the next upload. Minimal is absent because it protects less than Standard
-// and offering a weaker choice on an onboarding screen invites a user to pick it
-// without understanding what they gave up; a configuration that already carries it
-// keeps working and is raised, which the review screen discloses.
-//
-// The order matches config.OfferedRedactionLevels, and
-// TestPrivacyPreferencePage_OffersOnlyLevelsTheProductOffers keeps the two from
-// drifting apart in either direction.
-var privacyOptions = []privacyOption{
-	{
-		level:       redact.Standard,
-		label:       "Standard",
-		recommended: true,
-		description: "Redacts secrets, personal data, and username paths it recognizes. Pattern matching is best effort: it cannot find every one.",
-		keeps:       "Keeps: code content, project names, tool names",
-	},
-}
-
-// The wizard must offer exactly the levels the product offers - no more, so its
+// The wizard offers exactly the levels the product offers - no more, so its
 // output cannot break the next command, and no fewer, so a level that becomes
-// available cannot be silently withheld.
+// available cannot be silently withheld. The menu is the shared setup model's
+// (see menus.go), which derives it from config.OfferedRedactionLevels, so the
+// wizard follows the policy when it widens.
 //
 // That invariant is held by TestPrivacyPreferencePage_OffersOnlyLevelsTheProductOffers,
 // which checks SET containment in both directions and names the offending level.
@@ -2107,16 +2064,14 @@ var privacyOptions = []privacyOption{
 //     towards offering MORE - built cleanly and then made `peasant version` panic.
 //     A static developer-facing invariant should not be able to take a user's
 //     unrelated command down.
-//   - The count check was strictly weaker than the test beside it. Widen the menu
-//     and give this list a duplicate Standard entry and both panics pass at 2 == 2
-//     while the test correctly reports that the page withholds a level the product
-//     offers.
+//   - The count check was strictly weaker than the test beside it.
 //
 // So they cost a startup abort and caught a subset of what already fails. The test
 // is the guard.
 
 type PrivacyPreferencePage struct {
 	title     string
+	options   []privacyOption
 	cursor    int
 	confirmed bool
 	// examples are the before/after lines for the recommended level, PRODUCED by
@@ -2135,8 +2090,9 @@ type PrivacyPreferencePage struct {
 // only the username segment is. TestPrivacyPreferencePage_DerivesItsExamples
 // asserts the shipped rules never take this path, so it cannot degrade in silence.
 func NewPrivacyPreferencePage(title string) *PrivacyPreferencePage {
-	page := &PrivacyPreferencePage{title: title, cursor: recommendedPrivacyOption()}
-	if lines, err := privacyExamples(privacyOptions[page.cursor].level); err == nil {
+	options := privacyMenu()
+	page := &PrivacyPreferencePage{title: title, options: options, cursor: recommendedPrivacyOption(options)}
+	if lines, err := privacyExamples(options[page.cursor].level); err == nil {
 		page.examples = lines
 	}
 	return page
@@ -2149,8 +2105,8 @@ func NewPrivacyPreferencePage(title string) *PrivacyPreferencePage {
 // long as the list had exactly the two entries it had when that was written.
 // Removing the first entry would have left the cursor one past the end and
 // panicked on the first read of SelectedLevel.
-func recommendedPrivacyOption() int {
-	for index, option := range privacyOptions {
+func recommendedPrivacyOption(options []privacyOption) int {
+	for index, option := range options {
 		if option.recommended {
 			return index
 		}
@@ -2163,7 +2119,7 @@ func (p *PrivacyPreferencePage) IsComplete() bool { return p.confirmed }
 func (p *PrivacyPreferencePage) Init() tea.Cmd    { return nil }
 
 func (p *PrivacyPreferencePage) SelectedLevel() string {
-	return string(privacyOptions[p.cursor].level)
+	return string(p.options[p.cursor].level)
 }
 
 func (p *PrivacyPreferencePage) Reset() { p.confirmed = false }
@@ -2177,15 +2133,15 @@ func (p *PrivacyPreferencePage) Update(msg tea.Msg) (Page, tea.Cmd) {
 				p.cursor--
 			}
 		case defaults.KeyDown.String(), defaults.KeyVimDown.String():
-			if p.cursor < len(privacyOptions)-1 {
+			if p.cursor < len(p.options)-1 {
 				p.cursor++
 			}
 		case defaults.KeyEnter.String():
 			p.confirmed = true
 		default:
-			if len(msg.String()) == 1 && msg.String()[0] >= '1' && msg.String()[0] <= byte('0'+len(privacyOptions)) {
+			if len(msg.String()) == 1 && msg.String()[0] >= '1' && msg.String()[0] <= byte('0'+len(p.options)) {
 				idx := int(msg.String()[0] - '1')
-				if idx >= 0 && idx < len(privacyOptions) {
+				if idx >= 0 && idx < len(p.options) {
 					p.cursor = idx
 					p.confirmed = true
 				}
@@ -2196,7 +2152,7 @@ func (p *PrivacyPreferencePage) Update(msg tea.Msg) (Page, tea.Cmd) {
 }
 
 func (p *PrivacyPreferencePage) View(width, height int) string {
-	if offeredLevelIsSingular() && len(privacyOptions) == 1 {
+	if offeredLevelIsSingular() && len(p.options) == 1 {
 		return p.viewSingleOffered()
 	}
 	return p.viewChooser()
@@ -2214,7 +2170,7 @@ func (p *PrivacyPreferencePage) View(width, height int) string {
 // level is offered, which is the widening the disposition table exists to support
 // and which the rest of this work already pays for.
 func (p *PrivacyPreferencePage) viewSingleOffered() string {
-	option := privacyOptions[0]
+	option := p.options[0]
 	var b strings.Builder
 	b.WriteString(PageTitle.Render(p.title))
 	b.WriteString(TextBg.Render("\n\n"))
@@ -2247,7 +2203,7 @@ func (p *PrivacyPreferencePage) viewChooser() string {
 	b.WriteString(TextBg.Render("\n\n"))
 	b.WriteString(DescriptionStyle.Render("Choose your default redaction level. This controls what is redacted\nfrom your transcripts before they leave your machine."))
 	b.WriteString(TextBg.Render("\n\n"))
-	for i, opt := range privacyOptions {
+	for i, opt := range p.options {
 		radio := "○"
 		if i == p.cursor {
 			radio = "●"
@@ -2274,9 +2230,7 @@ func (p *PrivacyPreferencePage) viewChooser() string {
 			b.WriteString(HelpBar.Render(line))
 			b.WriteString(TextBg.Render("\n"))
 		}
-		b.WriteString(TextBg.Render("      "))
-		b.WriteString(HelpBar.Render(opt.keeps))
-		b.WriteString(TextBg.Render("\n\n"))
+		b.WriteString(TextBg.Render("\n"))
 	}
 	b.WriteString(HelpBar.Render("You can change this at any time in ~/.config/peasant/config.yaml"))
 	b.WriteString(TextBg.Render("\n\n"))
@@ -2298,40 +2252,26 @@ func (p *PrivacyPreferencePage) viewChooser() string {
 // the shipped one-level configuration never renders. A cache with no measurable
 // effect is a second code path to keep correct for nothing.
 func (p *PrivacyPreferencePage) examplesFor(index int) []string {
-	lines, err := privacyExamples(privacyOptions[index].level)
+	lines, err := privacyExamples(p.options[index].level)
 	if err != nil {
 		return nil
 	}
 	return lines
 }
 
-// licenseOption is one row on the LicensePage.
-type licenseOption struct {
-	license     schema.License
-	label       string
-	description string
-}
-
-// licenseOptions is the kickstart license menu. Every row is a real license (no
-// "none" escape hatch) so a contributor who reaches this page must pick one; the
-// default cursor sits on the first/most-permissive entry (CC0). Mirrors
-// schema.AllLicenses.
-var licenseOptions = []licenseOption{
-	{license: schema.LicenseCC0, label: "CC0 1.0", description: "Public-domain dedication — no rights reserved."},
-	{license: schema.LicenseCCBY, label: "CC BY 4.0", description: "Reuse allowed with attribution."},
-	{license: schema.LicenseCCBYSA, label: "CC BY-SA 4.0", description: "Attribution + share-alike (derivatives keep this license)."},
-}
-
 // LicensePage lets the user pick a default content license applied to all pushed
-// transcripts. Mirrors PrivacyPreferencePage (single-select radio list).
+// transcripts. Mirrors PrivacyPreferencePage (single-select radio list). Its
+// choices are the shared setup model's license menu (see menus.go): every row is
+// a real license, and the cursor starts on the first one (CC0).
 type LicensePage struct {
 	title     string
+	options   []licenseOption
 	cursor    int
 	confirmed bool
 }
 
 func NewLicensePage(title string) *LicensePage {
-	return &LicensePage{title: title} // cursor 0 = CC0 (first option)
+	return &LicensePage{title: title, options: licenseMenu()} // cursor 0 = CC0 (first option)
 }
 
 func (p *LicensePage) Title() string    { return p.title }
@@ -2342,7 +2282,7 @@ func (p *LicensePage) Reset()           { p.confirmed = false }
 // SelectedLicense returns the chosen license (always a real license — the menu
 // has no "none" entry).
 func (p *LicensePage) SelectedLicense() schema.License {
-	return licenseOptions[p.cursor].license
+	return p.options[p.cursor].license
 }
 
 func (p *LicensePage) Update(msg tea.Msg) (Page, tea.Cmd) {
@@ -2354,7 +2294,7 @@ func (p *LicensePage) Update(msg tea.Msg) (Page, tea.Cmd) {
 				p.cursor--
 			}
 		case defaults.KeyDown.String(), defaults.KeyVimDown.String():
-			if p.cursor < len(licenseOptions)-1 {
+			if p.cursor < len(p.options)-1 {
 				p.cursor++
 			}
 		case defaults.KeyEnter.String():
@@ -2362,7 +2302,7 @@ func (p *LicensePage) Update(msg tea.Msg) (Page, tea.Cmd) {
 		default:
 			if len(msg.String()) == 1 && msg.String()[0] >= '1' && msg.String()[0] <= '9' {
 				idx := int(msg.String()[0] - '1')
-				if idx < len(licenseOptions) {
+				if idx < len(p.options) {
 					p.cursor = idx
 					p.confirmed = true
 				}
@@ -2378,7 +2318,7 @@ func (p *LicensePage) View(width, height int) string {
 	b.WriteString(TextBg.Render("\n\n"))
 	b.WriteString(DescriptionStyle.Render("Choose a default license for transcripts you publish to the village.\nIt applies to every push; override a single run with --license."))
 	b.WriteString(TextBg.Render("\n\n"))
-	for i, opt := range licenseOptions {
+	for i, opt := range p.options {
 		radio := "○"
 		if i == p.cursor {
 			radio = "●"
@@ -2449,8 +2389,9 @@ func renderProgressSnapshot(snap map[string]StageProgress) string {
 // Exported so the command layer can prove the wizard can only produce a level the
 // product will actually run.
 func PrivacyLevels() []redact.RedactionLevel {
-	levels := make([]redact.RedactionLevel, 0, len(privacyOptions))
-	for _, option := range privacyOptions {
+	menu := privacyMenu()
+	levels := make([]redact.RedactionLevel, 0, len(menu))
+	for _, option := range menu {
 		levels = append(levels, option.level)
 	}
 	return levels
@@ -2461,8 +2402,9 @@ func PrivacyLevels() []redact.RedactionLevel {
 // apply to every redaction claim can be checked against what the wizard actually
 // displays, rather than against a copy of it.
 func PrivacyDescriptions() []string {
-	descriptions := make([]string, 0, len(privacyOptions))
-	for _, option := range privacyOptions {
+	menu := privacyMenu()
+	descriptions := make([]string, 0, len(menu))
+	for _, option := range menu {
 		descriptions = append(descriptions, option.description)
 	}
 	return descriptions

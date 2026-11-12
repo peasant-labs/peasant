@@ -650,20 +650,21 @@ func (a *StrikeAdapter) buildStrikeSession(source strikeSource) (DiscoveredSessi
 		projectName = filepath.Base(worktree)
 	}
 	return DiscoveredSession{
-		SessionID:     source.id,
-		Harness:       HarnessStrike,
-		SourcePath:    source.resolved,
-		SourceFormat:  SourceFormatJSONL,
-		OriginalRoot:  source.root,
-		ParentUUID:    strikeParent(source.sidecar),
-		SubagentPaths: []ResolvedPath{},
-		DebugPaths:    []ResolvedPath{},
-		ModTime:       source.modTime,
-		ProjectName:   projectName,
-		Title:         title,
-		Branch:        source.sidecar.branchName(),
-		CWD:           worktree,
-		CreatedAt:     source.sidecar.createdTime(),
+		SessionID:      source.id,
+		Harness:        HarnessStrike,
+		SourcePath:     source.resolved,
+		SourceFormat:   SourceFormatJSONL,
+		OriginalRoot:   source.root,
+		ParentUUID:     strikeParent(source.sidecar),
+		SubagentPaths:  []ResolvedPath{},
+		DebugPaths:     []ResolvedPath{},
+		ModTime:        source.modTime,
+		ProjectName:    projectName,
+		Title:          title,
+		Branch:         source.sidecar.branchName(),
+		RecordedRemote: source.sidecar.remoteURL(),
+		CWD:            worktree,
+		CreatedAt:      source.sidecar.createdTime(),
 	}, true
 }
 
@@ -1484,7 +1485,12 @@ func (a *StrikeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 	if worktree != "" {
 		meta.Git.Worktree = &worktree
 	}
-	remote, tracking := ResolveGitRemote(ctx, a.git, worktree, branch, sidecar.remoteURL())
+	// The sidecar's remote wins; otherwise git answers for the session's project
+	// directory only, as it does for the tree and the import filter before the
+	// session is stored. worktree above may be the storage folder, which is only
+	// a path for the identity hash and is never asked.
+	gitDir := ExtractionDirectory(session, sidecar.worktreePath(), osDirectoryExists)
+	remote, tracking := ResolveGitRemote(ctx, a.git, gitDir, branch, sidecar.remoteURL())
 	if remote != "" {
 		meta.Git.Remote = &remote
 	}

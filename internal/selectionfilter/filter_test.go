@@ -51,12 +51,14 @@ type filterCase struct {
 	ExpectConflictCount     int                        `yaml:"expectConflictCount"`
 	ExpectMatchWhenDisabled bool                       `yaml:"expectMatchWhenDisabled"`
 	NoticeContains          []string                   `yaml:"noticeContains"`
+	SummaryContains         []string                   `yaml:"summaryContains"`
 }
 
 type filterSession struct {
 	ID            string `yaml:"id"`
 	CWD           string `yaml:"cwd"`
 	ProjectName   string `yaml:"projectName"`
+	Branch        string `yaml:"branch"`
 	UnrelatedSlug bool   `yaml:"unrelatedSlug"`
 }
 
@@ -195,6 +197,7 @@ func runFilterCase(t *testing.T, item filterCase) {
 				Harness:     ingest.Harness(item.Harness),
 				ProjectName: row.ProjectName,
 				CWD:         row.CWD,
+				Branch:      row.Branch,
 			}
 		}
 	}
@@ -260,6 +263,15 @@ func runFilterCase(t *testing.T, item filterCase) {
 	for _, needle := range item.NoticeContains {
 		if !strings.Contains(notice.String(), needle) {
 			t.Fatalf("notice does not contain %q:\n%s", needle, notice.String())
+		}
+	}
+	summary := recorder.Summary("/config/chosen.yaml")
+	if len(item.SummaryContains) == 0 && summary != "" {
+		t.Fatalf("summary = %q, want empty when nothing was withheld", summary)
+	}
+	for _, needle := range item.SummaryContains {
+		if !strings.Contains(summary, needle) {
+			t.Fatalf("summary does not contain %q: %q", needle, summary)
 		}
 	}
 	if item.RepeatMatch && strings.Count(notice.String(), "was withheld during ingest") != 1 {

@@ -1,0 +1,21 @@
+# What a scan says about itself while it runs. The words are lowercase, as every
+# line of chrome is, and name the harness the way a preview does.
+requiredNames:
+  - discovering-names-the-harness-in-lowercase
+  - resolving-names-the-harness-in-lowercase
+  - a-harness-without-a-space-in-its-name
+cases:
+  - name: discovering-names-the-harness-in-lowercase
+    harness: claude-code
+    discovering: "discovering claude code sessions..."
+    resolving: "resolving claude code project info..."
+
+  - name: resolving-names-the-harness-in-lowercase
+    harness: codex
+    discovering: "discovering codex sessions..."
+    resolving: "resolving codex project info..."
+
+  - name: a-harness-without-a-space-in-its-name
+    harness: opencode
+    discovering: "discovering opencode sessions..."
+    resolving: "resolving opencode project info..."

@@ -20,6 +20,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/collectiveobservations"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/discovery"
 	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/metrics"
@@ -63,10 +64,24 @@ type syncHandler struct {
 	ingestStatus   string // "idle", "running", "done", "error"
 	ingestProgress *ingest.ProgressState
 	ingestResult   *ingest.PipelineResult
-	ingestError    error
+	// ingestWritten is what the finished run wrote, counting a session that was
+	// still being written when the run read it.
+	ingestWritten ingest.WrittenCounts
+	// ingestNote is what the finished run says beside its counts: how many
+	// sessions the saved selection withheld because its rules disagree. It is
+	// empty when none were.
+	ingestNote  string
+	ingestError error
 	// sessionIngest is set while a one-session re-index runs, so it and the
 	// whole-machine ingest never run at once in this process.
 	sessionIngest bool
+
+	// kickstartFeed carries the import's state to the finish panels of saved
+	// setup sessions. Nil publishes nothing.
+	kickstartFeed *kickstartImportFeed
+	// ingestRun runs one whole-machine import. Nil runs the pipeline. A test
+	// replaces it to hold a run or to observe what it starts with.
+	ingestRun func(*ingest.ProgressState)
 }
 
 // configDir resolves the config directory this handler reads and writes under,
@@ -1110,28 +1125,149 @@ func (h *syncHandler) handleSyncLogin(w http.ResponseWriter, _ *http.Request) {
 func (h *syncHandler) handleSyncIngest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 
-	if h.currentConfig() == nil {
+	start, launch, err := h.reserveIngest(false)
+	switch {
+	case errors.Is(err, errIngestNoConfig):
 		writeJSONError(w, http.StatusServiceUnavailable, "config not available")
 		return
+	case err != nil:
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	case start.AlreadyRunning:
+		writeJSONError(w, http.StatusConflict, "ingest already running")
+		return
+	}
+	// Every saved setup session whose finish panel is still open watches this run
+	// too: the run reports its start and its end under each session's id.
+	h.kickstartFeed.run(launch, nil)
+
+	json.NewEncoder(w).Encode(map[string]string{"status": "running"})
+}
+
+// errIngestNoConfig is the refusal to import without a configuration.
+var errIngestNoConfig = errors.New("config not available")
+
+// ingestStart is what claiming the import found: AlreadyRunning is true when an
+// import was already running and nothing was claimed.
+type ingestStart struct {
+	AlreadyRunning bool
+}
+
+// reserveIngest claims the whole-machine import POST /api/v1/sync/ingest runs.
+// The claim is made (a request that arrives now finds an import running) and the
+// returned launch starts the run, which reports its final state to observe when
+// observe is not nil: idle with the counts of sessions written, or failed with
+// the reason. launch is nil unless the import was claimed. A caller that must
+// publish something before the import can speak, such as the end of a saved
+// setup session, launches after it has.
+//
+// preflight refuses to claim, with the reason, when the import could not start
+// (see ingestPreflight): an invalid saved selection, a redaction level this
+// version cannot apply, or a store that is behind and needs the upgrade a
+// server never runs. preflight false keeps the route's
+// long-standing behavior: such a configuration is reported by the run, in the
+// status route, not by the request that started it.
+func (h *syncHandler) reserveIngest(preflight bool) (ingestStart, func(observe func(schema.LocalKickstartIngest)), error) {
+	cfg := h.currentConfig()
+	if cfg == nil {
+		return ingestStart{}, nil, errIngestNoConfig
+	}
+	if preflight {
+		if err := h.ingestPreflight(cfg); err != nil {
+			return ingestStart{}, nil, err
+		}
 	}
 
 	h.mu.Lock()
 	if h.ingestStatus == "running" || h.sessionIngest {
 		h.mu.Unlock()
-		writeJSONError(w, http.StatusConflict, "ingest already running")
-		return
+		return ingestStart{AlreadyRunning: true}, nil, nil
 	}
 
 	progState := ingest.NewProgressState()
 	h.ingestStatus = "running"
 	h.ingestProgress = progState
 	h.ingestResult = nil
+	h.ingestWritten = ingest.WrittenCounts{}
+	h.ingestNote = ""
 	h.ingestError = nil
 	h.mu.Unlock()
 
-	go h.runIngestPipeline(progState)
+	launch := func(observe func(schema.LocalKickstartIngest)) {
+		run := h.ingestRun
+		if run == nil {
+			run = h.runIngestPipeline
+		}
+		go func() {
+			run(progState)
+			if observe != nil {
+				observe(h.ingestWire())
+			}
+		}()
+	}
+	return ingestStart{}, launch, nil
+}
 
-	json.NewEncoder(w).Encode(map[string]string{"status": "running"})
+// ingestWire is the finished import as the kickstart topic reports it: idle with
+// the counts of sessions written and, when the saved selection withheld
+// sessions, the note that says so, or failed with the reason.
+func (h *syncHandler) ingestWire() schema.LocalKickstartIngest {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.ingestStatus == "error" || h.ingestError != nil {
+		message := "the import ended without a reason"
+		if h.ingestError != nil {
+			message = h.ingestError.Error()
+		}
+		return schema.LocalKickstartIngest{State: schema.LocalKickstartIngestFailed, Error: message}
+	}
+	return schema.LocalKickstartIngest{State: schema.LocalKickstartIngestIdle, Note: h.ingestNote, New: h.ingestWritten.New, Updated: h.ingestWritten.Updated}
+}
+
+// ingestPreflight is the one place that decides whether an import can start. It
+// runs the checks the run itself makes before it reads a source or opens the
+// store, so a caller that asks first is told what the run would be told, and
+// nothing is claimed for an import that would refuse at once.
+func (h *syncHandler) ingestPreflight(cfg *config.Config) error {
+	if err := checkIngestable(cfg); err != nil {
+		return err
+	}
+	return h.refuseBehindStore()
+}
+
+// refuseBehindStore refuses an import while the store is behind the schema
+// this build needs, or still owes a recount an earlier upgrade did not
+// finish. A server never upgrades the store: there is no terminal watching
+// it. The check only reads, so a refused import changes no byte, and the
+// refusal is the one store.Open gives a behind store: it names the terminal
+// command that runs the upgrade. This is defensive: the server refuses a
+// behind store at start, so the refusal means the store fell behind under a
+// running server.
+func (h *syncHandler) refuseBehindStore() error {
+	return store.RefuseBehind(string(h.dbPath()))
+}
+
+// checkIngestable refuses a configuration the import cannot apply, before any
+// source is read: an invalid saved selection, or a redaction level this version
+// cannot apply.
+func checkIngestable(cfg *config.Config) error {
+	if err := config.ValidateSelection(cfg.Selection); err != nil {
+		return fmt.Errorf("the import was not started because the saved selection is invalid, found in internal/api.checkIngestable before any source was read: %w; no source was read or imported and nothing was changed; choose the sessions to import again in setup (or run `peasant kickstart`), then import again", err)
+	}
+	// Refuse an import under a level this version cannot apply, rather than
+	// storing transcripts the user believes were anonymised at import time. No
+	// supported level redacts while ingest writes: that is the deferred redaction
+	// model, and redaction happens on the way out.
+	if !config.RedactionLevelSupported(cfg.Redaction.Level) {
+		return &config.UnsupportedRedactionLevelError{
+			Level:     cfg.Redaction.Level,
+			Source:    "the loaded configuration",
+			Operation: "the web ingest",
+			Step:      "before any transcript was read or written",
+			Impact:    "Nothing was imported and nothing already imported was changed.",
+		}
+	}
+	return nil
 }
 
 // --------------------------------------------------------------------------
@@ -1195,14 +1331,14 @@ func (h *syncHandler) handleSyncIngestSession(w http.ResponseWriter, r *http.Req
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
-	pipeline, closeStore, _, err := h.newIngestPipeline(ingest.NewProgressState(), &ingestSessionScope{id: id, harness: harness})
+	built, err := h.newIngestPipeline(ingest.NewProgressState(), &ingestSessionScope{id: id, harness: harness})
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, err.Error(), "session_ingest_failed")
 		return
 	}
-	defer closeStore()
+	defer built.release()
 	started := time.Now()
-	result, err := pipeline.Run(ctx)
+	result, err := built.pipeline.Run(ctx)
 	if errors.Is(err, ingest.ErrHarvestRunning) {
 		writeAPIError(w, http.StatusConflict, "another harvest is running on this data dir (for example `peasant harvest` in a terminal); the previous index was kept; retry when it finishes", "ingest_running")
 		return
@@ -1347,15 +1483,15 @@ func sessionIngestFailure(result *ingest.PipelineResult, id ingest.SessionID) st
 // runIngestPipeline constructs and runs the full ingest pipeline, mirroring
 // the pattern from buildFTUEIngestRunner in cmd/peasant/cmd_kickstart.go.
 func (h *syncHandler) runIngestPipeline(progState *ingest.ProgressState) {
-	pipeline, closeStore, recorder, err := h.newIngestPipeline(progState, nil)
+	built, err := h.newIngestPipeline(progState, nil)
 	if err != nil {
 		h.setIngestError(err)
 		return
 	}
-	defer closeStore()
+	defer built.release()
 
-	result, err := pipeline.Run(context.Background())
-	appendSelectionConflictDiagnostics(result, recorder, h.selectionConfigPath())
+	result, err := built.pipeline.Run(context.Background())
+	appendSelectionConflictDiagnostics(result, built.conflicts, h.selectionConfigPath())
 	if errors.Is(err, ingest.ErrHarvestRunning) {
 		h.setIngestError(fmt.Errorf("another harvest is running on this data dir (for example `peasant harvest` in a terminal); retry when it finishes"))
 		return
@@ -1365,9 +1501,12 @@ func (h *syncHandler) runIngestPipeline(progState *ingest.ProgressState) {
 		return
 	}
 
+	written := result.Written(func(id ingest.SessionID) bool { return built.storedBefore[id.String()] })
 	h.mu.Lock()
 	h.ingestStatus = "done"
 	h.ingestResult = result
+	h.ingestWritten = written
+	h.ingestNote = built.conflicts.Summary(h.selectionConfigPath())
 	h.mu.Unlock()
 }
 
@@ -1382,20 +1521,32 @@ func (h *syncHandler) selectionConfigPath() string {
 	return h.configPath
 }
 
-// newIngestPipeline builds the ingest pipeline the web routes run, and the
-// release of the store it opened. A nil scope runs every configured source and,
-// when the saved selection is selected, applies that selection. A session scope
-// reads that session's harness source only and processes that session only,
-// re-reading its recording even when the index looks current, and does not
-// apply the saved selection. The recorder is nil unless the selection filter
-// was installed.
-func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *ingestSessionScope) (*ingest.Pipeline, func(), *selectionfilter.ConflictRecorder, error) {
+// builtIngest is an import ready to run, with what it needs around the run.
+type builtIngest struct {
+	pipeline *ingest.Pipeline
+	// release closes the store the pipeline writes through.
+	release func()
+	// conflicts names sessions the saved selection withheld because its rules
+	// disagree. It is nil unless the selection filter was installed.
+	conflicts *selectionfilter.ConflictRecorder
+	// storedBefore holds the ids of the sessions the store held before the run.
+	// Only a whole-machine import reads the store for it; a session scope leaves
+	// it nil.
+	storedBefore map[string]bool
+}
+
+// newIngestPipeline builds the ingest pipeline the web routes run. A nil scope
+// runs every configured source and, when the saved selection is selected,
+// applies that selection. A session scope reads that session's harness source
+// only and processes that session only, re-reading its recording even when the
+// index looks current, and does not apply the saved selection.
+func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *ingestSessionScope) (*builtIngest, error) {
 	cfg := h.currentConfig()
 	if cfg == nil {
-		return nil, nil, nil, fmt.Errorf("config not available")
+		return nil, errIngestNoConfig
 	}
-	if err := config.ValidateSelection(cfg.Selection); err != nil {
-		return nil, nil, nil, fmt.Errorf("web ingest: invalid saved selection while preparing the pipeline in internal/api.newIngestPipeline: %w; no source was read or imported; run `peasant kickstart` to repair the saved selection, then retry", err)
+	if err := checkIngestable(cfg); err != nil {
+		return nil, err
 	}
 	fs := &ingest.OSFileSystem{}
 	git := &ingest.ExecGitResolver{}
@@ -1405,7 +1556,7 @@ func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *
 	if scope != nil {
 		source, ok := sources[scope.harness]
 		if !ok {
-			return nil, nil, nil, fmt.Errorf("the %s source is not enabled in config.yaml, so this session's recording cannot be read again; nothing was changed; enable sources.%s and retry", scope.harness, scope.harness)
+			return nil, fmt.Errorf("the %s source is not enabled in config.yaml, so this session's recording cannot be read again; nothing was changed; enable sources.%s and retry", scope.harness, scope.harness)
 		}
 		sources = map[defaults.Harness]ingest.SourceConfig{scope.harness: source}
 	}
@@ -1416,13 +1567,10 @@ func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *
 	}
 	resolvedOutput, err := ingest.NewResolvedPath(outputPath)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("resolve output path: %w", err)
+		return nil, fmt.Errorf("resolve output path: %w", err)
 	}
 
-	staleness := time.Duration(cfg.Output.StalenessThresholdSec) * time.Second
-	if staleness == 0 {
-		staleness = time.Duration(defaults.ConfigStalenessThresholdSec) * time.Second
-	}
+	staleness := cfg.StalenessWindow()
 
 	pipelineCfg := ingest.PipelineConfig{
 		Sources:            sources,
@@ -1433,16 +1581,6 @@ func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *
 		IndexProfiler: &ingest.IndexProfiler{},
 		Progress:      progState,
 	}
-	// A full import applies the saved selection. An explicit session re-index
-	// keeps the allowlist scope of `peasant harvest --session` and does not.
-	var selectionConflicts *selectionfilter.ConflictRecorder
-	if scope == nil && cfg.Selection.Mode == config.SelectionModeSelected {
-		filter, recorder := selectionfilter.New(cfg, git, ingest.NewPhysicalPathResolver())
-		pipelineCfg.PrepareSessionFilter = filter.Prepare
-		pipelineCfg.SessionFilter = filter.Match
-		pipelineCfg.SessionExclusionFilter = filter.Excludes
-		selectionConflicts = recorder
-	}
 	if scope != nil {
 		// The same scope as `peasant harvest --session <id> --force`: related
 		// sessions are included by default, the harness narrows the source, and
@@ -1451,7 +1589,7 @@ func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *
 		// suggested commands read the store this run wrote.
 		sessionScope, err := ingest.NewSessionScope([]ingest.SessionID{scope.id}, ingest.RelatedInclude)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("build the one-session scope for the web ingest: %w; nothing was changed", err)
+			return nil, fmt.Errorf("build the one-session scope for the web ingest: %w; nothing was changed", err)
 		}
 		pipelineCfg.Scope = &sessionScope
 		pipelineCfg.Command = "harvest"
@@ -1460,39 +1598,58 @@ func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *
 		pipelineCfg.Force = true
 	}
 
-	// Refuse an import under a level this version cannot apply, rather than
-	// storing transcripts the user believes were anonymised at import time. No
-	// supported level redacts while ingest writes: that is the deferred redaction
-	// model, and redaction happens on the way out.
-	if !config.RedactionLevelSupported(cfg.Redaction.Level) {
-		return nil, nil, nil, &config.UnsupportedRedactionLevelError{
-			Level:     cfg.Redaction.Level,
-			Source:    "the loaded configuration",
-			Operation: "the web ingest",
-			Step:      "before any transcript was read or written",
-			Impact:    "Nothing was imported and nothing already imported was changed.",
-		}
-	}
-
 	// Open DB and wire analytics stages.
 	dataDir := string(h.dataDir())
 	if err := os.MkdirAll(dataDir, defaults.PrivateDirPerm); err != nil {
-		return nil, nil, nil, fmt.Errorf("create data directory: %w", err)
+		return nil, fmt.Errorf("create data directory: %w", err)
 	}
 	// The same store a CLI harvest writes through, so this run indexes at the
 	// managed revision and can re-index what a harvest stored.
 	storeOptions, err := store.ManagedGenerationOptions(string(resolvedOutput))
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 	// A server never upgrades the store: there is no terminal watching it.
-	// Open refuses a behind store without changing it, and its error names
-	// the terminal command that runs the upgrade. Reaching the refusal here
-	// means the store fell behind under a running server, or the server
-	// started before the upgrade.
+	// The run asks again at the point it would open the store: a run that was
+	// not asked first (the import route, a one-session re-index) is refused
+	// here, and so is a store that fell behind since the caller asked, or
+	// under a running server. The refusal names the terminal command that
+	// runs the upgrade, and the store is not opened.
+	if err := h.refuseBehindStore(); err != nil {
+		return nil, err
+	}
 	db, err := store.Open(string(h.dbPath()), append(storeOptions, store.WithWriteConfig(cfg.Write))...)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("open analytics store: %w", err)
+		return nil, fmt.Errorf("open analytics store: %w", err)
+	}
+
+	// A full import reads what the store holds before it writes anything: the
+	// finish panel counts a session as new or updated by whether its row was
+	// there, and the selection filter judges a stored session by the branch the
+	// setup tree lists it under.
+	var storedBefore map[string]bool
+	var selectionConflicts *selectionfilter.ConflictRecorder
+	if scope == nil {
+		stored, readErr := db.AllIngestedSessions(context.Background())
+		if readErr != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("read the sessions the local store already holds: %w; the import did not start and nothing was changed; fix the store error above and retry", readErr)
+		}
+		storedBefore = make(map[string]bool, len(stored))
+		for _, row := range stored {
+			storedBefore[row.SessionID] = true
+		}
+		// The saved selection applies to a full import. An explicit session
+		// re-index keeps the allowlist scope of `peasant harvest --session`
+		// and does not.
+		if cfg.Selection.Mode == config.SelectionModeSelected {
+			filter, recorder := selectionfilter.New(cfg, git, ingest.NewPhysicalPathResolver(),
+				selectionfilter.WithKnownSessions(discovery.NewStoreKnownSessions(stored), staleness))
+			pipelineCfg.PrepareSessionFilter = filter.Prepare
+			pipelineCfg.SessionFilter = filter.Match
+			pipelineCfg.SessionExclusionFilter = filter.Excludes
+			selectionConflicts = recorder
+		}
 	}
 
 	pipeline, err := ingest.NewPipeline(fs, git, ingest.DefaultAdapterRegistry, pipelineCfg,
@@ -1514,9 +1671,9 @@ func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *
 	)
 	if err != nil {
 		_ = db.Close()
-		return nil, nil, nil, fmt.Errorf("create pipeline: %w", err)
+		return nil, fmt.Errorf("create pipeline: %w", err)
 	}
-	return pipeline, func() { _ = db.Close() }, selectionConflicts, nil
+	return &builtIngest{pipeline: pipeline, release: func() { _ = db.Close() }, conflicts: selectionConflicts, storedBefore: storedBefore}, nil
 }
 
 // setIngestError records a pipeline error under the mutex.
@@ -1561,6 +1718,7 @@ func (h *syncHandler) handleSyncIngestStatus(w http.ResponseWriter, _ *http.Requ
 	status := h.ingestStatus
 	prog := h.ingestProgress
 	result := h.ingestResult
+	written := h.ingestWritten
 	ingestErr := h.ingestError
 	h.mu.Unlock()
 
@@ -1585,8 +1743,8 @@ func (h *syncHandler) handleSyncIngestStatus(w http.ResponseWriter, _ *http.Requ
 
 	if result != nil {
 		resp["result"] = map[string]any{
-			"new":     result.Summary.New,
-			"updated": result.Summary.Updated,
+			"new":     written.New,
+			"updated": written.Updated,
 			// Local API contract unchanged: excluded sessions stay in "unchanged".
 			"unchanged": result.Summary.Unchanged + result.Summary.ExcludedBySelection,
 			"errors":    result.Summary.Errors,

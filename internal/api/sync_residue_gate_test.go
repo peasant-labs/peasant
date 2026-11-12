@@ -59,7 +59,12 @@ func assertSyncIngestRefusesBehindStore(t *testing.T, affected bool) {
 		t.Fatal(err)
 	}
 	h := syncResidueHandler(t, dataHome, nil)
-	_, _, _, err = h.newIngestPipeline(ingest.NewProgressState(), nil)
+	built, err := h.newIngestPipeline(ingest.NewProgressState(), nil)
+	if built != nil {
+		// A pipeline was built, so the store was opened: release it before failing.
+		built.release()
+		t.Fatal("web ingest built a pipeline over a behind store; a server must refuse instead of upgrading")
+	}
 	if err == nil {
 		t.Fatal("web ingest opened a behind store; a server must refuse instead of upgrading")
 	}

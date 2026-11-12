@@ -1,0 +1,83 @@
+# How the retention page reads an existing Claude Code cleanup period, how the
+# completion summary words it, and which option the cursor starts on.
+#
+# A stored period at or above the never-expire floor reads as "never expire".
+# The floor is the shared model's: 9999 is the first value that counts, so 9998 is
+# an ordinary period shown in days.
+#
+# wantDays is the option the cursor starts on when it is an offered period.
+# wantNeverExpire is the option whose period is the shared never-expire value.
+# wantCurrentSetting is the page's "current setting" line; wantSummaryLine is the
+# retention line of the completion summary (empty means the summary has none).
+requiredNames:
+  - not-set-opens-on-the-recommended-option
+  - stored-value-ignored-when-not-explicit
+  - stored-30-days
+  - stored-90-days
+  - stored-one-year
+  - stored-exact-never-expire-period
+  - stored-above-the-never-expire-floor
+  - stored-at-the-never-expire-floor
+  - stored-just-below-the-never-expire-floor
+  - stored-period-not-on-the-menu
+cases:
+  - name: not-set-opens-on-the-recommended-option
+    hasExisting: false
+    currentDays: -1
+    wantNeverExpire: true
+    wantCurrentSetting: "not set (defaults to 30 days)"
+    wantSummaryLine: ""
+  - name: stored-value-ignored-when-not-explicit
+    hasExisting: false
+    currentDays: 30
+    wantNeverExpire: true
+    wantCurrentSetting: "not set (defaults to 30 days)"
+    wantSummaryLine: "Retention:    30 days"
+  - name: stored-30-days
+    hasExisting: true
+    currentDays: 30
+    wantDays: 30
+    wantCurrentSetting: "Current setting: 30 days"
+    wantSummaryLine: "Retention:    30 days"
+  - name: stored-90-days
+    hasExisting: true
+    currentDays: 90
+    wantDays: 90
+    wantCurrentSetting: "Current setting: 90 days"
+    wantSummaryLine: "Retention:    90 days"
+  - name: stored-one-year
+    hasExisting: true
+    currentDays: 365
+    wantDays: 365
+    wantCurrentSetting: "Current setting: 365 days"
+    wantSummaryLine: "Retention:    365 days"
+  - name: stored-exact-never-expire-period
+    hasExisting: true
+    currentDays: 99999
+    wantNeverExpire: true
+    wantCurrentSetting: "Current setting: never expire"
+    wantSummaryLine: "Retention:    never expire"
+  - name: stored-above-the-never-expire-floor
+    hasExisting: true
+    currentDays: 100000
+    wantNeverExpire: true
+    wantCurrentSetting: "Current setting: never expire"
+    wantSummaryLine: "Retention:    never expire"
+  - name: stored-at-the-never-expire-floor
+    hasExisting: true
+    currentDays: 9999
+    wantNeverExpire: true
+    wantCurrentSetting: "Current setting: never expire"
+    wantSummaryLine: "Retention:    never expire"
+  - name: stored-just-below-the-never-expire-floor
+    hasExisting: true
+    currentDays: 9998
+    wantNeverExpire: true
+    wantCurrentSetting: "Current setting: 9998 days"
+    wantSummaryLine: "Retention:    9998 days"
+  - name: stored-period-not-on-the-menu
+    hasExisting: true
+    currentDays: 45
+    wantNeverExpire: true
+    wantCurrentSetting: "Current setting: 45 days"
+    wantSummaryLine: "Retention:    45 days"

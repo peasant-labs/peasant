@@ -228,6 +228,9 @@
 
 .stg-add { padding: var(--sp-3) var(--sp-4) var(--sp-4); }
 
+/* "run setup again" sits under the page title and keeps its own width */
+.stg-page .iu-page-head > .stg-rerun { align-self: flex-start; }
+
 /* the command that edits the selection sits where a control would */
 .stg-command { max-width: 20rem; }
 

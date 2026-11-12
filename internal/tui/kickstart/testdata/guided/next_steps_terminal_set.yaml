@@ -1,0 +1,16 @@
+# The completion actions are the setup model's closed set, onboarding.NextStep. The
+# terminal words only the four that NextStepsTUI lists. A step the web setup alone
+# offers, or a token outside the set, must be refused with an actionable message
+# instead of being shown without terminal copy.
+requiredNames:
+  - web-only-step-has-no-terminal-copy
+  - token-outside-the-set-is-named
+cases:
+  - name: web-only-step-has-no-terminal-copy
+    steps: [auto-publish-settings]
+    wantError: [completion guidance unavailable, no terminal display catalog entry, auto-publish-settings]
+    wantMissing: [peasant config, peasant web start, peasant village login, peasant village push]
+  - name: token-outside-the-set-is-named
+    steps: [config, village-install]
+    wantError: [completion guidance unavailable, unknown step, village-install]
+    wantMissing: [peasant config, peasant web start, peasant village login, peasant village push]

@@ -57,7 +57,7 @@ cases:
       - action: clear-filter
     beforeConsentContains:
       - review your changes
-      - "selection: only the buffered projects, branches, and sessions"
+      - "selection: 1 project you chose"
       - "changed: transcripts"
       - publish nothing
     rowAssertions:

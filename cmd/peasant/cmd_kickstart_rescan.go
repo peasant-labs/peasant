@@ -3,87 +3,10 @@ package main
 import (
 	"context"
 	"os"
-	"time"
 
-	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/discovery"
-	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 )
-
-// knownLookup adapts the store-backed index to the discovery scan interface.
-// Discovery never imports the database type.
-type knownLookup struct {
-	index knownSessionIndex
-}
-
-var _ discovery.KnownSessionIndex = knownLookup{}
-
-func (k knownLookup) Reusable(session ingest.DiscoveredSession, staleness time.Duration) (discovery.KnownSession, bool) {
-	record, ok := k.index.reusable(session, staleness)
-	if !ok {
-		return discovery.KnownSession{}, false
-	}
-	return discovery.KnownSession{
-		GitRemote:     record.GitRemote,
-		Branch:        record.Branch,
-		GitWorktree:   record.GitWorktree,
-		CanonicalCwd:  record.CanonicalCwd,
-		Title:         record.Title,
-		IngestedMs:    record.IngestedMs,
-		SchemaVersion: record.SchemaVersion,
-	}, true
-}
-
-// knownSession is what the local store already recorded for one ingested
-// session: the values a re-scan reuses instead of walking git for them again,
-// plus the two fields the diff rule classifies the discovered source against.
-type knownSession struct {
-	GitRemote     string
-	Branch        string
-	GitWorktree   string
-	CanonicalCwd  string
-	Title         string
-	IngestedMs    int64
-	SchemaVersion int
-}
-
-// knownSessionIndex maps a session id to what the store recorded for it. A nil
-// index means no reusable database was available, and every discovered session
-// is then resolved the full way.
-type knownSessionIndex map[string]knownSession
-
-// workingDirectory returns the most specific project directory the store
-// recorded. A per-session Git worktree wins over the project-level canonical
-// directory. Discovery still wins over both when the current source carries a
-// working directory.
-func (s knownSession) workingDirectory() string {
-	if s.GitWorktree != "" {
-		return s.GitWorktree
-	}
-	return s.CanonicalCwd
-}
-
-// reusable reports whether a discovered session is already recorded AND its
-// source has not changed since that ingest, so the recorded values stand in for
-// a fresh git resolution. Classification is the pipeline's own diff rule
-// (ingest.ClassifyAgainstStore), never a second copy of it: a session whose
-// source moved on is resolved again, because its project or branch may have
-// moved with it.
-func (k knownSessionIndex) reusable(session ingest.DiscoveredSession, staleness time.Duration) (knownSession, bool) {
-	record, ok := k[string(session.SessionID)]
-	if !ok {
-		return knownSession{}, false
-	}
-	ingestedMs := record.IngestedMs
-	location := ingest.SessionLocation{IngestedMs: &ingestedMs, SchemaVersion: record.SchemaVersion}
-	switch ingest.ClassifyAgainstStore(session, location, staleness) {
-	case ingest.DiffUnchanged, ingest.DiffActive:
-		// Unchanged, or still being written and so not re-ingested this run.
-		return record, true
-	}
-	return knownSession{}, false
-}
 
 // loadKnownSessions reads what the local store already holds so a re-scan can
 // skip resolving those sessions again. The database is reused ONLY when it
@@ -93,7 +16,7 @@ func (k knownSessionIndex) reusable(session ingest.DiscoveredSession, staleness 
 // returns nil so discovery resolves everything the full way. A slower scan is
 // always correct, so a database this build cannot reuse must never fail
 // onboarding.
-func loadKnownSessions(ctx context.Context, dbPath string) knownSessionIndex {
+func loadKnownSessions(ctx context.Context, dbPath string) discovery.StoreKnownSessions {
 	db := openReusableStore(dbPath)
 	if db == nil {
 		return nil
@@ -125,8 +48,10 @@ func openReusableStore(dbPath string) *store.Store {
 }
 
 // loadKnownSessionsFrom reads the recorded sessions from an already open store.
-// Any read problem returns nil, so a scan resolves everything the full way.
-func loadKnownSessionsFrom(ctx context.Context, db *store.Store) knownSessionIndex {
+// Any read problem returns nil, so a scan resolves everything the full way. The
+// index is discovery's own, the one the web setup reads, so the setup tree, the
+// web import and a harvest reuse a recorded session by one rule.
+func loadKnownSessionsFrom(ctx context.Context, db *store.Store) discovery.StoreKnownSessions {
 	if db == nil {
 		return nil
 	}
@@ -134,25 +59,5 @@ func loadKnownSessionsFrom(ctx context.Context, db *store.Store) knownSessionInd
 	if err != nil {
 		return nil
 	}
-	known := make(knownSessionIndex, len(rows))
-	for _, row := range rows {
-		known[row.SessionID] = knownSession{
-			GitRemote:     row.GitRemote,
-			Branch:        row.Branch,
-			GitWorktree:   row.GitWorktree,
-			CanonicalCwd:  row.CanonicalCwd,
-			Title:         row.Title,
-			IngestedMs:    row.IngestedMs,
-			SchemaVersion: row.SchemaVersion,
-		}
-	}
-	return known
-}
-
-// configStaleness returns the window inside which a source file counts as still
-// being written, from config with the packaged default as the fallback. Ingest
-// and the re-scan read it the same way so they agree on which sessions are
-// active.
-func configStaleness(cfg *config.Config) time.Duration {
-	return discovery.ConfigStaleness(cfg)
+	return discovery.NewStoreKnownSessions(rows)
 }

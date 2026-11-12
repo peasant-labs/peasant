@@ -373,7 +373,7 @@ func (g *ExecGitResolver) ResolveRepositoryRoot(ctx context.Context, dir string)
 
 func (g *ExecGitResolver) RemoteURL(ctx context.Context, dir string) (string, error) {
 	branch, branchErr := g.Branch(ctx, dir)
-	if branchErr == nil && branch != "" && branch != "HEAD" {
+	if branchErr == nil && NamedBranch(branch) != "" {
 		if remote, _, err := g.RemoteURLForBranch(ctx, dir, branch); err == nil && remote != "" {
 			return remote, nil
 		}
@@ -417,19 +417,36 @@ func isUsableRemoteURL(remote string) bool {
 	return err == nil
 }
 
-// ResolveGitRemote applies the attribution policy shared by adapters and
-// repository-scoped operations. Explicit provider evidence wins; otherwise a
-// recorded branch uses its current upstream configuration, followed by the
-// origin only. Checkout upstream is used only without a recorded branch. Callers retain path identity when
+// ResolveGitRemote is the one rule for which git remote a session belongs to,
+// for the extractors that store it and for the tree and the import filter that
+// show and judge it before it is stored (SessionRemoteFor). Explicit provider
+// evidence wins (a Codex session_meta repository_url, a Strike sidecar remote);
+// otherwise a recorded branch uses its current upstream configuration, followed
+// by the origin only; a session with no recorded branch (or only a detached
+// HEAD) uses the checkout's upstream. A parent directory's repository is never
+// adopted: dir answers for itself, and a directory git cannot place has no
+// remote. An empty dir asks git nothing, so a caller with no project directory
+// never reaches the process's own repository. Callers retain path identity when
 // this returns an empty remote.
 func ResolveGitRemote(ctx context.Context, git GitResolver, dir, recordedBranch, explicitRemote string) (remoteURL, trackingBranch string) {
+	return resolveGitRemote(ctx, git, dir, recordedBranch, explicitRemote, true)
+}
+
+// ResolveGitRemoteURL is ResolveGitRemote for a caller that needs the remote
+// alone, so it does not ask git for the checkout's tracking branch.
+func ResolveGitRemoteURL(ctx context.Context, git GitResolver, dir, recordedBranch, explicitRemote string) string {
+	remoteURL, _ := resolveGitRemote(ctx, git, dir, recordedBranch, explicitRemote, false)
+	return remoteURL
+}
+
+func resolveGitRemote(ctx context.Context, git GitResolver, dir, recordedBranch, explicitRemote string, wantTracking bool) (remoteURL, trackingBranch string) {
 	if explicitRemote != "" {
 		return explicitRemote, ""
 	}
-	if git == nil {
+	if git == nil || dir == "" {
 		return "", ""
 	}
-	if recordedBranch != "" {
+	if recordedBranch = NamedBranch(recordedBranch); recordedBranch != "" {
 		if resolver, ok := git.(RecordedBranchRemoteResolver); ok {
 			if remote, tracking, err := resolver.RemoteURLForBranch(ctx, dir, recordedBranch); err == nil && remote != "" {
 				return remote, tracking
@@ -442,8 +459,52 @@ func ResolveGitRemote(ctx context.Context, git GitResolver, dir, recordedBranch,
 		return remote, ""
 	}
 	remote, _ := git.RemoteURL(ctx, dir)
+	if !wantTracking {
+		return remote, ""
+	}
 	tracking, _ := git.TrackingBranch(ctx, dir)
 	return remote, tracking
+}
+
+// detachedHeadToken is what git reports as the checked-out branch when no branch
+// is checked out: `git rev-parse --abbrev-ref HEAD` prints HEAD, and a harness
+// that records the branch it saw records the same word.
+const detachedHeadToken = "HEAD"
+
+// NamedBranch returns branch, or "" when branch is not the name of a branch. A
+// detached checkout is on no branch, so git's word for it is not a name a
+// selection can save or a rule can match. Every place that takes a branch from
+// git, from a recording or from the store reads it through this function.
+func NamedBranch(branch string) string {
+	if branch == detachedHeadToken {
+		return ""
+	}
+	return branch
+}
+
+// ResolveGitBranch is the branch an extractor stores for one session. The
+// branch the session recorded wins: it names where the work happened and it does
+// not change when the checkout later moves. Only a session that recorded no
+// branch is attributed to the branch checked out in dir now, and an empty result
+// means neither source knew, or the checkout is detached. Git is not asked when
+// a branch was recorded (even a detached HEAD, which says the session ran on no
+// branch), when git is nil, or when dir is empty.
+//
+// SessionBranchFor decides the same question for the tree and the import filter
+// and ends here for a session with nothing recorded and nothing stored, so the
+// extractors and the tree place one session on one branch.
+func ResolveGitBranch(ctx context.Context, git GitResolver, dir, recordedBranch string) string {
+	if recordedBranch != "" {
+		return NamedBranch(recordedBranch)
+	}
+	if git == nil || dir == "" {
+		return ""
+	}
+	checkedOut, err := git.Branch(ctx, dir)
+	if err != nil {
+		return ""
+	}
+	return NamedBranch(checkedOut)
 }
 
 func (g *ExecGitResolver) Branch(ctx context.Context, dir string) (string, error) {

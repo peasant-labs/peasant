@@ -24,7 +24,8 @@ type consentCase struct {
 	AutoPublish      *bool  `yaml:"autoPublishIntent"`
 	Visibility       string `yaml:"visibility"`
 	Harnesses        map[string]struct {
-		Sessions []string `yaml:"sessions"`
+		Projects []config.ProjectSelection `yaml:"projects"`
+		Sessions []string                  `yaml:"sessions"`
 	} `yaml:"harnesses"`
 	Values    []string `yaml:"values"`
 	Effects   []string `yaml:"effects"`
@@ -32,7 +33,10 @@ type consentCase struct {
 }
 
 type consentDocument struct {
-	RequiredNames []string      `yaml:"requiredNames"`
+	RequiredNames []string `yaml:"requiredNames"`
+	// InternalWords are words of the implementation. No line of any summary
+	// may carry one: the summary is read by the person who chose.
+	InternalWords []string      `yaml:"internalWords"`
 	Cases         []consentCase `yaml:"cases"`
 }
 
@@ -72,7 +76,7 @@ func TestConsentParity(t *testing.T) {
 			if row.Harnesses != nil {
 				cfg.Selection.Harnesses = map[string]config.SelectionHarnessConfig{}
 				for name, harness := range row.Harnesses {
-					cfg.Selection.Harnesses[name] = config.SelectionHarnessConfig{Sessions: harness.Sessions}
+					cfg.Selection.Harnesses[name] = config.SelectionHarnessConfig{Projects: harness.Projects, Sessions: harness.Sessions}
 				}
 			}
 			summary, err := onboarding.BuildConsentSummary(model, onboarding.WriteContext{
@@ -90,7 +94,7 @@ func TestConsentParity(t *testing.T) {
 				t.Fatalf("effects: %v", err)
 			}
 			joined := strings.Join(append(append([]string{}, summary.Values...), summary.Effects...), "\n")
-			for _, forbidden := range row.Forbidden {
+			for _, forbidden := range append(append([]string{}, row.Forbidden...), document.InternalWords...) {
 				if strings.Contains(joined, forbidden) {
 					t.Errorf("summary contains forbidden %q:\n%s", forbidden, joined)
 				}

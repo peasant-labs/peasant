@@ -31,10 +31,18 @@ type restorationCase struct {
 	ClearProjectPaths      []string               `yaml:"clearProjectPaths"`
 	SelectProjectPaths     []string               `yaml:"selectProjectPaths"`
 	ClearBranches          []restorationBranch    `yaml:"clearBranches"`
+	SelectBranches         []restorationBranch    `yaml:"selectBranches"`
 	SelectAll              bool                   `yaml:"selectAll"`
 	LaterListings          []ftue.SessionListing  `yaml:"laterListings"`
 	ExpectLaterChecked     []string               `yaml:"expectLaterChecked"`
 	Expected               config.SelectionConfig `yaml:"expected"`
+	// The rescan case carries the forest an answer was given over and what the
+	// answer should keep and drop. The onboarding package reads them.
+	PreviousListings    []ftue.SessionListing `yaml:"previousListings"`
+	Answered            []string              `yaml:"answered"`
+	ExpectKept          []string              `yaml:"expectKept"`
+	ExpectDroppedCount  int                   `yaml:"expectDroppedCount"`
+	ExpectDroppedLabels []string              `yaml:"expectDroppedLabels"`
 }
 
 type restorationBranch struct {
@@ -110,6 +118,9 @@ func TestPrepopulateSelection_RestorationAndMergeMatrix(t *testing.T) {
 			}
 			for _, branch := range testCase.ClearBranches {
 				setBranchState(t, roots, branch, kit.Unchecked)
+			}
+			for _, branch := range testCase.SelectBranches {
+				setBranchState(t, roots, branch, kit.Checked)
 			}
 			if testCase.SelectAll {
 				for _, root := range roots {

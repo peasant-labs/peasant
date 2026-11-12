@@ -13,10 +13,12 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/onboarding"
+	"github.com/peasant-labs/peasant/internal/testkit/branchruleoverlay"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
+	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
 
@@ -34,6 +36,7 @@ type restorationListing struct {
 	GitRemote   string `yaml:"gitRemote"`
 	WorkingDir  string `yaml:"workingDir"`
 	Branch      string `yaml:"branch"`
+	Title       string `yaml:"title"`
 	SessionID   string `yaml:"sessionId"`
 }
 
@@ -46,10 +49,18 @@ type restorationCase struct {
 	ClearProjectPaths      []string               `yaml:"clearProjectPaths"`
 	SelectProjectPaths     []string               `yaml:"selectProjectPaths"`
 	ClearBranches          []restorationBranch    `yaml:"clearBranches"`
+	SelectBranches         []restorationBranch    `yaml:"selectBranches"`
 	SelectAll              bool                   `yaml:"selectAll"`
 	LaterListings          []restorationListing   `yaml:"laterListings"`
-	ExpectLaterChecked     []string               `yaml:"expectLaterChecked"`
-	Expected               config.SelectionConfig `yaml:"expected"`
+	// PreviousListings is the machine the answer was given over; Listings is
+	// what the rescan found. The check reads dropped labels from the former.
+	PreviousListings    []restorationListing   `yaml:"previousListings"`
+	Answered            []string               `yaml:"answered"`
+	ExpectKept          []string               `yaml:"expectKept"`
+	ExpectDroppedCount  int                    `yaml:"expectDroppedCount"`
+	ExpectDroppedLabels []string               `yaml:"expectDroppedLabels"`
+	ExpectLaterChecked  []string               `yaml:"expectLaterChecked"`
+	Expected            config.SelectionConfig `yaml:"expected"`
 }
 
 type restorationDocument struct {
@@ -127,6 +138,9 @@ func restoreAndDerive(t *testing.T, row restorationCase) (config.SelectionConfig
 	for _, branch := range row.ClearBranches {
 		setBranchState(t, roots, branch, kit.Unchecked)
 	}
+	for _, branch := range row.SelectBranches {
+		setBranchState(t, roots, branch, kit.Checked)
+	}
 	if row.SelectAll {
 		for _, root := range roots {
 			setNodeState(root, kit.Checked)
@@ -175,25 +189,22 @@ func assertLockedBlocksCommit(t *testing.T) {
 
 func assertRescanKeepsIDs(t *testing.T, row restorationCase) {
 	t.Helper()
-	roots := loadForest(t, row.Listings)
-	forest := settings.SelectionForest(roots)
-	answered := []string{"kept-session", "vanished-a", "vanished-b", "vanished-c", "vanished-d"}
-	kept, dropped := onboarding.RescanIDs(answered, forest)
-	if !reflect.DeepEqual(kept, []string{"kept-session"}) {
-		t.Fatalf("kept = %v, want only the id that still exists", kept)
+	current := settings.SelectionForest(loadForest(t, row.Listings))
+	previous := settings.SelectionForest(loadForest(t, row.PreviousListings))
+	kept, dropped := onboarding.RescanIDs(row.Answered, previous, current)
+	if !reflect.DeepEqual(kept, row.ExpectKept) {
+		t.Fatalf("kept = %v, want only the ids that still exist: %v", kept, row.ExpectKept)
 	}
-	if dropped.Count != 4 {
-		t.Fatalf("dropped count = %d, want 4", dropped.Count)
+	if dropped.Count != row.ExpectDroppedCount {
+		t.Fatalf("dropped count = %d, want %d", dropped.Count, row.ExpectDroppedCount)
 	}
-	if len(dropped.Labels) != 3 {
-		t.Fatalf("dropped labels = %v, want at most three", dropped.Labels)
+	if !reflect.DeepEqual(dropped.Labels, row.ExpectDroppedLabels) {
+		t.Fatalf("dropped labels = %v, want %v (read from the forest the answer was given over)", dropped.Labels, row.ExpectDroppedLabels)
 	}
-	for _, id := range kept {
-		if id == "vanished-a" {
-			t.Fatal("rescan widened or kept a vanished id")
-		}
+	if len(dropped.Labels) > schema.LocalKickstartDroppedLabelsMax {
+		t.Fatalf("dropped labels = %v, want at most %d", dropped.Labels, schema.LocalKickstartDroppedLabelsMax)
 	}
-	if len(kept) > len(answered) {
+	if len(kept) > len(row.Answered) {
 		t.Fatal("rescan widened the answered set")
 	}
 }
@@ -230,10 +241,23 @@ func assertEquivalenceCorpus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read inventory: %v", err)
 	}
+	// legacy_goldens.yaml records the old wizard and is not edited. The rule now
+	// saves the branches a project shows where the wizard saved none, so the
+	// scenarios that choose a project at project level are measured against the
+	// overlay's entry: the captured golden with the branch list added.
+	captured := make(map[string]config.SelectionConfig, len(doc.Scenarios))
+	for _, scenario := range doc.Scenarios {
+		captured[scenario.Name] = scenario.Golden
+	}
+	overlay, err := branchruleoverlay.Load(captured)
+	if err != nil {
+		t.Fatalf("legacy branch rule overlay: %v", err)
+	}
 	for _, scenario := range doc.Scenarios {
 		if scenario.Oracle != "legacy-captured" {
 			t.Fatalf("scenario %q oracle = %q", scenario.Name, scenario.Oracle)
 		}
+		want := overlay.Want(scenario.Name, scenario.Golden)
 		roots := inventoryRoots(t, inventory)
 		for _, scope := range scenario.Scopes {
 			for _, session := range scope.Sessions {
@@ -253,7 +277,7 @@ func assertEquivalenceCorpus(t *testing.T) {
 			t.Fatalf("scenario %q derive: %v", scenario.Name, err)
 		}
 		got.AutoIngestNewBranches = scenario.AutoIngestNewBranches
-		if err := yamlEqual(withoutClonePaths(normalizeSelection(got)), normalizeSelection(scenario.Golden)); err != nil {
+		if err := yamlEqual(withoutClonePaths(normalizeSelection(got)), normalizeSelection(want)); err != nil {
 			t.Fatalf("scenario %q does not match the equivalence corpus: %v", scenario.Name, err)
 		}
 	}
@@ -269,6 +293,7 @@ func loadForest(t *testing.T, listings []restorationListing) []*kit.TreeNode {
 			GitRemote:   row.GitRemote,
 			WorkingDir:  row.WorkingDir,
 			Branch:      row.Branch,
+			Title:       row.Title,
 			SessionID:   row.SessionID,
 		}
 	}

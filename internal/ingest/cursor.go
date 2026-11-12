@@ -846,28 +846,22 @@ func (a *CursorAdapter) enrichCursorProject(ctx context.Context, meta *UnifiedMe
 		return
 	}
 
-	branchStr, branchErr := a.git.Branch(ctx, projectDir)
-	branch := session.Branch
-	if branch == "" && branchErr == nil {
-		branch = branchStr
+	// Git is asked about the session's project directory, and the remote is the
+	// one the recorded branch (or, with none, the checkout) names: the same
+	// answers the tree and the import filter give before the session is stored.
+	gitDir := SessionProjectDirectory(session)
+	branch := ResolveGitBranch(ctx, a.git, gitDir, session.Branch)
+	remoteURL, trackingStr := ResolveGitRemote(ctx, a.git, gitDir, session.Branch, "")
+	worktreeStr, worktreeErr := "", error(nil)
+	if gitDir != "" {
+		worktreeStr, worktreeErr = a.git.Worktree(ctx, gitDir)
 	}
-	remoteURL, trackingStr := ResolveGitRemote(ctx, a.git, projectDir, branch, "")
-	remoteErr := error(nil)
-	// Walk up parent directories if direct remote lookup fails — handles cases where
-	// projectDir decoded to a subdirectory of the actual repo root.
-	if remoteErr != nil || remoteURL == "" {
-		if walkedRemote, _, walkErr := a.git.WalkUpRemoteURL(ctx, projectDir); walkErr == nil && walkedRemote != "" {
-			remoteURL = walkedRemote
-			remoteErr = nil
-		}
-	}
-	worktreeStr, worktreeErr := a.git.Worktree(ctx, projectDir)
 
 	gitInfo := GitContext{}
 	if branch != "" {
 		gitInfo.Branch = &branch
 	}
-	if remoteErr == nil && remoteURL != "" {
+	if remoteURL != "" {
 		gitInfo.Remote = &remoteURL
 	}
 	if worktreeErr == nil && worktreeStr != "" {

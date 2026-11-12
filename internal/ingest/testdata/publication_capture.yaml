@@ -14,6 +14,9 @@ cases:
   - <<: *claude
     name: claude_source_absent
     cwd: ""
+    # No recorded working directory and a transcript folder that decodes to none:
+    # no project directory, so git is asked nothing and there is no remote.
+    no_git_remote: true
     provenance: source_absent
     files:
       project/00000000-0000-4000-8000-000000000020.jsonl: |
@@ -37,6 +40,9 @@ cases:
     name: codex_directory_fallback_not_exact
     strip_cwd: true
     cwd: ""
+    # The rollout records no working directory; the folder it sits in is a
+    # storage folder and is never asked, so there is no remote.
+    no_git_remote: true
     provenance: source_absent
   - name: cursor_workspace_not_exact
     harness: cursor

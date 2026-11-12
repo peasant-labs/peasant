@@ -606,7 +606,7 @@ export function ShareWizardClient() {
   // Show loading while config is being fetched
   if (loading || (!discovery && !fetchError)) {
     return (
-      <div className="asb-page share-page">
+      <div className="asb-page share-page wizard-page">
         <Breadcrumbs items={[{ label: 'home', href: '/' }, { label: 'publish' }]} />
         <h1 className="iu-page-title page-title">publish</h1>
         <div className="flex items-center justify-center py-20">
@@ -619,7 +619,7 @@ export function ShareWizardClient() {
   // Show error UI when fetch failed (no mock fallback)
   if (fetchError) {
     return (
-      <div className="asb-page share-page">
+      <div className="asb-page share-page wizard-page">
         <Breadcrumbs items={[{ label: 'home', href: '/' }, { label: 'publish' }]} />
         <h1 className="iu-page-title page-title">publish</h1>
         <div className="flex flex-col items-center justify-center py-20 gap-4">
@@ -656,21 +656,21 @@ export function ShareWizardClient() {
   const chooseSessions = evidenceSessions ?? disc.sessions;
 
   return (
-    <div className="asb-page share-page animate-fade-up">
+    <div className="asb-page share-page wizard-page animate-fade-up">
       <Breadcrumbs items={[{ label: 'home', href: '/' }, { label: 'publish' }]} />
       <h1 className="iu-page-title page-title">publish</h1>
 
       {/* Wizard shell: steps register their actions; the shell renders those tools
           with back and progress in the persistent footer. */}
-        <section className="swz share-wizard" aria-label="publish online" data-tour="share-nav">
+        <section className="swz share-wizard wizard-host" aria-label="publish online" data-tour="share-nav">
 
         {/* Step rail — completed = olive+check, current = amber, locked = dim/disabled. */}
         <div className="swz-head">
           <StepIndicator
             steps={WIZARD_STEPS}
             current={step}
-            completed={completed as Set<string>}
-            reachable={reachable as Set<string>}
+            completed={completed}
+            reachable={reachable}
             onJump={(id) => setStep(id as WizardStep)}
             aria-label="publish progress"
           />

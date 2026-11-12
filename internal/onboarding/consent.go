@@ -1,7 +1,6 @@
 package onboarding
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/config"
@@ -31,7 +30,7 @@ func BuildConsentSummary(m Model, w WriteContext) (ConsentSummary, error) {
 	values := make([]string, 0, 8)
 	if consentFieldShown(m, FieldSelection, w) {
 		if cfg.Selection.Mode == config.SelectionModeSelected {
-			values = append(values, "selection: only the buffered projects, branches, and sessions")
+			values = append(values, selectionSummaryLine(cfg.Selection))
 		} else {
 			values = append(values, "selection: all discovered sessions")
 		}
@@ -72,12 +71,13 @@ func BuildConsentSummary(m Model, w WriteContext) (ConsentSummary, error) {
 	if consentFieldShown(m, FieldVisibility, w) {
 		values = append(values, "default visibility after a later publish: "+string(cfg.Push.Visibility))
 	}
-	if consentFieldShown(m, FieldRetention, w) && cfg.ClaudeRetentionDays > 0 {
-		values = append(values, fmt.Sprintf("claude code source retention: %d days", cfg.ClaudeRetentionDays))
+	retention := m.RetentionDays(w)
+	if retention > 0 {
+		values = append(values, retentionSummaryLine(retention))
 	}
 
 	effects := []string{"save the visible choices to peasant configuration"}
-	if consentFieldShown(m, FieldRetention, w) && cfg.ClaudeRetentionDays > 0 {
+	if retention > 0 {
 		effects = append(effects, "apply claude code retention after config saves")
 	}
 	if consentFieldShown(m, FieldSelection, w) {
@@ -88,6 +88,22 @@ func BuildConsentSummary(m Model, w WriteContext) (ConsentSummary, error) {
 	}
 	effects = append(effects, "publish nothing; sharing requires a later explicit push")
 	return ConsentSummary{Values: values, Effects: effects}, nil
+}
+
+// RetentionDays is the Claude Code retention period a save applies: the period
+// the configuration in w holds, when the retention field is shown and the period
+// is positive, otherwise zero. A period the user was shown is applied whether or
+// not they changed it, which is what the terminal's finish step does. The review
+// summary and the commit read this one rule, so what the summary promises is what
+// the save does.
+func (m Model) RetentionDays(w WriteContext) int {
+	if w.Config == nil || w.Config.ClaudeRetentionDays <= 0 {
+		return 0
+	}
+	if !consentFieldShown(m, FieldRetention, w) {
+		return 0
+	}
+	return w.Config.ClaudeRetentionDays
 }
 
 func consentFieldShown(m Model, key FieldKey, w WriteContext) bool {

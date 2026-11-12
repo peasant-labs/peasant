@@ -116,6 +116,13 @@ describe('subscribe factory', () => {
     expect(sub.topic).toBe(ChannelTopic.ProjectFamiliarity);
     expect(sub.id).toBe('proj-hash');
   });
+
+  it('kickstart() produces topic "kickstart" with no id, because each event names its own session', () => {
+    const wire = JSON.parse(JSON.stringify(subscribe.kickstart()));
+    expect(wire).toEqual({ topic: 'kickstart' });
+    expect(subscriptionKey(subscribe.kickstart())).toBe('kickstart');
+    expect(acceptSubscription(subscribe.kickstart(), topicNameVisitor)).toBe('visited:kickstart');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -134,6 +141,7 @@ const topicNameVisitor: SubscriptionVisitor<string> = {
   sessionDetail:        (s) => `visited:session_detail:${s.id}`,
   annotations:          (s) => `visited:annotations:${s.axis}:${s.id}`,
   projectFamiliarity:   (s) => `visited:project_familiarity:${s.id}`,
+  kickstart:            () => 'visited:kickstart',
 };
 
 describe('acceptSubscription visitor dispatch', () => {
@@ -201,6 +209,7 @@ describe('acceptSubscription visitor dispatch', () => {
       sessionDetail:        () => undefined,
       annotations:          (s) => { capturedAxis = s.axis; capturedId = s.id; },
       projectFamiliarity:   () => undefined,
+      kickstart:            () => undefined,
     };
 
     acceptSubscription(
