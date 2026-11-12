@@ -110,13 +110,14 @@ chosen:
   imported: 2
   left: [tax-report, hero-copy, stray]
 # The selection page adds one session to what is stored. Its import brings in
-# that one; the sessions stored already are neither new nor counted again.
+# that one as new; the sessions stored already are unchanged, so none is new or
+# updated again.
 selectionPage:
   session: tax-report
   imported: 1
 # The selection page's own case: one branch of a project whose clone has since
 # moved off the branch an older session recorded. `imported` is the sessions
-# that branch adds to what is stored.
+# that branch adds to what is stored (new; none already stored is updated).
 branchChoice:
   repository: marketing-site
   branch: main

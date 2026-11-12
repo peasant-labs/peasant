@@ -616,7 +616,8 @@ test('selection-page-saves-only-selection', async () => {
   await expect(pageD.getByRole('heading', { name: 'your selection is saved' })).toBeVisible();
   // The sessions stored already are not counted again: the import brings in the one that was added.
   laterImports.selectionPage = await finishCounts(pageD);
-  expect(laterImports.selectionPage.new, 'the import brought in the session that was added').toBe(fixture.selectionPage.imported);
+  // The sessions stored already are unchanged on disk, so they are neither new nor updated.
+  expect(laterImports.selectionPage, 'the import brought in the session that was added and updated none').toEqual({ new: fixture.selectionPage.imported, updated: 0 });
 
   // Only the selection changed on disk.
   const after = readConfig();
@@ -654,7 +655,7 @@ test('selection-page-names-the-chosen-branch', async () => {
   await save(page).click();
   await expect(page.getByRole('heading', { name: 'your selection is saved' })).toBeVisible();
   laterImports.branchChoice = await finishCounts(page);
-  expect(laterImports.branchChoice.new, 'the import brought in the session of the chosen branch').toBe(fixture.branchChoice.imported);
+  expect(laterImports.branchChoice, 'the import brought in the session of the chosen branch and updated none').toEqual({ new: fixture.branchChoice.imported, updated: 0 });
 
   const projects = readConfig().selection.harnesses['claude-code'].projects;
   const entry = projects.find((candidate) => candidate.gitRemote === marketingRepo.remote);
