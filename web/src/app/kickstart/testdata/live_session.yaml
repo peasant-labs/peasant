@@ -1,7 +1,8 @@
 # The live session across tabs and across the socket. Messages the server
 # pushes are played on the real WebSocket provider; `push` builds the topic
-# message from a served model. Nothing here polls: a call the page makes that
-# no case scripted is recorded, and the cases assert how many it made.
+# message from a served model. Nothing here polls: a kickstart call the page
+# makes that neither the case nor the file's defaultServer answers fails the
+# test at its teardown, and the cases assert how many calls they expect.
 # Every case below is played with the forest of the session it opens answered,
 # because the page reads it whatever the case is about. A case that is about the
 # forest scripts the route itself.
