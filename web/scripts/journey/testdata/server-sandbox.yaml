@@ -118,7 +118,7 @@ cases:
     occupied: false
     server: answers-elsewhere
     status: 7
-    exitAfterAnswerMs: 100
+    exitAfterAnswerMs: 0
     started: true
     error: exited with status 7 before it answered
   - name: owned-server-start-stops-a-server-that-never-answers

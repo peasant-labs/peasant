@@ -10,8 +10,8 @@ import { fileURLToPath } from 'node:url'
 import YAML from 'yaml'
 import { SurfaceGate } from './surface-gate.mjs'
 import { applyDeterminism } from './determinism.mjs'
-import { ownedServerSandbox } from '../journey/lib/owned-server-sandbox.mjs'
-import { startOwnedServer } from '../journey/lib/owned-server-start.mjs'
+import { ownedServerSandbox } from './lib/owned-server-sandbox.mjs'
+import { startOwnedServer } from './lib/owned-server-start.mjs'
 import { groupedSyncPayload } from './grouped-sync-payload.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))

@@ -23,8 +23,8 @@
 import { spawn } from 'node:child_process'
 import YAML from 'yaml'
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync } from 'node:fs'
-import { directoryNamedBy, ownedServerSandbox } from '../journey/lib/owned-server-sandbox.mjs'
-import { startOwnedServer } from '../journey/lib/owned-server-start.mjs'
+import { directoryNamedBy, ownedServerSandbox } from './lib/owned-server-sandbox.mjs'
+import { startOwnedServer } from './lib/owned-server-start.mjs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
 import { SurfaceGate } from './surface-gate.mjs'
@@ -152,6 +152,9 @@ const startServer = async () => {
       // Save the child immediately so a signal can stop it before it answers health.
       start: () => server = spawn(BIN, ['web', 'start', '--port', String(PORT), '--foreground', '--no-browser', ...sandbox.args, `--mock-data-store=${SMOKE_MOCKS}`], { env: sandbox.env, stdio: ['ignore', log, log] }),
     })
+  } catch (error) {
+    console.error(`ERROR [shell-nav-default-gate.mjs] ${error.message}`)
+    process.exit(2)
   } finally {
     closeSync(log)
   }

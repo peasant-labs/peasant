@@ -28,6 +28,9 @@ import { join } from 'node:path';
  * Inherited variables that never reach the binary. `OPENCODE_DB` is read as the
  * absolute path of the OpenCode database to ingest, and
  * `OPENCODE_DISABLE_CHANNEL_DB` changes which database file is looked for.
+ * Only inherited variables that name or select files the binary opens are
+ * dropped; URL variables such as `PEASANT_VILLAGE_URL` are kept because they
+ * cannot reach the local store.
  */
 export const DROPPED_FROM_INHERITED = Object.freeze(['OPENCODE_DB', 'OPENCODE_DISABLE_CHANNEL_DB']);
 

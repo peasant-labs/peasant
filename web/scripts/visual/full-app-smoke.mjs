@@ -28,8 +28,8 @@ import { SMOKE_MOCKS, SMOKE_THEMES, makeSmokeSurfaces } from './smoke-surfaces.m
 import { assertKnownProject } from './validate-mock-coordinates.mjs'
 import { applyDeterminism } from './determinism.mjs'
 import { loadStrikeSmokeFixture } from './strike-smoke-fixture.mjs'
-import { ownedServerSandbox } from '../journey/lib/owned-server-sandbox.mjs'
-import { startOwnedServer } from '../journey/lib/owned-server-start.mjs'
+import { ownedServerSandbox } from './lib/owned-server-sandbox.mjs'
+import { startOwnedServer } from './lib/owned-server-start.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE, '../../..')            // .../peasant/<worktree>

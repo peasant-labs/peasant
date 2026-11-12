@@ -245,9 +245,9 @@ its config, data and state directories (as `--config-dir`, `--data-dir`, `--stat
 variables), its cache directory and its `HOME`, all under one throwaway root in the temp directory. The
 mock data store supplies what the pages show, so no such script needs your recorded sessions, and none
 may open `~/.local/share/peasant` or `~/.config/peasant`.
-- **the helpers:** `scripts/journey/lib/isolated-sandbox.mjs` lays the directories out and returns the
-  flags and the environment; `scripts/journey/lib/owned-server-sandbox.mjs` also makes the root and
-  removes it when the script exits; `scripts/journey/lib/owned-server-start.mjs` starts the server. A new
+- **the helpers:** `scripts/visual/lib/isolated-sandbox.mjs` lays the directories out and returns the
+  flags and the environment; `scripts/visual/lib/owned-server-sandbox.mjs` also makes the root and
+  removes it when the script exits; `scripts/visual/lib/owned-server-start.mjs` starts the server. A new
   script that starts the binary uses them and passes BOTH `...sandbox.args` and `env: sandbox.env` to
   `spawn`. Setting only `--config-dir` is the mistake this replaces: the binary then opens the data
   directory of whoever runs the script.

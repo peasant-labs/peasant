@@ -7,13 +7,13 @@ import { join, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
-import { isolatedServerSandbox } from './lib/isolated-sandbox.mjs';
-import { directoryNamedBy, ownedServerSandbox } from './lib/owned-server-sandbox.mjs';
-import { startOwnedServer } from './lib/owned-server-start.mjs';
+import { isolatedServerSandbox } from '../visual/lib/isolated-sandbox.mjs';
+import { directoryNamedBy, ownedServerSandbox } from '../visual/lib/owned-server-sandbox.mjs';
+import { startOwnedServer } from '../visual/lib/owned-server-start.mjs';
 
 const f = parse(readFileSync(new URL('./testdata/server-sandbox.yaml', import.meta.url), 'utf8'));
 const WEB = fileURLToPath(new URL('../..', import.meta.url));
-const library = (name) => new URL(`./lib/${name}`, import.meta.url).href;
+const library = (name) => new URL(`../visual/lib/${name}`, import.meta.url).href;
 assert.deepEqual(new Set([...f.cases.map(c => c.name), 'every-script-that-starts-the-binary-is-sandboxed-or-exempt']), new Set(f.requiredNames));
 
 // A process that answers the health route on `port`, as a running server does.

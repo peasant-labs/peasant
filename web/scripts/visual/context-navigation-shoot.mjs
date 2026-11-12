@@ -53,8 +53,8 @@ import { SurfaceGate } from './surface-gate.mjs'
 import { applyDeterminism } from './determinism.mjs'
 import { loadContextNavigationFixture } from './context-navigation-fixture.mjs'
 import { SMOKE_MOCKS, SMOKE_THEMES } from './smoke-surfaces.mjs'
-import { ownedServerSandbox } from '../journey/lib/owned-server-sandbox.mjs'
-import { startOwnedServer } from '../journey/lib/owned-server-start.mjs'
+import { ownedServerSandbox } from './lib/owned-server-sandbox.mjs'
+import { startOwnedServer } from './lib/owned-server-start.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE, '../../..')
