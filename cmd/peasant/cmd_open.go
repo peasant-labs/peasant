@@ -158,6 +158,17 @@ func buildOpenCommand(deps openDependencies) *cobra.Command {
 				fmt.Fprintln(stderr, failure.line())
 				return &openFailedError{failure: failure}
 			}
+			// An already-signed-in installation gets the one-time claim notice
+			// on an interactive open too. The internal harvest muted its
+			// writers, so this is the first point the notice can be seen.
+			if !hook {
+				if db, cleanup, err := openDB(cmd); err == nil {
+					defer cleanup()
+					if noticeErr := announceUnclaimedClaimOnCommand(cmd, db, configDirOverride(cmd), stateDirOverride(cmd)); noticeErr != nil {
+						fmt.Fprintf(stderr, "warning: local ownership notice was not shown: %v\n", noticeErr)
+					}
+				}
+			}
 			for _, line := range lines {
 				fmt.Fprintln(stdout, line)
 			}

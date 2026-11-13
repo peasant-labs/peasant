@@ -536,7 +536,7 @@ func indexSessionEntriesRowsOnConn(conn *sqlite.Conn, sessionID ingest.SessionID
 				"what: failed to delete existing %s rows before re-indexing; "+
 				"why: FK constraint or DB corruption; "+
 				"user impact: session %s will not be re-indexed, stale data persists; "+
-				"how to fix: re-run peasant ingest after upgrading; if persistent, delete the DB at ~/.local/share/peasant/peasant.db and re-ingest",
+				"how to fix: re-run peasant ingest after upgrading; if persistent, delete the DB at ~/.local/share/peasant/peasant.db and re-ingest; local ownership claims are lost with the database, but the local owner id is kept in local-owner.json beside it",
 				q.table, sessionID, err, q.table, sessionID)
 		}
 	}

@@ -36,6 +36,7 @@ requiredResidual:
   - store-migration-v70
   - store-migration-v73
   - store-migration-v78
+  - store-migration-v79
   - store-offset-page-child-filter
   - store-offset-page-child-count
 requiredRouted:

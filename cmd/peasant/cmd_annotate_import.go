@@ -263,6 +263,7 @@ func runAnnotateImport(cmd *cobra.Command, fromFile, fromDir string) error {
 					fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s:%d: update content hash: %v\n",
 						path, lineNum, hashErr)
 				}
+				claimNewAnnotations(ctx, cmd, db, newID)
 				totalImported++
 
 			case existing.ContentHash == newHash:
@@ -287,12 +288,14 @@ func runAnnotateImport(cmd *cobra.Command, fromFile, fromDir string) error {
 				} else {
 					ingestParams.SessionID = params.SessionID
 				}
-				if _, createErr := db.CreateAnnotationAndSupersede(ctx, ingestParams, existing.ID, newHash); createErr != nil {
+				supersedingID, createErr := db.CreateAnnotationAndSupersede(ctx, ingestParams, existing.ID, newHash)
+				if createErr != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s:%d: supersede annotation: %v\n",
 						path, lineNum, createErr)
 					totalSkipped++
 					continue
 				}
+				claimNewAnnotations(ctx, cmd, db, supersedingID)
 				totalImported++
 			}
 		}

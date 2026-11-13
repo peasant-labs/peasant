@@ -1,0 +1,6 @@
+requiredNames:
+  - default-unclaimed
+  - claim-all
+cases:
+  - {name: default-unclaimed, input: "\n", all: false}
+  - {name: claim-all, input: "2\n", all: true}

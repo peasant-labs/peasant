@@ -197,6 +197,7 @@ func runAnnotateCreate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("annotate create: %w", err)
 	}
+	claimNewAnnotations(ctx, cmd, db, id)
 
 	fmt.Fprintf(cmd.OutOrStdout(), "created annotation %s: %s = %q on session %s\n", id, typeID, value, sessionID)
 	return nil
@@ -267,6 +268,7 @@ func runAnnotateCreateProject(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("annotate create-project: %w", err)
 	}
+	claimNewAnnotations(ctx, cmd, db, id)
 
 	fmt.Fprintf(cmd.OutOrStdout(), "created annotation %s: %s = %q on project %s\n", id, typeID, value, projectHash)
 	return nil

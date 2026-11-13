@@ -2,7 +2,9 @@ requiredNames:
   - v72-compact-identity-facts
   - v75-image-attachments
   - v77-turn-count-recount-marker
+  - v76-search-trigger-repair
   - v78-harness-check-widening
+  - v79-owner-claims
   - v74-conversation-turn-count
   - v70-parent-state
   - v71-derived-lookups
@@ -76,7 +78,6 @@ requiredNames:
   - v66-session-thinking-level
   - v67-latest-attempt-pointer
   - v73-harness-check-widening
-  - v76-search-trigger-repair
 requiredGuardNames:
   - deleted-required-slot
   - shared-needle

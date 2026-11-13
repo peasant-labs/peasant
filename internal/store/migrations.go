@@ -287,6 +287,8 @@ var migrationV24 = createSessionCommands + ";\n" +
 // session_entries_fts is dropped. See schema_v76.go.
 // migrationV77 marks the stored turn counts for one recount. See schema_v77.go.
 // migrationV78 widens stored harness checks to the sixteen known values. See schema_v78.go.
+// migrationV79 adds the permanent local owner, the append-only claim log, and
+// nullable current owner pointers on sessions and annotations. See schema_v79.go.
 
 // dbSchema is the sqlitemigration schema applied on Open().
 var dbSchema = sqlitemigration.Schema{
@@ -369,6 +371,7 @@ var dbSchema = sqlitemigration.Schema{
 		migrationV76,
 		migrationV77,
 		migrationV78,
+		migrationV79,
 	},
 	// V16 rebuilds annotation tables with new FKs; disable FK checking during
 	// the migration transaction so renamed/recreated tables don't cause violations.
@@ -441,5 +444,6 @@ var dbSchema = sqlitemigration.Schema{
 		nil,                        // V76: search trigger repair (trigger + FTS DML only, no FK-bearing tables)
 		nil,                        // V77: turn count recount marker (new table, no data rewrite)
 		{DisableForeignKeys: true}, // V78: widen stored harness checks to the sixteen known values
+		nil,                        // V79: local owner, append-only claim log, owner pointers (additive, no FK on pointers)
 	},
 }

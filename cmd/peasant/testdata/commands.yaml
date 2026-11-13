@@ -185,6 +185,18 @@ commands:
           - { name: owner-email, type: stringArray, default: "[]" }
           - { name: json, type: bool, default: "false" }
 
+  - name: User
+    use: user
+    subcommands:
+      - use: show
+        flags:
+          - { name: json, type: bool, default: "false" }
+      - use: claim
+        flags:
+          - { name: all, type: bool, default: "false" }
+          - { name: yes, type: bool, default: "false" }
+          - { name: json, type: bool, default: "false" }
+
   - name: TUI
     use: tui
     flags:

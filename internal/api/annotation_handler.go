@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
+	"github.com/peasant-labs/peasant/internal/auth"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/schema"
@@ -23,6 +25,9 @@ type annotationHandler struct {
 	// spawn runs a broadcast task on a Server-tracked goroutine so shutdown
 	// drains it before the store closes. The server wires it in Listen.
 	spawn func(fn func(context.Context))
+	// configHome overrides the XDG config root the saved Village credential is
+	// read from. An empty value disables automatic annotation claiming.
+	configHome string
 }
 
 // async runs fn through the server-tracked spawner. A handler constructed
@@ -240,6 +245,7 @@ func (h *annotationHandler) handleCreateAnnotation(w http.ResponseWriter, r *htt
 		writeJSONError(w, http.StatusInternalServerError, "failed to create annotation")
 		return
 	}
+	h.claimNewAnnotation(ctx, newID)
 
 	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
 	w.WriteHeader(http.StatusCreated)
@@ -445,4 +451,18 @@ func (h *annotationHandler) handleBatchCreateAnnotations(w http.ResponseWriter, 
 		// broadcasts above so shutdown drains it too.
 		h.async(h.hub.RefreshQuality)
 	}
+}
+
+// claimNewAnnotation points a just-created web annotation at the signed-in
+// account's latest claim entry. It is best-effort: a signed-out server keeps
+// creating annotations, and a claim failure never fails the request.
+func (h *annotationHandler) claimNewAnnotation(ctx context.Context, annotationID string) {
+	if h.annotationStore == nil || h.configHome == "" || annotationID == "" {
+		return
+	}
+	snapshot, err := auth.CaptureCredentials(ctx, h.configHome)
+	if err != nil {
+		return
+	}
+	_, _ = h.annotationStore.ClaimAnnotationIDs(ctx, snapshot, []string{annotationID}, store.ClaimSourceAutomatic, time.Now().UnixMilli())
 }

@@ -286,6 +286,15 @@ type Store struct {
 	writeConfig ingest.WriteConfig
 	// attachmentDir is the content-addressed image directory beside the database.
 	attachmentDir string
+	// dbPath is the analytics database file this store opened. It anchors the
+	// owner permanence file beside it across a database rebuild.
+	dbPath string
+	// claimBatchSize bounds one claim-pointer transaction. Production uses
+	// claimUpdateBatchSize; a store-internal test lowers it to prove the loop.
+	claimBatchSize int
+	// claimBatchSeam is a nil production hook a store-internal test sets to
+	// interrupt a claim after a bounded batch, proving the next run resumes.
+	claimBatchSeam func(table string, batch, changed int) error
 	// attachments is the one file-and-row store for this database. Put, GC, and
 	// prune share its lock. It is constructed in Open and never replaced.
 	attachments *attachments.Store
@@ -323,6 +332,10 @@ type openOptions struct {
 	// log for the life of the pool. It exists so a test can count commits by
 	// reading the log, and is never set on a production open.
 	walAutocheckpointDisabled bool
+	// skipLocalOwnerBootstrap suppresses the owner row/file bootstrap. It is
+	// used only to build the pristine test template; production opens always
+	// create or adopt the owner.
+	skipLocalOwnerBootstrap bool
 	// writeConfig carries the write.* budgets the staging and activation
 	// lanes enforce. Nil means the shipped defaults at the host's worker
 	// count; the pipeline passes its resolved configuration so the store
@@ -366,6 +379,13 @@ func WithWriteConfig(cfg ingest.WriteConfig) OpenOption {
 // for test helpers that open many copies of an already-migrated template.
 func WithSkipMigrations() OpenOption {
 	return func(o *openOptions) { o.skipMigrations = true }
+}
+
+// WithSkipLocalOwnerBootstrap suppresses the local owner row/file bootstrap.
+// It exists only for the pristine test template; production opens always
+// create or adopt the owner when the store opens.
+func WithSkipLocalOwnerBootstrap() OpenOption {
+	return func(o *openOptions) { o.skipLocalOwnerBootstrap = true }
 }
 
 // WithPoolSize sets the SQLite connection-pool size for this Open. Use a small
@@ -612,7 +632,30 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 		return nil, fmt.Errorf("store: load installation salt: %w", err)
 	}
 
-	opened := &Store{pool: pool, salt: s, indexFormats: formats, indexConversions: conversions, generationArtifacts: o.generationArtifacts, sessionLocker: o.sessionLocker, attachmentDir: AttachmentDir(dbPath)}
+	if !o.skipLocalOwnerBootstrap {
+		// A skip-migrations open may point at a pre-V79 database (a migration
+		// fixture that seeds an old version). Only bootstrap once the owner
+		// table exists; a normal open has just migrated to the current version.
+		version, err := readUserVersion(pool)
+		if err != nil {
+			_ = pool.Close()
+			return nil, fmt.Errorf("store: read the schema version for the local owner: %w", err)
+		}
+		if version >= localOwnerSchemaVersion {
+			conn, err := pool.Take(context.Background())
+			if err != nil {
+				_ = pool.Close()
+				return nil, fmt.Errorf("store: take connection for the local owner: %w", err)
+			}
+			_, ownerErr := bootstrapLocalOwnerOnConn(conn, LocalOwnerFilePath(dbPath), time.Now().UnixMilli())
+			pool.Put(conn)
+			if ownerErr != nil {
+				_ = pool.Close()
+				return nil, fmt.Errorf("store: create or adopt the local owner: %w", ownerErr)
+			}
+		}
+	}
+	opened := &Store{pool: pool, salt: s, indexFormats: formats, indexConversions: conversions, generationArtifacts: o.generationArtifacts, sessionLocker: o.sessionLocker, attachmentDir: AttachmentDir(dbPath), dbPath: dbPath, claimBatchSize: claimUpdateBatchSize}
 	opened.attachments = attachments.New(opened.attachmentDir, attachmentRows{opened}, attachments.Hooks{})
 	opened.writeConfig = resolveStoreWriteConfig(o.writeConfig)
 	return opened, nil

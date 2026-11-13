@@ -101,7 +101,7 @@ AFTER UPDATE OF parent_id, model_harness, model_id, opaque_host_id,
   thinking_level_history, latest_attempt_generation_id,
   latest_attempt_artifact_hash, latest_attempt_indexer_version,
   latest_attempt_failure_code, latest_attempt_failure_message,
-  latest_attempt_captured_at_ms, latest_attempt_stats_json ON sessions
+  latest_attempt_captured_at_ms, latest_attempt_stats_json, owner_claim_id ON sessions
 BEGIN
   UPDATE sessions
    SET parent_state = CASE

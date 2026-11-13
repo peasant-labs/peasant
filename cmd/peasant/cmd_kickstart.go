@@ -558,6 +558,19 @@ func buildFTUEIngestRunnerWithProgress(cmd *cobra.Command, configPath string) (f
 			ingest.WithGitDiffAnalyzer(ingest.NewExecGitDiffAnalyzer()),
 		)
 
+		// Automatically assign ownership of the sessions onboarding writes when
+		// this computer is already signed in. The wizard asks no ownership
+		// question: it runs in an alt-screen, so the one-time prompt belongs to
+		// the standalone sign-in command only. Reuse the harvest claimer wiring
+		// so a real credential read failure is reported instead of silently
+		// disabling ownership.
+		claimer, claimErr := automaticSessionClaimer(ctx, configDirOverride(cmd), db)
+		if claimErr != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: local ownership claim is off for onboarding: %v\n", claimErr)
+		} else if claimer != nil {
+			pipelineOpts = append(pipelineOpts, ingest.WithSessionClaimer(claimer))
+		}
+
 		pipelineOpts = append(pipelineOpts, ingest.WithRunLock(filepath.Join(string(defaults.ResolveDataDirPathWith(dataDirOverride(cmd))), ingest.RunLockFileName)))
 		pipeline, err := ingest.NewPipeline(fs, git, ingest.DefaultAdapterRegistry, pipelineCfg, pipelineOpts...)
 		if err != nil {

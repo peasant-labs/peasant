@@ -47,6 +47,8 @@ tables:
   - ingest_run_outcomes
   - _install_salt
   - lessons
+  - local_owner
+  - owner_claims
   - lesson_sources
   - memory_injection_log
   - models
@@ -105,6 +107,10 @@ tables:
   - type_origins
   - value_domain_kinds
 indexes:
+  - idx_sessions_owner_claim
+  - idx_owner_claims_scope_order
+  - idx_owner_claims_owner_order
+  - idx_annotations_owner_claim
   - idx_claude_evidence_identity_root
   - idx_claude_teammate_spawns_identity
   - idx_codex_rollout_catalog_session
