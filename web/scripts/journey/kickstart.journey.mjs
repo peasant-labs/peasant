@@ -666,6 +666,12 @@ test('focus-burst-reads-sign-in-once', async () => {
   }, FOCUS_BURST);
   await expect.poll(reads, { message: 'the burst made one leading read and one trailing read', timeout: 15000 }).toBe(before + FOCUS_BURST.expectedReads);
   await expect.poll(() => new URL(pageF.url()).pathname, 'the online page kept the reader').toBe('/village/');
+  // The page's own saved-observations read runs at opening and on each focus;
+  // wait for the last refusal so the journey's exact refusal list is settled.
+  await expect.poll(
+    () => failedResponses.filter((entry) => entry.tab === 'F' && entry.status === 401 && entry.path === '/api/v1/village/collective-observations').length,
+    { message: 'the online page finished its saved-observations reads', timeout: 15000 },
+  ).toBe(FOCUS_BURST.focuses + 1);
   focusBurstReads = { landed: new URL(pageF.url()).pathname, before, after: reads(), ...FOCUS_BURST };
   await pageF.close();
 });
@@ -864,10 +870,16 @@ test('computed-styles-and-themes', async () => {
     expect(entry.rail.labels.map((label) => label.text), `${name}: the rail measured one label per step`).toHaveLength(count);
   }
   expect(consoleErrors, 'no console error or page error in any tab').toEqual([]);
-  // Every refused request was one the journey provoked on purpose: the save that
-  // found a changed field (409), and the deep links to work that was never recorded.
+  // The signed-out online page reads its saved observations at opening and on
+  // each focus of the burst; every one is refused with 401. That is the page
+  // saying nobody is signed in, not a refusal of the setup walk's routes, so it
+  // is counted here and left out of the exact list below.
+  const signedOut = failedResponses.filter((entry) => entry.tab === 'F' && entry.status === 401 && entry.path === '/api/v1/village/collective-observations');
+  expect(signedOut, 'the signed-out online page refused one saved-observations read at opening and one per focus').toHaveLength(FOCUS_BURST.focuses + 1);
+  // Every other refused request was one the journey provoked on purpose: the save
+  // that found a changed field (409), and the deep links to work never recorded.
   const hash = 'a'.repeat(64);
-  const refused = failedResponses.map((entry) => `${entry.status} ${entry.method} ${entry.path.replaceAll(hash, '<hash>').replace(/\/sessions\/[0-9a-f]{32}\//, '/sessions/<id>/')}`).sort();
+  const refused = failedResponses.filter((entry) => !signedOut.includes(entry)).map((entry) => `${entry.status} ${entry.method} ${entry.path.replaceAll(hash, '<hash>').replace(/\/sessions\/[0-9a-f]{32}\//, '/sessions/<id>/')}`).sort();
   expect(refused, 'the refused requests are exactly the provoked ones').toEqual(fixture.expectedRefusals.slice().sort());
   await Promise.all([pageA, pageB].map((page) => page?.close()));
 });
