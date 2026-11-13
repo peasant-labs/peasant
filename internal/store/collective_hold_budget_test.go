@@ -23,10 +23,16 @@ var collectiveHoldBudgetFixtures []byte
 // The note is composed at the end of an observation write. Most cases below
 // call it directly with contexts they build, so whether the caller or the
 // budget is live is an input, never a race with the clock. The one wrapper
-// check waits for the connection's own interrupt; see its comment for why a
-// paused machine cannot flip what it observes.
+// check waits for the connection's own interrupt; see its comment for the one
+// real-time budget it still inherits.
 const (
-	holdBudgetHold  = 100 * time.Millisecond
+	// holdBudgetHold is the validated ceiling of ingest.WriteConfig.Validate,
+	// so the wrapper check below runs a budget a configured app can actually
+	// use. Its deadline starts before the connection is taken and the
+	// transaction begins, which is why this check cannot use a short budget:
+	// a pause longer than it in that window ends the step with the context's
+	// error, before any SQLite interrupt exists.
+	holdBudgetHold  = 5 * time.Second
 	holdBudgetGuard = 30 * time.Second
 )
 
@@ -137,13 +143,16 @@ func TestNameExpiredObservationHold(t *testing.T) {
 // TestObservationTransactionNamesExpiredHoldBudget proves the production
 // wrapper reaches the note, keeps the interrupt classification and rolls the
 // write back. The action waits for the connection's own interrupt rather than
-// for a clock: the interrupt is the wake source, and it only arrives once the
-// budget has closed the connection. So a paused machine only delays the run -
-// an insert interrupted during setup, a poll interrupted later, or a stall
-// before the note is composed all leave the same end-of-step observation,
-// because the deadline has already passed, the caller is never cancelled and
-// the transaction has installed nothing. The guard exists for a hang and sits
-// far above the budget.
+// for a clock, so once the write is running a pause only delays the run: the
+// deadline has already passed when the interrupt arrives, the caller is never
+// cancelled and the transaction has installed nothing.
+//
+// The wrapper's hold budget is the one real-time bound here, and it starts
+// before the connection is taken and the transaction begins. A pause longer
+// than the validated five-second ceiling while pool.Take or BEGIN runs ends the
+// step with the context's own error before any interrupt exists, and this check
+// cannot observe the note; it reports that explicitly below instead of a wrong
+// assertion. A configured app can use this budget.
 func TestObservationTransactionNamesExpiredHoldBudget(t *testing.T) {
 	s, err := Open(filepath.Join(t.TempDir(), "observations.db"), WithWriteConfig(ingest.WriteConfig{HoldTarget: holdBudgetHold}))
 	if err != nil {
@@ -168,6 +177,12 @@ func TestObservationTransactionNamesExpiredHoldBudget(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("an observation write held past its budget committed")
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		// The budget covers pool.Take and BEGIN, so a pause past it there ends
+		// the step with the context's error and no interrupt exists to note.
+		// That is a machine stall, not a behavior of the wrapper.
+		t.Fatalf("the machine paused past the %s hold budget before the write reached an interrupt, so this check never observed the note: %v", holdBudgetHold, err)
 	}
 	if code := sqlite.ErrCode(err); code != sqlite.ResultInterrupt {
 		t.Fatalf("the wrapper changed the SQLite code: code=%v err=%v", code, err)
