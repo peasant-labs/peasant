@@ -76,9 +76,10 @@ const (
 	// 4.31 GB, about the size of its search index.
 	StoreUpgradeEntryTableRebuildDiskFactor = 2.0
 
-	// StoreUpgradeSessionTablesRebuildDiskFactor is for step 78, which
-	// copies the sessions and daily harness summary tables to widen their
-	// harness CHECK (a copy out, the drop, a copy back and eight indexes).
+	// StoreUpgradeSessionTablesRebuildDiskFactor is for steps 73 and 78,
+	// which each copy the sessions and daily harness summary tables to widen
+	// their harness CHECK (a copy out, the drop, a copy back and the indexes).
+	// Step 73 is the same copy, so it takes the factor measured on step 78.
 	// Its basis is those two tables with their indexes, read row by row. On
 	// synthetic schema-77 stores of 20,000 and 50,000 sessions rows
 	// (2026-11-12, TestSandboxHarnessWideningMeasure) the step's log grew
@@ -128,7 +129,7 @@ const (
 	StoreUpgradeEstimateMaxEntryRows = 65536
 
 	// StoreUpgradeEstimateMaxSessionRows bounds the rows of each session
-	// table the free-disk estimate of step 78 reads. A session row is read
+	// table the free-disk estimate of steps 73 and 78 reads. A session row is read
 	// from its record header like an entry row; a million rows is far past
 	// any store seen (21,462 sessions on the largest), so a real store is
 	// always measured rather than charged twice its whole database.

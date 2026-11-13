@@ -36,8 +36,8 @@ var upgradeCostDiskNeeds = map[UpgradeCost]upgradeDiskNeed{
 	UpgradeCostScalesWithText: {factor: defaults.StoreUpgradeSearchRebuildDiskFactor, basis: upgradeDiskBasisDatabase},
 }
 
-// The overrides: the steps that copy the entry table, and the step that
-// copies the session tables.
+// The overrides: the steps that copy the entry table, and the steps that
+// copy the session tables.
 var (
 	// entryTableCopyDiskNeed is step 11's: it copies the entry table before
 	// any search index exists.
@@ -45,8 +45,9 @@ var (
 	// entryTableRebuildDiskNeed is step 75's: it copies the entry table and
 	// rebuilds both search indexes.
 	entryTableRebuildDiskNeed = upgradeDiskNeed{factor: defaults.StoreUpgradeEntryTableRebuildDiskFactor, basis: upgradeDiskBasisEntryTableAndSearchIndex}
-	// sessionTablesRebuildDiskNeed is step 78's: it copies the sessions and
-	// daily harness summary tables to widen their harness CHECK.
+	// sessionTablesRebuildDiskNeed is the need of steps 73 and 78: each copies
+	// the sessions and daily harness summary tables to widen their harness
+	// CHECK.
 	sessionTablesRebuildDiskNeed = upgradeDiskNeed{factor: defaults.StoreUpgradeSessionTablesRebuildDiskFactor, basis: upgradeDiskBasisSessionTables}
 )
 
@@ -144,7 +145,7 @@ var upgradeStepCatalog = map[int]upgradeCatalogEntry{
 	70: {title: "add the parent lane and the store revision", cost: UpgradeCostScalesWithRows},
 	71: {title: "add lookups for scoped harvest", cost: UpgradeCostScalesWithRows},
 	72: {title: "compact claude identity facts", cost: UpgradeCostScalesWithRows},
-	73: {title: "widen the stored harness set", cost: UpgradeCostScalesWithRows},
+	73: {title: "widen the stored harness set", cost: UpgradeCostScalesWithRows, disk: sessionTablesRebuildDiskNeed},
 	74: {title: "add the conversation turn count and fill it for stored sessions", cost: UpgradeCostScalesWithRows, counts: UpgradeUnitSessions},
 	75: {title: "add image entries and rebuild the search index", cost: UpgradeCostScalesWithText, disk: entryTableRebuildDiskNeed},
 	76: {title: searchRepairQuickTitle, cost: UpgradeCostQuick},

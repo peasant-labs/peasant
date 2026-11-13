@@ -29,7 +29,7 @@ const (
 	upgradeDiskBasisEntryTableAndSearchIndex upgradeDiskBasis = "entry_table_and_search_index"
 	// upgradeDiskBasisSessionTables is the two tables that carry the stored
 	// harness CHECK, sessions and daily_summary_harness, with their indexes:
-	// what a step that widens that CHECK copies (schema 78).
+	// what a step that widens that CHECK copies (schemas 73 and 78).
 	upgradeDiskBasisSessionTables upgradeDiskBasis = "session_tables"
 )
 

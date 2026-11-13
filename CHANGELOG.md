@@ -68,10 +68,12 @@ was tagged but not published links to its tag instead.
   `peasant migrate --schema-only`. A store whose 0.17.0 recount did not finish
   is behind until that command runs it.
 - Migration 78 admits the Antigravity CLI and IDE in the stored harness set.
-  It copies the sessions table, so its time and the free disk it asks for grow
-  with the number of stored sessions (about half a second and twice the
-  sessions table for 20,000 sessions), and the upgrade counts it as a long
-  step.
+  It copies the sessions and daily summary tables, so its time and the free
+  disk it asks for grow with the number of stored sessions (about half a
+  second and twice those tables for 20,000 sessions), and the upgrade counts
+  it as a long step on every store. Upgrading from 0.17.0 or earlier, a git
+  hook skips publishing (git is not blocked) and a script refuses until
+  `peasant migrate --schema-only` runs in a terminal.
 - Migration 79 stores a profile of every import. `ingest_run_stages` holds one
   row per pipeline stage per run (duration, counts, bytes, time spent waiting
   for the write lane), kept for the latest 100 runs, and `index_log` gains
