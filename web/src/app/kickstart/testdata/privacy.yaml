@@ -14,8 +14,10 @@ cases:
   - name: real-redactor-lines-for-current-draft
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 2, stale: false}}
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - expectText:
@@ -36,8 +38,10 @@ cases:
   - name: failure-withholds-and-shows-actionable-error
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: privacy-refused}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - expectText:
@@ -48,8 +52,10 @@ cases:
   - name: no-static-sample
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: no-example}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - expectText: [redaction level]

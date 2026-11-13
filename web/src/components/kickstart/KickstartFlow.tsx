@@ -8,17 +8,20 @@ import type { KickstartSession, KickstartStop } from '@/lib/kickstart/model';
 import { useKickstartSession } from '@/lib/kickstart/useKickstartSession';
 import { useVillageSignIn } from '@/lib/kickstart/useVillageSignIn';
 import {
+  answerGroupLabelId,
   connectOfferStopKey,
   firstVisibleStop,
+  footAnswerField,
   nextVisibleStop,
   previousVisibleStop,
   stopByKey,
   visibleStopAfter,
   visibleStops,
 } from '@/lib/kickstart/view';
-import { KickstartCloseReason, KickstartStopKind, type KickstartScope } from '@/lib/kickstart/values';
-import { ConnectOffer } from './ConnectOffer';
+import { KickstartCloseReason, KickstartConnectAnswer, KickstartStopKind, type KickstartScope } from '@/lib/kickstart/values';
+import { CONNECT_OFFER_PROMPT_ID, ConnectOffer } from './ConnectOffer';
 import { FinishPanel } from './FinishPanel';
+import { FootAnswers } from './FootAnswers';
 import { StaleNotice } from './StaleNotice';
 import { StopRenderer } from './StopRenderer';
 import './kickstart.css';
@@ -165,7 +168,7 @@ export function KickstartFlow({ scope, title, trail, ariaLabel }: KickstartFlowP
       />
     );
   } else if (offerHere) {
-    body = <ConnectOffer connect={session.connect} signIn={signIn} answer={api.answerConnect} />;
+    body = <ConnectOffer connect={session.connect} signIn={signIn} />;
   } else {
     body = (
       <StopRenderer
@@ -174,13 +177,59 @@ export function KickstartFlow({ scope, title, trail, ariaLabel }: KickstartFlowP
         api={api}
         copy={copy}
         signIn={signIn}
-        answeredConnection={() => go(nextVisibleStop(session, stop.key))}
       />
     );
   }
 
   const settled = ending === null;
-  const primary = !settled || offerHere
+  // A stop answered by a button draws its answers where `continue` sits, and
+  // no `continue`: the answer is how the reader moves on.
+  const answerField = settled && !offerHere ? footAnswerField(stop) : undefined;
+  let answers: ReactNode = null;
+  if (settled && offerHere) {
+    const accept = async (value: string) => {
+      if (value === KickstartConnectAnswer.Skip.wire) {
+        await api.answerConnect(KickstartConnectAnswer.Skip);
+        return;
+      }
+      if (await signIn.signIn()) await api.answerConnect(KickstartConnectAnswer.Accept);
+    };
+    answers = (
+      <FootAnswers
+        labelledBy={CONNECT_OFFER_PROMPT_ID}
+        answers={[
+          { value: KickstartConnectAnswer.Skip.wire, label: session.connect.skip ?? KickstartConnectAnswer.Skip.label, primary: false },
+          { value: KickstartConnectAnswer.Accept.wire, label: KickstartConnectAnswer.Accept.label, primary: true },
+        ]}
+        waiting={signIn.waiting}
+        onAnswer={(value) => void accept(value)}
+        onStopWaiting={signIn.cancel}
+      />
+    );
+  } else if (answerField !== undefined) {
+    // On the connection stop, yes opens the browser sign-in first and is sent
+    // only once this computer is signed in; any other answer is sent at once.
+    const connection = stop.kind === KickstartStopKind.Connection;
+    const following = nextVisibleStop(session, stop.key);
+    const choose = async (value: string) => {
+      if (connection && value === KickstartConnectAnswer.Accept.wire && !(await signIn.signIn())) return;
+      if (await api.answer(answerField.key, value)) go(following);
+    };
+    answers = (
+      <FootAnswers
+        labelledBy={answerGroupLabelId(answerField)}
+        answers={answerField.options.map((option) => ({
+          value: option.value,
+          label: option.label,
+          primary: connection && option.value === KickstartConnectAnswer.Accept.wire,
+        }))}
+        waiting={connection && signIn.waiting}
+        onAnswer={(value) => void choose(value)}
+        onStopWaiting={signIn.cancel}
+      />
+    );
+  }
+  const primary = !settled || answers !== null
     ? null
     : onReview
       ? { label: 'save and import', onClick: () => void api.commit(), loading: api.committing, disabled: api.committing }
@@ -206,11 +255,12 @@ export function KickstartFlow({ scope, title, trail, ariaLabel }: KickstartFlowP
         </Button>
       }
       footEnd={
-        primary !== null && (
+        answers ??
+        (primary !== null && (
           <Button variant="primary" onClick={primary.onClick} disabled={primary.disabled} loading={primary.loading}>
             {primary.label}
           </Button>
-        )
+        ))
       }
     >
       {notices}
