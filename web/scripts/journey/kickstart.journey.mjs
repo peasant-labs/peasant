@@ -358,7 +358,8 @@ test('answers-sit-where-continue-sits', async () => {
   await expect(title(pageA)).toHaveText('choose sessions to import');
   const proceed = await next(pageA).boundingBox();
   expect(proceed, 'the tree stop draws continue in its foot').not.toBeNull();
-  expect(Math.abs(answer.right - proceed.right), 'the answer and continue share a right edge').toBeLessThanOrEqual(FOOT_ALIGNMENT_TOLERANCE);
+  const right = (box) => box.x + box.width;
+  expect(Math.abs(right(answer) - right(proceed)), 'the answer and continue share a right edge').toBeLessThanOrEqual(FOOT_ALIGNMENT_TOLERANCE);
   expect(Math.abs((answer.y + answer.height / 2) - (proceed.y + proceed.height / 2)), 'the answer and continue share a vertical centre').toBeLessThanOrEqual(FOOT_ALIGNMENT_TOLERANCE);
   footAlignment = { answer, proceed, narrow };
 
