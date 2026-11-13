@@ -24,7 +24,7 @@ import { isolatedServerSandbox } from './isolated-sandbox.mjs';
  * nothing is written into it, so one with no configuration file still has none.
  *
  * @param {string} name names the script in the root's directory name
- * @param {{configDir?: string, dataDir?: string}} [named] directories the caller names itself and keeps
+ * @param {{configDir?: string, dataDir?: string, home?: string}} [named] directories the caller names itself and keeps
  * @param {Record<string, string | undefined>} [inherited] the environment to extend (default: the script's own)
  */
 export function ownedServerSandbox(name, named = {}, inherited = process.env) {

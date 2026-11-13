@@ -43,6 +43,17 @@ for (const row of f.cases) test(row.name, { timeout: 20000 }, async t => {
     child.child.stdin.write('acquire');
     return { ...child, ready };
   }
+  if (row.mode === 'environment') {
+    const life = await acquire(); cleanups.push(() => life.cleanup());
+    // The variable is in this process's environment and not in the one the caller gives.
+    process.env[row.inheritedOnly] = 'from-the-runner';
+    t.after(() => { delete process.env[row.inheritedOnly]; });
+    const child = life.launch(process.execPath, [LIFECYCLE_CHILD, 'prints-env', '--names', [row.inheritedOnly, ...Object.keys(row.given), 'PEASANT_OBSERVATIONS_OWNER'].join(',')], { stdio: ['ignore', 'pipe', 'inherit'], env: row.given });
+    const printed = await bounded(new Promise(done => child.child.stdout.once('data', data => done(JSON.parse(data.toString())))), 3000, 'test child environment');
+    await bounded(child.done, 3000, 'test child exit');
+    assert.deepEqual(printed, { [row.inheritedOnly]: null, ...row.given, PEASANT_OBSERVATIONS_OWNER: life.identity.owner });
+    return;
+  }
   if (row.mode === 'forced' || row.mode === 'timeout' || row.mode === 'missing') {
     const life = await acquire(); cleanups.push(() => life.cleanup());
     const immutable = readFileSync(join(directory, 'owner.json'), 'utf8');

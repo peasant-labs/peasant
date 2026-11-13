@@ -1,4 +1,4 @@
-requiredNames: [forced-child-reaped-once, timed-out-child-reaped, stale-owner-recovered, stale-owner-other-temp-context, concurrent-recovery-loser-preserves-winner, missing-command-reaped, configured-sandbox-seed-writes-the-file-the-binary-reads, configured-sandbox-seed-survives-a-cleared-directory, configured-sandbox-seed-refuses-a-relative-root, configured-sandbox-seed-accepts-a-config-dir]
+requiredNames: [forced-child-reaped-once, timed-out-child-reaped, stale-owner-recovered, stale-owner-other-temp-context, concurrent-recovery-loser-preserves-winner, missing-command-reaped, launch-uses-the-given-environment-whole, configured-sandbox-seed-writes-the-file-the-binary-reads, configured-sandbox-seed-survives-a-cleared-directory, configured-sandbox-seed-refuses-a-relative-root, configured-sandbox-seed-accepts-a-config-dir]
 cases:
   - {name: forced-child-reaped-once, mode: forced, termMs: 50, killMs: 2000}
   - {name: timed-out-child-reaped, mode: timeout, termMs: 50, killMs: 2000}
@@ -6,6 +6,14 @@ cases:
   - {name: stale-owner-other-temp-context, mode: changed-temp, termMs: 50, killMs: 2000}
   - {name: concurrent-recovery-loser-preserves-winner, mode: concurrent, termMs: 50, killMs: 2000}
   - {name: missing-command-reaped, mode: missing, termMs: 50, killMs: 2000}
+  # A child launched with an environment gets exactly that one plus the owner mark: a variable the
+  # caller left out (a server sandbox drops the database paths) is not put back from the runner's.
+  - name: launch-uses-the-given-environment-whole
+    mode: environment
+    termMs: 50
+    killMs: 2000
+    inheritedOnly: OPENCODE_DB
+    given: {PEASANT_LIFECYCLE_GIVEN: given-by-the-caller}
   # A journey about any page but setup starts from a computer that is already set up.
   - {name: configured-sandbox-seed-writes-the-file-the-binary-reads, mode: config-seed, relativePath: peasant/config.yaml, content: "version: 1\n", fileMode: 0o600}
   - {name: configured-sandbox-seed-survives-a-cleared-directory, mode: config-reseed, relativePath: peasant/config.yaml, content: "version: 1\n"}

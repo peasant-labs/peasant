@@ -40,6 +40,7 @@ function runOwnedSandboxScript(root, args) {
 const namedArgs = (named) => [
   ...(named.configDir === undefined ? [] : ['--config-dir', named.configDir]),
   ...(named.dataDir === undefined ? [] : ['--data-dir', named.dataDir]),
+  ...(named.home === undefined ? [] : ['--home', named.home]),
 ];
 
 const freePort = () => new Promise((done) => { const s = createServer(); s.listen(0, 'localhost', () => { const { port } = s.address(); s.close(() => done(port)); }); });
@@ -53,6 +54,7 @@ const modes = {
     const sandbox = isolatedServerSandbox(sandboxRoot, named, row.inherited ?? {});
     const want = Object.fromEntries(Object.entries(row.expect).map(([key, value]) => [key, place(value)]));
     assert.deepEqual({ configDir: sandbox.configDir, dataDir: sandbox.dataDir, stateDir: sandbox.stateDir, home: sandbox.env.HOME, cache: sandbox.env.XDG_CACHE_HOME }, want);
+    assert.equal(sandbox.home, want.home, 'the sandbox names the same HOME it gives the binary');
     // The flags and the environment name the same three directories, so neither can fall back to the person's.
     assert.deepEqual([...sandbox.args], ['--config-dir', want.configDir, '--data-dir', want.dataDir, '--state-dir', want.stateDir]);
     assert.deepEqual(
@@ -87,7 +89,7 @@ const modes = {
       const said = JSON.parse(stdout);
       assert.equal(said.existed, true);
       assert.ok(said.root.startsWith(join(root, `peasant-${row.script}-`)), `${said.root} is in the temporary directory and named for the script`);
-      assert.equal(said.home, join(said.root, 'home'));
+      assert.equal(said.home, named.home ?? join(said.root, 'home'));
       assert.equal(said.dataDir, named.dataDir ?? join(said.root, 'data'));
       assert.equal(said.configDir, named.configDir ?? join(said.root, 'config'));
       assert.equal(existsSync(said.root), false, `the sandbox is gone after the script ends by ${end}`);
@@ -131,7 +133,8 @@ const modes = {
     assert.ok(serverArgs, `case ${row.name} has the unknown server ${row.server}`);
     let started = null;
     let answeredElsewhere = false;
-    const options = { port, portVariable: 'PEASANT_EXAMPLE_PORT', start: () => {
+    // A script that picks a free port itself on every run has no variable to name.
+    const options = { port, ...(row.pickedPort ? {} : { portVariable: 'PEASANT_EXAMPLE_PORT' }), start: () => {
       if (row.server === 'answers-elsewhere') {
         const other = launch(cleanups, FAKE_SERVER, ['answers-and-notifies', '--port', port], { ipc: true });
         other.once('message', () => { answeredElsewhere = true; started.send('exit'); });
@@ -140,7 +143,7 @@ const modes = {
     }, ...(row.withinMs ? { withinMs: row.withinMs } : {}) };
     const before = Date.now();
     if (row.error) {
-      await assert.rejects(startOwnedServer(options), (error) => [row.error, String(port), ...(row.errorNames ?? [])].every((part) => error.message.includes(part)) || assert.fail(error.message));
+      await assert.rejects(startOwnedServer(options), (error) => ([row.error, String(port), ...(row.errorNames ?? [])].every((part) => error.message.includes(part)) && !(row.errorOmits ?? []).some((part) => error.message.includes(part))) || assert.fail(error.message));
       if (row.endsWithinMs) assert.ok(Date.now() - before < row.endsWithinMs, `the wait ended after ${Date.now() - before} ms, long before the ${row.withinMs} ms allowed`);
     } else {
       const server = await startOwnedServer(options);
@@ -180,8 +183,9 @@ test('every-script-that-starts-the-binary-is-sandboxed-or-exempt', () => {
     assert.match(source, /\bstartOwnedServer\(/, `${path} starts its server through startOwnedServer`);
     const spawns = source.split('\n').filter((line) => startsTheBinary.test(line));
     assert.ok(spawns.length > 0, `${path}: the spawn must stay on one source line with the web start arguments, ...sandbox.args and env: sandbox.env; restore the one-line call so the sandbox check can verify it`);
+    // A journey that owns its processes through acquireLifecycle starts the binary with that lifetime's `launch`, which spawns it in its own reaped group.
     for (const line of spawns) {
-      assert.ok(/\bspawn\(/.test(line) && line.includes('...sandbox.args') && /\benv: sandbox\.env\b/.test(line), `${path}: the spawn must stay on one source line with the web start arguments, ...sandbox.args and env: sandbox.env so the sandbox check can verify it: ${line.trim()}`);
+      assert.ok(/\b(?:spawn|launch)\(/.test(line) && line.includes('...sandbox.args') && /\benv: sandbox\.env\b/.test(line), `${path}: the spawn must stay on one source line with the web start arguments, ...sandbox.args and env: sandbox.env so the sandbox check can verify it: ${line.trim()}`);
     }
   }
 });
