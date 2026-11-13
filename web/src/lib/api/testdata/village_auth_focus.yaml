@@ -6,8 +6,8 @@
 # is expected: the times each read started, what each subscriber heard in
 # order (`no account` when the read failed), and whether the reader still
 # listens for focus when the timeline ends (`pendingTimers` checks how many
-# timers are waiting at that moment). No two reads are
-# ever in flight at once, in any case.
+# timers are waiting at that moment, `listeners` how many focus listeners it
+# holds). No two reads are ever in flight at once, in any case.
 requiredNames:
   - one-read-per-focus-burst
   - focus-during-a-read-starts-no-read
@@ -16,6 +16,7 @@ requiredNames:
   - two-subscribers-share-one-read
   - failed-read-reports-no-account-and-allows-the-next
   - last-unsubscribe-removes-the-listener-and-the-timer
+  - unsubscribe-last-during-a-read-remount-waits-for-its-end
 cases:
   # Five focus events inside one second: one read at once, one after the gap.
   - name: one-read-per-focus-burst
@@ -114,4 +115,28 @@ cases:
     until: 9000
     expectReads: [0]
     expectHeard: {sidebar: [ada], online: [ada]}
+    expectListening: false
+
+  # The last subscriber leaves while its read is slow. A new subscriber mounts
+  # before that read settles: no second read starts, the old answer is told to
+  # nobody, and a fresh read runs two seconds after the old read actually ends.
+  # A focus during the transition is held for that fresh read.
+  - name: unsubscribe-last-during-a-read-remount-waits-for-its-end
+    reads: [{ms: 1000, answer: ada}, {ms: 100, answer: signed out}]
+    timeline:
+      - {at: 0, subscribe: sidebar}
+      - {at: 300, unsubscribe: sidebar}
+      - {at: 600, subscribe: online}
+      - {at: 601, listeners: 1}
+      - {at: 800, focus: true}
+      # The old read ends at 1000 and schedules the fresh read for 3000.
+      - {at: 1000, pendingTimers: 1}
+      - {at: 1200, focus: true}
+      # The fresh read reaches the new subscriber and ends at 3100.
+      - {at: 3200, unsubscribe: online}
+      - {at: 3201, listeners: 0, pendingTimers: 0}
+      - {at: 4000, focus: true}
+    until: 8000
+    expectReads: [0, 3000]
+    expectHeard: {sidebar: [], online: [signed out]}
     expectListening: false

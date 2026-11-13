@@ -11,6 +11,7 @@ interface TimelineEvent {
   unsubscribe?: string;
   focus?: true;
   pendingTimers?: number;
+  listeners?: number;
 }
 interface Case {
   name: string;
@@ -23,7 +24,7 @@ interface Case {
 }
 
 const fixture = parse(readFileSync(resolve(process.cwd(), 'src/lib/api/testdata/village_auth_focus.yaml'), 'utf8')) as { requiredNames: string[]; cases: Case[] };
-const EVENT_KEYS = ['at', 'subscribe', 'unsubscribe', 'focus', 'pendingTimers'];
+const EVENT_KEYS = ['at', 'subscribe', 'unsubscribe', 'focus', 'pendingTimers', 'listeners'];
 
 /** What a subscriber heard, in the fixture's words. */
 function heard(reading: VillageAuthReading): string {
@@ -109,14 +110,15 @@ describe('the sign-in read on window focus', () => {
         }
         if (event.unsubscribe !== undefined) leave[event.unsubscribe]();
         if (event.focus) target.dispatchEvent(new Event('focus'));
+        if (event.listeners !== undefined) expect(target.listening, `${row.name}: focus listeners at ${event.at} ms`).toBe(event.listeners);
         if (event.pendingTimers !== undefined) expect(vi.getTimerCount(), `${row.name}: timers waiting at ${event.at} ms`).toBe(event.pendingTimers);
       }
       await vi.advanceTimersByTimeAsync(row.until - clock);
+      expect(mostInFlight, `${row.name}: reads in flight at once`).toBe(1);
       expect(started, `${row.name}: when each read started`).toEqual(row.expectReads);
       expect(said, `${row.name}: what each subscriber heard`).toEqual(row.expectHeard);
       expect(target.listening > 0, `${row.name}: still listening for focus`).toBe(row.expectListening);
       expect(target.listening, `${row.name}: focus listeners held`).toBeLessThanOrEqual(1);
-      expect(mostInFlight, `${row.name}: reads in flight at once`).toBe(1);
     });
   }
 });
