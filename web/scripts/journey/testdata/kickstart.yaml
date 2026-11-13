@@ -81,13 +81,13 @@ projects:
   - {name: light-desktop, theme: light, width: 1280, height: 900}
 # The commit the branch was cut from. A provenance marker must be absent from
 # its web sources, or it proves nothing about this branch.
-baseCommit: 15cf2d0be79715b8e91e96c314c33ac619cdb16f
+baseCommit: 412cc8791141fb542e823ddb8fd46aa3fafab257
 provenance:
-  # Strings only this branch introduces, found in the bundle the binary serves.
+  # Strings only this branch introduces, found in the bundle the binary serves:
+  # the foot answer group and the data attribute its buttons carry.
   markers:
-    - wizard-host
-    - set up peasant
-    - your selection is saved
+    - ks-foot-answers
+    - data-foot-answer
   routes: [/kickstart/, /selection/]
 # The recordings: the ingest end-to-end fixture's Claude root session is the
 # template. Sessions name a prompt (the first is what the tree shows).
