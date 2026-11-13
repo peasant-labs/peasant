@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import type { RefObject } from 'react';
 import { readTranscriptReadingState, transcriptReadingScrollTop, writeTranscriptReadingState } from './transcriptReadingState';
+
+/** The viewer's one inner scroller, whose offset is the saved reading position. */
+const STREAM_SELECTOR = '.txn-stream';
 
 /**
  * Host-owned per-session reading state for Back navigation.
@@ -13,19 +15,21 @@ import { readTranscriptReadingState, transcriptReadingScrollTop, writeTranscript
  * the browser's Back — including the retained-history disclosure, which is read
  * state the route owns rather than this record.
  *
- * `enabled` is the viewer-ready signal: the scroll effect only touches the DOM
- * after the viewer body exists, and it re-runs on the session change that a Back
- * or a follow performs. `replayScroll` is false when the route itself carries a
- * `?turn=` target: the composite's one-time position owns the initial scroll
- * there, and a replay on top of it would move the reader the route never asked
- * to move.
+ * `hostRef` is a callback ref for the element that wraps the mounted viewer. The
+ * page renders a loading skeleton instead of that element while it reads the
+ * transcript's segments, so the element can appear, disappear and appear again
+ * after the first render. The scroll capture and the replay follow the element
+ * itself: they attach when it mounts, detach when it unmounts, and re-attach to
+ * the next one. The viewer can also replace its own inner scroller (switching
+ * to the graph view and back does), so the capture listens on the host in the
+ * capture phase rather than on one scroller element.
+ *
+ * `replayScroll` is false when the route itself carries a `?turn=` target: the
+ * composite's one-time position owns the initial scroll there, and a replay on
+ * top of it would move the reader the route never asked to move.
  */
-export function useTranscriptReadingState(
-  sessionId: string,
-  hostRef: RefObject<HTMLElement | null>,
-  enabled: boolean,
-  replayScroll = true,
-) {
+export function useTranscriptReadingState(sessionId: string, replayScroll = true) {
+  const [host, setHost] = useState<HTMLElement | null>(null);
   const [activeTurn, setActiveTurn] = useState<number | undefined>(undefined);
   const [search, setSearch] = useState<string>('');
   // The session that currently owns the mounted stream. A session change renders
@@ -65,60 +69,62 @@ export function useTranscriptReadingState(
   }, [activeTurn, search, sessionId]);
 
   // Capture the inner scroller offset while reading and replay it when this
-  // session is presented again. The viewer resets its reading position on a
+  // session is presented again. Keyed on the mounted host element, so a host
+  // that mounts after a loading skeleton gets its listener, and a host that is
+  // replaced releases the old one. The viewer resets its reading position on a
   // session change, so the replay re-applies until the offset sticks (the
   // stream may still be short on the first frames after the body mounts).
   useEffect(() => {
-    const host = hostRef.current;
-    if (!enabled || !host || typeof window === 'undefined') return;
+    if (!host || typeof window === 'undefined') return;
     let frame = 0;
     let stopped = false;
     let attempts = 0;
     let stable = 0;
-    let scroller: HTMLElement | null = null;
     const savedTop = replayScroll ? transcriptReadingScrollTop(sessionId) : 0;
     // The viewer resets its own reading position on a session change, so the
     // replay keeps correcting the offset until it has held for a short settle
     // window; stopping the moment it first sticks would let a later view reset
     // win the race.
     const SETTLE_FRAMES = 30;
-    let restored = savedTop <= 0;
+    const MAX_REPLAY_FRAMES = 120;
 
-    const captureScrollTop = () => {
-      if (!scroller || owningSession.current !== sessionId) return;
+    // Scroll events do not bubble, but they do pass through the host in the
+    // capture phase, so one host listener sees every scroller the viewer mounts.
+    const captureScrollTop = (event: Event) => {
+      const scroller = event.target;
+      if (!(scroller instanceof HTMLElement) || !scroller.matches(STREAM_SELECTOR)) return;
+      if (owningSession.current !== sessionId) return;
       writeTranscriptReadingState(sessionId, {
         scrollTop: scroller.scrollTop,
         activeTurn: latest.current.activeTurn,
         search: latest.current.search,
       });
     };
+    host.addEventListener('scroll', captureScrollTop, { capture: true, passive: true });
 
-    const tick = () => {
+    const replay = () => {
       if (stopped || owningSession.current !== sessionId) return;
-      if (!scroller) {
-        scroller = host.querySelector<HTMLElement>('.txn-stream');
-        if (scroller) scroller.addEventListener('scroll', captureScrollTop, { passive: true });
-      }
-      if (scroller && !restored) {
+      const scroller = host.querySelector<HTMLElement>(STREAM_SELECTOR);
+      if (scroller) {
         if (Math.abs(scroller.scrollTop - savedTop) > 1) {
           scroller.scrollTop = savedTop;
           stable = 0;
         } else {
           stable += 1;
-          if (stable >= SETTLE_FRAMES) restored = true;
+          if (stable >= SETTLE_FRAMES) return;
         }
       }
       attempts += 1;
-      if ((!scroller || !restored) && attempts < 120) frame = window.requestAnimationFrame(tick);
+      if (attempts < MAX_REPLAY_FRAMES) frame = window.requestAnimationFrame(replay);
     };
-    frame = window.requestAnimationFrame(tick);
+    if (savedTop > 0) frame = window.requestAnimationFrame(replay);
 
     return () => {
       stopped = true;
       window.cancelAnimationFrame(frame);
-      scroller?.removeEventListener('scroll', captureScrollTop);
+      host.removeEventListener('scroll', captureScrollTop, { capture: true });
     };
-  }, [enabled, hostRef, replayScroll, sessionId]);
+  }, [host, replayScroll, sessionId]);
 
-  return { activeTurn, setActiveTurn, search, setSearch };
+  return { hostRef: setHost, activeTurn, setActiveTurn, search, setSearch };
 }

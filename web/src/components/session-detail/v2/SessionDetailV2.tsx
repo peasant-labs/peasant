@@ -170,9 +170,6 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     }
     setFilters(next);
   }, [filters]);
-  // Host element for the mounted viewer; the per-session reading state replays
-  // the inner scroller offset against it on the way back.
-  const transcriptHostRef = useRef<HTMLDivElement | null>(null);
   const { data: detail, channelFault: detailFault, connectionFault, refresh: refreshDetail } = useChannel<SessionDetailWire>(
     subscribe.sessionDetail(sessionId),
   );
@@ -505,12 +502,16 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // has to carry it for refresh and copied links, so it is restored above.
   // A `?turn=` target owns the one-time scroll through the composite, so the
   // replay stands down rather than moving the reader off the route's target.
+  // `transcriptHostRef` is a callback ref for the viewer's host element: that
+  // element only exists once the transcript has loaded past its skeleton, and
+  // the hook attaches its scroll capture when it mounts.
   const {
+    hostRef: transcriptHostRef,
     activeTurn,
     setActiveTurn,
     search,
     setSearch,
-  } = useTranscriptReadingState(sessionId, transcriptHostRef, Boolean(detail && vm), requestedTurn == null);
+  } = useTranscriptReadingState(sessionId, requestedTurn == null);
 
   const { theme } = useTheme();
 
