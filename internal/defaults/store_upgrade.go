@@ -28,7 +28,7 @@ import "time"
 //	step 75  1m43s  654,091,232 high-water (1.348), database grew by 165,154,816 (0.340)
 //	step 76  310ms            0
 //
-// Sandbox measurement of step 75 by layout, 2026-11-12, store code at
+// Historical sandbox measurement of step 75 by layout, 2026-11-12, store code at
 // revision fc8fb98c9 plus the entry table read in full: two synthetic
 // schema-74 stores with about 256 MiB of entry text each (65,500 entries,
 // exponential sizes with a heavy tail), and a store whose text is in the
@@ -53,9 +53,10 @@ import "time"
 //	used / database                              1.749                0.224                1.834
 //	plan asked for                  966,621,389 (1.06x)  311,253,095 (1.83x)  1,828,020,224 (1.01x)
 //
-// Every basis the plan measured was at or above dbstat's: 1.011 and 1.017
-// times. The bound store's measured basis, 998,016,761, exceeds its
-// database and is capped at it.
+// In this historical run each measured basis was at or above dbstat's: 1.011
+// and 1.017 times. The bound store's measured basis, 998,016,761, exceeded
+// its database and was capped then. The current estimator additionally models
+// index-key bytes and does not cap an estimate at the old database size.
 const (
 	// StoreUpgradeEntryTableRebuildDiskFactor is for a step that copies the
 	// entry table and rebuilds the search indexes. Its basis is the entry
@@ -86,7 +87,8 @@ const (
 	// about 1,240 bytes per session row, 1.40 and 1.45 times the database,
 	// which those tables make up almost entirely; the rows-step factor (0.01
 	// of the database) would have asked for about a hundredth of that. 2.0
-	// times the measured tables leaves room above every run.
+	// times the estimated tables covered these measured runs. This remains an
+	// estimate, not a guarantee of the space every store will need.
 	StoreUpgradeSessionTablesRebuildDiskFactor = 2.0
 
 	// StoreUpgradeSearchRebuildDiskFactor is for a step that builds or
@@ -118,7 +120,7 @@ const (
 	// reads from the entry table of a store whose text is in the bodies. Each
 	// row is measured from its record header with octet_length, which loads
 	// no value and no overflow page, and every row is read, so the estimate
-	// counts a heavy tail in full and cannot come in low. A larger table, or
+	// accounts for a heavy tail rather than sampling it. A larger table, or
 	// a store whose text is in the entry rows, takes the whole database as
 	// its basis, which that table dominates. Measured: 74 ms for the whole
 	// basis on a store at the bound with rows of about a page each (the
@@ -131,15 +133,21 @@ const (
 	// StoreUpgradeEstimateMaxSessionRows bounds the rows of each session
 	// table the free-disk estimate of steps 73 and 78 reads. A session row is read
 	// from its record header like an entry row; a million rows is far past
-	// any store seen (21,462 sessions on the largest), so a real store is
-	// always measured rather than charged twice its whole database.
+	// any store seen in the earlier measurements (21,462 sessions on the
+	// largest); larger stores fall back to the whole database.
 	StoreUpgradeEstimateMaxSessionRows = 1_000_000
 
-	// StoreUpgradeEstimateRowOverheadBytes is what one entry row costs beyond
-	// its leaf share and overflow pages: the record header, the rowid and
-	// its entries in the table's six indexes. Measured 236 to 362 bytes per
-	// row on synthetic stores of 256-, 1,024- and 4,096-byte entries.
+	// StoreUpgradeEstimateRowOverheadBytes is the fixed reserve per row for
+	// small index entries and page overhead. Measured 236 to 362 bytes per
+	// row on short-key synthetic entry tables. The estimator separately adds
+	// index-key costs above this reserve, including overflow pages.
 	StoreUpgradeEstimateRowOverheadBytes = 384
+
+	// StoreUpgradeIndexPageHeadroomDivisor adds one quarter to the computed
+	// index-cell sizes for page occupancy and interior-page overhead. It is a
+	// conservative estimate checked against synthetic SQLite page counts, not
+	// a guarantee about every possible database layout.
+	StoreUpgradeIndexPageHeadroomDivisor = 4
 
 	// StoreUpgradeTightDiskMultiple defines "tight": free space is known and
 	// below this multiple of the required bytes. A terminal upgrade asks

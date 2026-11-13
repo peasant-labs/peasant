@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -101,13 +102,12 @@ type tableBytesEstimate struct {
 // overflow pages, so a row of hundreds of megabytes costs what a short one
 // does; the cost is bounded by the row count, never by the text.
 //
-// Every row is read, so a heavy tail of entry sizes is counted in full and
-// the result cannot come in low: each row is its leaf share, its whole
-// overflow pages and a fixed overhead for its record and index entries
-// (storedRowBytes), plus the first page of each b-tree. Deleted rows and the
-// free space they leave are not counted, because the copy writes the live
-// rows into a fresh table. A table with more than maxRows rows stops the
-// read and is not measured. A missing table is zero.
+// Every row is read, so a heavy tail of row and index-key sizes is counted
+// rather than sampled. The index estimate includes the indexes the copy will
+// build, including partial indexes, and uses SQLite's index overflow rule.
+// Deleted rows and their free space are not counted: the copy writes live
+// rows into a fresh table. A table with more than maxRows rows stops the read
+// and is not measured. A missing table is zero.
 func measureTableBytesOnConn(conn *sqlite.Conn, table string, maxRows int64) (tableBytesEstimate, error) {
 	est := tableBytesEstimate{Measured: true}
 	if !tableExistsOnConn(conn, table) {
@@ -116,6 +116,15 @@ func measureTableBytesOnConn(conn *sqlite.Conn, table string, maxRows int64) (ta
 	columns, err := tableColumnsOnConn(conn, table)
 	if err != nil {
 		return est, err
+	}
+	indexes, keyExprs, err := upgradeIndexKeysOnConn(conn, table, columns)
+	if err != nil {
+		return est, err
+	}
+	futureParentColumn := 0
+	if table == "sessions" && !slices.Contains(columns, "resolved_parent_id") {
+		keys, _ := upgradeIndexDefinitions(table)
+		futureParentColumn = slices.Index(keys, "resolved_parent_id") + 1
 	}
 	pageSize, err := readPragmaInt(conn, "PRAGMA page_size")
 	if err != nil || pageSize <= 0 {
@@ -129,18 +138,50 @@ func measureTableBytesOnConn(conn *sqlite.Conn, table string, maxRows int64) (ta
 	}); err != nil {
 		return est, fmt.Errorf("store: count the indexes of %s for the free-disk estimate: %w", table, err)
 	}
+	// A store older than the copy step can be missing target indexes that an
+	// intervening migration creates. Include their initial pages too.
+	if len(indexes) > 0 {
+		trees = max(trees, int64(len(indexes)+1))
+	}
 	// octet_length counts the values, not the record header in front of
-	// them: a size varint and one serial type varint per column, three
-	// bytes for any value under two megabytes. A row near the size where
-	// its payload spills to an overflow page would otherwise be counted on
-	// the wrong side of it.
-	header := int64(2 + 3*len(columns))
+	// them. A five-byte varint per column also covers values above two MiB;
+	// otherwise a payload near an overflow threshold can be misclassified.
+	header := int64(5 * (len(columns) + 1))
 	var stored int64
-	if err := sqlitex.ExecuteTransient(conn, `SELECT `+octetSumExpr(columns)+` FROM `+quoteIdentifier(table)+` LIMIT ?`, &sqlitex.ExecOptions{
+	selection := octetSumExpr(columns)
+	for _, expr := range keyExprs {
+		selection += ", " + expr
+	}
+	if err := sqlitex.ExecuteTransient(conn, `SELECT `+selection+` FROM `+quoteIdentifier(table)+` LIMIT ?`, &sqlitex.ExecOptions{
 		Args: []any{maxRows + 1},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			est.RowsRead++
-			stored += storedRowBytes(stmt.ColumnInt64(0)+header, pageSize)
+			payload := stmt.ColumnInt64(0) + header
+			if futureParentColumn > 0 {
+				// The later parent projection adds this value to the row as
+				// well as to an index. Include both new column headers and
+				// the parent-state text before applying the table overflow rule.
+				payload += stmt.ColumnInt64(futureParentColumn) + 18
+			}
+			row := storedRowBytes(payload, pageSize)
+			// The daily summary copy uses a WITHOUT ROWID table, whose record
+			// has the lower index-btree overflow threshold.
+			if table == "daily_summary_harness" {
+				row = max(row, storedIndexBytes(payload, len(columns), pageSize)+defaults.StoreUpgradeEstimateRowOverheadBytes)
+			}
+			var indexBytes int64
+			for _, index := range indexes {
+				var keyBytes int64
+				for _, column := range index {
+					keyBytes += stmt.ColumnInt64(column + 1)
+				}
+				indexBytes += storedIndexBytes(keyBytes, len(index), pageSize)
+			}
+			divisor := int64(defaults.StoreUpgradeIndexPageHeadroomDivisor)
+			indexBytes += (indexBytes + divisor - 1) / divisor
+			// The existing allowance already covers short index entries. Add
+			// only the excess so ordinary short keys are not charged twice.
+			stored += row + max(indexBytes-defaults.StoreUpgradeEstimateRowOverheadBytes, 0)
 			return nil
 		},
 	}); err != nil {
@@ -151,6 +192,78 @@ func measureTableBytesOnConn(conn *sqlite.Conn, table string, maxRows int64) (ta
 	}
 	est.StoredBytes = stored + trees*pageSize
 	return est, nil
+}
+
+// upgradeIndexKeysOnConn describes the indexes rebuilt by the frozen copy
+// steps, not only those present in the store being planned. Every partial
+// index is charged for every row; this avoids depending on its predicate.
+// The fixture tests compare the modeled index inventory with those migrations.
+func upgradeIndexKeysOnConn(conn *sqlite.Conn, table string, columns []string) ([][]int, []string, error) {
+	keys, indexes := upgradeIndexDefinitions(table)
+	if len(indexes) == 0 {
+		return nil, nil, nil
+	}
+	present := make(map[string]bool, len(columns))
+	for _, column := range columns {
+		present[column] = true
+	}
+	exprs := make([]string, len(keys))
+	for i, key := range keys {
+		if present[key] {
+			exprs[i] = "coalesce(octet_length(" + quoteIdentifier(key) + "), 0)"
+			continue
+		}
+		if table == "sessions" && key == "resolved_parent_id" {
+			var err error
+			exprs[i], err = futureResolvedParentLengthExpr(conn, present)
+			if err != nil {
+				return nil, nil, err
+			}
+			continue
+		}
+		return nil, nil, fmt.Errorf("store: cannot estimate the index keys of %s: column %s is missing", table, key)
+	}
+	return indexes, exprs, nil
+}
+
+func upgradeIndexDefinitions(table string) ([]string, [][]int) {
+	var keys []string
+	var indexes [][]int
+	switch table {
+	case "sessions":
+		keys = []string{"session_id", "parent_id", "model_harness", "opaque_host_id", "project_hash", "start_ms", "resolved_parent_id"}
+		indexes = [][]int{{0}, {6, 5, 0}, {2}, {3}, {1}, {4}, {5, 0}, {5}, {0}}
+	case entryTableName:
+		keys = []string{"session_id", "entry_index", "depth", "is_error", "parent_index", "role", "entry_type"}
+		indexes = [][]int{{0, 1}, {0, 2}, {0, 3}, {0, 4}, {0, 5}, {0, 6}}
+	}
+	return keys, indexes
+}
+
+// futureResolvedParentLengthExpr bounds the parent projection migration 70
+// will create on an older store. The value can come from the current parent,
+// a metadata snapshot, or the active generation's started-by evidence. A
+// metadata document's whole byte length bounds its decoded parent string and
+// avoids loading the document or its overflow pages just to parse JSON.
+func futureResolvedParentLengthExpr(conn *sqlite.Conn, columns map[string]bool) (string, error) {
+	if !columns["session_id"] || !columns["parent_id"] {
+		return "", fmt.Errorf("store: cannot estimate future session parent keys without session_id and parent_id")
+	}
+	parts := []string{`coalesce(octet_length(sessions.parent_id), 0)`}
+	if tableExistsOnConn(conn, "session_publication_metadata") {
+		parts = append(parts, `coalesce((SELECT max(octet_length(p.metadata_json), 32) FROM session_publication_metadata p WHERE p.session_id = sessions.session_id), 0)`)
+	}
+	if columns["active_generation_id"] && tableExistsOnConn(conn, "session_relationship_evidence") {
+		generation := "sessions.active_generation_id"
+		if columns["latest_attempt_generation_id"] {
+			generation = "coalesce(sessions.active_generation_id, sessions.latest_attempt_generation_id)"
+		}
+		parts = append(parts, `coalesce((SELECT octet_length(r.target_local_id) FROM session_relationship_evidence r WHERE r.session_id = sessions.session_id AND r.generation_id = `+generation+` AND r.kind = 'started_by' LIMIT 1), 0)`)
+	}
+	if len(parts) == 1 {
+		return parts[0], nil
+	}
+	return "max(" + strings.Join(parts, ", ") + ")", nil
 }
 
 // entryTextInBodiesOnConn reports the store's entry text layout: true once
@@ -204,7 +317,30 @@ func storedRowBytes(payload, pageSize int64) int64 {
 	// nine bytes each), and a two-byte pointer; the page header is eight.
 	cell := local + 18 + 2
 	perPage := max((usable-8)/cell, 1)
-	return pageSize/perPage + overflow*pageSize + defaults.StoreUpgradeEstimateRowOverheadBytes
+	return (pageSize+perPage-1)/perPage + overflow*pageSize + defaults.StoreUpgradeEstimateRowOverheadBytes
+}
+
+// storedIndexBytes estimates one index record, including rowid, cell and
+// record headers. Index b-trees spill much sooner than table b-trees. Worst
+// case varint and child-pointer allowances deliberately err high. Key lengths
+// are accumulated per row because overflow page rounding is nonlinear.
+func storedIndexBytes(keyBytes int64, columns int, pageSize int64) int64 {
+	usable := pageSize
+	payload := keyBytes + 9*int64(columns+2)
+	maxLocal := (usable-12)*64/255 - 23
+	local, overflow := payload, int64(0)
+	if payload > maxLocal {
+		minLocal := (usable-12)*32/255 - 23
+		local = minLocal + (payload-minLocal)%(usable-4)
+		if local > maxLocal {
+			local = minLocal
+		}
+		overflow = (payload - local + usable - 5) / (usable - 4)
+		local += 4
+	}
+	cell := local + 9 + 4 + 2
+	perPage := max((usable-12)/cell, 1)
+	return (pageSize+perPage-1)/perPage + overflow*pageSize
 }
 
 // fts5IndexBytesOnConn estimates the size of an FTS5 index from two
@@ -371,27 +507,31 @@ func sqliteVarint(b []byte) (value uint64, n int) {
 }
 
 // diskBasisBytes is the size a step's disk factor multiplies, for a store
-// whose database file is storeBytes long. The objects a step rewrites live
-// in the database, so the database size caps every basis and is the basis
-// whenever the tables cannot be measured within the read bound. A store
+// whose database file is storeBytes long. The database is the fallback when
+// the tables cannot be measured within the read bound; an estimate is not
+// capped at the current file because a later step can create new indexes. A store
 // whose tables cannot be measured at all (a search index record that does
 // not decode) falls back to the whole database, with a notice.
 func diskBasisBytes(conn *sqlite.Conn, basis upgradeDiskBasis, storeBytes int64) (int64, string) {
+	return diskBasisBytesWithLimits(conn, basis, storeBytes, defaults.StoreUpgradeEstimateMaxEntryRows, defaults.StoreUpgradeEstimateMaxSessionRows)
+}
+
+func diskBasisBytesWithLimits(conn *sqlite.Conn, basis upgradeDiskBasis, storeBytes, maxEntryRows, maxSessionRows int64) (int64, string) {
 	if basis == upgradeDiskBasisDatabase {
 		return storeBytes, ""
 	}
-	size, measured, err := estimateDiskBasisOnConn(conn, basis, defaults.StoreUpgradeEstimateMaxEntryRows)
+	size, measured, err := estimateDiskBasisOnConn(conn, basis, maxEntryRows, maxSessionRows)
 	if err != nil {
 		return storeBytes, fmt.Sprintf("warning: could not measure the %s for the free-disk check (%v); the upgrade asks for the share of the whole database instead", strings.ReplaceAll(basis.String(), "_", " "), err)
 	}
 	if !measured {
 		return storeBytes, ""
 	}
-	return min(size, storeBytes), ""
+	return size, ""
 }
 
-// estimateDiskBasisOnConn measures a table basis so that it cannot come in
-// low. measured is false when the basis must be the whole database instead:
+// estimateDiskBasisOnConn estimates a table basis. measured is false when the
+// basis must be the whole database instead:
 //   - the entry text is in the entry rows (entryTextInBodiesOnConn): the
 //     entry table dominates the database, so the database is a close upper
 //     bound and nothing is read;
@@ -401,11 +541,11 @@ func diskBasisBytes(conn *sqlite.Conn, basis upgradeDiskBasis, storeBytes int64)
 // Otherwise the entry table is read in full (measureTableBytesOnConn) and
 // each search index the step rebuilds is sized by its structure record; a
 // rebuild writes an index about the size of the one it replaces.
-func estimateDiskBasisOnConn(conn *sqlite.Conn, basis upgradeDiskBasis, maxEntryRows int64) (size int64, measured bool, err error) {
+func estimateDiskBasisOnConn(conn *sqlite.Conn, basis upgradeDiskBasis, maxEntryRows, maxSessionRows int64) (size int64, measured bool, err error) {
 	switch basis {
 	case upgradeDiskBasisEntryTable, upgradeDiskBasisEntryTableAndSearchIndex:
 	case upgradeDiskBasisSessionTables:
-		return estimateSessionTablesOnConn(conn, defaults.StoreUpgradeEstimateMaxSessionRows)
+		return estimateSessionTablesOnConn(conn, maxSessionRows)
 	default:
 		return 0, false, fmt.Errorf("store: the disk basis %q has no table measure", basis)
 	}

@@ -30,6 +30,17 @@ requiredNames:
   - entry-rows-at-the-overflow-size-are-counted-on-the-right-side
   - heavy-tail-in-a-rows-store-takes-the-whole-database
   - entry-rows-rising-with-rowid-in-a-rows-store-take-the-whole-database
+  - long-indexed-entry-keys-are-counted-in-the-plan
+  - session-table-plan-covers-long-indexed-keys
+  - session-table-estimate-respects-its-row-bound
+  - session-table-plan-covers-large-index-overflow-keys
+  - session-table-plan-covers-mixed-indexed-key-sizes
+  - old-store-plan-covers-keys-before-parent-indexes-exist
+  - old-store-plan-covers-future-parents-from-metadata
+  - session-table-plan-covers-long-host-and-project-keys
+  - session-copy-estimator-models-the-frozen-target-indexes
+  - session-copy-estimator-models-the-earlier-frozen-target-indexes
+  - entry-copy-estimator-models-the-frozen-target-indexes
   - unmeasurable-search-index-falls-back-to-the-whole-database-with-a-notice
   - plan-includes-the-turn-count-recount-when-its-marker-exists
   - store-at-head-with-a-pending-recount-is-behind

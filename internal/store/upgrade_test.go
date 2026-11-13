@@ -46,21 +46,27 @@ type storeUpgradeCase struct {
 	WantFactorMax float64 `yaml:"wantFactorMax,omitempty"`
 	// The synthetic schema-74 store of a layout case, and the bounds of its
 	// need over the factor times its measured basis.
-	Layout         string  `yaml:"layout,omitempty"`
-	Sessions       int     `yaml:"sessions,omitempty"`
-	TextEntries    int     `yaml:"textEntries,omitempty"`
-	MeanEntryBytes int     `yaml:"meanEntryBytes,omitempty"`
-	EntryShape     string  `yaml:"entryShape,omitempty"`
-	RowEntries     int     `yaml:"rowEntries,omitempty"`
-	RowEntryBytes  int     `yaml:"rowEntryBytes,omitempty"`
-	ContentBytes   int     `yaml:"contentBytes,omitempty"`
-	WantBasisMin   float64 `yaml:"wantBasisMin,omitempty"`
-	WantBasisMax   float64 `yaml:"wantBasisMax,omitempty"`
+	Layout              string  `yaml:"layout,omitempty"`
+	Sessions            int     `yaml:"sessions,omitempty"`
+	TextEntries         int     `yaml:"textEntries,omitempty"`
+	MeanEntryBytes      int     `yaml:"meanEntryBytes,omitempty"`
+	EntryShape          string  `yaml:"entryShape,omitempty"`
+	RowEntries          int     `yaml:"rowEntries,omitempty"`
+	RowEntryBytes       int     `yaml:"rowEntryBytes,omitempty"`
+	ContentBytes        int     `yaml:"contentBytes,omitempty"`
+	IDBytes             int     `yaml:"idBytes,omitempty"`
+	MixedIDs            bool    `yaml:"mixedIDs,omitempty"`
+	KeyBytes            int     `yaml:"keyBytes,omitempty"`
+	MetadataParentBytes int     `yaml:"metadataParentBytes,omitempty"`
+	Table               string  `yaml:"table,omitempty"`
+	WantBasisMin        float64 `yaml:"wantBasisMin,omitempty"`
+	WantBasisMax        float64 `yaml:"wantBasisMax,omitempty"`
 	// MaxEntryRows replaces the entry table's read bound of an estimate
 	// case; zero keeps the production bound. WantMeasured says whether the
 	// estimate measures the tables (true) or takes the whole database.
-	MaxEntryRows int64 `yaml:"maxEntryRows,omitempty"`
-	WantMeasured bool  `yaml:"wantMeasured,omitempty"`
+	MaxEntryRows   int64 `yaml:"maxEntryRows,omitempty"`
+	MaxSessionRows int64 `yaml:"maxSessionRows,omitempty"`
+	WantMeasured   bool  `yaml:"wantMeasured,omitempty"`
 	// StopAfterSessions is how many sessions a recount case lets the
 	// recount handle before it cancels the upgrade.
 	StopAfterSessions int `yaml:"stopAfterSessions,omitempty"`
@@ -164,6 +170,8 @@ func TestStoreUpgrade(t *testing.T) {
 		"disk-layout-need":         runUpgradeDiskLayoutNeedCase,
 		"disk-estimate-bound":      runUpgradeDiskEstimateBoundCase,
 		"disk-estimate-never-low":  runUpgradeDiskEstimateNeverLowCase,
+		"disk-session-keys":        runUpgradeDiskSessionKeysCase,
+		"disk-index-inventory":     runUpgradeDiskIndexInventoryCase,
 		"disk-basis-fallback":      runUpgradeDiskBasisFallbackCase,
 		"wal-truncated":            runUpgradeWALTruncatedCase,
 		"run-lock":                 runUpgradeRunLockCase,
@@ -1068,7 +1076,7 @@ func layoutSpecOf(t *testing.T, c storeUpgradeCase) layoutStoreSpec {
 	if err != nil {
 		t.Fatalf("store_upgrade.yaml case %q: %v", c.Name, err)
 	}
-	return layoutStoreSpec{Layout: layout, Sessions: c.Sessions, TextEntriesPerSession: c.TextEntries, MeanEntryBytes: c.MeanEntryBytes, EntryShape: shape, RowEntriesPerSession: c.RowEntries, RowEntryBytes: c.RowEntryBytes, ContentBytesPerSession: c.ContentBytes}
+	return layoutStoreSpec{Layout: layout, Sessions: c.Sessions, TextEntriesPerSession: c.TextEntries, MeanEntryBytes: c.MeanEntryBytes, EntryShape: shape, RowEntriesPerSession: c.RowEntries, RowEntryBytes: c.RowEntryBytes, ContentBytesPerSession: c.ContentBytes, IDBytes: c.IDBytes, MixedIDs: c.MixedIDs}
 }
 
 // entryRebuildTruthOnConn is dbstat's page count of what schema 75
@@ -1152,7 +1160,7 @@ func runUpgradeDiskEstimateBoundCase(t *testing.T, c storeUpgradeCase) {
 	if est.Measured || est.StoredBytes != 0 || est.RowsRead != bound+1 {
 		t.Errorf("the measure of a %d-row table under a bound of %d = %+v; want it stopped one row past the bound and not measured", totals.EntryRows, bound, est)
 	}
-	if _, measured, err := estimateDiskBasisOnConn(conn, upgradeDiskBasisEntryTableAndSearchIndex, bound); err != nil || measured {
+	if _, measured, err := estimateDiskBasisOnConn(conn, upgradeDiskBasisEntryTableAndSearchIndex, bound, defaults.StoreUpgradeEstimateMaxSessionRows); err != nil || measured {
 		t.Errorf("the basis estimate under a bound of %d: measured %v, err %v; want the whole database", bound, measured, err)
 	}
 	full, err := measureTableBytesOnConn(conn, entryTableName, totals.EntryRows)
@@ -1179,7 +1187,7 @@ func runUpgradeDiskEstimateNeverLowCase(t *testing.T, c storeUpgradeCase) {
 	entriesTruth, searchTruth := entryRebuildTruthOnConn(t, conn)
 	truth := entriesTruth + searchTruth
 	started := time.Now()
-	size, measured, err := estimateDiskBasisOnConn(conn, upgradeDiskBasisEntryTableAndSearchIndex, defaults.StoreUpgradeEstimateMaxEntryRows)
+	size, measured, err := estimateDiskBasisOnConn(conn, upgradeDiskBasisEntryTableAndSearchIndex, defaults.StoreUpgradeEstimateMaxEntryRows, defaults.StoreUpgradeEstimateMaxSessionRows)
 	elapsed := time.Since(started)
 	if err := conn.Close(); err != nil {
 		t.Fatal(err)

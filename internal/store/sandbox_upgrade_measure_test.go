@@ -259,7 +259,7 @@ func TestSandboxStoreUpgradeDiskBasisMeasure(t *testing.T) {
 				searchEstimate += size
 			}
 			estimateTime := timed(func() {
-				if basis, measured, err = estimateDiskBasisOnConn(conn, upgradeDiskBasisEntryTableAndSearchIndex, defaults.StoreUpgradeEstimateMaxEntryRows); err != nil {
+				if basis, measured, err = estimateDiskBasisOnConn(conn, upgradeDiskBasisEntryTableAndSearchIndex, defaults.StoreUpgradeEstimateMaxEntryRows, defaults.StoreUpgradeEstimateMaxSessionRows); err != nil {
 					t.Fatal(err)
 				}
 			})

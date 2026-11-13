@@ -96,6 +96,8 @@ type layoutStoreSpec struct {
 	// ContentBytesPerSession is the stored transcript size per session in
 	// the content store (converted layout only).
 	ContentBytesPerSession int
+	IDBytes                int
+	MixedIDs               bool
 }
 
 // layoutStoreTotals is what the builder wrote.
@@ -180,7 +182,7 @@ func buildLayoutStore(t testing.TB, path string, spec layoutStoreSpec) layoutSto
 				txErr = sqlitex.Execute(conn, query, &sqlitex.ExecOptions{Args: args})
 			}
 		}
-		sessionID := fmt.Sprintf("%08x-0000-4000-8000-000000000074", s)
+		sessionID := upgradeSyntheticID(s, spec.IDBytes, spec.MixedIDs)
 		step(`INSERT INTO sessions(session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format)
 VALUES(?, 'claude-code', 'layout-model', 'layout-host', 'layout-project', 1, 2, 3, '/synthetic/layout.jsonl', 'jsonl')`, sessionID)
 		switch spec.Layout {
@@ -236,6 +238,18 @@ VALUES(?, ?, 'claude-code', 'text', 'user', 0, ?, nullif(?, ''))`, sessionID, sp
 		}
 	}
 	return totals
+}
+
+// upgradeSyntheticID creates an identifier with an explicit size. Mixed
+// inputs keep every other identifier UUID-shaped to exercise page thresholds.
+func upgradeSyntheticID(i, size int, mixed bool) string {
+	if size == 0 || (mixed && i%2 == 0) {
+		return fmt.Sprintf("%08x-0000-4000-8000-000000000074", i)
+	}
+	if size < 12 {
+		panic("synthetic session ID must fit its prefix and unique suffix")
+	}
+	return "ses_" + strings.Repeat("a", size-12) + fmt.Sprintf("%08x", i)
 }
 
 // migrateTo applies the frozen chain up to version on conn.

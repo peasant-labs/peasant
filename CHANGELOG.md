@@ -58,9 +58,10 @@ was tagged but not published links to its tag instead.
 
 ### Database
 - A store upgrade estimates the free disk it needs and refuses before the first
-  step if there is not enough. If free space is unknown, it warns before a long
-  step and continues. Ctrl-C rolls back the running step and keeps the finished
-  steps; run `peasant migrate --schema-only` to resume.
+  step if available space is below that estimate. Actual usage can differ. If
+  free space is unknown, it warns before a long step and continues. Ctrl-C rolls
+  back the running step and keeps the finished steps; run
+  `peasant migrate --schema-only` to resume.
 - The turn count recount that 0.17.0 ran when it first opened the store is
   now a step of the store upgrade, right after migration 77, and the open no
   longer runs it. Its time grows with the number of stored sessions, so at a
@@ -70,7 +71,8 @@ was tagged but not published links to its tag instead.
 - Migration 78 admits the Antigravity CLI and IDE in the stored harness set.
   It copies the sessions and daily summary tables, so its time and the free
   disk it asks for grow with the number of stored sessions (about half a
-  second and twice those tables for 20,000 sessions), and the upgrade counts
+  second for 20,000 sessions in one synthetic run). Its estimate is twice the
+  modeled tables and indexes, and the upgrade counts
   it as a long step on every store. Upgrading from 0.17.0 or earlier, a git
   hook skips publishing (git is not blocked) and a script refuses until
   `peasant migrate --schema-only` runs in a terminal.

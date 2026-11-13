@@ -201,6 +201,75 @@ cases:
     sessions: 40
     textEntries: 25
     meanEntryBytes: 1024
+  - name: long-indexed-entry-keys-are-counted-in-the-plan
+    kind: disk-estimate-never-low
+    layout: entry-text-in-bodies
+    sessions: 20
+    textEntries: 5
+    meanEntryBytes: 512
+    rowEntries: 25
+    idBytes: 1024
+    contentBytes: 131072
+    wantMeasured: true
+    wantBasisMax: 3.0
+  - name: session-table-plan-covers-long-indexed-keys
+    kind: disk-session-keys
+    from: 77
+    sessions: 200
+    idBytes: 1024
+    keyBytes: 64
+  - name: session-table-estimate-respects-its-row-bound
+    kind: disk-session-keys
+    from: 77
+    sessions: 24
+    idBytes: 36
+    keyBytes: 64
+    maxSessionRows: 8
+  - name: session-table-plan-covers-large-index-overflow-keys
+    kind: disk-session-keys
+    from: 77
+    sessions: 100
+    idBytes: 4096
+    keyBytes: 64
+  - name: session-table-plan-covers-mixed-indexed-key-sizes
+    kind: disk-session-keys
+    from: 77
+    sessions: 200
+    idBytes: 1024
+    mixedIDs: true
+    keyBytes: 64
+  - name: old-store-plan-covers-keys-before-parent-indexes-exist
+    kind: disk-session-keys
+    from: 69
+    sessions: 200
+    idBytes: 1024
+    keyBytes: 64
+  - name: old-store-plan-covers-future-parents-from-metadata
+    kind: disk-session-keys
+    from: 69
+    sessions: 120
+    idBytes: 36
+    keyBytes: 64
+    metadataParentBytes: 1024
+  - name: session-table-plan-covers-long-host-and-project-keys
+    kind: disk-session-keys
+    from: 77
+    sessions: 120
+    idBytes: 36
+    keyBytes: 1024
+  - name: session-copy-estimator-models-the-frozen-target-indexes
+    kind: disk-index-inventory
+    from: 77
+    table: sessions
+  - name: session-copy-estimator-models-the-earlier-frozen-target-indexes
+    kind: disk-index-inventory
+    from: 73
+    stopAt: 73
+    table: sessions
+  - name: entry-copy-estimator-models-the-frozen-target-indexes
+    kind: disk-index-inventory
+    from: 74
+    table: session_entries
   # A search index whose structure record does not decode cannot be
   # measured: the plan asks for the factor times the whole database and
   # says why in one notice.

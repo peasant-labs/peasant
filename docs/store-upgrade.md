@@ -69,14 +69,16 @@ next starts, so the log space of one step is reused by the next.
 
 | factor | value | steps | basis | evidence |
 |---|---|---|---|---|
-| entry table rebuild | 2.0 | 75 (override) | the entry table with its indexes, and the two search indexes the step rebuilds, on a store whose text is in the bodies; the whole database on a store whose text is in the entry rows | measured: the step used 1.760 times the entry table and search indexes with the text in the entry rows, 1.020 times with the text in the bodies, and 1.848 times at the row bound; 2.0 leaves about 8% to spare |
+| entry table rebuild | 2.0 | 75 (override) | the entry table with its indexes, and the two search indexes the step rebuilds, on a store whose text is in the bodies; the whole database on a store whose text is in the entry rows | measured: the step used 1.760 times the entry table and search indexes with the text in the entry rows, 1.020 times with the text in the bodies, and 1.848 times at the row bound; 2.0 leaves about 8% on the largest measured ratio |
 | entry table rebuild | 2.0 | 11 (override) | the entry table with its indexes; a store that old keeps its text in the entry rows, so the whole database | the same factor |
-| session tables rebuild | 2.0 | 73 and 78 (override) | `sessions` and `daily_summary_harness` with their indexes, every row read from its record header (at most a million rows each; past that, the whole database) | measured: the step's log grew 1.02 to 1.03 times the estimated tables, 1.40 to 1.45 times a database those tables fill; the plan asked for 1.38 to 1.43 times what the log used |
+| session tables rebuild | 2.0 | 73 and 78 (override) | `sessions` and `daily_summary_harness` with their indexes, every row read from its record header (at most a million rows each; past that, the whole database) | historical measurement with the earlier estimator: the step's log grew 1.02 to 1.03 times its estimated tables, 1.40 to 1.45 times a database those tables fill; the plan asked for 1.38 to 1.43 times what the log used |
 | search rebuild | 0.39 | every `scales_with_text` step that copies no table: 35, and 76 on a store with stale search results | the database | derived from the search index build estimate; not measured |
 | row-scaled | 0.01 | every `scales_with_rows` step but 11, 73 and 78 | the database | measured on 70 to 74: at most 0.0018 for one step, 0.0032 for five |
 | quick | 0.001 | every `quick` step | the database | measured: the quick step wrote nothing |
 
 The values and the measurements are in `internal/defaults/store_upgrade.go`.
+These are estimates calibrated on the stated synthetic shapes, not a guarantee
+of the disk space every store or filesystem will use.
 
 Step 75 copies `session_entries` into a new table with `image` in its entry
 type set, drops the old table, re-creates its five indexes, and drops and
@@ -88,9 +90,9 @@ a small entry table, not a copy of the store.
 
 ### How the plan measures a basis
 
-The plan only reads, and what it reads is bounded. A basis it measures can
-never come in low: it reads every row it counts, and where it cannot, it
-takes the whole database.
+The plan only reads, and its row counts are bounded. It estimates every row
+within the bound rather than sampling. Above that bound it uses the whole
+database as a fallback; both the measured basis and the fallback are estimates.
 
 - **Where the text is.** The plan first reads one row of
   `session_entry_bodies`. That table holds rows only once a session's text
@@ -102,10 +104,16 @@ takes the whole database.
   bound (tool output there has no length limit), so the plan reads every
   row, at most 65,536, each measured with `octet_length`, which SQLite
   answers from the record header without loading the value or its overflow
-  pages. A row's size follows SQLite's page layout: its share of a leaf page,
-  its whole overflow pages, and a fixed 384 bytes for the record header and
-  its index entries. A table with more rows stops the read and takes the
+  pages. The estimate accounts for the table row and, separately, each key of
+  the indexes the copy builds, using SQLite's index overflow-page rule. It
+  counts composite and partial-index keys conservatively and adds headroom
+  for page occupancy. A table with more rows stops the read and takes the
   whole database.
+- **The session tables.** The plan estimates the sessions and daily-summary
+  rows the same way, including the target indexes. For a store from before the
+  parent projection existed, it bounds the future parent key using the
+  existing parent, metadata-document length and stored relationship evidence.
+  No input identifier length is assumed.
 - **Each search index.** FTS5 keeps two records current in the index's own
   `_data` table: the structure record lists every segment's leaf pages, and
   the averages record starts with the document count. Leaves times their
@@ -113,15 +121,14 @@ takes the whole database.
   and its `_idx` row, plus one small row per document, is the index's size,
   read from two rows.
 
-The estimate errs high: each row's leaf share assumes rows of its own size,
-its record header is counted at three bytes per column, and the search index
-estimate came out about one percent above `dbstat`. It does
-not count deleted rows or the free space they leave, because step 75 copies
-the live rows into a fresh table. A basis never exceeds the database size, so
-the plan never asks for more than the factor times the whole database. A
-store whose tables cannot be measured (a search index record that does not
-decode) gets the factor times the whole database and one warning line saying
-why.
+The row and index estimates add conservative page and record overhead; the
+search-index estimate came out about one percent above `dbstat` on the measured
+shapes. They do not count deleted rows or the free space they leave, because
+the copy writes live rows into a fresh table. An estimated basis can exceed the
+current database: an earlier migration may create indexes the copy will then
+rebuild. A store whose search index cannot be measured (for example, its
+structure record does not decode) gets the factor times the whole database and
+one warning line saying why.
 
 What was considered, in order:
 
@@ -143,7 +150,8 @@ What was considered, in order:
 
 ### Measured
 
-Two synthetic schema-74 stores, about 256 MiB of entry text each, and a
+Historical measurements with the earlier, capped estimator: two synthetic
+schema-74 stores, about 256 MiB of entry text each, and a
 store whose text is in the bodies and whose entry table holds 65,536 rows of
 about a page each, the read bound (2026-11-12,
 `TestSandboxStoreUpgradeDiskBasisMeasure`):
@@ -152,17 +160,18 @@ about a page each, the read bound (2026-11-12,
 |---|---|---|---|
 | database | 522 MB | 758 MB | 988 MB |
 | entry table and search indexes (`dbstat`) | 519 MB | 166 MB | 981 MB |
-| basis the plan uses | 522 MB, the whole database | 168 MB, read in full | 998 MB read, capped at 988 MB |
+| basis the earlier plan used | 522 MB, the whole database | 168 MB, read in full | 998 MB read, capped at 988 MB |
 | estimate time, entry rows read | 20 µs, none | 4.8 ms, 2,620 | 74 ms, 65,536 |
 | `dbstat` time over the same objects | 227 ms | 96 ms | 377 ms |
 | step 75: log high-water plus database growth | 914 MB | 170 MB | 1,812 MB |
 | the plan asked for | 967 MB (1.06 times what was used) | 311 MB (1.83 times) | 1,828 MB (1.01 times) |
 
-Every basis the plan measured was at or above `dbstat`'s. The test fixtures
+Each basis measured in those runs was at or above `dbstat`'s. The test fixtures
 add entry rows with a heavy tail (every hundredth row a hundred times the
 mean), rows rising in size with their rowid, and rows at the size where
-SQLite moves a payload to an overflow page, in both layouts, and assert the
-same.
+SQLite moves a payload to an overflow page, in both layouts. Further synthetic
+fixtures exercise long and mixed index keys, the separate index overflow rule,
+future parent keys, and refusal below the planned disk requirement.
 
 The incident store (43 GB, a 39 MiB entry table, 16.4 GiB of text in the
 bodies) left a log of 4.31 GB in step 75. The old rule asked it for 1.69 times
