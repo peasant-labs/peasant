@@ -191,13 +191,34 @@
               # This checkPhase is a packaging sanity gate (including Peasant's
               # CGO=0 public-module redaction seam), not a substitute
               # for the full suite.
+              #
+              # -timeout=20m: Go's default per-package timeout is 10 minutes, and
+              # the release runner (2 vCPU arm64, so `go test` runs 2 packages
+              # and 2 parallel tests at a time) has run internal/api past it.
+              # The SQLite-backed packages are bound by disk sync, so their time
+              # varies several-fold between runner VMs of the same class: across
+              # two runs of one commit internal/api took 377s and >600s, and
+              # internal/store 118s and 429s. 20 minutes is about three times the
+              # slowest package seen there, and stays under the job's own
+              # 30-minute limit, so a hung test still fails with Go's goroutine
+              # dump naming it instead of the job being killed without one.
+              #
+              # -skip TestStopWebLeavesSameNamedExecutableAtAnotherPathAlone:
+              # the test copies the test binary and executes the copy while
+              # other parallel tests fork, so the exec can fail with ETXTBSY
+              # ("text file busy", golang/go#22315). That is a test-harness race,
+              # not a packaging defect, and it fails this gate at random. The
+              # test still runs in `make check` and CI. Remove this skip when
+              # peasant-labs/peasant#967 makes the copy-then-exec step retry.
               preCheck = ''
                 export HOME=$(mktemp -d)
                 export GIT_CONFIG_NOSYSTEM=1
               '';
               checkPhase = ''
                 runHook preCheck
-                go test $(go list ./... | grep -vE '/internal/(e2e|ingest)$')
+                go test -timeout=20m \
+                  -skip '^TestStopWebLeavesSameNamedExecutableAtAnotherPathAlone$' \
+                  $(go list ./... | grep -vE '/internal/(e2e|ingest)$')
                 ${extraCheckPhase}
                 runHook postCheck
               '';
