@@ -106,8 +106,8 @@ mutations:
       - reopens the retained-history disclosure from a copied route in a fresh document
     expectedFailurePattern: was not restored from the
   - name: host stops replaying the per-session reading state
-    find: "useTranscriptReadingState(sessionId, transcriptHostRef, Boolean(detail && vm), requestedTurn == null)"
-    replace: "{ activeTurn: undefined, setActiveTurn: () => {}, search: '', setSearch: () => {} }"
+    find: "useTranscriptReadingState(sessionId, requestedTurn == null)"
+    replace: "{ hostRef: undefined, activeTurn: undefined, setActiveTurn: () => {}, search: '', setSearch: () => {} }"
     expectedTestFile: "src/app/projects/[[...segments]]/transcriptContextNavigation.mounted.test.tsx"
     expectedFailedTestNames:
       - restores the child query, disclosure, scroll, and selection after Back from the target
