@@ -36,7 +36,8 @@ var upgradeCostDiskNeeds = map[UpgradeCost]upgradeDiskNeed{
 	UpgradeCostScalesWithText: {factor: defaults.StoreUpgradeSearchRebuildDiskFactor, basis: upgradeDiskBasisDatabase},
 }
 
-// The two overrides: the steps that copy the entry table.
+// The overrides: the steps that copy the entry table, and the step that
+// copies the session tables.
 var (
 	// entryTableCopyDiskNeed is step 11's: it copies the entry table before
 	// any search index exists.
@@ -44,6 +45,9 @@ var (
 	// entryTableRebuildDiskNeed is step 75's: it copies the entry table and
 	// rebuilds both search indexes.
 	entryTableRebuildDiskNeed = upgradeDiskNeed{factor: defaults.StoreUpgradeEntryTableRebuildDiskFactor, basis: upgradeDiskBasisEntryTableAndSearchIndex}
+	// sessionTablesRebuildDiskNeed is step 78's: it copies the sessions and
+	// daily harness summary tables to widen their harness CHECK.
+	sessionTablesRebuildDiskNeed = upgradeDiskNeed{factor: defaults.StoreUpgradeSessionTablesRebuildDiskFactor, basis: upgradeDiskBasisSessionTables}
 )
 
 // diskNeedFor is the entry's free-disk need at the cost the plan resolved
@@ -145,7 +149,7 @@ var upgradeStepCatalog = map[int]upgradeCatalogEntry{
 	75: {title: "add image entries and rebuild the search index", cost: UpgradeCostScalesWithText, disk: entryTableRebuildDiskNeed},
 	76: {title: searchRepairQuickTitle, cost: UpgradeCostQuick},
 	77: {title: "mark the stored turn counts for a recount", cost: UpgradeCostQuick},
-	78: {title: "widen the stored harness set for the antigravity cli and ide", cost: UpgradeCostScalesWithRows},
+	78: {title: "widen the stored harness set for the antigravity cli and ide", cost: UpgradeCostScalesWithRows, disk: sessionTablesRebuildDiskNeed},
 	79: {title: "store the import profile and give run outcomes stable ids", cost: UpgradeCostQuick},
 }
 

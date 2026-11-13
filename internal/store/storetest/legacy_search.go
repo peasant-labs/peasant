@@ -102,31 +102,13 @@ CREATE INDEX idx_ingest_run_outcomes_run ON ingest_run_outcomes(run_id, id);
 // the chain from 75 creates them again instead of colliding.
 func BuildCleanV75Store(t *testing.T, path string) {
 	t.Helper()
-	buildV75Store(t, path, true)
-}
-
-// BuildSessionlessV75Store writes a real version-75 store that holds no
-// session, the way BuildCleanV75Store does without its seeded session. Its
-// upgrade plan is quick: there are no stale search results to rebuild, and
-// migration 77 marks no turn count recount on a store with no sessions.
-func BuildSessionlessV75Store(t *testing.T, path string) {
-	t.Helper()
-	buildV75Store(t, path, false)
-}
-
-// buildV75Store builds the version-75 store of BuildCleanV75Store, with or
-// without its one seeded session.
-func buildV75Store(t *testing.T, path string, withSession bool) {
-	t.Helper()
 	s, err := store.Open(path)
 	if err != nil {
 		t.Fatalf("open the current schema to build a v75 store: %v", err)
 	}
-	if withSession {
-		const sessionID = "cccccccc-3333-4333-8333-cccccccccccc"
-		SeedSession(t, s, sessionID)
-		SeedSessionEntry(t, s, sessionID, 0)
-	}
+	const sessionID = "cccccccc-3333-4333-8333-cccccccccccc"
+	SeedSession(t, s, sessionID)
+	SeedSessionEntry(t, s, sessionID, 0)
 	if err := s.Close(); err != nil {
 		t.Fatalf("close the seeded store: %v", err)
 	}
@@ -176,5 +158,34 @@ func BuildRecountOwedHeadStore(t *testing.T, path string) {
 	}()
 	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO pending_recounts(name) VALUES('turn_counts')`, nil); err != nil {
 		t.Fatalf("mark the turn count recount as owed: %v", err)
+	}
+}
+
+// BuildQuickV78Store writes a real version-78 store that holds no session:
+// the current schema with what migration v79 adds undone, stamped 78. Its
+// upgrade plan is the one quick step, 79, and a real upgrade finishes it.
+// Every store below 78 plans step 78, which copies the session tables and is
+// long, so this is the quick behind store an entry-point policy test needs.
+func BuildQuickV78Store(t *testing.T, path string) {
+	t.Helper()
+	s, err := store.Open(path)
+	if err != nil {
+		t.Fatalf("open the current schema to build a v78 store: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close the new store: %v", err)
+	}
+	conn, err := sqlite.OpenConn(path, sqlite.OpenReadWrite)
+	if err != nil {
+		t.Fatalf("reopen the new store raw: %v", err)
+	}
+	defer func() {
+		if err := conn.Close(); err != nil {
+			t.Errorf("close the v78 store: %v", err)
+		}
+	}()
+	if err := sqlitex.ExecuteScript(conn, undoImportProfileScript+`
+PRAGMA user_version = 78;`, nil); err != nil {
+		t.Fatalf("restore the v78 shape: %v", err)
 	}
 }

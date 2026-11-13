@@ -76,6 +76,18 @@ const (
 	// 4.31 GB, about the size of its search index.
 	StoreUpgradeEntryTableRebuildDiskFactor = 2.0
 
+	// StoreUpgradeSessionTablesRebuildDiskFactor is for step 78, which
+	// copies the sessions and daily harness summary tables to widen their
+	// harness CHECK (a copy out, the drop, a copy back and eight indexes).
+	// Its basis is those two tables with their indexes, read row by row. On
+	// synthetic schema-77 stores of 20,000 and 50,000 sessions rows
+	// (2026-11-12, TestSandboxHarnessWideningMeasure) the step's log grew
+	// about 1,240 bytes per session row, 1.40 and 1.45 times the database,
+	// which those tables make up almost entirely; the rows-step factor (0.01
+	// of the database) would have asked for about a hundredth of that. 2.0
+	// times the measured tables leaves room above every run.
+	StoreUpgradeSessionTablesRebuildDiskFactor = 2.0
+
 	// StoreUpgradeSearchRebuildDiskFactor is for a step that builds or
 	// rebuilds a search index without copying a table. Not measured in the
 	// sandbox run. Derivation: a fresh build of the search index measured
@@ -114,6 +126,13 @@ const (
 	// page instead, so its cost grows with the text (377 ms at the bound,
 	// tens of seconds for a 40 GB entry table).
 	StoreUpgradeEstimateMaxEntryRows = 65536
+
+	// StoreUpgradeEstimateMaxSessionRows bounds the rows of each session
+	// table the free-disk estimate of step 78 reads. A session row is read
+	// from its record header like an entry row; a million rows is far past
+	// any store seen (21,462 sessions on the largest), so a real store is
+	// always measured rather than charged twice its whole database.
+	StoreUpgradeEstimateMaxSessionRows = 1_000_000
 
 	// StoreUpgradeEstimateRowOverheadBytes is what one entry row costs beyond
 	// its leaf share and overflow pages: the record header, the rowid and

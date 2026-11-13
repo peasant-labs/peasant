@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -308,4 +309,58 @@ func runUpgradeRecountInOrderCase(t *testing.T, c storeUpgradeCase) {
 		t.Fatalf("store is at schema %d after the upgrade, want 79", got)
 	}
 	requireRecounted(t, fixture, path, "the upgrade from 0.16.2")
+}
+
+func runUpgradeRecountDoneInOrderCase(t *testing.T, c storeUpgradeCase) {
+	fixture := loadTurnCountRecountFixture(t)
+	if CurrentSchemaVersion() != 79 {
+		t.Fatalf("this case pins the upgrade of a 0.17.0 store (schema 77) by a build at schema 79; the build is at %d; add the new steps to its want list", CurrentSchemaVersion())
+	}
+	// A 0.17.0 open that finished its recount: schema 77, the marker
+	// deleted, and the counts it wrote (the sentinel stands for them).
+	path := buildRecountOwedStore(t, fixture, c.From)
+	conn, err := sqlite.OpenConn(path, sqlite.OpenReadWrite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlitex.ExecuteTransient(conn, `DELETE FROM pending_recounts`, nil); err != nil {
+		_ = conn.Close()
+		t.Fatal(err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := storedTurnCounts{fixture.InterruptedRecount.SentinelTurnCount, fixture.InterruptedRecount.SentinelConversationTurnCount}
+	writeTurnCountSentinel(t, path, fixture.Sessions[0].SessionID, sentinel)
+	countsBefore, _, _ := readTurnCountRecountState(t, path)
+
+	want := []UpgradeStep{schemaStep(78), schemaStep(79)}
+	if plan := mustPlan(t, path); plan.From != c.From || !slices.Equal(plan.Steps, want) {
+		t.Fatalf("plan = %d -> %d with %+v, want %d -> 79 with %+v", plan.From, plan.To, plan.Steps, c.From, want)
+	}
+	var started []UpgradeStep
+	report, err := Upgrade(t.Context(), path, UpgradeOptions{
+		Progress: func(event UpgradeEvent) {
+			if event.Kind == UpgradeEventStepStarted {
+				started = append(started, event.Step)
+			}
+		},
+		afterRecountSession: func(int, ingest.SessionID) error {
+			t.Error("the upgrade of a store whose recount finished recounted again")
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("upgrade the 0.17.0 store: %v", err)
+	}
+	if !slices.Equal(started, want) || len(report.Steps) != len(want) {
+		t.Fatalf("started steps %+v and %d finished, want %+v", started, len(report.Steps), want)
+	}
+	counts, pending, version := readTurnCountRecountState(t, path)
+	if version != 79 || pending {
+		t.Fatalf("store is at schema %d with the marker pending=%t, want 79 with no marker", version, pending)
+	}
+	if !maps.Equal(counts, countsBefore) {
+		t.Errorf("stored counts changed across the upgrade: %+v, want %+v", counts, countsBefore)
+	}
 }

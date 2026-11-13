@@ -58,8 +58,9 @@ Each step has a disk factor and a basis: what the factor multiplies. The
 basis is the whole database, or the tables the step rewrites, measured on
 the store. The cost class gives both: a quick step, a row-scaled step and a
 text-scaled step that copies no table each multiply the whole database by
-their factor. Only the two steps that copy the entry table (11 and 75) name
-their own factor and basis in the catalog. The search trigger repair (76)
+their factor. Only the steps that copy a table name their own factor and
+basis in the catalog: the two that copy the entry table (11 and 75), and the
+one that copies the session tables (78). The search trigger repair (76)
 takes the need of the cost the plan resolves for the store.
 
 A step's need is its factor times its basis. The plan asks for the largest
@@ -70,8 +71,9 @@ next starts, so the log space of one step is reused by the next.
 |---|---|---|---|---|
 | entry table rebuild | 2.0 | 75 (override) | the entry table with its indexes, and the two search indexes the step rebuilds, on a store whose text is in the bodies; the whole database on a store whose text is in the entry rows | measured: the step used 1.760 times the entry table and search indexes with the text in the entry rows, 1.020 times with the text in the bodies, and 1.848 times at the row bound; 2.0 leaves about 8% to spare |
 | entry table rebuild | 2.0 | 11 (override) | the entry table with its indexes; a store that old keeps its text in the entry rows, so the whole database | the same factor |
+| session tables rebuild | 2.0 | 78 (override) | `sessions` and `daily_summary_harness` with their indexes, every row read from its record header (at most a million rows each; past that, the whole database) | measured: the step's log grew 1.02 to 1.03 times the estimated tables, 1.40 to 1.45 times a database those tables fill; the plan asked for 1.38 to 1.43 times what the log used |
 | search rebuild | 0.39 | every `scales_with_text` step that copies no table: 35, and 76 on a store with stale search results | the database | derived from the search index build estimate; not measured |
-| row-scaled | 0.01 | every `scales_with_rows` step but 11 | the database | measured on 70 to 74: at most 0.0018 for one step, 0.0032 for five |
+| row-scaled | 0.01 | every `scales_with_rows` step but 11 and 78 | the database | measured on 70 to 74: at most 0.0018 for one step, 0.0032 for five |
 | quick | 0.001 | every `quick` step | the database | measured: the quick step wrote nothing |
 
 The values and the measurements are in `internal/defaults/store_upgrade.go`.
@@ -218,7 +220,10 @@ schema 77 with the marker, and its plan is the recount, then 78 and 79.
 
 A 0.16.2 store (schema 76) with sessions plans four steps: 77 (quick), the
 turn count recount (scales with rows, counted in sessions), 78 (scales with
-rows) and 79 (quick).
+rows: it copies the session tables to widen their harness CHECK) and 79
+(quick). A 0.17.0 store whose recount finished plans 78 and 79. Both plans
+hold a long step, so a terminal asks first and a hook or a script leaves the
+upgrade for `peasant migrate --schema-only`.
 
 ## The step catalog
 
@@ -276,6 +281,9 @@ logs what step 75 used: the log's high-water mark plus the database's growth.
 number of sessions with a chosen number of entries each, half of them managed
 generations, upgrades them, and logs the turn count recount's time and log
 growth per session.
+`TestSandboxHarnessWideningMeasure` builds schema-77 stores of a chosen number
+of sessions rows, upgrades them, and logs step 78's time and log growth beside
+the plan's estimate of the session tables.
 None of them runs in the gate. The free-disk factors in
 `internal/defaults/store_upgrade.go` record the last runs.
 
@@ -290,3 +298,17 @@ The last recount run (2026-11-12, load average about 18):
 The time grows with the sessions and with their entries, so the recount is a
 row-scaled step that counts sessions, like step 74. Its log stays near 75
 bytes per session, well inside the row-scaled disk factor (0.01).
+
+The last run of step 78 (2026-11-12, load average about 8 to 17), synthetic
+sessions rows shaped like stored ones and one daily summary row per day:
+
+| sessions rows | database | step 78 | per row | log written | session tables estimate |
+|---|---|---|---|---|---|
+| 20,000 | 17.7 MB | 0.41 to 0.51 s | 20 to 25 µs | 24.8 MB, 1.40 of the database | 24.1 MB in 41 ms |
+| 50,000 | 42.8 MB | 1.09 to 1.21 s | 22 to 24 µs | 61.8 MB, 1.45 of the database | 60.6 MB in 102 ms |
+
+The time grows with the session rows and is not sub-second at 50,000 rows,
+so step 78 is a row-scaled step like step 73, which copied the same tables.
+Its log is about 1,240 bytes per row, about the size of the copied tables,
+so it asks for twice those tables rather than the row-scaled share of the
+database.

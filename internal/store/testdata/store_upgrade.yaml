@@ -74,9 +74,11 @@ cases:
   # largest need among its steps. wantFactorMin and wantFactorMax bound
   # RequiredFreeBytes / StoreBytes. residue seeds stale search results into a
   # schema-75 store, so its repair rebuilds the index.
+  # From 78 the plan is light steps only: from 77 and below it holds step 78,
+  # which copies the session tables and asks for twice their size.
   - name: plan-of-light-steps-asks-for-the-small-share
     kind: disk-need
-    from: 75
+    from: 78
     wantFactorMin: 0.0001
     wantFactorMax: 0.02
   - name: plan-with-a-search-rebuild-asks-for-its-own-share
@@ -228,3 +230,8 @@ cases:
   - name: upgrade-from-0.16.2-runs-77-recount-78-and-79-in-order
     kind: recount-in-order
     from: 76
+  # A 0.17.0 store whose recount finished: schema 77, no marker. Its plan is
+  # 78, then 79, with no recount, and the counts the recount wrote stay.
+  - name: upgrade-from-0.17.0-with-the-recount-done-runs-78-and-79-in-order
+    kind: recount-done-in-order
+    from: 77

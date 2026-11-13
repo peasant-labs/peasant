@@ -177,6 +177,7 @@ func TestStoreUpgrade(t *testing.T) {
 		"recount-open-never-runs":  runUpgradeRecountOpenNeverRunsCase,
 		"recount-cancelled":        runUpgradeRecountCancelledCase,
 		"recount-in-order":         runUpgradeRecountInOrderCase,
+		"recount-done-in-order":    runUpgradeRecountDoneInOrderCase,
 	}
 	for _, c := range cases {
 		c := c
@@ -756,7 +757,7 @@ func checkUpgradeDiskNeed(t *testing.T, what string, need upgradeDiskNeed, cost 
 		t.Errorf("%s has no disk factor; use one of the named factors in internal/defaults/store_upgrade.go (StoreUpgradeQuickStepDiskFactor, StoreUpgradeRowsStepDiskFactor, StoreUpgradeSearchRebuildDiskFactor, StoreUpgradeEntryTableRebuildDiskFactor)", what)
 	}
 	if _, err := newUpgradeDiskBasis(string(need.basis)); err != nil {
-		t.Errorf("%s has no valid disk basis (%v); use upgradeDiskBasisDatabase, or the basis naming the tables the step rewrites (upgradeDiskBasisEntryTable, upgradeDiskBasisEntryTableAndSearchIndex)", what, err)
+		t.Errorf("%s has no valid disk basis (%v); use upgradeDiskBasisDatabase, or the basis naming the tables the step rewrites (upgradeDiskBasisEntryTable, upgradeDiskBasisEntryTableAndSearchIndex, upgradeDiskBasisSessionTables)", what, err)
 	}
 	if cost.Long() && need.factor > 0 && need.factor <= defaults.StoreUpgradeQuickStepDiskFactor {
 		t.Errorf("%s is for a long cost (%s) but carries the quick disk factor; a long step rewrites rows or text and needs the rows factor or more", what, cost)

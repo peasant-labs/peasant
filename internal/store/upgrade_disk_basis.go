@@ -27,10 +27,14 @@ const (
 	// session_entries_fts over the entry rows and session_search_fts over
 	// the entry rows and the entry bodies. Schema 75 rewrites exactly these.
 	upgradeDiskBasisEntryTableAndSearchIndex upgradeDiskBasis = "entry_table_and_search_index"
+	// upgradeDiskBasisSessionTables is the two tables that carry the stored
+	// harness CHECK, sessions and daily_summary_harness, with their indexes:
+	// what a step that widens that CHECK copies (schema 78).
+	upgradeDiskBasisSessionTables upgradeDiskBasis = "session_tables"
 )
 
 // allUpgradeDiskBases is the closed basis set.
-var allUpgradeDiskBases = []upgradeDiskBasis{upgradeDiskBasisDatabase, upgradeDiskBasisEntryTable, upgradeDiskBasisEntryTableAndSearchIndex}
+var allUpgradeDiskBases = []upgradeDiskBasis{upgradeDiskBasisDatabase, upgradeDiskBasisEntryTable, upgradeDiskBasisEntryTableAndSearchIndex, upgradeDiskBasisSessionTables}
 
 // newUpgradeDiskBasis validates a raw basis. The empty basis is refused, so
 // a catalog entry that names none fails the catalog test.
@@ -72,6 +76,10 @@ const (
 // rebuilds: session_entries_fts over the entry rows and session_search_fts
 // over the entry rows and the entry bodies.
 var entryRebuildSearchIndexes = []string{"session_entries_fts", "session_search_fts"}
+
+// harnessCheckTables are the two tables that mirror the stored harness set in
+// a CHECK: what a stored harness CHECK widening copies.
+var harnessCheckTables = []string{"sessions", "daily_summary_harness"}
 
 // tableBytesEstimate is a read-only, bounded measure of one rowid table.
 type tableBytesEstimate struct {
@@ -396,6 +404,8 @@ func diskBasisBytes(conn *sqlite.Conn, basis upgradeDiskBasis, storeBytes int64)
 func estimateDiskBasisOnConn(conn *sqlite.Conn, basis upgradeDiskBasis, maxEntryRows int64) (size int64, measured bool, err error) {
 	switch basis {
 	case upgradeDiskBasisEntryTable, upgradeDiskBasisEntryTableAndSearchIndex:
+	case upgradeDiskBasisSessionTables:
+		return estimateSessionTablesOnConn(conn, defaults.StoreUpgradeEstimateMaxSessionRows)
 	default:
 		return 0, false, fmt.Errorf("store: the disk basis %q has no table measure", basis)
 	}
@@ -416,6 +426,22 @@ func estimateDiskBasisOnConn(conn *sqlite.Conn, basis upgradeDiskBasis, maxEntry
 			}
 			size += indexBytes
 		}
+	}
+	return size, true, nil
+}
+
+// estimateSessionTablesOnConn reads every row of the tables a harness CHECK
+// widening copies (harnessCheckTables), at most maxRows of each. Their rows
+// are never text-scaled, but some columns carry JSON with no length limit, so
+// every row is read rather than sampled. measured is false when a table has
+// more rows than the bound; the caller then takes the whole database.
+func estimateSessionTablesOnConn(conn *sqlite.Conn, maxRows int64) (size int64, measured bool, err error) {
+	for _, table := range harnessCheckTables {
+		est, err := measureTableBytesOnConn(conn, table, maxRows)
+		if err != nil || !est.Measured {
+			return 0, false, err
+		}
+		size += est.StoredBytes
 	}
 	return size, true, nil
 }

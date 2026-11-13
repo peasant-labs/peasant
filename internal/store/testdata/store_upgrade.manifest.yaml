@@ -36,3 +36,4 @@ requiredNames:
   - open-never-runs-the-recount
   - cancelled-recount-keeps-its-marker
   - upgrade-from-0.16.2-runs-77-recount-78-and-79-in-order
+  - upgrade-from-0.17.0-with-the-recount-done-runs-78-and-79-in-order

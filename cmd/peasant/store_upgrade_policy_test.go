@@ -7,6 +7,7 @@ import (
 	_ "embed"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -192,10 +193,10 @@ func seedPolicyStore(t *testing.T, dir, kind string) string {
 	switch kind {
 	case "long", "affected":
 		residuefixture.SeedAffected(t, dbPath)
-	case "quick", "clean":
+	case "quick", "clean", "real-quick":
+		storetest.BuildQuickV78Store(t, dbPath)
+	case "clean-v75":
 		residuefixture.SeedClean(t, dbPath)
-	case "real-v75":
-		storetest.BuildSessionlessV75Store(t, dbPath)
 	case "owed-recount":
 		storetest.BuildRecountOwedHeadStore(t, dbPath)
 	case "real-v75-long":
@@ -313,7 +314,7 @@ func TestStoreUpgradePolicy(t *testing.T) {
 				if err != nil {
 					t.Errorf("the upgrade ran but the helper returned %v", err)
 				}
-				wantHeader := "needs an upgrade: schema 75 to"
+				wantHeader := fmt.Sprintf("needs an upgrade: schema %d to", plan.From)
 				if c.Store == "owed-recount" {
 					wantHeader = "is current, but an earlier upgrade did not finish 1 step(s)"
 				}
@@ -352,7 +353,7 @@ func TestStoreUpgradePolicy(t *testing.T) {
 						t.Errorf("refusal misses %q:\n%s", part, err)
 					}
 				}
-				what := "is at schema 75 and this build needs"
+				what := fmt.Sprintf("is at schema %d and this build needs", plan.From)
 				if c.Store == "owed-recount" {
 					what = "the schema this build needs, but an earlier upgrade did not finish 1 step(s)"
 				}
@@ -416,8 +417,9 @@ func TestStoreUpgradeStep76Cost(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			// Later migrations join both plans as quick steps; step 76 alone
-			// decides whether either plan is long.
+			// Later migrations join both plans; step 76 alone decides the
+			// search repair's cost. Step 78 copies the session tables and is
+			// long in both, so it is the quick plan's only long step.
 			longRepair, ok := planStepProducing(long, 76)
 			if !ok {
 				t.Fatalf("long store plan = %+v, want a step that produces schema 76", long.Steps)
@@ -429,14 +431,16 @@ func TestStoreUpgradeStep76Cost(t *testing.T) {
 			if longRepair.Cost != store.UpgradeCostScalesWithText || !long.HasLongStep() {
 				t.Errorf("step 76 on a store with stale search results costs %q, want scales_with_text", longRepair.Cost)
 			}
-			if quickRepair.Cost != store.UpgradeCostQuick || quick.HasLongStep() {
+			if quickRepair.Cost != store.UpgradeCostQuick {
 				t.Errorf("step 76 on a store without stale search results costs %q, want quick", quickRepair.Cost)
+			}
+			for _, step := range quick.Steps {
+				if step.Cost.Long() && step.Version != 78 {
+					t.Errorf("the plan of a store without stale search results holds the long step %d (%s); only step 78 is long there", step.Version, step.Title)
+				}
 			}
 			if got := decideStoreUpgrade(storeEntryPiped, long, false); got != storeUpgradeRefuse {
 				t.Errorf("piped policy on the long plan = %q, want refused", got)
-			}
-			if got := decideStoreUpgrade(storeEntryPiped, quick, false); got != storeUpgradeRun {
-				t.Errorf("piped policy on the quick plan = %q, want ran", got)
 			}
 		})
 	}
@@ -685,7 +689,7 @@ func (p *kickstartUpgradeProbe) command(t *testing.T) *cobra.Command {
 func runKickstartUpgradesBeforeDiscovery(t *testing.T) {
 	stubTerminal(t, true)
 	dir := t.TempDir()
-	dbPath := seedPolicyStore(t, dir, "real-v75")
+	dbPath := seedPolicyStore(t, dir, "real-quick")
 	probe := &kickstartUpgradeProbe{}
 	out, err := executeWithDataDir(t, probe.command(t), dir, nil)
 	if err != nil {

@@ -6,12 +6,13 @@
 # case states the policy and nothing else. mode is how the entry point is
 # classed: terminal and piped come from the one terminal check, hook from
 # the flag `village push` declares for generated hooks (--non-interactive),
-# server is fixed. store names the fixture: quick is a
-# schema-75 store with no stale search results (one quick step), long is a
-# schema-75 store with stale search results (one long step), current is at
-# the head schema, missing has no file, and owed-recount is at the head
-# schema with one session and the turn count recount still owed (one long
-# step: the store is behind although its schema is current). want is the policy outcome: ran,
+# server is fixed. store names the fixture: quick is a schema-78 store with
+# no sessions (one quick step, 79; every store below 78 also plans step 78,
+# which copies the session tables and is long), long is a schema-75 store
+# with stale search results (long steps), current is at the head schema,
+# missing has no file, and owed-recount is at the head schema with one
+# session and the turn count recount still owed (one long step: the store is
+# behind although its schema is current). want is the policy outcome: ran,
 # asked (the plan and a prompt were shown; wantRan says whether the answer
 # let the upgrade run), skipped (the nothing-attempted status, which a
 # generated hook turns into exit 0), refused, or none. exit is peasant's
@@ -427,12 +428,13 @@ policyCases:
     want: none
     exit: 0
 
-# step76Cases tie the search repair's cost to the policy: the same schema-75
-# store is a long plan only when it carries stale search results.
+# step76Cases tie the search repair's cost to the store: on the same
+# schema-75 store, step 76 is long only when the store carries stale search
+# results (clean-v75 is that store without them). Step 78 is long on both.
 step76Cases:
   - name: step-76-is-long-only-when-the-store-has-search-residue
     longStore: long
-    quickStore: quick
+    quickStore: clean-v75
 
 # pushCases run the real `village push` command on a store with a long step.
 # Every caller is refused before any village request and exits with the
@@ -450,12 +452,12 @@ pushCases:
     caller: script
 
 # entryCases run the real entry functions with no terminal. store: affected
-# and clean are the minimal schema-75 fixtures (long and quick plans; the
-# quick upgrade cannot finish on the minimal fixture, so a case on it asserts
-# only that the entry point did not refuse); current is a real head store;
-# real-v75 is a real schema-75 store with no stale results and no sessions,
-# so migration 77 marks no recount and its plan is quick, and wantOpened
-# requires the entry point to upgrade it and open it at the head schema.
+# is the minimal schema-75 fixture with stale search results (a long plan);
+# clean and real-quick are the schema-78 store with no sessions (a quick
+# plan, 79, that a real upgrade finishes); current is a real head store;
+# real-v75-long is a real schema-75 store whose search repair rebuilds.
+# wantOpened requires the entry point to upgrade the store and open it at
+# the head schema.
 # wantRefuse requires the typed refusal with the database file and its
 # sidecars byte-identical. confirm is --confirm for the migrate and reclaim
 # openers. The kickstart mount and the web server never upgrade, so they
@@ -526,9 +528,9 @@ entryCases:
     store: current
     wantRefuse: false
     wantOpened: true
-  - name: webpreopen-real-v75-upgrades-in-the-parent
+  - name: webpreopen-real-quick-store-upgrades-in-the-parent
     entry: webPreopen
-    store: real-v75
+    store: real-quick
     wantRefuse: false
     wantOpened: true
   - name: webforeground-affected-refuses
@@ -555,9 +557,9 @@ entryCases:
     entry: runVerify
     store: clean
     wantRefuse: false
-  - name: opendb-real-v75-clean-opens-and-migrates
+  - name: opendb-real-quick-store-opens-and-migrates
     entry: openDB
-    store: real-v75
+    store: real-quick
     wantRefuse: false
     wantOpened: true
   - name: migratestore-affected-without-confirm-refuses

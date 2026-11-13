@@ -81,14 +81,14 @@ requiredNames:
   - webpreopen-affected-refuses
   - webpreopen-clean-proceeds
   - webpreopen-current-proceeds
-  - webpreopen-real-v75-upgrades-in-the-parent
+  - webpreopen-real-quick-store-upgrades-in-the-parent
   - webforeground-affected-refuses
   - webforeground-clean-refuses
   - ftuerunner-affected-refuses
   - ftuerunner-clean-passes-gate
   - runverify-affected-refuses
   - runverify-clean-passes-gate
-  - opendb-real-v75-clean-opens-and-migrates
+  - opendb-real-quick-store-opens-and-migrates
   - migratestore-affected-without-confirm-refuses
   - migratestore-affected-with-confirm-passes-gate
   - migratestore-clean-without-confirm-passes-gate
