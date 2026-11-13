@@ -1,0 +1,44 @@
+# The transcript-segment seeder writes only into a data directory it creates itself.
+#
+# Each case runs the real seeder (`go run ./web/scripts/visual/seed-transcript-store.go
+# -data-dir <arg>`) in a throwaway temporary root. `mode` sets up what already exists at the
+# path the seeder is given: a sentinel store (`existing-store`), an empty directory
+# (`empty-dir`), a symlink to a sentinel store (`symlink`), a plain file (`file`), nothing
+# (`relative`, `missing-parent`, `fresh`). A refused case (`refused: true`, the default) must
+# exit 1 with its `error` text, and every byte, entry and mode the invocation found must be
+# unchanged afterwards. A fresh case must seed the expected rows and leave the data directory
+# for the capture's own server to read.
+requiredNames:
+  - seeder-refuses-an-existing-sentinel-store
+  - seeder-refuses-an-existing-empty-directory
+  - seeder-refuses-a-symlinked-data-directory
+  - seeder-refuses-a-file-at-the-data-path
+  - seeder-refuses-a-relative-data-directory
+  - seeder-refuses-a-path-whose-parent-is-missing
+  - seeder-seeds-and-reads-a-fresh-directory
+cases:
+  - name: seeder-refuses-an-existing-sentinel-store
+    mode: existing-store
+    error: 'already exists as a directory'
+  - name: seeder-refuses-an-existing-empty-directory
+    mode: empty-dir
+    error: 'already exists as a directory'
+  - name: seeder-refuses-a-symlinked-data-directory
+    mode: symlink
+    error: 'already exists as a symlink'
+  - name: seeder-refuses-a-file-at-the-data-path
+    mode: file
+    error: 'already exists as a file'
+  - name: seeder-refuses-a-relative-data-directory
+    mode: relative
+    error: 'must name an absolute path'
+  - name: seeder-refuses-a-path-whose-parent-is-missing
+    mode: missing-parent
+    error: 'could not be created'
+  - name: seeder-seeds-and-reads-a-fresh-directory
+    mode: fresh
+    refused: false
+    turns: 69
+    conversationTurns: 60
+    sessions: 1
+    entries: 80
