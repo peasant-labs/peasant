@@ -36,6 +36,9 @@ requiredNames:
   - owned-server-stop-kills-a-child-that-ignores-term
   - owned-server-stop-returns-an-already-exited-child
   - owned-server-stop-returns-a-child-that-never-spawned
+  - owned-server-stop-does-not-count-a-kill-error-as-exit
+  - owned-server-stop-returns-when-a-kill-error-precedes-a-late-exit
+  - owned-server-stop-reports-a-kill-error-and-keeps-a-live-child
   - every-script-that-starts-the-binary-is-sandboxed-or-exempt
 cases:
   # mode layout: `named` are the directories the caller names itself ($ROOT and $OTHER are
@@ -191,6 +194,11 @@ cases:
   - {name: owned-server-stop-kills-a-child-that-ignores-term, mode: stop, child: ignores-term, termMs: 150, killMs: 2000, signal: SIGKILL}
   - {name: owned-server-stop-returns-an-already-exited-child, mode: stop, child: waits, exitAfterMs: 0, before: exited}
   - {name: owned-server-stop-returns-a-child-that-never-spawned, mode: stop, child: missing}
+# A kill that fails emits ChildProcess `error` while the child is alive; only an actual exit may
+# count. `calls` records the signals the stop sent, and `error` is the text its refusal must carry.
+  - {name: owned-server-stop-does-not-count-a-kill-error-as-exit, mode: stop, child: ignores-term, termMs: 150, killMs: 2000, killError: term, calls: [SIGTERM, SIGKILL], signal: SIGKILL}
+  - {name: owned-server-stop-returns-when-a-kill-error-precedes-a-late-exit, mode: stop, child: waits, exitAfterMs: 100, termMs: 2000, killError: term, calls: [SIGTERM]}
+  - {name: owned-server-stop-reports-a-kill-error-and-keeps-a-live-child, mode: stop, child: ignores-term, termMs: 100, killMs: 100, killError: both, calls: [SIGTERM, SIGKILL], error: EPERM}
 # Every script under web/scripts that starts `peasant web start`. A required script makes its
 # sandbox with ownedServerSandbox, starts through startOwnedServer, and passes both
 # `...sandbox.args` and `env: sandbox.env` on the spawn (or on the `launch` of the lifetime a

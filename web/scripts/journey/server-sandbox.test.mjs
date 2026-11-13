@@ -167,17 +167,38 @@ const modes = {
     const args = row.child === 'missing' ? [] : [LIFECYCLE_CHILD, row.child, '--exit-after-ms', String(row.exitAfterMs ?? 60000), ...(row.child === 'ignores-term' ? ['--status', '0'] : [])];
     const child = spawn(program, args, { stdio: ['ignore', 'pipe', 'inherit'] });
     const failed = new Promise((done) => child.once('error', done));
-    cleanups.push(() => { try { if (!gone(child)) child.kill('SIGKILL'); } catch { /* already gone */ } });
+    const realKill = child.kill.bind(child);
+    const calls = [];
+    // A kill can fail while the child is still alive (for example EPERM); the ChildProcess emits
+    // `error`. Only an actual exit may let the stop return.
+    child.kill = (signal) => {
+      calls.push(signal);
+      if (row.killError === 'both' || (row.killError === 'term' && signal === 'SIGTERM')) {
+        child.emit('error', Object.assign(new Error(`kill ${signal}: EPERM`), { code: 'EPERM' }));
+        return false;
+      }
+      return realKill(signal);
+    };
+    cleanups.push(() => { try { if (!gone(child)) realKill('SIGKILL'); } catch { /* already gone */ } });
     // The ignoring child prints ready only after its SIGTERM handler is in place.
     if (row.child === 'ignores-term') await new Promise((done) => child.stdout.once('data', done));
     if (row.before === 'exited') await new Promise((done) => child.once('exit', done));
     if (row.child === 'missing') await failed;
     const before = Date.now();
-    await stopOwnedServer(child, { termMs: row.termMs, killMs: row.killMs, what: 'the test server' });
-    if (row.child === 'missing') assert.equal(child.pid, undefined, 'a spawn that never produced a process is already stopped');
-    else assert.equal(gone(child), true, 'the child has exited');
+    if (row.error) {
+      await assert.rejects(stopOwnedServer(child, { termMs: row.termMs, killMs: row.killMs, what: 'the test server' }), (error) => error.message.includes(row.error) && error.message.includes('may still be alive'));
+      assert.equal(gone(child), false, 'a child that did not exit is not reported as stopped');
+      realKill('SIGKILL');
+      await new Promise((done) => child.once('exit', done));
+    } else {
+      await stopOwnedServer(child, { termMs: row.termMs, killMs: row.killMs, what: 'the test server' });
+      if (row.child === 'missing') assert.equal(child.pid, undefined, 'a spawn that never produced a process is already stopped');
+      else assert.equal(gone(child), true, 'the child has exited');
+      if (row.signal) assert.equal(child.signalCode, row.signal);
+      if (row.killError && row.child === 'ignores-term') assert.ok(Date.now() - before >= row.termMs - 10, 'a kill error does not count as an exit');
+    }
+    if (row.calls) assert.deepEqual(calls, row.calls);
     assert.ok(Date.now() - before < (row.termMs ?? 3000) + (row.killMs ?? 2000) + 2000, 'the stop waits only its deadlines');
-    if (row.signal) assert.equal(child.signalCode, row.signal);
   },
 };
 
