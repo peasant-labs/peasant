@@ -492,6 +492,7 @@ test('focus-burst-reads-sign-in-once', async () => {
   watch(pageF, 'F');
   const firstRead = pageF.waitForResponse((response) => new URL(response.url()).pathname === '/api/v1/sync/auth', { timeout: 20000 });
   await pageF.goto('/village/');
+  expect(new URL(pageF.url()).pathname, 'the online page stays the online page').toBe('/village/');
   await (await firstRead).finished();
   const reads = () => requests.filter((entry) => entry.tab === 'F' && entry.method === 'GET' && entry.path === '/api/v1/sync/auth').length;
   expect(reads(), 'the online page read the sign-in once when it opened').toBe(1);
@@ -507,7 +508,7 @@ test('focus-burst-reads-sign-in-once', async () => {
     }
   }, FOCUS_BURST);
   await expect.poll(reads, { message: 'the burst made one leading read and one trailing read', timeout: 15000 }).toBe(before + FOCUS_BURST.expectedReads);
-  focusBurstReads = { before, after: reads(), ...FOCUS_BURST };
+  focusBurstReads = { landed: new URL(pageF.url()).pathname, before, after: reads(), ...FOCUS_BURST };
   await pageF.close();
 });
 
