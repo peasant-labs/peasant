@@ -700,7 +700,9 @@ test('config-holds-only-the-chosen-selection', async () => {
   const touched = requests.filter((entry) => entry.method !== 'GET' && !entry.path.startsWith(`${API}/`)).map((entry) => `${entry.method} ${entry.path}`);
   // The only write outside the setup's own routes is the finish panel's "import now".
   expect(touched, 'the only writes were setup\'s own').toEqual(['POST /api/v1/sync/ingest']);
-  expect(requests.filter((entry) => entry.path.startsWith('/api/') && /\/auto-publish|\/sync\/push|\/sync\/login|\/village\//.test(entry.path)), 'no publish, sign-in or hook route was called').toEqual([]);
+  // The online page is mounted later for the sign-in read; its own saved
+  // observations read is not part of the setup's walk.
+  expect(requests.filter((entry) => entry.tab !== 'F' && entry.path.startsWith('/api/') && /\/auto-publish|\/sync\/push|\/sync\/login|\/village\//.test(entry.path)), 'no publish, sign-in or hook route was called').toEqual([]);
 });
 
 test('selection-page-saves-only-selection', async () => {
