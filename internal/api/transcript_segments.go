@@ -34,6 +34,13 @@ type SegmentReader interface {
 	Revision(context.Context) (string, error)
 }
 
+// mockSegmentSource is a provider that can name the mock store's stored-entry
+// reader. A nil reader means the sessions section is not mocked, or the mock
+// holds no stored entries, and the server reads the analytics store instead.
+type mockSegmentSource interface {
+	MockSegmentReader() SegmentReader
+}
+
 // segmentCacheKey names one cut: the session plus the store revision it was cut
 // under. A revision change is a different key, and the old key falls out of the
 // LRU rather than being served under a newer revision.

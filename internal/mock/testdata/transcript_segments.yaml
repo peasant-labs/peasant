@@ -1,0 +1,61 @@
+# Mock sessions whose transcript the local web app must open under
+# --mock-data-store=...,sessions. The session page takes its turns from the
+# transcript segment directory and segment reads, so with the sessions mock
+# store on those reads must serve each mock session's own turns, cut and folded
+# by the same segment producer the analytics store is read with. An empty
+# directory beside a detail header that counts turns renders "transcript not
+# indexed yet" instead of the transcript.
+#
+# Each case names one mock session and what its segment reads must carry:
+#   sessionId           the mock session identifier the detail read serves.
+#   conversationTurns   the directory's totalConversationTurns, and the sum of
+#                       every segment boundary's conversation turn count.
+#   toolCalls           the tool calls the served turns carry in total.
+#   sameTurnIdentities  whether the served turn identities equal the mock turn
+#                       indexes. A mock session with tool calls lays its tool
+#                       call entries between its turns, as a stored session
+#                       does, so its later turn identities move.
+#   contextNavigation   the context_navigation.yaml session the case serves, if
+#                       any; its first fixture turn must open the transcript.
+#   httpReadable        whether the local API routes accept the identifier.
+#                       Every case folds the mock store's entries back into
+#                       the mock turns with the production fold; a readable case
+#                       is also read through the directory and segment routes.
+#                       The generated sessions carry identifiers the session ID
+#                       contract refuses, so only the fold reaches their tool
+#                       call entries.
+#
+# required lists every case name. A case that disappears fails the test by
+# name rather than by count.
+required:
+  - context-navigation-child
+  - context-navigation-unresolved
+  - strike-mounted
+  - generated-turns-with-tool-calls
+cases:
+  - name: context-navigation-child
+    sessionId: sess_contextchild
+    conversationTurns: 5
+    toolCalls: 0
+    sameTurnIdentities: true
+    contextNavigation: child
+    httpReadable: true
+  - name: context-navigation-unresolved
+    sessionId: sess_contextunresolved
+    conversationTurns: 1
+    toolCalls: 0
+    sameTurnIdentities: true
+    contextNavigation: unresolved
+    httpReadable: true
+  - name: strike-mounted
+    sessionId: 20260729T010203.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+    conversationTurns: 2
+    toolCalls: 0
+    sameTurnIdentities: true
+    httpReadable: true
+  - name: generated-turns-with-tool-calls
+    sessionId: sess-hero-title-generated
+    conversationTurns: 4
+    toolCalls: 2
+    sameTurnIdentities: false
+    httpReadable: false

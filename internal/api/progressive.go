@@ -251,6 +251,22 @@ func (p *ProgressiveProvider) Search(ctx context.Context, query string, limit in
 	return prov.Search(ctx, query, limit)
 }
 
+// MockSegmentReader returns the mock store's stored-entry reader when the
+// sessions section is mocked and the mock serves stored entries, so the
+// transcript segment reads open the same sessions the list and detail reads
+// serve. It returns nil otherwise, and the server reads the analytics store.
+// The server cuts and folds either reader's entries with one segment producer.
+func (p *ProgressiveProvider) MockSegmentReader() SegmentReader {
+	if !p.isMocked(defaults.MockSections.Sessions) {
+		return nil
+	}
+	reader, ok := p.mock.(SegmentReader)
+	if !ok {
+		return nil
+	}
+	return reader
+}
+
 // GroupedCandidates forwards the opt-in grouped list/search predicate to the
 // provider that backs the matching section, so a production progressive server
 // serves grouped views from the real store rather than a mock fold.
@@ -298,6 +314,7 @@ func (p *ProgressiveProvider) SelectionScopeByID(ctx context.Context, ids []stri
 // Ensure implementation of DataProvider interface.
 var _ DataProvider = (*ProgressiveProvider)(nil)
 var _ QualityPageProvider = (*ProgressiveProvider)(nil)
+var _ mockSegmentSource = (*ProgressiveProvider)(nil)
 
 // The publication read reaches the stored sessions through the provider the
 // server is started with, which is a ProgressiveProvider in production.
