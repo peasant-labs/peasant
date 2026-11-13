@@ -10,3 +10,5 @@ cases:
   - {name: kiro-crew, tool: kiro-crew, harness: kiro-crew}
   - {name: cursor-cli, tool: cursor-cli, harness: cursor}
   - {name: cursor-ide-state, tool: cursor-ide-state, harness: cursor}
+  - {name: antigravity-cli, tool: antigravity-cli, harness: antigravity-cli}
+  - {name: antigravity-ide, tool: antigravity-ide, harness: antigravity-ide}

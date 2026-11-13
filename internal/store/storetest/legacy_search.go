@@ -63,7 +63,7 @@ func SeedLegacySearchIndex(t *testing.T, s *store.Store) {
 	}
 }
 
-// undoImportProfileScript undoes what migration v78 adds, so a store
+// undoImportProfileScript undoes what migration v79 adds, so a store
 // built from the current schema can be stamped as an earlier version and have
 // that migration applied to it again: the index_log timing columns, the stage
 // table, the outcome lookup tables, and the reason-id shape of
@@ -98,7 +98,7 @@ CREATE INDEX idx_ingest_run_outcomes_run ON ingest_run_outcomes(run_id, id);
 // user_version 75. Migration v76 only re-points those triggers and drops that
 // index, so the result is the v75 schema with no residue: upgrading it runs
 // v76 on the targeted-insert path. Undoing the later migrations drops
-// pending_recounts (v77) and the import profile tables and columns (v78), so
+// pending_recounts (v77) and the import profile tables and columns (v79), so
 // the chain from 75 creates them again instead of colliding.
 func BuildCleanV75Store(t *testing.T, path string) {
 	t.Helper()

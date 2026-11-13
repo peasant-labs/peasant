@@ -63,8 +63,8 @@ github.com/cpuguy83/go-md2man/v2 v2.0.6/go.mod h1:oOW0eioCTA6cOiMLiUPZOpcVxMig6N
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/dayvidpham/bestiary v0.3.0 h1:oYt8LLVonXMKeacwgr8vyRQw5V8Y0IxzCoYD9GBqRtA=
-github.com/dayvidpham/bestiary v0.3.0/go.mod h1:X+WiGZpdSPIyjIwBcVftqpoXlfXg5YHVEajvcxjh9Ec=
+github.com/dayvidpham/bestiary v0.4.0 h1:gqh7AOSDqx9QMWjjPxGu+NII1iJyEJwCIqRhmWubxds=
+github.com/dayvidpham/bestiary v0.4.0/go.mod h1:X+WiGZpdSPIyjIwBcVftqpoXlfXg5YHVEajvcxjh9Ec=
 github.com/dlclark/regexp2 v1.12.0 h1:0j4c5qQmnC6XOWNjP3PIXURXN2gWx76rd3KvgdPkCz8=
 github.com/dlclark/regexp2 v1.12.0/go.mod h1:DHkYz0B9wPfa6wondMfaivmHpzrQ3v9q8cnmRbL6yW8=
 github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=
@@ -129,8 +129,8 @@ github.com/ncruces/go-strftime v0.1.9 h1:bY0MQC28UADQmHmaF5dgpLmImcShSi2kHU9XLdh
 github.com/ncruces/go-strftime v0.1.9/go.mod h1:Fwc5htZGVVkseilnfgOVb9mKy6w1naJmn9CehxcKcls=
 github.com/peasant-labs/redact v0.1.6 h1:Kk03w/5aGmagtuKrV2NLeRVeclA90UBghSXKjTbU4ls=
 github.com/peasant-labs/redact v0.1.6/go.mod h1:X3C7ssZnus4U/t4+HnbbQ4IE9e7txyPIlZYSftvp3Cs=
-github.com/peasant-labs/schema v0.51.0 h1:UAvP3sNxzhP3X58Lk+NZ3DkTBFeyISiHlYpTp2lEgGU=
-github.com/peasant-labs/schema v0.51.0/go.mod h1:PSMRnvyfB26eSJLZF5+rPFnKCmlDfGv3sR8kz7vItxk=
+github.com/peasant-labs/schema v0.52.0 h1:L8JKPliZWKyoEl+PgkRmDFD+8utHVh9WxHLH1bRP4+M=
+github.com/peasant-labs/schema v0.52.0/go.mod h1:6xhJQLjcSV82Gi/271F6gZA9mj6azWexlYLFDeplIOY=
 github.com/philhofer/fwd v1.2.0 h1:e6DnBTl7vGY+Gz322/ASL4Gyp1FspeMvx1RNDoToZuM=
 github.com/philhofer/fwd v1.2.0/go.mod h1:RqIHx9QI14HlwKwm98g9Re5prTQ6LdeRQn+gXJFxsJM=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=

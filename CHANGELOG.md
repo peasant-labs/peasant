@@ -67,7 +67,7 @@ was tagged but not published links to its tag instead.
   terminal the upgrade asks first, and a script or a git hook leaves it for
   `peasant migrate --schema-only`. A store whose 0.17.0 recount did not finish
   is behind until that command runs it.
-- Migration 78 stores a profile of every import. `ingest_run_stages` holds one
+- Migration 79 stores a profile of every import. `ingest_run_stages` holds one
   row per pipeline stage per run (duration, counts, bytes, time spent waiting
   for the write lane), kept for the latest 100 runs, and `index_log` gains
   `parse_ms`, `write_ms` and `bytes`. `ingest_run_outcomes` now holds a

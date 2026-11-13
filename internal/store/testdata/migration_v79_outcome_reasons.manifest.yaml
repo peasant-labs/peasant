@@ -1,4 +1,4 @@
-# Required-name manifest for migration_v78_outcome_reasons: deletion
+# Required-name manifest for migration_v79_outcome_reasons: deletion
 # protection by NAME, never by count. requiredRows names one row per
 # (kind, code) pair a build before the migration could write.
 requiredNames:

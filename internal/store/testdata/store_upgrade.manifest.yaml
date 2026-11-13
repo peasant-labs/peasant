@@ -35,4 +35,4 @@ requiredNames:
   - store-at-head-with-a-pending-recount-is-behind
   - open-never-runs-the-recount
   - cancelled-recount-keeps-its-marker
-  - upgrade-from-0.16.2-runs-77-recount-and-78-in-order
+  - upgrade-from-0.16.2-runs-77-recount-78-and-79-in-order

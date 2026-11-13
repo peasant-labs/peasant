@@ -1,0 +1,24 @@
+# The schema objects V78 rebuilds or must leave untouched, as they exist at
+# slot 77: both rebuilt tables, every sessions index and trigger, and the six
+# parent-lane triggers on the other two tables.
+requiredObjects:
+  - daily_summary_harness
+  - idx_sessions_child_page
+  - idx_sessions_harness
+  - idx_sessions_host
+  - idx_sessions_parent
+  - idx_sessions_project
+  - idx_sessions_root_page
+  - idx_sessions_start
+  - idx_sessions_sweep_pending
+  - session_publication_metadata_parent_state_ad
+  - session_publication_metadata_parent_state_ai
+  - session_publication_metadata_parent_state_au
+  - session_relationship_evidence_parent_state_ad
+  - session_relationship_evidence_parent_state_ai
+  - session_relationship_evidence_parent_state_au
+  - sessions
+  - sessions_parent_state_ad
+  - sessions_parent_state_ai
+  - sessions_parent_state_au
+  - sessions_publication_metadata_changed

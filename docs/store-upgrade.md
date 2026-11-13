@@ -214,10 +214,11 @@ the conversation turns. A session with no stored entries, or whose entries
 cannot be read, keeps both stored values and is logged. The recount walks the
 sessions with the same code as the step 74 fill. 0.17.0 ran this recount when
 it opened the store; a 0.17.0 store whose open was killed part way is at
-schema 77 with the marker, and its plan is the recount, then 78.
+schema 77 with the marker, and its plan is the recount, then 78 and 79.
 
-A 0.16.2 store (schema 76) with sessions plans three steps: 77 (quick), the
-turn count recount (scales with rows, counted in sessions), and 78 (quick).
+A 0.16.2 store (schema 76) with sessions plans four steps: 77 (quick), the
+turn count recount (scales with rows, counted in sessions), 78 (scales with
+rows) and 79 (quick).
 
 ## The step catalog
 

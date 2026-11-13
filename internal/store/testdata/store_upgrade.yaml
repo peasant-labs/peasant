@@ -225,6 +225,6 @@ cases:
     from: 76
     stopAfterSessions: 2
     wantVersion: 77
-  - name: upgrade-from-0.16.2-runs-77-recount-and-78-in-order
+  - name: upgrade-from-0.16.2-runs-77-recount-78-and-79-in-order
     kind: recount-in-order
     from: 76

@@ -1,0 +1,161 @@
+# A synthetic Antigravity store. The Antigravity tests build it under
+# t.TempDir(). Nothing here comes from a real store: the table definitions
+# repeat the names and declared types observed on antigravity-hub 2.29.0 and
+# antigravity-cli 1.5.3, and every text and blob value is an invented string
+# that contains the sentinel. A report must never contain the sentinel.
+#
+# {id} stands for the conversation identifier of one session.
+sentinel: SENTINEL
+body:
+  # conversations/{id}.db
+  schema:
+    - CREATE TABLE `battle_mode_infos` (`idx` integer,`data` blob,PRIMARY KEY (`idx`))
+    - CREATE TABLE `executor_metadata` (`idx` integer,`data` blob,PRIMARY KEY (`idx`))
+    - CREATE TABLE `gen_metadata` (`idx` integer,`data` blob,`size` integer NOT NULL DEFAULT 0,PRIMARY KEY (`idx`))
+    - CREATE TABLE `parent_references` (`idx` integer,`data` blob,PRIMARY KEY (`idx`))
+    - CREATE TABLE `steps` (`idx` integer,`step_type` integer NOT NULL DEFAULT 0,`status` integer NOT NULL DEFAULT 0,`has_subtrajectory` numeric NOT NULL DEFAULT false,`metadata` blob,`error_details` blob,`permissions` blob,`task_details` blob,`render_info` blob,`step_payload` blob,`step_format` integer NOT NULL DEFAULT 0,PRIMARY KEY (`idx`))
+    - CREATE TABLE `trajectory_meta` (`trajectory_id` text,`cascade_id` text,`trajectory_type` integer,`source` integer,PRIMARY KEY (`trajectory_id`))
+    - CREATE TABLE `trajectory_metadata_blob` (`id` text DEFAULT "main",`data` blob,PRIMARY KEY (`id`))
+    - CREATE INDEX `idx_steps_status` ON `steps`(`status`)
+    - CREATE INDEX `idx_steps_step_type` ON `steps`(`step_type`)
+  rows:
+    - INSERT INTO battle_mode_infos VALUES (0, CAST('SENTINEL-battle' AS BLOB))
+    - INSERT INTO executor_metadata VALUES (0, CAST('SENTINEL-executor' AS BLOB))
+    - INSERT INTO gen_metadata VALUES (0, CAST('SENTINEL-gen' AS BLOB), 14)
+    - INSERT INTO parent_references VALUES (0, CAST('SENTINEL-parent' AS BLOB))
+    - >-
+      INSERT INTO steps VALUES (0, 14, 3, 0, CAST('SENTINEL-metadata-0' AS BLOB), CAST('SENTINEL-error-0' AS BLOB),
+      CAST('SENTINEL-permissions-0' AS BLOB), CAST('SENTINEL-task-0' AS BLOB), CAST('SENTINEL-render-0' AS BLOB),
+      CAST('SENTINEL-payload-0' AS BLOB), 1)
+    - >-
+      INSERT INTO steps VALUES (1, 15, 3, 0, CAST('SENTINEL-metadata-1' AS BLOB), NULL, NULL, NULL,
+      CAST('SENTINEL-render-1' AS BLOB), CAST('SENTINEL-payload-1' AS BLOB), 1)
+    - >-
+      INSERT INTO steps VALUES (2, 15, 4, 0, CAST('SENTINEL-metadata-2' AS BLOB), CAST('SENTINEL-error-2' AS BLOB),
+      NULL, NULL, NULL, CAST('SENTINEL-payload-2' AS BLOB), 1)
+    - INSERT INTO trajectory_meta VALUES ('SENTINEL-trajectory', 'SENTINEL-cascade', 1, 2)
+    - INSERT INTO trajectory_metadata_blob VALUES ('main', CAST('SENTINEL-trajectory-blob' AS BLOB))
+  # A column a later product version could add. The read guard must refuse it
+  # by its declared type, without a code change.
+  blobExtension:
+    - ALTER TABLE steps ADD COLUMN `future_payload` blob
+    - UPDATE steps SET future_payload = CAST('SENTINEL-future' AS BLOB)
+index:
+  # conversation_summaries.db
+  schema:
+    - >-
+      CREATE TABLE `conversation_summaries` (`conversation_id` text,`title` text NOT NULL DEFAULT "",
+      `preview` text NOT NULL DEFAULT "",`step_count` integer NOT NULL DEFAULT 0,`last_modified_time` datetime NOT NULL,
+      `workspace_uris` text NOT NULL,`status` text NOT NULL DEFAULT "",`source` text NOT NULL DEFAULT "",
+      `project_id` text NOT NULL DEFAULT "",`agent_name` text NOT NULL DEFAULT "",
+      `parent_conversation_id` text NOT NULL DEFAULT "",`nesting_depth` integer NOT NULL DEFAULT 0,
+      `battle_id` text NOT NULL DEFAULT "",`winning_conversation_id` text NOT NULL DEFAULT "",
+      `not_fully_idle` numeric NOT NULL DEFAULT false,`killed` numeric NOT NULL DEFAULT false,
+      `last_user_input_time` datetime NOT NULL,`last_user_input_step_index` integer NOT NULL DEFAULT -1,
+      `app_data_dir` text NOT NULL DEFAULT "",`raw_summary` blob,`group_id` text NOT NULL DEFAULT "",
+      PRIMARY KEY (`conversation_id`))
+    - CREATE INDEX idx_conversation_summaries_last_modified_time ON conversation_summaries(last_modified_time)
+    - CREATE INDEX idx_conversation_summaries_last_user_input_time ON conversation_summaries(last_user_input_time)
+    - >-
+      CREATE VIRTUAL TABLE conversations_fts USING fts5(conversation_id UNINDEXED, chunk_index UNINDEXED,
+      last_modified_time UNINDEXED, title, workspace, project, user_body, agent_body)
+    - CREATE TABLE search_schema_version (version INTEGER PRIMARY KEY)
+    - INSERT INTO search_schema_version VALUES (1)
+  # One row per indexed conversation.
+  row:
+    - >-
+      INSERT INTO conversation_summaries (conversation_id, title, preview, step_count, last_modified_time,
+      workspace_uris, source, project_id, last_user_input_time, raw_summary)
+      VALUES ('{id}', 'SENTINEL-title', 'SENTINEL-preview', 3, '2026-01-02 03:04:05.000000000+00:00',
+      '["file:///invented/workspace"]', 'CORTEX_TRAJECTORY_SOURCE_CLI', 'SENTINEL-project',
+      '2026-01-02 03:04:00.000000000+00:00', CAST('SENTINEL-summary' AS BLOB))
+    - >-
+      INSERT INTO conversations_fts (conversation_id, chunk_index, last_modified_time, title, workspace, project,
+      user_body, agent_body) VALUES ('{id}', 0, 'SENTINEL-time', 'SENTINEL-fts-title', 'SENTINEL-fts-workspace',
+      'SENTINEL-fts-project', 'SENTINEL-fts-user', 'SENTINEL-fts-agent')
+# The project path the index row names, as a capture with metadata reports it.
+workspacePath: /invented/workspace
+# Files of one session that both products write, besides the body.
+sessionFiles:
+  - path: brain/{id}/.system_generated/logs/transcript.jsonl
+    content: |
+      {"type":"USER_INPUT","source":"USER_EXPLICIT","status":"DONE","step_index":0,"created_at":"2026-01-02T03:04:00Z","content":"SENTINEL-user","truncated_fields":["SENTINEL-truncated"]}
+      {"type":"PLANNER_RESPONSE","source":"MODEL","status":"DONE","step_index":1,"created_at":"2026-01-02T03:04:01Z","content":"SENTINEL-answer","thinking":"SENTINEL-thinking","tool_calls":[{"name":"SENTINEL-tool","args":{"CommandLine":"SENTINEL-command","Cwd":"SENTINEL-cwd"}}],"input_tokens":10,"output_tokens":5,"cache_read_tokens":0}
+      {"type":"GENERIC","source":"MODEL","status":"ERROR","step_index":2,"created_at":"2026-01-02T03:04:02Z","content":"SENTINEL-generic","error":"SENTINEL-error"}
+  - path: brain/{id}/.system_generated/logs/transcript_full.jsonl
+    content: |
+      {"type":"USER_INPUT","source":"USER_EXPLICIT","status":"DONE","step_index":0,"created_at":"2026-01-02T03:04:00Z","content":"SENTINEL-user"}
+      {"type":"PLANNER_RESPONSE","source":"MODEL","status":"DONE","step_index":1,"created_at":"2026-01-02T03:04:01Z","content":"SENTINEL-answer","tool_calls":[{"name":"SENTINEL-tool","args":{"CommandLine":"SENTINEL-command"}}]}
+  # The chunk files cut the log by size: the second record starts in the first
+  # chunk and ends in the second, and its tail decodes as a JSON string.
+  - path: brain/{id}/.system_generated/logs/chunks/transcript/00000000.jsonl
+    content: |
+      {"type":"USER_INPUT","source":"USER_EXPLICIT","content":"SENTINEL-chunk"}
+      {"type":"PLANNER_RESPONSE","source":"MODEL","content":
+  - path: brain/{id}/.system_generated/logs/chunks/transcript/00000001.jsonl
+    content: |
+      "SENTINEL-chunk-tail"
+      {"type":"GENERIC","source":"MODEL","content":"SENTINEL-chunk-next"}
+  - path: brain/{id}/.system_generated/logs/chunks/transcript_full/00000000.jsonl
+    content: |
+      {"type":"USER_INPUT","source":"USER_EXPLICIT","content":"SENTINEL-chunk-full"}
+  - path: brain/{id}/.system_generated/steps/1/output.txt
+    content: SENTINEL-step-output
+  - path: brain/{id}/scratch/notes.txt
+    content: SENTINEL-scratch
+  - path: annotations/{id}.pbtxt
+    content: |
+      title: "SENTINEL-annotation-title"
+  - path: presence/{id}.lock
+    content: SENTINEL-lock
+# Files at a store root that both products write.
+sharedRootFiles:
+  - path: crashes/crash_1.log
+    content: SENTINEL-crash
+products:
+  antigravity-cli:
+    rootFiles:
+      - path: history.jsonl
+        content: |
+          {"display":"SENTINEL-history","timestamp":1767323040000}
+      - path: implicit/i1.pb
+        content: SENTINEL-implicit
+      - path: knowledge/knowledge.lock
+        content: SENTINEL-knowledge
+      - path: log/cli-1.log
+        content: SENTINEL-log
+      - path: persistent_terminals/t1
+        content: SENTINEL-terminal
+      - path: settings.json
+        content: '{"theme":"SENTINEL-theme"}'
+      - path: jetski_state.pbtxt
+        content: |
+          installation_uuid: "SENTINEL-uuid"
+          migrations {
+            key: "SENTINEL-key"
+            value: true
+          }
+      - path: jetbox_summaries_proto.pb
+        content: SENTINEL-summaries
+    sessionFiles: []
+    credentials: [antigravity-oauth-token, installation_id]
+  antigravity-ide:
+    rootFiles:
+      - path: daemon/hub_1.json
+        content: '{"port":"SENTINEL-port"}'
+      - path: antigravity_state.pbtxt
+        content: |
+          migrate_convos_into_projects: true
+          seen_nuxs {
+            uids: "SENTINEL-nux"
+          }
+      - path: agyhub_summaries_proto.pb
+        content: SENTINEL-summaries
+    sessionFiles:
+      - path: brain/{id}/.system_generated/messages/{id}.json
+        content: '{"content":"SENTINEL-message","sender":"SENTINEL-sender","recipient":"SENTINEL-recipient","priority":1,"hideFromUser":false,"id":"SENTINEL-id","timestamp":"2026-01-02T03:04:03Z"}'
+      - path: brain/{id}/.system_generated/messages/read.json
+        content: '{"0b9e6f4c-1d2a-4e5f-8a7b-9c0d1e2f3a4b":true}'
+      - path: brain/{id}/.system_generated/messages/undelivered/u1.json
+        content: SENTINEL-undelivered
+    credentials: [installation_id]

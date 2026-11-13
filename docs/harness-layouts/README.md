@@ -57,6 +57,8 @@ A saved report is JSON. These fields are the contract:
 - `fields[].count` is how many values were seen at that path. It can be lower than `records`
   when a record omits the field, and higher when an array repeats it.
 - `fields[].types` is the sorted set of JSON types seen at the path.
+- `bytes` is the total size of an artifact's files when the probe sizes them without reading
+  them. `records` then counts those files. It is omitted for an artifact that is read.
 - `truncated` means the artifact had more than 1024 distinct paths. Paths are kept in a fixed
   order — the record, then object keys in lexicographic order, depth-first — so the same file
   always keeps the same subset.

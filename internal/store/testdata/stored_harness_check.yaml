@@ -1,0 +1,59 @@
+# The stored-harness CHECK of each frozen schema version that changed it.
+#
+# Each case names a frozen schema version and holds the literal IN (...) list of
+# the model_harness CHECK on both sessions and daily_summary_harness, in the
+# order the DDL writes it. The lists are literals on purpose: a shipped
+# migration's CHECK never moves with the contract's known set, so these values
+# are not derived from schema.Harnesses(). The head check that turns red when
+# the known set grows without a migration is migration_v53_test.go.
+#
+# decoded by loadStoredHarnessChecks in migration_harness_check_test.go;
+# stored_harness_check.manifest.yaml lists the required case names.
+cases:
+  - name: v72-eight-values
+    schemaVersion: 72
+    values:
+      - claude-code
+      - opencode
+      - codex
+      - gemini-cli
+      - cursor
+      - antigravity
+      - strike
+      - pi
+  - name: v73-fourteen-values
+    schemaVersion: 73
+    values:
+      - claude-code
+      - opencode
+      - codex
+      - gemini-cli
+      - cursor
+      - antigravity
+      - strike
+      - pi
+      - grok-build
+      - devin-desktop
+      - cline
+      - kiro
+      - kiro-cli
+      - kiro-crew
+  - name: v78-sixteen-values
+    schemaVersion: 78
+    values:
+      - claude-code
+      - opencode
+      - codex
+      - gemini-cli
+      - cursor
+      - antigravity
+      - strike
+      - pi
+      - grok-build
+      - devin-desktop
+      - cline
+      - kiro
+      - kiro-cli
+      - kiro-crew
+      - antigravity-cli
+      - antigravity-ide

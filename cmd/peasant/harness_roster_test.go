@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dayvidpham/bestiary"
 	"github.com/peasant-labs/peasant/internal/harnesslayout"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -184,8 +185,8 @@ func rosterOwner(t *testing.T, owner string) ([]string, bool) {
 			harvestable = append(harvestable, harness)
 		}
 		harnesses = harnesslayout.LayoutOnly(layouts, harvestable)
-	case "archived-gemini":
-		harnesses = []schema.Harness{schema.HarnessGeminiCLI}
+	case "bestiary-archived":
+		harnesses = bestiary.ArchivedHarnesses()
 	default:
 		t.Fatalf("unknown harness roster owner %q", owner)
 	}

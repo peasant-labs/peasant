@@ -21,7 +21,7 @@ cases:
     subsetOf:
       - label: known
   - name: archived
-    owner: archived-gemini
+    owner: bestiary-archived
     disjoint: true
     subsetOf:
       - label: known

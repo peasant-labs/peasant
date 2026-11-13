@@ -1,0 +1,20 @@
+# Required case names of antigravity_cases.yaml.
+requiredNames:
+  - session-is-discovered-from-its-body-under-this-root
+  - index-row-without-a-body-under-this-root-is-not-a-session
+  - one-conversation-is-captured-by-exactly-one-tool
+  - capture-carries-the-tool-of-its-root
+  - both-tools-report-the-same-core-shape-for-the-same-session-tree
+  - ide-messages-directory-is-reported-for-the-ide-only
+  - cli-root-entries-are-reported-for-the-cli-only
+  - ide-root-entries-are-reported-for-the-ide-only
+  - body-shape-holds-tables-columns-and-counts
+  - no-sentinel-reaches-the-report
+  - title-is-never-set
+  - jsonl-values-never-reach-the-report
+  - text-and-protobuf-files-are-sized-not-read
+  - a-record-split-across-chunk-files-is-not-malformed
+  - credential-files-are-never-opened
+  - workspace-path-is-removed-from-the-default-report
+  - wal-and-shm-files-are-not-sessions
+  - missing-root-empty-root-and-index-without-bodies-give-no-sessions-and-no-error

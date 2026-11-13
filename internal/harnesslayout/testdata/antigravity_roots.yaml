@@ -1,0 +1,29 @@
+# The registered roots of the two Antigravity tools and the Cline tool. Root
+# paths are templates: {home} and {config} resolve per operating system.
+#
+# check is one of:
+#   root-is         tool has exactly the one root `root` on every operating system
+#   roots-disjoint  no resolved root of one tool equals or contains a root of another
+#   outside-tools   `path` is a root of `owner` (when set) and neither equals,
+#                   contains, nor lies inside any root of `tools`
+cases:
+  - name: cli-root-is-gemini-antigravity-cli
+    check: root-is
+    tools: [antigravity-cli]
+    root: "{home}/.gemini/antigravity-cli"
+  - name: ide-root-is-gemini-antigravity
+    check: root-is
+    tools: [antigravity-ide]
+    root: "{home}/.gemini/antigravity"
+  - name: cli-and-ide-roots-are-distinct-and-neither-contains-the-other
+    check: roots-disjoint
+    tools: [antigravity-cli, antigravity-ide]
+  - name: cline-antigravity-root-is-not-an-antigravity-root
+    check: outside-tools
+    path: "{config}/Antigravity/User/globalStorage/saoudrizwan.claude-dev"
+    owner: cline
+    tools: [antigravity-cli, antigravity-ide]
+  - name: shared-gemini-config-is-a-root-of-neither-tool
+    check: outside-tools
+    path: "{home}/.gemini/config"
+    tools: [antigravity-cli, antigravity-ide]
