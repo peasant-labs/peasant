@@ -319,15 +319,15 @@ test('fresh-install-redirects-to-setup', async () => {
   await expect(title(pageA)).toHaveText('peasant online');
   await seen(pageA);
   // The opening scan may still be running when the first stop is drawn; its
-  // later stops arrive with the scan's end. Capture the surface the reader
+  // later stops arrive when the scan ends. Capture the surface the reader
   // settles on, not a rail that is still growing.
-  await expect.poll(() => frames.find((frame) => frame.tab === 'A' && frame.kind === 'scan' && frame.scan.state === 'done'), 'the opening scan ended', { timeout: 30000 }).toBeTruthy();
-  const scanSettled = frames.find((frame) => frame.tab === 'A' && frame.kind === 'scan' && frame.scan.state === 'done');
-  await expect.poll(() => frames.some((frame) => frame.tab === 'A' && frame.kind === 'session' && frame.revision > scanSettled.revision), 'the scan end reached the page', { timeout: 10000 }).toBe(true);
+  await expect.poll(async () => (await snapshot(pageA.request)).view.scan.state, { message: 'the opening scan ended', timeout: 30000 }).toBe('done');
   const { id, view } = await snapshot(pageA.request);
+  const expectedStops = visibleStops(view).length;
+  await expect.poll(async () => (await stepOf(pageA)).total, 'the page holds the stops the settled view lists').toBe(expectedStops);
   const first = await stepOf(pageA);
   expect(first.index).toBe(1);
-  expect(first.total, 'the page counts the stops the server shows').toBe(visibleStops(view).length);
+  expect(first.total, 'the page counts the stops the server shows').toBe(expectedStops);
   await expect.poll(() => frames.some((frame) => frame.tab === 'A' && frame.kind === 'session' && frame.sessionId === id), 'the topic sends the session snapshot on subscribe').toBe(true);
   await shoot(pageA, '01-village');
 });
