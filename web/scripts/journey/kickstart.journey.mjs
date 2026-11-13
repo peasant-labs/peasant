@@ -451,7 +451,7 @@ test('second-tab-converges-without-reload', async () => {
   expect(new Set(sameSession).size, 'two tabs of the wizard share one session').toBe(1);
 
   // B opens on the answers A already gave.
-  await next(pageB).click();
+  await pageB.getByRole('button', { name: 'no', exact: true }).click();
   await expect(title(pageB)).toHaveText('choose sessions to import');
   await expect(pageB.locator('.ks-counts', { hasText: `${chosenSessions.length} chosen` })).toBeVisible();
   await expect(project(pageB).getByRole('checkbox', { name: 'main', exact: true })).toHaveAttribute('aria-checked', 'true');
