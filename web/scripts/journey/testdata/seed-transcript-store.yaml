@@ -1,0 +1,30 @@
+# The transcript-segment seeder creates its own temporary data directory and accepts no path.
+#
+# Each case runs the real seeder (`go run ./web/scripts/visual/seed-transcript-store.go`) in a
+# throwaway temporary root. A supplied path — as `-data-dir <path>` or as a positional argument —
+# must be refused before anything is created or opened, and every byte, entry and mode the
+# invocation found must be unchanged afterwards. A run with no path creates a fresh private
+# directory under TMPDIR, seeds it, and prints its path; the test reads the seeded rows back
+# through SQLite. `form` is how the path is supplied (`flag` by default, or `positional`).
+requiredNames:
+  - seeder-refuses-a-supplied-sentinel-store
+  - seeder-refuses-a-supplied-empty-directory
+  - seeder-refuses-a-supplied-symlink
+  - seeder-refuses-a-supplied-file
+  - seeder-refuses-a-relative-supplied-path
+  - seeder-refuses-a-positional-path
+  - seeder-creates-and-reads-a-fresh-temporary-directory
+cases:
+  - {name: seeder-refuses-a-supplied-sentinel-store, mode: existing-store}
+  - {name: seeder-refuses-a-supplied-empty-directory, mode: empty-dir}
+  - {name: seeder-refuses-a-supplied-symlink, mode: symlink}
+  - {name: seeder-refuses-a-supplied-file, mode: file}
+  - {name: seeder-refuses-a-relative-supplied-path, mode: relative}
+  - {name: seeder-refuses-a-positional-path, mode: existing-store, form: positional}
+  - name: seeder-creates-and-reads-a-fresh-temporary-directory
+    mode: fresh
+    refused: false
+    turns: 69
+    conversationTurns: 60
+    sessions: 1
+    entries: 80

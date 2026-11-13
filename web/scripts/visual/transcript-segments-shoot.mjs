@@ -11,12 +11,13 @@
    assertServedBuild runs before any capture. Transient PNGs stay under review-capture/ and are not committed.
 */
 import { spawn } from 'node:child_process'
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { assertServedBuild } from './served-build.mjs'
+import { isolatedServerSandbox } from './lib/isolated-sandbox.mjs'
 import { ownedServerSandbox } from './lib/owned-server-sandbox.mjs'
-import { startOwnedServer } from './lib/owned-server-start.mjs'
+import { startOwnedServer, stopOwnedServer } from './lib/owned-server-start.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE, '../../..')
@@ -67,22 +68,40 @@ async function directory(sessionId) {
 }
 
 mkdirSync(OUT, { recursive: true })
-// The server's configuration, data, state and cache directories and its HOME are a throwaway root of
-// this run, so it never opens the store or the home of the person running the script. The synthetic
-// transcript is seeded into the sandbox's own data directory, and the configuration directory starts
-// as an installed dashboard, so the home session list is served rather than sent to setup.
-const sandbox = ownedServerSandbox('transcript-segments')
-const seeded = JSON.parse((await run('go', ['run', './web/scripts/visual/seed-transcript-store.go', '-data-dir', sandbox.dataDir])).stdout)
-let serverLog = ''
-// It is started only when nothing answers on the port yet, and the wait ends when it answers or has
-// exited, so the pages are never driven against a server this run did not start.
-const server = await startOwnedServer({ port: PORT, portVariable: 'PEASANT_TRANSCRIPT_SEGMENTS_PORT', withinMs: 30_000, start: () => {
-  const child = spawn(BIN, ['web', 'start', '--foreground', '--no-browser', '--port', PORT, ...sandbox.args], { cwd: REPO, env: sandbox.env, stdio: ['ignore', 'pipe', 'pipe'] })
-  child.stdout.on('data', (chunk) => { serverLog += chunk })
-  child.stderr.on('data', (chunk) => { serverLog += chunk })
-  return child
-} }).catch((error) => { throw fail('starting peasant', error.message) })
+// The server's configuration, state, cache and HOME are a throwaway root of this run, so it never
+// opens the store or the home of the person running the script. The seeder creates its own data
+// directory under that root and accepts no path, so nothing can point it at a real store; the
+// sandbox then names the created directory when it starts the binary. The configuration directory
+// starts as an installed dashboard, so the home session list is served rather than sent to setup.
+// The root is this run's to remove: it is removed only after the server has provably stopped, or
+// when nothing was started, never while a child may still be alive.
+const owned = ownedServerSandbox('transcript-segments', {}, process.env, { removeOnExit: false })
+let seeded
+let sandbox
 try {
+  // Only the seeder's TMPDIR is redirected into the sandbox root; it keeps the Go tool environment
+  // (module cache) it needs, and it opens nothing under that HOME.
+  seeded = JSON.parse((await run('go', ['run', './web/scripts/visual/seed-transcript-store.go'], { env: { ...process.env, TMPDIR: owned.root } })).stdout)
+  sandbox = isolatedServerSandbox(owned.root, { dataDir: seeded.dataDir }, owned.env)
+} catch (error) {
+  // Nothing was started, so only this run's root is removed.
+  rmSync(owned.root, { recursive: true, force: true })
+  throw error
+}
+let serverLog = ''
+let server
+let failure
+let startAttempted = false
+try {
+  // It is started only when nothing answers on the port yet, and the wait ends when it answers or
+  // has exited, so the pages are never driven against a server this run did not start.
+  startAttempted = true
+  server = await startOwnedServer({ port: PORT, portVariable: 'PEASANT_TRANSCRIPT_SEGMENTS_PORT', withinMs: 30_000, start: () => {
+    const child = spawn(BIN, ['web', 'start', '--foreground', '--no-browser', '--port', PORT, ...sandbox.args], { cwd: REPO, env: sandbox.env, stdio: ['ignore', 'pipe', 'pipe'] })
+    child.stdout.on('data', (chunk) => { serverLog += chunk })
+    child.stderr.on('data', (chunk) => { serverLog += chunk })
+    return child
+  } }).catch((error) => { throw fail('starting peasant', error.message) })
   const provenance = await assertServedBuild({ origin: ORIGIN, markers: [MARKER, 'data-segment-boundaries', 'data-mounted-turn-bound'], bin: BIN, webRoot: WEB })
   const hostChunk = (await import('node:fs')).readdirSync(resolve(WEB, 'out/_next/static/chunks/app/projects/[[...segments]]')).find((name) => name.startsWith('page-'))
   if (!hostChunk) throw fail('verifying build provenance', 'the projects page chunk is missing from web/out')
@@ -309,7 +328,22 @@ try {
   console.log(JSON.stringify(report, null, 2))
 } catch (error) {
   console.error(serverLog)
-  throw error
-} finally {
-  server.kill('SIGTERM')
+  failure = error
 }
+let keepRoot = false
+if (server) {
+  try {
+    await stopOwnedServer(server, { what: 'the transcript-segment server', retained: owned.root })
+  } catch (error) {
+    console.error(`transcript segment capture cleanup failed: ${error.message}`)
+    failure ??= error
+    keepRoot = true
+  }
+} else if (startAttempted) {
+  // The start failed after a child may have been spawned; keep the root rather than remove files
+  // under a process that may still be alive.
+  keepRoot = true
+  console.error(`The transcript segment capture did not start its server; the sandbox ${owned.root} was kept in case its child is still alive.`)
+}
+if (!keepRoot) rmSync(owned.root, { recursive: true, force: true })
+if (failure) throw failure
