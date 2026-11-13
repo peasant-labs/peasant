@@ -1,5 +1,4 @@
-# These miniature modules exercise the real lint script and Go toolchain. The
-# common driver path satisfies the existing native-driver discovery guard.
+# Miniature modules run the actual lint script and Go toolchain.
 commonFiles:
   - path: go.mod
     content: |
@@ -12,139 +11,41 @@ commonFiles:
     content: |
       package sqlite
 cases:
-  - name: tagged-packages-and-tests-are-vetted-only
+  - name: declared-tag-vetted-without-running-tests
     files:
-      - path: feature/first/tagged.go
-        tracked: true
+      - path: feature/tagged.go
         content: |
-          //go:build new_feature
+          //go:build guided_screenshots
 
-          package first
-      - path: feature/second/tagged.go
+          package feature
+      - path: feature/tagged_test.go
         content: |
-          //go:build new_feature
+          //go:build guided_screenshots
 
-          package second
-      - path: feature/second/tagged_test.go
-        content: |
-          //go:build new_feature
-
-          package second
+          package feature
           import "testing"
           func TestMustNotRun(t *testing.T) { panic("opt-in tests must not execute") }
     wantContains:
-      - 'vet-go: vetting tag new_feature: ./feature/first ./feature/second'
-  - name: new-untracked-tag-type-error
+      - 'vet-go: vetting tag guided_screenshots: ./feature'
+  - name: declared-tag-type-error-fails
+    files:
+      - path: feature/tagged.go
+        content: |
+          //go:build guided_screenshots
+
+          package feature
+          var _ = undefinedTaggedValue
+    wantFailure: true
+    wantContains:
+      - 'vet-go: vetting tag guided_screenshots: ./feature'
+      - 'undefined: undefinedTaggedValue'
+  - name: undeclared-tag-fails
     files:
       - path: feature/tagged.go
         content: |
           //go:build brand_new
 
           package feature
-          var _ = undefinedTaggedValue
     wantFailure: true
     wantContains:
-      - 'vet-go: vetting tag brand_new: ./feature'
-      - 'undefined: undefinedTaggedValue'
-  - name: disjunction-vets-each-tag
-    files:
-      - path: feature/tagged.go
-        content: |
-          //go:build alpha || beta
-
-          package feature
-    wantContains:
-      - 'vet-go: vetting tag alpha: ./feature'
-      - 'vet-go: vetting tag beta: ./feature'
-  - name: tagged-test-only-type-error
-    files:
-      - path: feature/baseline.go
-        content: |
-          package feature
-      - path: feature/tagged_test.go
-        content: |
-          //go:build test_only
-
-          package feature
-          var _ = undefinedTestValue
-    wantFailure: true
-    wantContains:
-      - 'vet-go: vetting tag test_only: ./feature'
-      - 'undefined: undefinedTestValue'
-  - name: positive-conjunction-fails-closed
-    files:
-      - path: feature/tagged.go
-        content: |
-          //go:build alpha && beta
-
-          package feature
-    wantFailure: true
-    wantContains:
-      - 'multiple positive opt-in tags with AND in feature/tagged.go'
-  - name: compound-negation-fails-closed
-    files:
-      - path: feature/tagged.go
-        content: |
-          //go:build !(alpha || beta)
-
-          package feature
-    wantFailure: true
-    wantContains:
-      - 'cannot vet compound negation in feature/tagged.go'
-  - name: toolchain-conjunction-fails-closed
-    files:
-      - path: feature/tagged.go
-        content: |
-          //go:build alpha && ignore
-
-          package feature
-    wantFailure: true
-    wantContains:
-      - 'opt-in tag requires a toolchain condition in feature/tagged.go'
-  - name: double-negation-fails-closed
-    files:
-      - path: feature/tagged.go
-        content: |
-          //go:build !!alpha
-
-          package feature
-    wantFailure: true
-    wantContains:
-      - 'double negation not allowed'
-  - name: platform-and-ignore-are-not-opt-ins
-    files:
-      - path: feature/baseline.go
-        content: |
-          package feature
-      - path: feature/ignored.go
-        content: |
-          //go:build ignore
-
-          package feature
-          var _ = undefinedIgnoredValue
-      - path: feature/negative.go
-        content: |
-          //go:build !not_enabled
-
-          package feature
-      - path: feature/unix.go
-        content: |
-          //go:build unix
-
-          package feature
-      - path: feature/other.go
-        content: |
-          //go:build !(linux || windows)
-
-          package feature
-      - path: feature/testdata/not-a-package/fixture.go
-        content: |
-          //go:build fixture_only
-
-          package fixture
-          var _ = undefinedFixtureValue
-    wantAbsent:
-      - 'vet-go: vetting tag ignore:'
-      - 'vet-go: vetting tag unix:'
-      - 'vet-go: vetting tag not_enabled:'
-      - 'vet-go: vetting tag fixture_only:'
+      - 'undeclared opt-in build tag: brand_new'

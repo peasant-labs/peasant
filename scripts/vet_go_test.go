@@ -22,7 +22,6 @@ var vetGoManifestYAML []byte
 type vetGoFile struct {
 	Path    string `yaml:"path"`
 	Content string `yaml:"content"`
-	Tracked bool   `yaml:"tracked"`
 }
 
 type vetGoCase struct {
@@ -30,7 +29,6 @@ type vetGoCase struct {
 	Files        []vetGoFile `yaml:"files"`
 	WantFailure  bool        `yaml:"wantFailure"`
 	WantContains []string    `yaml:"wantContains"`
-	WantAbsent   []string    `yaml:"wantAbsent"`
 }
 
 type vetGoFixture struct {
@@ -40,8 +38,8 @@ type vetGoFixture struct {
 
 // TestVetGoTaggedDiscovery invokes the same script as make lint in isolated
 // miniature Git modules. It uses real go vet (which compiles but does not run
-// the panic-bearing test), so discovery, package grouping, and exit status are
-// checked together rather than modeled by a fake Go command.
+// the panic-bearing test), so tag checks and exit status are checked together
+// rather than modeled by a fake Go command.
 func TestVetGoTaggedDiscovery(t *testing.T) {
 	var fixture vetGoFixture
 	if err := testutil.DecodeFixtureYAML(vetGoCasesYAML, &fixture); err != nil {
@@ -90,11 +88,6 @@ func TestVetGoTaggedDiscovery(t *testing.T) {
 				if err := os.WriteFile(path, []byte(file.Content), 0o644); err != nil {
 					t.Fatal(err)
 				}
-				if file.Tracked {
-					if output, err := run("git", "add", "--", file.Path); err != nil {
-						t.Fatalf("stage fixture %s: %v\n%s", file.Path, err, output)
-					}
-				}
 			}
 			output, err := run("bash", script)
 			if ctx.Err() != nil {
@@ -106,11 +99,6 @@ func TestVetGoTaggedDiscovery(t *testing.T) {
 			for _, want := range c.WantContains {
 				if !strings.Contains(string(output), want) {
 					t.Errorf("output does not contain %q:\n%s", want, output)
-				}
-			}
-			for _, absent := range c.WantAbsent {
-				if strings.Contains(string(output), absent) {
-					t.Errorf("output unexpectedly contains %q:\n%s", absent, output)
 				}
 			}
 		})

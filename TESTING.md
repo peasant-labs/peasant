@@ -57,11 +57,12 @@ wall stays separate from the test wall. The frozen step set lives in
 `internal/testkit/testgate/testdata/pretest_steps.yaml`, which a test resolves
 against the Makefile so a dropped or reordered recipe line fails loudly.
 
-Lint discovers opt-in build tags and their packages from owned Go sources, including untracked
-files. It runs `go vet` for each tag and compiles its tagged tests without executing them. Platform,
-toolchain, and `ignore` constraints are not opt-in tags; testdata and third-party code are excluded.
-If a constraint combines opt-ins or requires a toolchain condition in a way a single `-tags` run
-cannot prove, lint fails and asks for tag discovery to be extended rather than silently skipping it.
+Lint declares opt-in build tags in `scripts/vet-go.sh` and fails if owned Go sources, including
+untracked files, contain an undeclared custom tag. It runs `go vet` for each tag and compiles its
+tagged tests without executing them. Platform, toolchain, and `ignore` constraints are not opt-in
+tags; testdata and third-party code are excluded. Vet selects files for its target platform; the
+Windows cross-vet step in `.github/workflows/tests.yml` also vets Windows-specific files. Tags are
+vetted individually, not in combinations that may be required by a build constraint.
 
 The two `projection-negative-*` steps run the build-tagged negative builds in
 `internal/transcript` with a scoped `-run`. Each build replaces the production
