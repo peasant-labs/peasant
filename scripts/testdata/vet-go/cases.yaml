@@ -1,0 +1,51 @@
+# Miniature modules run the actual lint script and Go toolchain.
+commonFiles:
+  - path: go.mod
+    content: |
+      module github.com/peasant-labs/peasant
+      go 1.25.0
+  - path: baseline.go
+    content: |
+      package baseline
+  - path: third_party/zombiezen-sqlite/driver.go
+    content: |
+      package sqlite
+cases:
+  - name: declared-tag-vetted-without-running-tests
+    files:
+      - path: feature/tagged.go
+        content: |
+          //go:build guided_screenshots
+
+          package feature
+      - path: feature/tagged_test.go
+        content: |
+          //go:build guided_screenshots
+
+          package feature
+          import "testing"
+          func TestMustNotRun(t *testing.T) { panic("opt-in tests must not execute") }
+    wantContains:
+      - 'vet-go: vetting tag guided_screenshots: ./feature'
+  - name: declared-tag-type-error-fails
+    files:
+      - path: feature/tagged.go
+        content: |
+          //go:build guided_screenshots
+
+          package feature
+          var _ = undefinedTaggedValue
+    wantFailure: true
+    wantContains:
+      - 'vet-go: vetting tag guided_screenshots: ./feature'
+      - 'undefined: undefinedTaggedValue'
+  - name: undeclared-tag-fails
+    files:
+      - path: feature/tagged.go
+        content: |
+          //go:build brand_new
+
+          package feature
+    wantFailure: true
+    wantContains:
+      - 'undeclared opt-in build tag: brand_new'

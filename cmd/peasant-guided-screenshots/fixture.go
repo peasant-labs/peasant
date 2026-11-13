@@ -69,13 +69,13 @@ func (s ingestProgressState) valid() bool {
 type guidedSection string
 
 const (
-	guidedSectionAutoIngest  guidedSection = kickstart.SectionAutoIngest
-	guidedSectionPublication guidedSection = kickstart.SectionPublication
-	guidedSectionAutoPublish guidedSection = kickstart.SectionAutoPublish
-	guidedSectionPrivacy     guidedSection = kickstart.SectionPrivacy
-	guidedSectionLicense     guidedSection = kickstart.SectionLicense
-	guidedSectionDestination guidedSection = kickstart.SectionDestination
-	guidedSectionRetention   guidedSection = kickstart.SectionRetention
+	guidedSectionAutoIngest  guidedSection = guidedSection(kickstart.SectionAutoIngest)
+	guidedSectionPublication guidedSection = guidedSection(kickstart.SectionPublication)
+	guidedSectionAutoPublish guidedSection = guidedSection(kickstart.SectionAutoPublish)
+	guidedSectionPrivacy     guidedSection = guidedSection(kickstart.SectionPrivacy)
+	guidedSectionLicense     guidedSection = guidedSection(kickstart.SectionLicense)
+	guidedSectionDestination guidedSection = guidedSection(kickstart.SectionDestination)
+	guidedSectionRetention   guidedSection = guidedSection(kickstart.SectionRetention)
 )
 
 func (s guidedSection) valid() bool {

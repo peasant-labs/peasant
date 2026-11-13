@@ -57,6 +57,13 @@ wall stays separate from the test wall. The frozen step set lives in
 `internal/testkit/testgate/testdata/pretest_steps.yaml`, which a test resolves
 against the Makefile so a dropped or reordered recipe line fails loudly.
 
+Lint declares opt-in build tags in `scripts/vet-go.sh` and fails if owned Go sources, including
+untracked files, contain an undeclared custom tag. It runs `go vet` for each tag and compiles its
+tagged tests without executing them. Platform, toolchain, and `ignore` constraints are not opt-in
+tags; testdata and third-party code are excluded. Vet selects files for its target platform; the
+Windows cross-vet step in `.github/workflows/tests.yml` also vets Windows-specific files. Tags are
+vetted individually, not in combinations that may be required by a build constraint.
+
 The two `projection-negative-*` steps run the build-tagged negative builds in
 `internal/transcript` with a scoped `-run`. Each build replaces the production
 seed policy with a deliberately wrong one and asserts that exactly the designated
@@ -824,8 +831,9 @@ entries, and changed count declarations before any PNG is published. No local co
 repository, credential, or other user data is read into the evidence.
 
 This harness is outside the default tests and builds. All command and test files are guarded by the
-opt-in `guided_screenshots` build tag, so `go test ./...`, `make check`, normal `go build`/`make
-build`, and the production Peasant binary do not compile or run it.
+opt-in `guided_screenshots` build tag, so `go test ./...`, normal `go build`/`make build`, and the
+production Peasant binary do not compile or run it. The lint step of `make check` discovers and vets
+opt-in tagged packages, including this harness, but does not run their tests.
 
 ### Running the harness
 
