@@ -1,4 +1,4 @@
-requiredNames: [original-locals, renamed-locals, dollar-locals, missing-anchor, duplicate-anchor, literal-navigation-mutation, literal-body-mutation]
+requiredNames: [original-locals, renamed-locals, dollar-locals, missing-anchor, duplicate-anchor, literal-navigation-mutation, literal-body-mutation, unparsable-mutant-refused, module-chunk-checked-without-running]
 cases:
   - name: original-locals
     source: 'async function fetcher(t){let a=await (0,c.yT)(u,{method:"POST",signal:t});if(!o.rHE.safeParse(a.body).success)throw Error("invalid");return a}'
@@ -23,3 +23,12 @@ cases:
     mutation: village-body-missing
     source: 'function body(){return x.jsx("div",{className:"village-page",children:[]})}'
     guard: '("section",{className:"village-page",hidden:!0,children:['
+  # The mutant must still parse, or the app fails on a syntax error instead of on the removed behaviour.
+  - name: unparsable-mutant-refused
+    source: 'async function f(t){let a=await (0,c.yT)(u,{method:"POST",signal:t});if(!o.rHE.safeParse(a.body).success)throw Error("invalid");return a'
+    error: no longer parses as an ES module
+  # A chunk is checked as the ES module it is (import/export accepted), and only parsed:
+  # evaluating it would exit the checker with status 9 and import a module that does not exist.
+  - name: module-chunk-checked-without-running
+    source: 'import{missing}from"./chunk-that-does-not-exist.js";process.exit(9);export default async function m(e){let s=await (0,c.yT)(t,{method:"POST",signal:e});if(!o.rHE.safeParse(s.body).success)throw Error("invalid");return missing(s)}'
+    guard: 'if(!s.ok)throw Error("typed partial report discarded")'

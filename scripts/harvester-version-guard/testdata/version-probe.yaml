@@ -1,0 +1,20 @@
+# Which parserVersions source versionProbe picks for an archived revision.
+# tree: registered (internal/ingest/harvester_versions.go exists), pre-registry
+# (it does not), or unreadable (internal/ingest cannot be searched).
+# reads/neverReads are selector expressions the chosen source must or must not use.
+requiredNames:
+  - registered-revision-reads-the-registry
+  - pre-registry-revision-reads-the-baseline
+  - unreadable-archive-fails-closed
+cases:
+  - name: registered-revision-reads-the-registry
+    tree: registered
+    reads: [ingest.DefaultAdapterRegistry, ingest.HarvesterVersionRegistry, target.AdapterVersion, target.IndexerVersion]
+    neverReads: [ingest.CurrentIndexVersion]
+  - name: pre-registry-revision-reads-the-baseline
+    tree: pre-registry
+    reads: [ingest.DefaultAdapterRegistry, ingest.CurrentIndexVersion]
+    neverReads: [ingest.HarvesterVersionRegistry]
+  - name: unreadable-archive-fails-closed
+    tree: unreadable
+    error: cannot tell which version registry
