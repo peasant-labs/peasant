@@ -17,6 +17,8 @@ requiredNames:
   - failed-read-reports-no-account-and-allows-the-next
   - last-unsubscribe-removes-the-listener-and-the-timer
   - unsubscribe-last-during-a-read-remount-waits-for-its-end
+  - unsubscribe-after-completion-remount-waits-out-the-gap
+  - orphaned-read-ends-unheard-remount-waits-out-the-gap
 cases:
   # Five focus events inside one second: one read at once, one after the gap.
   - name: one-read-per-focus-burst
@@ -133,6 +135,53 @@ cases:
       - {at: 1000, pendingTimers: 1}
       - {at: 1200, focus: true}
       # The fresh read reaches the new subscriber and ends at 3100.
+      - {at: 3200, unsubscribe: online}
+      - {at: 3201, listeners: 0, pendingTimers: 0}
+      - {at: 4000, focus: true}
+    until: 8000
+    expectReads: [0, 3000]
+    expectHeard: {sidebar: [], online: [signed out]}
+    expectListening: false
+
+  # A read completed, then the last subscriber left. A quick remount has no
+  # reading to show, so it waits out the rest of the two seconds from the
+  # completed read's actual end and then reads once. It is not shown the old
+  # account and it does not start a read immediately on mounting.
+  - name: unsubscribe-after-completion-remount-waits-out-the-gap
+    reads: [{ms: 100, answer: ada}, {ms: 100, answer: signed out}]
+    timeline:
+      - {at: 0, subscribe: sidebar}
+      # The read ends at 100; the subscriber leaves at 300.
+      - {at: 300, unsubscribe: sidebar}
+      - {at: 600, subscribe: online}
+      - {at: 601, listeners: 1, pendingTimers: 1}
+      # A focus inside the gap adds nothing to the one scheduled read.
+      - {at: 800, focus: true}
+      # The fresh read starts at 2100, two seconds after the read ended.
+      - {at: 2201, pendingTimers: 0}
+      - {at: 2400, unsubscribe: online}
+      - {at: 2401, listeners: 0, pendingTimers: 0}
+      - {at: 3000, focus: true}
+    until: 8000
+    expectReads: [0, 2100]
+    expectHeard: {sidebar: [ada], online: [signed out]}
+    expectListening: false
+
+  # A slow read outlives every subscriber, so nobody hears it. A remount inside
+  # the gap starts none of its own and waits for one fresh read at the end of
+  # the gap measured from the old read's actual end.
+  - name: orphaned-read-ends-unheard-remount-waits-out-the-gap
+    reads: [{ms: 1000, answer: ada}, {ms: 100, answer: signed out}]
+    timeline:
+      - {at: 0, subscribe: sidebar}
+      - {at: 300, unsubscribe: sidebar}
+      # The old read ends unheard at 1000; no timer or listener is left.
+      - {at: 1001, pendingTimers: 0}
+      - {at: 1200, subscribe: online}
+      - {at: 1201, listeners: 1, pendingTimers: 1}
+      - {at: 1500, focus: true}
+      # The fresh read starts at 3000, two seconds after the old read ended.
+      - {at: 3101, pendingTimers: 0}
       - {at: 3200, unsubscribe: online}
       - {at: 3201, listeners: 0, pendingTimers: 0}
       - {at: 4000, focus: true}

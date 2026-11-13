@@ -20,8 +20,11 @@
  * the next one. A read started for a subscriber who has left is not canceled:
  * its answer is told to nobody, but its end releases the in-flight guard and
  * starts the gap for whoever is mounted now, so a remount never overlaps it or
- * silently waits for a focus. The clock, the timer and the event target are
- * injected, so the timing is tested on a fake clock against the real reader.
+ * silently waits for a focus. The end time survives a period with no
+ * subscribers, but the account reading does not: a remount inside the gap
+ * schedules one fresh read at its end rather than showing an old account. The
+ * clock, the timer and the event target are injected, so the timing is tested
+ * on a fake clock against the real reader.
  */
 
 import type { SyncAuthResponse } from '@peasant-labs/schema';
@@ -49,12 +52,13 @@ export interface VillageAuthFocusDeps {
 export interface VillageAuthFocusReader {
   /**
    * Hear every reading from now on. A subscriber is told the last reading at
-   * once when there is one; the first subscriber starts listening for focus,
-   * and a subscriber is read for unless a read is in flight or the last one
-   * ended inside the gap. Returns the unsubscribe; the last one stops
-   * listening, drops a trailing read that has not started, lets a read in
-   * flight go unheard, and forgets the last reading. A read still in flight
-   * keeps the guard; its end starts the gap for whoever mounts next.
+   * once when there is one; with no reading and a read inside the gap it
+   * schedules one fresh read for the end of that gap, so a quick remount
+   * neither shows an old account nor waits for a focus. The first subscriber
+   * starts listening for focus, and a subscriber is read for unless a read is
+   * in flight. Returns the unsubscribe; the last one stops listening, drops a
+   * trailing read that has not started, lets a read in flight go unheard, and
+   * forgets the last reading but keeps its end time for the gap.
    */
   subscribe(listener: VillageAuthListener): () => void;
 }
@@ -96,13 +100,12 @@ export function createVillageAuthFocusReader(deps: VillageAuthFocusDeps): Villag
         return;
       }
       // The subscriber this read belonged to has left. Its answer is not told,
-      // but its end releases the guard and starts the gap for whoever is
-      // mounted now, and a fresh read runs at the end of that gap.
+      // but its end releases the guard and keeps the gap for whoever mounts
+      // now, and a fresh read runs at the end of that gap.
       inFlight = false;
       lastEnd = deps.now();
       owed = false;
       if (listeners.size > 0) schedule();
-      else lastEnd = null;
     };
     let reading: Promise<SyncAuthResponse>;
     try {
@@ -145,15 +148,24 @@ export function createVillageAuthFocusReader(deps: VillageAuthFocusDeps): Villag
       listeners.add(listener);
       if (first) deps.target.addEventListener('focus', onFocus);
       if (last !== null) listener(last.reading);
-      // A reading younger than the gap is the one to show: the subscriber has it.
-      ask(false);
+      // With no reading to show (the period emptied and forgot it), a mount
+      // inside the gap waits for one fresh read at the end of the gap instead
+      // of showing an old account or waiting for a focus. A mount with a
+      // reading to show, or with a read in flight, asks as before and does not
+      // add a trailing read to an active period.
+      if (last === null && !inFlight && trailing === null && lastEnd !== null && deps.now() - lastEnd < gapMs) {
+        schedule();
+      } else {
+        ask(false);
+      }
       return () => {
         if (!listeners.delete(listener) || listeners.size > 0) return;
         // Nobody is left to tell: stop listening, drop the trailing read, and
-        // forget the last reading, so whoever comes next reads the sign-in
-        // afresh instead of being shown an old one. A read in flight is not
-        // canceled: it keeps the guard until it ends, and its completion starts
-        // the gap for whoever mounts next.
+        // forget the last reading, so whoever comes next is not shown an old
+        // account. Keep the end time: a remount inside the gap waits for one
+        // fresh read at its end. A read in flight is not canceled; it keeps the
+        // guard until it ends, and its completion starts the gap for whoever
+        // mounts next.
         deps.target.removeEventListener('focus', onFocus);
         if (trailing !== null) {
           deps.clearTimer(trailing);
@@ -162,7 +174,6 @@ export function createVillageAuthFocusReader(deps: VillageAuthFocusDeps): Villag
         period += 1;
         owed = false;
         last = null;
-        if (!inFlight) lastEnd = null;
       };
     },
   };
