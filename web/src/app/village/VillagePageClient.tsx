@@ -4,7 +4,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 import { zLocalContributionEvidenceKind, type LocalContributionEvidenceKind } from '@peasant-labs/schema';
 import { VillageObservations } from '@peasant-labs/fairtrade/ui';
 import { Button, Input } from '@/lib/ft-ui';
-import { fetchVillageAuth } from '@/lib/api/settings';
+import { villageAuthFocusReader } from '@/lib/api/villageAuthFocus';
 import { ObservationController } from '@/lib/village/observations';
 import { presentObservations } from '@/lib/village/presentation';
 import './village.css';
@@ -18,16 +18,13 @@ export default function VillagePageClient() {
   const [limit, setLimit] = useState('50');
   // The signed-in account's name, so the page names it instead of its id.
   const [handle, setHandle] = useState<string | null>(null);
+  // The sign-in is read through the one reader the sidebar shares, so one
+  // window focus is at most one read of it however many are mounted.
+  useEffect(() => villageAuthFocusReader().subscribe(auth => setHandle(auth?.authenticated && auth.username ? auth.username : null)), []);
   useEffect(() => {
-    const readHandle = () => {
-      fetchVillageAuth()
-        .then(auth => setHandle(auth.authenticated && auth.username ? auth.username : null))
-        .catch(() => setHandle(null));
-    };
-    readHandle();
     void controller.load();
     // A return from login/logout elsewhere re-reads only the selected LOCAL projection.
-    const readSelected = () => { readHandle(); void controller.reselect(); };
+    const readSelected = () => { void controller.reselect(); };
     window.addEventListener('focus', readSelected);
     return () => { window.removeEventListener('focus', readSelected); controller.clear(); };
   }, [controller]);
