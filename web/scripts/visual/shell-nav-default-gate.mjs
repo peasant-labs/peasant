@@ -182,10 +182,16 @@ process.on('exit', () => {
 })
 
 // ── page probes ──────────────────────────────────────────────────────────────────────────────────
+// Waits for the page to render two frames. Headless Chrome can answer a layout read with style it has
+// not yet recomputed for a change React just made (a rule matched by `:has()`, or one reading a custom
+// property set on the root), until the next rendered frame; a geometry read taken before that frame can
+// pass a layout the screen never shows. Every read below that decides a verdict waits for it first.
+const renderedFrame = (page) => page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+
 // What the notice says and offers. Its position and the page's clearance come from
 // chromeClearance, the same probe the chrome gate and the component contract share.
 const noticeState = async (page) => ({
-  ...await page.evaluate(({ notice, retry, live }) => {
+  ...await renderedFrame(page).then(() => page.evaluate(({ notice, retry, live }) => {
     const section = document.querySelector(notice)
     const status = section?.querySelector('[role="status"]')
     return {
@@ -199,7 +205,7 @@ const noticeState = async (page) => ({
       documentOverflow: document.documentElement.scrollHeight - window.innerHeight,
       scrollY: window.scrollY,
     }
-  }, { notice: NOTICE, retry: RETRY, live: LIVE }),
+  }, { notice: NOTICE, retry: RETRY, live: LIVE })),
   clearance: await page.evaluate(chromeClearance, PINNED_QUERY),
 })
 
@@ -215,6 +221,7 @@ const waitFor = async (page, predicate, timeoutMs, what) => {
 }
 
 const assertChromeHolds = async (page, theme, where) => {
+  await renderedFrame(page)
   const failures = [...await page.evaluate(chromeFailures, manifest, { theme, shipped }), ...(await page.evaluate(chromeClearance, PINNED_QUERY)).failures]
   if (failures.length) throw new Error(`the ${theme} sidebar at ${where} breaks the shell manifest: ${JSON.stringify(failures)}`)
 }
@@ -367,9 +374,9 @@ const drivePage = async (theme, spec, seen) => {
     await startFrameSampler(page)
   }
 
-  // stopped: the notice at the top of the page, saying the right thing, the page under it
+  // stopped: the notice at the top of the page column, saying the right thing, the page body under it
   await stopServer()
-  await waitFor(page, (s) => s.shown && s.noticeHeight !== '' && s.clearance.failures.length === 0, OFFLINE_WITHIN_MS, `the ${where} offline notice (placed at the top of the page, <main> under it)`)
+  await waitFor(page, (s) => s.shown && s.noticeHeight !== '' && s.clearance.failures.length === 0, OFFLINE_WITHIN_MS, `the ${where} offline notice (at the top of <main>, the page body under it)`)
   // The live region is written by a passive effect after the notice paints; give it that render.
   const state = await waitFor(page, (s) => s.live !== '', 2000, `the ${where} live region announcing the stop`)
   const failures = []
@@ -439,7 +446,7 @@ const drivePage = async (theme, spec, seen) => {
       captured.push(await capture(page, gate, theme, spec.name))
   }
   const c = state.clearance
-  console.log(`OK offline ${where}: notice ${c.notice}px under the ${c.header}px chrome (${c.noticePinned ? 'pinned' : 'in the page flow'}), <main> starts at ${c.mainTop}px, scroll padding ${c.scrollPaddingTop}px, command "${state.command}"${note}`)
+  console.log(`OK offline ${where}: notice ${c.notice}px under the ${c.header}px chrome (${c.noticePinned ? 'pinned' : 'in the page flow'}), <main> starts at ${c.mainTop}px with the notice at its top, the page body at ${c.bodyTop}px, scroll padding ${c.scrollPaddingTop}px, command "${state.command}"${note}`)
 
   // still down: a failed `try again` is announced, with the time of the check
   if (!await pressRetry(page)) throw new Error(`the ${where} notice has no \`try again\` to press`)
@@ -462,7 +469,7 @@ const drivePage = async (theme, spec, seen) => {
   } else {
     pressed = await pressRetry(page)
   }
-  await waitFor(page, (s) => !s.shown && s.noticeHeight === '' && s.clearance.failures.length === 0, RECOVER_WITHIN_MS, `the ${where} notice clearing after the restart (with <main> back under the chrome)`)
+  await waitFor(page, (s) => !s.shown && s.noticeHeight === '' && s.clearance.failures.length === 0, RECOVER_WITHIN_MS, `the ${where} notice clearing after the restart (with the page body back under the chrome)`)
   const back = await waitFor(page, (s) => s.live === ANNOUNCE.back, 2000, `the ${where} live region announcing the return`)
   if (keepsPlace) {
     const went = await frameTransition(page, false)
