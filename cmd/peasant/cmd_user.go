@@ -123,7 +123,7 @@ annotations are foreign and are never claimed.`,
 		},
 	}
 	cmd.Flags().BoolVar(&all, "all", false, "Reassign every local session and annotation, not only unclaimed ones")
-	cmd.Flags().BoolVar(&yes, "yes", false, "Confirm --all without asking on a terminal")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Confirm --all without asking on a terminal")
 	cmd.Flags().BoolVar(&jsonOutput, defaults.JSONFlagName, false, "Output as JSON instead of human-readable")
 	return cmd
 }
