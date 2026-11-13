@@ -318,6 +318,12 @@ test('fresh-install-redirects-to-setup', async () => {
   await expect(pageA.getByRole('heading', { level: 1, name: 'set up peasant' })).toBeVisible();
   await expect(title(pageA)).toHaveText('peasant online');
   await seen(pageA);
+  // The opening scan may still be running when the first stop is drawn; its
+  // later stops arrive with the scan's end. Capture the surface the reader
+  // settles on, not a rail that is still growing.
+  await expect.poll(() => frames.find((frame) => frame.tab === 'A' && frame.kind === 'scan' && frame.scan.state === 'done'), 'the opening scan ended', { timeout: 30000 }).toBeTruthy();
+  const scanSettled = frames.find((frame) => frame.tab === 'A' && frame.kind === 'scan' && frame.scan.state === 'done');
+  await expect.poll(() => frames.some((frame) => frame.tab === 'A' && frame.kind === 'session' && frame.revision > scanSettled.revision), 'the scan end reached the page', { timeout: 10000 }).toBe(true);
   const { id, view } = await snapshot(pageA.request);
   const first = await stepOf(pageA);
   expect(first.index).toBe(1);
