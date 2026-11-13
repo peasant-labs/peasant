@@ -1,0 +1,39 @@
+# An interrupt in an observation write is SQLite's bare word "interrupted".
+# The wrapper adds the expired writer hold budget beside it, but only as an
+# observation made at the end of the step: the same note must appear whether the
+# budget or another interrupt fired, so no case may read it as a proved cause.
+# A caller cancellation, a live budget, and a failure with its own cause keep
+# their own error. Every case rolls back its transaction.
+requiredNames:
+  - interrupt-after-budget
+  - interrupt-after-caller-cancel
+  - interrupt-after-budget-and-caller-cancel
+  - interrupt-from-elsewhere
+  - interrupt-past-budget-from-elsewhere
+  - own-cause-after-budget
+cases:
+  - name: interrupt-after-budget
+    outcome: interrupt-after-budget
+    wantCode: interrupt
+    wantHoldNote: true
+  - name: interrupt-after-caller-cancel
+    outcome: interrupt-after-caller-cancel
+    wantCode: interrupt
+    wantHoldNote: false
+  - name: interrupt-after-budget-and-caller-cancel
+    outcome: interrupt-after-budget-and-caller-cancel
+    wantCode: interrupt
+    wantHoldNote: false
+  - name: interrupt-from-elsewhere
+    outcome: interrupt-from-elsewhere
+    wantCode: interrupt
+    wantHoldNote: false
+  - name: interrupt-past-budget-from-elsewhere
+    outcome: interrupt-past-budget-from-elsewhere
+    wantCode: interrupt
+    wantHoldNote: true
+  - name: own-cause-after-budget
+    outcome: own-cause-after-budget
+    wantCode: error
+    wantOwnCause: true
+    wantHoldNote: false
