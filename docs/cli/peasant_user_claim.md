@@ -22,6 +22,7 @@ peasant user claim [flags]
       --all    Reassign every local session and annotation, not only unclaimed ones
   -h, --help   help for claim
       --json   Output as JSON instead of human-readable
+      --yes    Confirm --all without asking on a terminal
 ```
 
 ### Options inherited from parent commands

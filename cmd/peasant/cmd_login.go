@@ -63,7 +63,9 @@ func BuildLoginCommand() *cobra.Command {
 			fmt.Fprintf(cmd.OutOrStdout(), "Logged in as %s\n", creds.Username)
 			// The ownership question belongs to the standalone sign-in path. A
 			// claim failure never fails a completed login: the decision is not
-			// recorded, so `peasant user claim` can retry.
+			// recorded, so `peasant user claim` can retry. The prompt key carries
+			// the local owner id: a decision in one data directory never
+			// suppresses the prompt in another that shares the state directory.
 			claimDeps := signInClaimDeps{
 				in:          cmd.InOrStdin(),
 				out:         cmd.ErrOrStderr(),
@@ -73,14 +75,25 @@ func BuildLoginCommand() *cobra.Command {
 				capture: func(ctx context.Context) (auth.CredentialSnapshot, error) {
 					return auth.CaptureCredentials(ctx, configDir)
 				},
-				claim: func(ctx context.Context, snapshot auth.CredentialSnapshot, all bool) (store.ClaimResult, error) {
-					db, cleanup, err := openDB(cmd)
-					if err != nil {
-						return store.ClaimResult{}, err
-					}
-					defer cleanup()
-					return db.ClaimArtifacts(ctx, snapshot, all, store.ClaimSourceSignInPrompt, time.Now().UnixMilli())
-				},
+			}
+			db, cleanup, dbErr := openDB(cmd)
+			if dbErr != nil {
+				fmt.Fprintln(cmd.ErrOrStderr(), claimPromptWarning(fmt.Errorf("open the local store: %w", dbErr)))
+				return nil
+			}
+			defer cleanup()
+			owner, ownerErr := db.LocalOwner(cmd.Context())
+			if ownerErr != nil || owner == nil {
+				message := "the local owner is missing"
+				if ownerErr != nil {
+					message = ownerErr.Error()
+				}
+				fmt.Fprintln(cmd.ErrOrStderr(), claimPromptWarning(fmt.Errorf("read the local owner: %s", message)))
+				return nil
+			}
+			claimDeps.localOwnerID = owner.ID
+			claimDeps.claim = func(ctx context.Context, snapshot auth.CredentialSnapshot, all bool) (store.ClaimResult, error) {
+				return db.ClaimArtifacts(ctx, snapshot, all, store.ClaimSourceSignInPrompt, time.Now().UnixMilli())
 			}
 			if err := promptSignInClaim(cmd.Context(), creds, claimDeps); err != nil {
 				fmt.Fprintln(cmd.ErrOrStderr(), claimPromptWarning(err))

@@ -23,11 +23,15 @@ type Decision struct {
 	DecidedAt int64  `json:"decidedAt"`
 }
 
-// State holds the prompt decisions for one state directory, keyed by the
-// normalized Village base URL plus the Village user UUID.
+// State holds the prompt decisions for one state directory. Decisions are
+// keyed by local owner id plus the normalized Village base URL plus the Village
+// user UUID, so one data directory's answer never suppresses another's prompt.
+// Notices records the one-time already-signed-in notice separately, so showing
+// it does not settle the real prompt.
 type State struct {
 	Version   int                 `json:"version"`
 	Decisions map[string]Decision `json:"decisions"`
+	Notices   map[string]int64    `json:"notices,omitempty"`
 }
 
 // DefaultPath returns the prompt-state path under a peasant state directory
@@ -36,11 +40,12 @@ func DefaultPath(stateDir string) string {
 	return filepath.Join(stateDir, FileName)
 }
 
-// ScopeKey keys one Village account scope. The base URL must already be
-// normalized; a newline cannot occur in a normalized URL and separates the two
-// identity parts unambiguously.
-func ScopeKey(villageURL, userID string) string {
-	return villageURL + "\n" + userID
+// ScopeKey keys one prompt scope. The local owner id keeps two data
+// directories sharing a state directory independent; the Village base URL must
+// already be normalized, and a newline cannot occur in a normalized URL or a
+// local owner id, so the three parts are unambiguous.
+func ScopeKey(localOwnerID, villageURL, userID string) string {
+	return localOwnerID + "\n" + villageURL + "\n" + userID
 }
 
 // Load reads prompt state. A missing file is an empty state, not an error.
@@ -65,29 +70,52 @@ func Load(path string) (State, error) {
 	if state.Decisions == nil {
 		state.Decisions = map[string]Decision{}
 	}
+	if state.Notices == nil {
+		state.Notices = map[string]int64{}
+	}
 	return state, nil
 }
 
-// Decided reports whether the prompt was already settled for this account
-// scope, whatever the answer was.
-func (s State) Decided(villageURL, userID string) bool {
-	_, ok := s.Decisions[ScopeKey(villageURL, userID)]
+// Decided reports whether the prompt was already settled for this local owner
+// and account scope, whatever the answer was.
+func (s State) Decided(localOwnerID, villageURL, userID string) bool {
+	_, ok := s.Decisions[ScopeKey(localOwnerID, villageURL, userID)]
 	return ok
 }
 
-// Record marks the prompt settled for one account scope.
-func (s *State) Record(villageURL, userID string, choice Choice, nowMs int64) {
+// Record marks the prompt settled for one local owner and account scope.
+func (s *State) Record(localOwnerID, villageURL, userID string, choice Choice, nowMs int64) {
 	s.Version = stateVersion
 	if s.Decisions == nil {
 		s.Decisions = map[string]Decision{}
 	}
-	s.Decisions[ScopeKey(villageURL, userID)] = Decision{Choice: choice, DecidedAt: nowMs}
+	s.Decisions[ScopeKey(localOwnerID, villageURL, userID)] = Decision{Choice: choice, DecidedAt: nowMs}
+}
+
+// Noticed reports whether the one-time already-signed-in notice was already
+// shown for this local owner and account scope.
+func (s State) Noticed(localOwnerID, villageURL, userID string) bool {
+	_, ok := s.Notices[ScopeKey(localOwnerID, villageURL, userID)]
+	return ok
+}
+
+// RecordNotice marks the one-time notice shown. It is not a prompt decision:
+// the real sign-in prompt remains due.
+func (s *State) RecordNotice(localOwnerID, villageURL, userID string, nowMs int64) {
+	s.Version = stateVersion
+	if s.Notices == nil {
+		s.Notices = map[string]int64{}
+	}
+	s.Notices[ScopeKey(localOwnerID, villageURL, userID)] = nowMs
 }
 
 // Save atomically replaces the prompt state under a private mode.
 func Save(path string, state State) error {
 	if state.Decisions == nil {
 		state.Decisions = map[string]Decision{}
+	}
+	if state.Notices == nil {
+		state.Notices = map[string]int64{}
 	}
 	state.Version = stateVersion
 	data, err := json.MarshalIndent(state, "", "  ")

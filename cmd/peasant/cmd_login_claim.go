@@ -18,13 +18,14 @@ import (
 // Production wires the saved credential snapshot and the analytics store;
 // tests can drive each outcome without a network login.
 type signInClaimDeps struct {
-	in          io.Reader
-	out         io.Writer
-	interactive bool
-	statePath   string
-	now         func() int64
-	capture     func(context.Context) (auth.CredentialSnapshot, error)
-	claim       func(context.Context, auth.CredentialSnapshot, bool) (store.ClaimResult, error)
+	in           io.Reader
+	out          io.Writer
+	interactive  bool
+	statePath    string
+	localOwnerID string
+	now          func() int64
+	capture      func(context.Context) (auth.CredentialSnapshot, error)
+	claim        func(context.Context, auth.CredentialSnapshot, bool) (store.ClaimResult, error)
 }
 
 // promptSignInClaim asks once per account scope and data directory whether the
@@ -32,7 +33,7 @@ type signInClaimDeps struct {
 // asks nothing and records nothing. A decline is recorded but is not a claim.
 // A claim failure records no decision, so `peasant user claim` can retry.
 func promptSignInClaim(ctx context.Context, creds *auth.Credentials, deps signInClaimDeps) error {
-	if creds == nil || !deps.interactive {
+	if creds == nil || !deps.interactive || deps.localOwnerID == "" {
 		return nil
 	}
 	base, err := auth.NormalizeVillageURL(creds.VillageURL)
@@ -43,7 +44,7 @@ func promptSignInClaim(ctx context.Context, creds *auth.Credentials, deps signIn
 	if err != nil {
 		return err
 	}
-	if state.Decided(base, creds.UserID) {
+	if state.Decided(deps.localOwnerID, base, creds.UserID) {
 		return nil
 	}
 	choice, err := claimprompt.Prompt(deps.in, deps.out, creds.Username)
@@ -56,7 +57,7 @@ func promptSignInClaim(ctx context.Context, creds *auth.Credentials, deps signIn
 	}
 	switch choice {
 	case claimprompt.NotNow:
-		state.Record(base, creds.UserID, choice, now())
+		state.Record(deps.localOwnerID, base, creds.UserID, choice, now())
 		return claimprompt.Save(deps.statePath, state)
 	case claimprompt.Unclaimed, claimprompt.All:
 		snapshot, err := deps.capture(ctx)
@@ -68,7 +69,7 @@ func promptSignInClaim(ctx context.Context, creds *auth.Credentials, deps signIn
 			return fmt.Errorf("claim local artifacts: %w", err)
 		}
 		writeClaimOutcome(deps.out, result)
-		state.Record(base, creds.UserID, choice, now())
+		state.Record(deps.localOwnerID, base, creds.UserID, choice, now())
 		return claimprompt.Save(deps.statePath, state)
 	default:
 		return fmt.Errorf("ask the local ownership question: unsupported answer %q; nothing was claimed", choice)
@@ -78,6 +79,8 @@ func promptSignInClaim(ctx context.Context, creds *auth.Credentials, deps signIn
 // writeClaimOutcome reports one completed claim on the progress stream.
 func writeClaimOutcome(out io.Writer, result store.ClaimResult) {
 	switch {
+	case result.ClaimID == "" && result.Stored == 0:
+		fmt.Fprintln(out, "There is nothing to claim yet: this store has no local sessions or annotations.")
 	case result.ClaimID == "":
 		fmt.Fprintln(out, "Nothing to claim: every local session and annotation already has an owner.")
 	case result.Claimed == 0:

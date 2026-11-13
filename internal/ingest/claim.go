@@ -34,14 +34,14 @@ func WithSessionClaimer(claimer SessionClaimer) PipelineOption {
 	return func(p *Pipeline) { p.claimer = claimer }
 }
 
-// claimRunSessions claims the sessions this run created, updated, or rebuilt.
-// It never returns an error: ownership is a local projection of stored
-// artifacts, and the next claim can retry what this attempt could not assign.
+// claimRunSessions claims the sessions this run stored for the first time. It
+// never returns an error: ownership is a local projection of stored artifacts,
+// and the next claim can retry what this attempt could not assign.
 func (p *Pipeline) claimRunSessions(ctx context.Context, logPrefix string, sessionResults []SessionResult) {
 	if p.claimer == nil {
 		return
 	}
-	ids := claimableSessionIDs(sessionResults, p.rebuiltSessionIDs)
+	ids := claimableSessionIDs(sessionResults)
 	if len(ids) == 0 {
 		return
 	}
@@ -56,13 +56,15 @@ func (p *Pipeline) claimRunSessions(ctx context.Context, logPrefix string, sessi
 	}
 }
 
-// claimableSessionIDs names the sessions a claim may cover: every successful
-// new or updated result plus every rebuild this run recorded, deduplicated in
-// first-seen order. Unchanged, active, excluded, and failed sessions are left
-// out; a claim must not reach an artifact this run did not write.
-func claimableSessionIDs(sessionResults []SessionResult, rebuilt []SessionID) []string {
-	seen := make(map[SessionID]struct{}, len(sessionResults)+len(rebuilt))
-	ids := make([]string, 0, len(sessionResults)+len(rebuilt))
+// claimableSessionIDs names the sessions an automatic claim may cover: every
+// successful DiffNew result, deduplicated in first-seen order. Updated,
+// reindexed, rebuilt, unchanged, active, excluded, and failed sessions are left
+// out: an automatic claim covers only artifacts the run stored for the first
+// time. An existing installation's older rows stay unclaimed until the sign-in
+// prompt or `peasant user claim` explicitly claims them.
+func claimableSessionIDs(sessionResults []SessionResult) []string {
+	seen := make(map[SessionID]struct{}, len(sessionResults))
+	ids := make([]string, 0, len(sessionResults))
 	add := func(id SessionID) {
 		if id == "" {
 			return
@@ -77,13 +79,10 @@ func claimableSessionIDs(sessionResults []SessionResult, rebuilt []SessionID) []
 		if result.Error != nil || result.ExcludedBySelection {
 			continue
 		}
-		if result.Status != DiffNew && result.Status != DiffUpdated {
+		if result.Status != DiffNew {
 			continue
 		}
 		add(result.SessionID)
-	}
-	for _, id := range rebuilt {
-		add(id)
 	}
 	return ids
 }

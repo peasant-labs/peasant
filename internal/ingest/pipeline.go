@@ -362,11 +362,7 @@ type Pipeline struct {
 	// or stale. Both are reported once at the end of the rebuild.
 	rebuiltFromFiles int
 	rebuildStale     []SessionID
-	// rebuiltSessionIDs names the saved-pair rows this run recorded from files,
-	// so the automatic claim can cover a rebuild even when indexing needs no
-	// further work.
-	rebuiltSessionIDs []SessionID
-	// claimer assigns local ownership of this run's written sessions. Nil keeps
+	// claimer assigns local ownership of this run's new sessions. Nil keeps
 	// automatic claiming off (signed out, dry run, or a file-only run).
 	claimer SessionClaimer
 
@@ -774,7 +770,6 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	p.resetDiagnostics()
 	p.resetUnavailableSettledThisRun()
 	p.resetUnroutedRepairs()
-	p.rebuiltSessionIDs = nil
 	p.locationCache = nil
 	p.seqCursorCache = nil
 	defer func() {

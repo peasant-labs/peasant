@@ -110,6 +110,28 @@ VALUES('oc_fixture', 'lo_fixture', ?, ?, 'fixture-user', 4000, 'manual')`, &sqli
 		conn.Close()
 		t.Fatalf("DELETE owner_claims error = %v, want an append-only refusal", err)
 	}
+	// INSERT OR REPLACE rewrites a claim through the delete+insert pair without
+	// firing the delete trigger while recursive triggers are off. The BEFORE
+	// INSERT guard must refuse the reused id.
+	if err := sqlitex.ExecuteTransient(conn, `INSERT OR REPLACE INTO owner_claims(id, local_owner_id, village_url, user_id, username_snapshot, claimed_at, source)
+VALUES('oc_fixture', 'lo_fixture', ?, ?, 'replaced-user', 9000, 'manual')`, &sqlitex.ExecOptions{Args: []any{v79FixtureVillageURL, v79FixtureUserID}}); err == nil || !strings.Contains(err.Error(), "append-only") {
+		conn.Close()
+		t.Fatalf("INSERT OR REPLACE owner_claims error = %v, want an append-only refusal", err)
+	}
+	// local_owner is exactly one row for the life of the store: REPLACE, UPDATE,
+	// and DELETE all fail at the schema boundary.
+	if err := sqlitex.ExecuteTransient(conn, `INSERT OR REPLACE INTO local_owner(id, singleton, created_at) VALUES('lo_replacement', 1, 2000)`, nil); err == nil || !strings.Contains(err.Error(), "exactly one row") {
+		conn.Close()
+		t.Fatalf("INSERT OR REPLACE local_owner error = %v, want the singleton refusal", err)
+	}
+	if err := sqlitex.ExecuteTransient(conn, `UPDATE local_owner SET id = 'lo_rewritten' WHERE id = 'lo_fixture'`, nil); err == nil || !strings.Contains(err.Error(), "exactly one row") {
+		conn.Close()
+		t.Fatalf("UPDATE local_owner error = %v, want the singleton refusal", err)
+	}
+	if err := sqlitex.ExecuteTransient(conn, `DELETE FROM local_owner`, nil); err == nil || !strings.Contains(err.Error(), "exactly one row") {
+		conn.Close()
+		t.Fatalf("DELETE local_owner error = %v, want the singleton refusal", err)
+	}
 
 	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO owner_claims(id, local_owner_id, village_url, user_id, username_snapshot, claimed_at, source)
 VALUES('oc_missing_owner', 'lo_missing', ?, ?, 'fixture-user', 5000, 'manual')`, &sqlitex.ExecOptions{Args: []any{v79FixtureVillageURL, v79FixtureUserID}}); err == nil {

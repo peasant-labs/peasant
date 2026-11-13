@@ -224,7 +224,10 @@ func baselineCaseIsObservation(kind string) bool {
 // openFreshStore opens the production fresh path on path and registers cleanup.
 func openFreshStore(t *testing.T, path string) *Store {
 	t.Helper()
-	s, err := Open(path, WithPoolSize(1))
+	// The baseline-vs-chain dump must stay byte-identical: a local owner row
+	// carries a random id and wall-clock creation time. Owner bootstrap has its
+	// own tests; schema-identity opens skip it.
+	s, err := Open(path, WithPoolSize(1), WithSkipLocalOwnerBootstrap())
 	if err != nil {
 		t.Fatalf("store.Open(%s): %v", path, err)
 	}

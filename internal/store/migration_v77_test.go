@@ -297,8 +297,8 @@ func runTurnCountRecountFromV75(t *testing.T, fixture turnCountRecountFixture) {
 		t.Fatalf("open the V75 store: %v", err)
 	}
 	counts, pending, version := readTurnCountRecountState(t, path)
-	if version != 78 {
-		t.Fatalf("schema version = %d, want 78", version)
+	if version != 79 {
+		t.Fatalf("schema version = %d, want 79", version)
 	}
 	if pending {
 		t.Fatal("the recount marker is still set after a completed open")
@@ -403,8 +403,8 @@ func runTurnCountRecountFromV73(t *testing.T, fixture turnCountRecountFixture) {
 		t.Fatalf("open the V73 store: %v", err)
 	}
 	counts, pending, version := readTurnCountRecountState(t, path)
-	if version != 78 {
-		t.Fatalf("schema version = %d, want 78", version)
+	if version != 79 {
+		t.Fatalf("schema version = %d, want 79", version)
 	}
 	if pending {
 		t.Fatal("the recount marker is still set after a completed open")
@@ -478,8 +478,8 @@ func runTurnCountRecountInterruptedFirstOpen(t *testing.T, fixture turnCountReco
 		}
 	}
 	counts, pending, version := readTurnCountRecountState(t, path)
-	if version != 78 {
-		t.Fatalf("schema version after the failed open = %d, want 78: the version cannot say the recount is owed", version)
+	if version != 79 {
+		t.Fatalf("schema version after the failed open = %d, want 79: the version cannot say the recount is owed", version)
 	}
 	if !pending {
 		t.Fatal("the failed open cleared the recount marker; the next open would not recount")
@@ -526,8 +526,8 @@ func runTurnCountRecountNewStore(t *testing.T, _ turnCountRecountFixture) {
 		t.Fatalf("open a new store: %v", err)
 	}
 	counts, pending, version := readTurnCountRecountState(t, path)
-	if version != 78 {
-		t.Fatalf("new store schema version = %d, want 78", version)
+	if version != 79 {
+		t.Fatalf("new store schema version = %d, want 79", version)
 	}
 	if pending {
 		t.Fatal("a new store holds a pending recount after its first open")

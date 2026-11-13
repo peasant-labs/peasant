@@ -78,7 +78,6 @@ requiredNames:
   - v66-session-thinking-level
   - v67-latest-attempt-pointer
   - v73-harness-check-widening
-  - v76-search-trigger-repair
 requiredGuardNames:
   - deleted-required-slot
   - shared-needle

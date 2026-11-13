@@ -331,7 +331,6 @@ func (p *Pipeline) reconcileScannedPairs(ctx context.Context, scanned []reindexT
 				continue
 			}
 			p.rebuiltFromFiles++
-			p.rebuiltSessionIDs = append(p.rebuiltSessionIDs, result.SessionID)
 		}
 		page = page[:0]
 	}

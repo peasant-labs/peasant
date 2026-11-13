@@ -2,10 +2,12 @@ package store
 
 // migrationV79 adds the permanent local owner and the append-only claim log.
 //
-// local_owner holds at most one row: singleton is UNIQUE and CHECKed to 1, so
-// a second row fails at the schema boundary. owner_claims is the history; the
-// BEFORE UPDATE and BEFORE DELETE triggers refuse every rewrite and every
-// deletion.
+// local_owner holds exactly one row: singleton is UNIQUE and CHECKed to 1, and
+// BEFORE INSERT/UPDATE/DELETE triggers refuse a second row, a replacement, and
+// a deletion. owner_claims is the history; BEFORE INSERT ... WHEN EXISTS,
+// BEFORE UPDATE and BEFORE DELETE triggers refuse id reuse, every rewrite, and
+// every deletion, including the delete half of INSERT OR REPLACE (which fires
+// no delete trigger while recursive triggers are off).
 //
 // sessions.owner_claim_id and annotations.owner_claim_id are nullable current
 // pointers. NULL means unclaimed. They deliberately have no foreign key: a
@@ -16,6 +18,10 @@ package store
 // The claim account scope is the V68 collective-observation scope: a normalized
 // full Village base URL plus the stable Village user UUID. The composite foreign
 // key reuses that grammar instead of defining a second account identity.
+// owner_claims references collective_observation_scopes, which V68 introduces
+// as an observation cache. A claim is permanent, so a scope row referenced by a
+// claim is permanent too: the claim foreign key keeps that scope row from being
+// deleted for the life of the store.
 const migrationV79 = `
 CREATE TABLE local_owner (
     id          TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 64),
@@ -35,6 +41,13 @@ CREATE TABLE owner_claims (
         REFERENCES collective_observation_scopes(village_url, user_id)
 ) STRICT;
 
+CREATE TRIGGER owner_claims_no_replace
+BEFORE INSERT ON owner_claims
+WHEN EXISTS (SELECT 1 FROM owner_claims WHERE id = NEW.id)
+BEGIN
+    SELECT RAISE(ABORT, 'owner_claims is append-only; a claim id is never reused');
+END;
+
 CREATE TRIGGER owner_claims_no_update
 BEFORE UPDATE ON owner_claims BEGIN
     SELECT RAISE(ABORT, 'owner_claims is append-only; append a new claim');
@@ -43,6 +56,23 @@ END;
 CREATE TRIGGER owner_claims_no_delete
 BEFORE DELETE ON owner_claims BEGIN
     SELECT RAISE(ABORT, 'owner_claims is append-only; claims are retained');
+END;
+
+CREATE TRIGGER local_owner_no_second
+BEFORE INSERT ON local_owner
+WHEN EXISTS (SELECT 1 FROM local_owner)
+BEGIN
+    SELECT RAISE(ABORT, 'local_owner holds exactly one row for the life of the store');
+END;
+
+CREATE TRIGGER local_owner_no_update
+BEFORE UPDATE ON local_owner BEGIN
+    SELECT RAISE(ABORT, 'local_owner holds exactly one row for the life of the store');
+END;
+
+CREATE TRIGGER local_owner_no_delete
+BEFORE DELETE ON local_owner BEGIN
+    SELECT RAISE(ABORT, 'local_owner holds exactly one row for the life of the store');
 END;
 
 CREATE INDEX idx_owner_claims_owner_order

@@ -132,7 +132,7 @@ CREATE TABLE annotations (
     created_at         INTEGER NOT NULL,
     updated_at         INTEGER,
     superseded_by      TEXT REFERENCES annotations(id)
-, retired_at INTEGER) STRICT;
+, retired_at INTEGER, owner_claim_id TEXT) STRICT;
 
 CREATE TABLE annotator_kinds (
     id   INTEGER PRIMARY KEY,
@@ -401,6 +401,12 @@ CREATE TABLE local_operation_diagnostics (
     FOREIGN KEY(village_url,user_id) REFERENCES collective_observation_scopes(village_url,user_id)
 ) WITHOUT ROWID;
 
+CREATE TABLE local_owner (
+    id          TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 64),
+    singleton   INTEGER NOT NULL DEFAULT 1 CHECK (singleton = 1) UNIQUE,
+    created_at  INTEGER NOT NULL CHECK (created_at > 0)
+) STRICT;
+
 CREATE TABLE memory_injection_log (
     id           TEXT PRIMARY KEY,
     project_path TEXT NOT NULL,
@@ -430,6 +436,18 @@ CREATE TABLE models (
 CREATE TABLE opencode_session_seq_cursor (
   session_id TEXT PRIMARY KEY,
   last_seq INTEGER NOT NULL CHECK(last_seq >= 0)
+) STRICT;
+
+CREATE TABLE owner_claims (
+    id                TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 64),
+    local_owner_id    TEXT NOT NULL REFERENCES local_owner(id),
+    village_url       TEXT NOT NULL,
+    user_id           TEXT NOT NULL,
+    username_snapshot TEXT NOT NULL,
+    claimed_at        INTEGER NOT NULL CHECK (claimed_at > 0),
+    source            TEXT NOT NULL CHECK (source IN ('sign_in_prompt','automatic','manual')),
+    FOREIGN KEY (village_url, user_id)
+        REFERENCES collective_observation_scopes(village_url, user_id)
 ) STRICT;
 
 CREATE TABLE pending_annotations (
@@ -1128,7 +1146,7 @@ CREATE TABLE sessions (
     latest_attempt_stats_json IS NULL OR json_valid(latest_attempt_stats_json)
 ), parent_state TEXT NOT NULL DEFAULT 'root'
   CHECK (parent_state IN ('root','resolved','unresolved')), resolved_parent_id TEXT
-  CHECK ((parent_state = 'resolved') = (resolved_parent_id IS NOT NULL))) STRICT;
+  CHECK ((parent_state = 'resolved') = (resolved_parent_id IS NOT NULL)), owner_claim_id TEXT) STRICT;
 
 CREATE TABLE store_state (
   id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -1197,6 +1215,8 @@ CREATE INDEX idx_annfam_class_id ON annotation_families(class_id);
 CREATE INDEX idx_annotation_target_anchors_session_state
     ON annotation_target_anchors(session_id, state);
 
+CREATE INDEX idx_annotations_owner_claim ON annotations(owner_claim_id);
+
 CREATE INDEX idx_annotator_kind ON annotators(kind_id);
 
 CREATE INDEX idx_annotator_model ON annotators(model_id, provider_key) WHERE model_id IS NOT NULL;
@@ -1253,6 +1273,12 @@ CREATE INDEX idx_local_operation_diagnostics_order ON local_operation_diagnostic
 
 CREATE INDEX idx_models_family ON models(family) WHERE family IS NOT NULL;
 
+CREATE INDEX idx_owner_claims_owner_order
+    ON owner_claims(local_owner_id, claimed_at, id);
+
+CREATE INDEX idx_owner_claims_scope_order
+    ON owner_claims(village_url, user_id, claimed_at, id);
+
 CREATE INDEX idx_publication_attempts_target ON publication_attempt_diagnostics(village_origin, owner_user_id, project_hash, session_id, attempted_at DESC);
 
 CREATE INDEX idx_pulled_annotations_local_session ON pulled_annotations(local_session_id);
@@ -1300,6 +1326,8 @@ CREATE INDEX idx_sessions_child_page
 CREATE INDEX idx_sessions_harness ON sessions(model_harness);
 
 CREATE INDEX idx_sessions_host ON sessions(opaque_host_id);
+
+CREATE INDEX idx_sessions_owner_claim ON sessions(owner_claim_id);
 
 CREATE INDEX idx_sessions_parent ON sessions(parent_id) WHERE parent_id IS NOT NULL;
 
@@ -1350,6 +1378,40 @@ CREATE VIEW session_search_source(rid, session_id, entry_index, content_preview,
   UNION ALL
   SELECT body_id, session_id, entry_index, content_preview, tool_input, tool_output
     FROM session_entry_bodies;
+
+CREATE TRIGGER local_owner_no_delete
+BEFORE DELETE ON local_owner BEGIN
+    SELECT RAISE(ABORT, 'local_owner holds exactly one row for the life of the store');
+END;
+
+CREATE TRIGGER local_owner_no_second
+BEFORE INSERT ON local_owner
+WHEN EXISTS (SELECT 1 FROM local_owner)
+BEGIN
+    SELECT RAISE(ABORT, 'local_owner holds exactly one row for the life of the store');
+END;
+
+CREATE TRIGGER local_owner_no_update
+BEFORE UPDATE ON local_owner BEGIN
+    SELECT RAISE(ABORT, 'local_owner holds exactly one row for the life of the store');
+END;
+
+CREATE TRIGGER owner_claims_no_delete
+BEFORE DELETE ON owner_claims BEGIN
+    SELECT RAISE(ABORT, 'owner_claims is append-only; claims are retained');
+END;
+
+CREATE TRIGGER owner_claims_no_replace
+BEFORE INSERT ON owner_claims
+WHEN EXISTS (SELECT 1 FROM owner_claims WHERE id = NEW.id)
+BEGIN
+    SELECT RAISE(ABORT, 'owner_claims is append-only; a claim id is never reused');
+END;
+
+CREATE TRIGGER owner_claims_no_update
+BEFORE UPDATE ON owner_claims BEGIN
+    SELECT RAISE(ABORT, 'owner_claims is append-only; append a new claim');
+END;
 
 CREATE TRIGGER session_entries_ad AFTER DELETE ON session_entries BEGIN
     INSERT INTO session_search_fts(session_search_fts, rowid, content_preview, tool_input, tool_output, session_id, entry_index)
@@ -2032,7 +2094,7 @@ AFTER UPDATE OF parent_id, model_harness, model_id, opaque_host_id,
   thinking_level_history, latest_attempt_generation_id,
   latest_attempt_artifact_hash, latest_attempt_indexer_version,
   latest_attempt_failure_code, latest_attempt_failure_message,
-  latest_attempt_captured_at_ms, latest_attempt_stats_json ON sessions
+  latest_attempt_captured_at_ms, latest_attempt_stats_json, owner_claim_id ON sessions
 BEGIN
   UPDATE sessions
    SET parent_state = CASE
@@ -2199,4 +2261,4 @@ DELETE FROM "session_search_fts_data";
 INSERT INTO "session_search_fts_data" ("id", "block") VALUES (1, X'000000000000');
 INSERT INTO "session_search_fts_data" ("id", "block") VALUES (10, X'00000000000000');
 
-PRAGMA user_version = 78;
+PRAGMA user_version = 79;

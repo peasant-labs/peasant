@@ -172,6 +172,7 @@ func TestCLI_AnnotateImportRoundTrip(t *testing.T) {
 	// Now create a fresh DB for import (to prove the import creates new annotations).
 	dataHome2 := t.TempDir()
 	seedTestSessionInto(t, dataHome2, testSessionUUID)
+	saveUserCommandCredentials(t, dataHome2)
 
 	// Import from the JSONL file.
 	stdout, stderr, err := executeAnnotateImportCmd(t, dataHome2, []string{"import", "--from-file", jsonlPath})
@@ -204,6 +205,20 @@ func TestCLI_AnnotateImportRoundTrip(t *testing.T) {
 	if !found {
 		t.Errorf("expected annotation with type_id=%s value=approve; got rows: %+v",
 			testutil.TestTypeIDSessionApproval, rows)
+	}
+	claims, err := db2.OwnerClaims(ctx)
+	if err != nil {
+		t.Fatalf("claims after import: %v", err)
+	}
+	if len(claims) != 1 || claims[0].Source != "automatic" {
+		t.Fatalf("claims after import = %+v, want one automatic entry", claims)
+	}
+	counts, err := db2.OwnershipCounts(ctx)
+	if err != nil {
+		t.Fatalf("ownership after import: %v", err)
+	}
+	if counts.ClaimedAnnotations < 1 {
+		t.Fatalf("ownership after import = %+v, want the imported annotation claimed", counts)
 	}
 }
 
