@@ -35,10 +35,12 @@ cases:
   - {name: stored-remote-matches-the-tree}
   - {name: computed-styles-and-themes}
 # The only requests the journey provokes the server to refuse: the deep links to a
-# project and a transcript that were never recorded, and the save that found a
-# changed field. Anything else refused is a finding.
+# project and a transcript that were never recorded, the save that found a
+# changed field, and the online page's saved-observations read on a computer that
+# is signed out (the sign-in burst opens it, and it says so rather than guessing).
 expectedRefusals:
   - "400 GET /api/v1/sync/sessions"
+  - "401 GET /api/v1/village/collective-observations"
   - "404 GET /api/v1/projects/resolve"
   - "409 POST /api/v1/kickstart/sessions/<id>/commit"
 # The screens whose step rail shows its labels, with how many labels each has.
