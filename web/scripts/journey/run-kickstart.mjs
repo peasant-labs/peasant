@@ -4,12 +4,13 @@ import { createServer } from 'node:net';
 import { randomUUID } from 'node:crypto';
 import { accessSync, closeSync, constants, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { delimiter, join, resolve } from 'node:path';
-import { setTimeout as delay } from 'node:timers/promises';
 import { parse } from 'yaml';
 import { acquireLifecycle, bounded, ownedGroups } from './lib/owned-lifecycle.mjs';
 import { hash } from './lib/provenance.mjs';
 import { verifyKickstartServed, markerInCommit } from './lib/kickstart-provenance.mjs';
 import { seedRecordings } from './lib/kickstart-seed.mjs';
+import { ownedServerSandbox } from '../visual/lib/owned-server-sandbox.mjs';
+import { startOwnedServer } from '../visual/lib/owned-server-start.mjs';
 
 /**
  * Runs the setup journey on the real binary.
@@ -36,7 +37,7 @@ let app;
 let stopApp = async () => {};
 let cleaning;
 let stopping = false;
-let sandbox;
+let computers;
 const buildOutput = [];
 let manifest;
 let saveManifest = () => {};
@@ -134,30 +135,31 @@ try {
   // flatten punctuation, and a root with dots or dashes (the lifecycle's own state
   // root and the Nix shell's TMPDIR both have them) can make discovery resolve the
   // projects to the enclosing checkout.
-  sandbox = mkdtempSync('/tmp/ksjourney');
+  computers = mkdtempSync('/tmp/ksjourney');
   const paths = (root) => ({
     root,
     home: join(root, 'home'),
     config: join(root, 'config'),
     data: join(root, 'data'),
-    stateDir: join(root, 'state'),
   });
 
   async function startApp(computer, name) {
     const port = await freePort();
     const origin = `http://127.0.0.1:${port}`;
-    const log = openSync(join(artifacts, `server-${name}.log`), 'w');
-    const env = { ...process.env, HOME: computer.home, XDG_CONFIG_HOME: computer.config, XDG_DATA_HOME: computer.data, XDG_STATE_HOME: computer.stateDir };
-    app = launch(binaryPath, ['web', 'start', '--foreground', '--no-browser', '--port', String(port)], { env, stdio: ['ignore', log, log] });
-    closeSync(log);
-    await bounded((async () => {
-      for (;;) {
-        if (app.child.exitCode !== null) throw new Error(`The owned binary exited during startup; see ${join(artifacts, `server-${name}.log`)}`);
-        try { const r = await fetch(`${origin}/api/v1/health`, { signal: AbortSignal.timeout(1000) }); if (r.ok) return; } catch { /* health is the wake source, bounded by the startup deadline */ }
-        await delay(100);
-      }
-    })(), 30000, 'owned binary startup');
-    return { origin, env };
+    const logPath = join(artifacts, `server-${name}.log`);
+    // The seeded HOME and the configuration and data directories are the computer's own, named so
+    // nothing is written into them: the configuration directory has no config.yaml, so the binary
+    // starts unconfigured, which is what this journey is about. State and cache are a throwaway root.
+    const sandbox = ownedServerSandbox('kickstart', { home: computer.home, configDir: computer.config, dataDir: computer.data });
+    // Started only when nothing answers on the port yet; the wait ends when it answers or has exited.
+    await startOwnedServer({ port, withinMs: 30000, log: logPath, start: () => {
+      const log = openSync(logPath, 'w');
+      try {
+        app = launch(binaryPath, ['web', 'start', '--foreground', '--no-browser', '--port', String(port), ...sandbox.args], { env: sandbox.env, stdio: ['ignore', log, log] });
+      } finally { closeSync(log); }
+      return app.child;
+    } });
+    return { origin, env: sandbox.env };
   }
   stopApp = async () => {
     if (!app) return;
@@ -174,7 +176,7 @@ try {
 
   for (const theme of projects) {
     // A fresh computer for each theme: nothing the last one saved is here.
-    const computer = paths(join(sandbox, theme.theme));
+    const computer = paths(join(computers, theme.theme));
     rmSync(computer.root, { recursive: true, force: true });
     mkdirSync(computer.home, { recursive: true });
     const seeded = seedRecordings({ home: computer.home, root: computer.root, repoRoot: repo, fixture: fixture.recordings });
@@ -223,6 +225,6 @@ try {
 } finally {
   try { await stopApp(); } catch (error) { console.error(error.message); }
   // Only the directory this run created, and only after the app that used it has stopped.
-  if (sandbox && !app) rmSync(sandbox, { recursive: true, force: true });
+  if (computers && !app) rmSync(computers, { recursive: true, force: true });
   try { await cleanup(); } catch (error) { console.error(error.message); process.exit(1); }
 }

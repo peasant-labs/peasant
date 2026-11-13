@@ -17,9 +17,11 @@ import { join } from 'node:path';
  * `DROPPED_FROM_INHERITED`: each one points the binary at a file by an absolute
  * path, past every directory above.
  *
- * A caller may name a configuration directory or a data directory of its own
- * (to inspect it afterwards, or to start from a prepared store). Only the ones
- * it names are its own; every other place is still under the root. Nothing
+ * A caller may name a configuration directory, a data directory or a HOME of
+ * its own (to inspect it afterwards, to start from a prepared store, or to
+ * start from a prepared home such as one holding recorded agent sessions and
+ * Git repositories). Only the ones it names are its own; every other place is
+ * still under the root. Nothing
  * here falls back to the person's directories, and a caller that wants the
  * binary on a real store has to name that store itself.
  */
@@ -45,13 +47,14 @@ function absolute(path, what) {
  * The directories, the flags and the environment for one server a script owns.
  *
  * @param {string} root an empty directory the script made for this run
- * @param {{configDir?: string, dataDir?: string}} [named] directories the caller names itself; an empty or missing value means "under the root"
+ * @param {{configDir?: string, dataDir?: string, home?: string}} [named] directories the caller names itself; an empty or missing value means "under the root"
  * @param {Record<string, string | undefined>} [inherited] the environment to extend (default: the script's own)
  */
 export function isolatedServerSandbox(root, named = {}, inherited = process.env) {
   absolute(root, 'its root');
   const configDir = named.configDir ? absolute(named.configDir, 'the configuration directory the caller named') : join(root, 'config');
   const dataDir = named.dataDir ? absolute(named.dataDir, 'the data directory the caller named') : join(root, 'data');
+  const home = named.home ? absolute(named.home, 'the home directory the caller named') : join(root, 'home');
   const stateDir = join(root, 'state');
   const passedOn = Object.fromEntries(Object.entries(inherited).filter(([key]) => !DROPPED_FROM_INHERITED.includes(key)));
   return Object.freeze({
@@ -59,12 +62,13 @@ export function isolatedServerSandbox(root, named = {}, inherited = process.env)
     configDir,
     dataDir,
     stateDir,
+    home,
     /** The flags that name the three directories the binary takes as flags. */
     args: Object.freeze(['--config-dir', configDir, '--data-dir', dataDir, '--state-dir', stateDir]),
     /** The environment for the binary: the same directories, plus HOME and the cache directory, which have no flag. */
     env: Object.freeze({
       ...passedOn,
-      HOME: join(root, 'home'),
+      HOME: home,
       XDG_CONFIG_HOME: configDir,
       XDG_DATA_HOME: dataDir,
       XDG_STATE_HOME: stateDir,

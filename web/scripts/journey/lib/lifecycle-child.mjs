@@ -9,11 +9,15 @@
  *     with <status> after <ms>, so only SIGKILL ends it sooner.
  *   node lifecycle-child.mjs waits --exit-after-ms <ms>
  *     does nothing and exits 0 after <ms>, as a quiet workload does.
+ *   node lifecycle-child.mjs prints-env --names <NAME,NAME>
+ *     prints one JSON line with the value of each named environment variable
+ *     (null when it is unset) and exits 0, so a test can see the environment
+ *     the owned lifetime started it with.
  */
 import { parseArgs } from 'node:util';
 
-const MODES = Object.freeze(['ignores-term', 'waits']);
-const USAGE = `node lifecycle-child.mjs <${MODES.join('|')}> --exit-after-ms <ms> [--status <status>]`;
+const MODES = Object.freeze(['ignores-term', 'waits', 'prints-env']);
+const USAGE = `node lifecycle-child.mjs <${MODES.join('|')}> [--exit-after-ms <ms>] [--status <status>] [--names <NAME,NAME>]`;
 
 /**
  * @param {string} reason
@@ -42,7 +46,7 @@ const { positionals, values } = (() => {
   try {
     return parseArgs({
       allowPositionals: true,
-      options: { 'exit-after-ms': { type: 'string' }, status: { type: 'string' } },
+      options: { 'exit-after-ms': { type: 'string' }, status: { type: 'string' }, names: { type: 'string' } },
     });
   } catch (error) {
     return refuse(`its arguments could not be read: ${error instanceof Error ? error.message : String(error)}`);
@@ -63,6 +67,12 @@ switch (mode) {
   case 'waits': {
     if (values.status !== undefined) refuse('--status is given with mode waits, which always exits 0');
     setTimeout(() => {}, integer(values['exit-after-ms'], '--exit-after-ms', 0, 600000));
+    break;
+  }
+  case 'prints-env': {
+    const names = values.names?.split(',').filter(Boolean) ?? [];
+    if (names.length === 0) refuse('mode prints-env needs --names with at least one variable name');
+    process.stdout.write(`${JSON.stringify(Object.fromEntries(names.map((name) => [name, process.env[name] ?? null])))}\n`);
     break;
   }
   default:

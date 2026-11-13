@@ -115,9 +115,12 @@ export async function acquireLifecycle(directory, { termMs = 1500, killMs = 2000
   }
   return {
     identity,
+    /** Starts a child in its own process group, marked as this owner's. An `env` the caller gives
+     * is the child's whole environment, so a variable it leaves out (such as one a server sandbox
+     * drops) is not put back from this process's own; without one the child inherits this process's. */
     launch(command, args, options = {}) {
       if (stopping || gate.child.exitCode !== null || gate.child.signalCode !== null) throw new Error('Journey ownership is stopping or its flock keeper exited; no new child may start');
-      const child = start(command, args, { ...options, detached: true, env: { ...process.env, ...options.env, PEASANT_OBSERVATIONS_OWNER: owner } });
+      const child = start(command, args, { ...options, detached: true, env: { ...(options.env ?? process.env), PEASANT_OBSERVATIONS_OWNER: owner } });
       children.push(child); return child;
     },
     cleanup() {

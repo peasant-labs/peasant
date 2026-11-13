@@ -7,10 +7,10 @@
  * ends the way it is told. It never starts a server.
  *
  *   node owned-sandbox-script.mjs --name <script> [--config-dir <dir>] [--data-dir <dir>]
- *     --end <exit|uncaught-error|last-line> [--status <status>]
+ *     [--home <dir>] --end <exit|uncaught-error|last-line> [--status <status>]
  *
- * `--name` is the script name the sandbox root is named for. `--config-dir`
- * and `--data-dir` are the directories the script names itself, passed to
+ * `--name` is the script name the sandbox root is named for. `--config-dir`,
+ * `--data-dir` and `--home` are the directories the script names itself, passed to
  * `ownedServerSandbox` as given, so a refused one is refused there. `--end`
  * says how the process ends: `exit` calls process.exit with `--status`,
  * `uncaught-error` throws, `last-line` runs off the end of the module.
@@ -21,7 +21,7 @@ import { parseArgs } from 'node:util';
 import { ownedServerSandbox } from '../../visual/lib/owned-server-sandbox.mjs';
 
 const ENDS = Object.freeze(['exit', 'uncaught-error', 'last-line']);
-const USAGE = `node owned-sandbox-script.mjs --name <script> [--config-dir <dir>] [--data-dir <dir>] --end <${ENDS.join('|')}> [--status <status>]`;
+const USAGE = `node owned-sandbox-script.mjs --name <script> [--config-dir <dir>] [--data-dir <dir>] [--home <dir>] --end <${ENDS.join('|')}> [--status <status>]`;
 
 /**
  * @param {string} reason
@@ -38,6 +38,7 @@ const { values } = (() => {
         name: { type: 'string' },
         'config-dir': { type: 'string' },
         'data-dir': { type: 'string' },
+        home: { type: 'string' },
         end: { type: 'string' },
         status: { type: 'string' },
       },
@@ -59,10 +60,11 @@ if (end === 'exit') {
   refuse(`--status is given with --end ${end}, which does not exit with a status`);
 }
 
-/** @type {{configDir?: string, dataDir?: string}} */
+/** @type {{configDir?: string, dataDir?: string, home?: string}} */
 const named = {};
 if (values['config-dir'] !== undefined) named.configDir = values['config-dir'];
 if (values['data-dir'] !== undefined) named.dataDir = values['data-dir'];
+if (values.home !== undefined) named.home = values.home;
 
 const sandbox = ownedServerSandbox(values.name, named);
 // The file the binary reads below the configuration directory it is started with.
