@@ -123,6 +123,22 @@ export function treeField(stop: KickstartStop): KickstartField | undefined {
   return stop.fields.find((field) => field.kind === KickstartFieldKind.Tree);
 }
 
+/**
+ * The field a stop is answered by with a button, when it has one: its action
+ * field. Such a stop draws its answers where `continue` sits, so the reader
+ * answers it from the same place they moved on from the stop before. A stop
+ * answered by a radio group, a checkbox or the tree returns nothing and keeps
+ * `continue`. Only the served field kind is read.
+ */
+export function footAnswerField(stop: KickstartStop): KickstartField | undefined {
+  return stop.fields.find((field) => field.kind === KickstartFieldKind.Action);
+}
+
+/** The id of the element that names a button-answered field's answers: its question. */
+export function answerGroupLabelId(field: KickstartField): string {
+  return `${field.key}-label`;
+}
+
 /** A field by key anywhere in the session. */
 export function fieldByKey(session: KickstartSession, key: string): { stop: KickstartStop; field: KickstartField } | undefined {
   for (const stop of session.stops) {

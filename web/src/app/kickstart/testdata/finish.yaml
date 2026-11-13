@@ -31,6 +31,8 @@ cases:
     section: automatic-publishing
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "POST /api/v1/kickstart/sessions/ses-full/commit":
         body:
           saved: true
@@ -38,7 +40,7 @@ cases:
           ingest: {state: running, new: 0, updated: 0}
           nextSteps: [config, web-start, village-login, village-push, auto-publish-settings]
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - click: continue
@@ -55,6 +57,8 @@ cases:
   - name: diagnostics-render
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "POST /api/v1/kickstart/sessions/ses-full/commit":
         body:
           saved: true
@@ -65,7 +69,7 @@ cases:
             - "withheld one session: two saved rules both match the branch feature/x"
             - "withheld one session: its project path is not on this computer"
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - click: continue
@@ -84,6 +88,8 @@ cases:
   - name: a-retention-failure-is-listed-as-a-note-from-the-save
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "POST /api/v1/kickstart/sessions/ses-full/commit":
         body:
           saved: true
@@ -93,7 +99,7 @@ cases:
           diagnostics:
             - "config saved, retention not applied: permission denied"
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - click: continue
@@ -106,6 +112,8 @@ cases:
   - name: import-now-disabled-while-running
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "POST /api/v1/kickstart/sessions/ses-full/commit":
         body:
           saved: true
@@ -115,7 +123,7 @@ cases:
       "POST /api/v1/sync/ingest": {body: {status: running}}
       "GET /api/v1/sync/ingest/status": {body: {status: running}}
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - click: continue
@@ -138,6 +146,8 @@ cases:
   - name: no-hook-install
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "POST /api/v1/kickstart/sessions/ses-full/commit":
         body:
           saved: true
@@ -145,7 +155,7 @@ cases:
           ingest: {state: running, new: 0, updated: 0}
           nextSteps: [config, web-start, village-login, village-push, auto-publish-settings]
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - click: continue
@@ -164,6 +174,8 @@ cases:
     fakeTimers: true
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "POST /api/v1/kickstart/sessions/ses-full/commit":
         body:
           saved: true
@@ -171,7 +183,7 @@ cases:
           ingest: {state: running, new: 0, updated: 0}
           nextSteps: [config]
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - click: continue
@@ -193,6 +205,8 @@ cases:
   - name: the-end-event-with-a-failure-shows-its-error
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "POST /api/v1/kickstart/sessions/ses-full/commit":
         body:
           saved: true
@@ -200,7 +214,7 @@ cases:
           ingest: {state: running, new: 0, updated: 0}
           nextSteps: [config]
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - click: continue
@@ -217,6 +231,8 @@ cases:
   - name: import-now-refused-shows-its-reason-on-the-panel
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "POST /api/v1/kickstart/sessions/ses-full/commit":
         body:
           saved: true
@@ -225,7 +241,7 @@ cases:
           nextSteps: [config]
       "POST /api/v1/sync/ingest": {status: 503, body: {error: config not available}}
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - click: continue
@@ -249,6 +265,8 @@ cases:
     fakeTimers: true
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "POST /api/v1/kickstart/sessions/ses-full/commit":
         body:
           saved: true
@@ -259,7 +277,7 @@ cases:
       "GET /api/v1/sync/ingest/status":
         body: {status: done, result: {new: 1234, updated: 56, unchanged: 325, errors: 0, indexed: 0, computed: 0, duration: 2s}}
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - click: continue
@@ -286,6 +304,8 @@ cases:
     fakeTimers: true
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "POST /api/v1/kickstart/sessions/ses-full/commit":
         body:
           saved: true
@@ -295,7 +315,7 @@ cases:
       "POST /api/v1/sync/ingest": {body: {status: running}}
       "GET /api/v1/sync/ingest/status": {body: {status: running}}
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - click: continue
@@ -319,6 +339,8 @@ cases:
   - name: import-now-reads-a-failed-end
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "POST /api/v1/kickstart/sessions/ses-full/commit":
         body:
           saved: true
@@ -328,7 +350,7 @@ cases:
       "POST /api/v1/sync/ingest": {body: {status: running}}
       "GET /api/v1/sync/ingest/status": {body: {status: error, error: the store is locked by another process}}
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - click: continue
@@ -345,6 +367,8 @@ cases:
   - name: a-push-that-arrives-while-the-status-is-read-wins
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "POST /api/v1/kickstart/sessions/ses-full/commit":
         body:
           saved: true
@@ -356,7 +380,7 @@ cases:
         held: true
         body: {status: done, result: {new: 1234, updated: 56, unchanged: 325, errors: 0, indexed: 0, computed: 0, duration: 2s}}
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - click: continue
@@ -378,6 +402,8 @@ cases:
     fakeTimers: true
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "POST /api/v1/kickstart/sessions/ses-full/commit":
         body:
           saved: true
@@ -387,7 +413,7 @@ cases:
       "GET /api/v1/sync/ingest/status":
         body: {status: done, result: {new: 1234, updated: 56, unchanged: 325, errors: 0, indexed: 0, computed: 0, duration: 2s}}
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - click: continue
@@ -409,6 +435,8 @@ cases:
     fakeTimers: true
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "POST /api/v1/kickstart/sessions/ses-full/commit":
         body:
           saved: true
@@ -416,7 +444,7 @@ cases:
           ingest: {state: running, new: 0, updated: 0}
           nextSteps: [config]
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - click: continue
@@ -437,6 +465,8 @@ cases:
   - name: import-now-while-another-import-runs-says-so
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "POST /api/v1/kickstart/sessions/ses-full/commit":
         body:
           saved: true
@@ -445,7 +475,7 @@ cases:
           nextSteps: [config]
       "POST /api/v1/sync/ingest": {status: 409, body: {error: ingest already running}}
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - click: continue
@@ -462,6 +492,8 @@ cases:
   - name: import-now-whose-status-cannot-be-read-says-so
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "POST /api/v1/kickstart/sessions/ses-full/commit":
         body:
           saved: true
@@ -471,7 +503,7 @@ cases:
       "POST /api/v1/sync/ingest": {body: {status: running}}
       "GET /api/v1/sync/ingest/status": {status: 500, body: {error: the status store is unavailable}}
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - click: continue
@@ -485,6 +517,8 @@ cases:
   - name: a-status-the-page-does-not-know-is-refused
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "POST /api/v1/kickstart/sessions/ses-full/commit":
         body:
           saved: true
@@ -494,7 +528,7 @@ cases:
       "POST /api/v1/sync/ingest": {body: {status: running}}
       "GET /api/v1/sync/ingest/status": {malformed: true, body: {status: paused}}
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - click: continue

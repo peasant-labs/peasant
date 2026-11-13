@@ -18,6 +18,28 @@
   flex-wrap: wrap;
 }
 
+/* The answers of a stop answered by a button, in the frame's foot where
+   `continue` sits on the other stops: `stop waiting` while a sign-in waits,
+   then the answers, the primary one last at the bottom right. */
+.ks-foot-answers {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+/* A narrow foot cannot hold back, the count and up to three buttons on one
+   line: back and the count keep the first line, and the answers take a second
+   full-width line of their own, right-aligned, in the same order. */
+@media (max-width: 40rem) {
+  .wizard-host .swz-foot:has(.ks-foot-answers) {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .wizard-host .swz-foot-end:has(.ks-foot-answers) {
+    grid-column: 1 / -1;
+  }
+}
+
 /* One stop. */
 .ks-stop {
   display: flex;

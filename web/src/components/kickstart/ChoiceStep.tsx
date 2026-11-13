@@ -1,8 +1,8 @@
 'use client';
 
-import { Button, Checkbox } from '@/lib/ft-ui';
+import { Checkbox } from '@/lib/ft-ui';
 import type { KickstartField, LocalSettingValue } from '@/lib/kickstart/model';
-import { isOptionSelected } from '@/lib/kickstart/view';
+import { answerGroupLabelId, isOptionSelected } from '@/lib/kickstart/view';
 import { KickstartFieldKind } from '@/lib/kickstart/values';
 
 /**
@@ -71,21 +71,19 @@ function ToggleControl({ field, answer, hideRefusal }: { field: KickstartField; 
   );
 }
 
-/** An action field is a question with labelled answers; each answer is a button. */
-function ActionControl({ field, answer, hideRefusal }: { field: KickstartField; answer: AnswerField; hideRefusal: boolean }) {
+/**
+ * An action field is a question with labelled answers, each a button. The
+ * buttons are drawn in the frame's foot (`FootAnswers`), where `continue` sits
+ * on the other stops; the body keeps the question, which names them, its help
+ * and the server's refusal.
+ */
+function ActionControl({ field, hideRefusal }: { field: KickstartField; hideRefusal: boolean }) {
   return (
     <div className="ks-field">
-      <span className="ks-field-label" id={`${field.key}-label`}>
+      <span className="ks-field-label" id={answerGroupLabelId(field)}>
         {field.label}
       </span>
       {field.description !== null && <p className="ks-help">{field.description}</p>}
-      <div className="ks-answers" role="group" aria-labelledby={`${field.key}-label`}>
-        {field.options.map((option) => (
-          <Button key={option.value} variant="secondary" onClick={() => answer(field.key, option.value)}>
-            {option.label}
-          </Button>
-        ))}
-      </div>
       <Refusal field={field} hidden={hideRefusal} />
     </div>
   );
@@ -104,7 +102,7 @@ export function NoticeText({ field }: { field: KickstartField }) {
 export function FieldControl({ field, answer, hideRefusal = false }: { field: KickstartField; answer: AnswerField; hideRefusal?: boolean }) {
   if (field.kind === KickstartFieldKind.Toggle) return <ToggleControl field={field} answer={answer} hideRefusal={hideRefusal} />;
   if (field.kind === KickstartFieldKind.Choice) return <ChoiceGroup field={field} answer={answer} hideRefusal={hideRefusal} />;
-  if (field.kind === KickstartFieldKind.Action) return <ActionControl field={field} answer={answer} hideRefusal={hideRefusal} />;
+  if (field.kind === KickstartFieldKind.Action) return <ActionControl field={field} hideRefusal={hideRefusal} />;
   if (field.kind === KickstartFieldKind.Notice) return <NoticeText field={field} />;
   return null;
 }

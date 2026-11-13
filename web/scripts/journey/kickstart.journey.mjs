@@ -41,6 +41,17 @@ const marketingLabel = new URL(marketingRepo.remote).pathname.replace(/^\//, '')
 const theme = () => test.info().project.metadata.theme;
 const API = '/api/v1/kickstart';
 
+// The pointer's click-through: the connection stop's answer and the next stop's
+// `continue` sit in the same foot slot, so a right edge or vertical centre that
+// differs by more than half a pixel would make the reader move the pointer.
+const FOOT_ALIGNMENT_TOLERANCE = 0.5;
+// The narrowest foot: at 320 px back and the count keep the first line, and the
+// answers take a second full-width line of their own.
+const NARROW_FOOT_WIDTH = 320;
+// A burst of window focuses on `/village`. The shared reader starts one read,
+// holds the rest inside its two-second gap, and makes one trailing read.
+const FOCUS_BURST = { focuses: 5, intervalMs: 200, gapMs: 2000, expectedReads: 2 };
+
 // ── shared state: the pages of one browser, and what they saw ───────────────
 let context;
 let pageA;
@@ -54,6 +65,12 @@ const requests = [];
 const walked = [];
 let offerSeen = null;
 let ingestCounts = null;
+// Where the connection stop's answers and the next stop's `continue` were laid
+// out, and the narrow foot they were measured beside.
+let footAlignment = null;
+// The sign-in reads a burst of window focuses caused on `/village`: the page's
+// own read, then the burst's leading and trailing reads.
+let focusBurstReads = null;
 // What the finish panel shows once "import now" has run an import after the first
 // one ended, and the ingest states the first tab was pushed for that run.
 let importNowCounts = null;
@@ -259,7 +276,7 @@ test.beforeAll(async ({ browser }) => {
 
 test.afterAll(async () => {
   writeFileSync(join(artifacts, `${theme()}-evidence.json`), JSON.stringify({
-    theme: theme(), shots, probes, consoleErrors, failedResponses, walked, offerSeen, ingestCounts, importNowCounts, importNowStates, laterImports, importedAfterSetup, savedSelection, storedRemotes,
+    theme: theme(), shots, probes, consoleErrors, failedResponses, walked, offerSeen, ingestCounts, importNowCounts, importNowStates, laterImports, importedAfterSetup, savedSelection, storedRemotes, footAlignment, focusBurstReads,
     frames: frames.map(({ tab, kind, revision, reason, scan, ingest }) => ({ tab, kind, revision, reason, scan, ingest })),
     requests: requests.filter((entry) => entry.path.startsWith('/api/')).map((entry) => `${entry.tab} ${entry.method} ${entry.path}${entry.scope === undefined ? '' : ` (scope ${entry.scope})`}`),
   }, null, 2));
@@ -301,12 +318,61 @@ test('fresh-install-redirects-to-setup', async () => {
   await expect(pageA.getByRole('heading', { level: 1, name: 'set up peasant' })).toBeVisible();
   await expect(title(pageA)).toHaveText('peasant online');
   await seen(pageA);
+  // The opening scan may still be running when the first stop is drawn; its
+  // later stops arrive when the scan ends. Capture the surface the reader
+  // settles on, not a rail that is still growing.
+  await expect.poll(async () => (await snapshot(pageA.request)).view.scan.state, { message: 'the opening scan ended', timeout: 30000 }).toBe('done');
   const { id, view } = await snapshot(pageA.request);
+  const expectedStops = visibleStops(view).length;
+  await expect.poll(async () => (await stepOf(pageA)).total, 'the page holds the stops the settled view lists').toBe(expectedStops);
   const first = await stepOf(pageA);
   expect(first.index).toBe(1);
-  expect(first.total, 'the page counts the stops the server shows').toBe(visibleStops(view).length);
+  expect(first.total, 'the page counts the stops the server shows').toBe(expectedStops);
   await expect.poll(() => frames.some((frame) => frame.tab === 'A' && frame.kind === 'session' && frame.sessionId === id), 'the topic sends the session snapshot on subscribe').toBe(true);
   await shoot(pageA, '01-village');
+});
+
+test('answers-sit-where-continue-sits', async () => {
+  // The connection stop is answered from the foot, where every other stop's
+  // `continue` sits. The reader who clicked through lands on `yes` without
+  // moving the pointer, and the narrow foot keeps back and the count on their
+  // own line above the answers.
+  const yes = pageA.getByRole('button', { name: 'yes', exact: true });
+  const answer = await yes.boundingBox();
+  expect(answer, 'the connection stop draws yes in its foot').not.toBeNull();
+  const desktop = test.info().project.use.viewport;
+
+  await pageA.setViewportSize({ width: NARROW_FOOT_WIDTH, height: desktop.height });
+  const narrow = await pageA.locator('.swz-foot').evaluate((foot) => {
+    const box = (selector) => {
+      const found = foot.querySelector(selector);
+      return found === null ? null : found.getBoundingClientRect().toJSON();
+    };
+    return { start: box('.swz-foot-start'), count: box('.swz-count'), end: box('.swz-foot-end'), answers: box('.ks-foot-answers') };
+  });
+  expect(narrow.start, 'the narrow foot draws back').not.toBeNull();
+  expect(narrow.answers, 'the narrow foot draws the answers').not.toBeNull();
+  expect(narrow.answers.top, 'the answers take their own line under back').toBeGreaterThanOrEqual(narrow.start.bottom - FOOT_ALIGNMENT_TOLERANCE);
+  expect(narrow.count.top, 'the count keeps the first line with back').toBeLessThan(narrow.answers.top);
+  expect(Math.abs(narrow.answers.right - narrow.end.right), "the answers end at the foot's right edge").toBeLessThanOrEqual(FOOT_ALIGNMENT_TOLERANCE);
+  await shoot(pageA, '12-answers-narrow');
+  await pageA.setViewportSize(desktop);
+
+  // `yes` must sit exactly where the next stop's `continue` sits: same right
+  // edge, same vertical centre, so a second click-through needs no pointer move.
+  await pageA.getByRole('button', { name: 'no', exact: true }).click();
+  await expect(title(pageA)).toHaveText('choose sessions to import');
+  const proceed = await next(pageA).boundingBox();
+  expect(proceed, 'the tree stop draws continue in its foot').not.toBeNull();
+  const right = (box) => box.x + box.width;
+  expect(Math.abs(right(answer) - right(proceed)), 'the answer and continue share a right edge').toBeLessThanOrEqual(FOOT_ALIGNMENT_TOLERANCE);
+  expect(Math.abs((answer.y + answer.height / 2) - (proceed.y + proceed.height / 2)), 'the answer and continue share a vertical centre').toBeLessThanOrEqual(FOOT_ALIGNMENT_TOLERANCE);
+  footAlignment = { answer, proceed, narrow };
+
+  // Leave the walk where the story left it: the next case answers the
+  // connection stop itself.
+  await pageA.getByRole('button', { name: 'back' }).click();
+  await expect(title(pageA)).toHaveText('peasant online');
 });
 
 test('scan-progress-and-tree-selection', async () => {
@@ -391,7 +457,7 @@ test('second-tab-converges-without-reload', async () => {
   expect(new Set(sameSession).size, 'two tabs of the wizard share one session').toBe(1);
 
   // B opens on the answers A already gave.
-  await next(pageB).click();
+  await pageB.getByRole('button', { name: 'no', exact: true }).click();
   await expect(title(pageB)).toHaveText('choose sessions to import');
   await expect(pageB.locator('.ks-counts', { hasText: `${chosenSessions.length} chosen` })).toBeVisible();
   await expect(project(pageB).getByRole('checkbox', { name: 'main', exact: true })).toHaveAttribute('aria-checked', 'true');
@@ -573,6 +639,43 @@ test('save-finish-and-ingest-end', async () => {
   expect((await (await pageA.request.get(`${API}/status`)).json()).configured).toBe(true);
 });
 
+test('focus-burst-reads-sign-in-once', async () => {
+  // The sidebar and the online page share one sign-in reader. Five window
+  // focuses inside one second are one leading read and one trailing read,
+  // however many listeners are mounted; the develop build read once per focus
+  // per listener, so the same burst was ten reads. The setup is saved by now,
+  // so `/village` is the online page rather than a first-run redirect.
+  const pageF = await context.newPage();
+  watch(pageF, 'F');
+  const firstRead = pageF.waitForResponse((response) => new URL(response.url()).pathname === '/api/v1/sync/auth', { timeout: 20000 });
+  await pageF.goto('/village/');
+  expect(new URL(pageF.url()).pathname, 'the online page stays the online page').toBe('/village/');
+  await (await firstRead).finished();
+  const reads = () => requests.filter((entry) => entry.tab === 'F' && entry.method === 'GET' && entry.path === '/api/v1/sync/auth').length;
+  expect(reads(), 'the online page read the sign-in once when it opened').toBe(1);
+
+  // The burst starts outside the two-second gap the opening read began, so its
+  // first focus is a leading read and the rest are held for the trailing one.
+  await pageF.evaluate((ms) => new Promise((resolve) => setTimeout(resolve, ms)), FOCUS_BURST.gapMs + 500);
+  const before = reads();
+  await pageF.evaluate(async ({ focuses, intervalMs }) => {
+    for (let index = 0; index < focuses; index += 1) {
+      window.dispatchEvent(new Event('focus'));
+      if (index + 1 < focuses) await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+  }, FOCUS_BURST);
+  await expect.poll(reads, { message: 'the burst made one leading read and one trailing read', timeout: 15000 }).toBe(before + FOCUS_BURST.expectedReads);
+  await expect.poll(() => new URL(pageF.url()).pathname, 'the online page kept the reader').toBe('/village/');
+  // The page's own saved-observations read runs at opening and on each focus;
+  // wait for the last refusal so the journey's exact refusal list is settled.
+  await expect.poll(
+    () => failedResponses.filter((entry) => entry.tab === 'F' && entry.status === 401 && entry.path === '/api/v1/village/collective-observations').length,
+    { message: 'the online page finished its saved-observations reads', timeout: 15000 },
+  ).toBe(FOCUS_BURST.focuses + 1);
+  focusBurstReads = { landed: new URL(pageF.url()).pathname, before, after: reads(), ...FOCUS_BURST };
+  await pageF.close();
+});
+
 test('config-holds-only-the-chosen-selection', async () => {
   const config = readConfig();
   savedSelection = config.selection;
@@ -612,7 +715,9 @@ test('config-holds-only-the-chosen-selection', async () => {
   const touched = requests.filter((entry) => entry.method !== 'GET' && !entry.path.startsWith(`${API}/`)).map((entry) => `${entry.method} ${entry.path}`);
   // The only write outside the setup's own routes is the finish panel's "import now".
   expect(touched, 'the only writes were setup\'s own').toEqual(['POST /api/v1/sync/ingest']);
-  expect(requests.filter((entry) => entry.path.startsWith('/api/') && /\/auto-publish|\/sync\/push|\/sync\/login|\/village\//.test(entry.path)), 'no publish, sign-in or hook route was called').toEqual([]);
+  // The online page is mounted later for the sign-in read; its own saved
+  // observations read is not part of the setup's walk.
+  expect(requests.filter((entry) => entry.tab !== 'F' && entry.path.startsWith('/api/') && /\/auto-publish|\/sync\/push|\/sync\/login|\/village\//.test(entry.path)), 'no publish, sign-in or hook route was called').toEqual([]);
 });
 
 test('selection-page-saves-only-selection', async () => {
@@ -765,10 +870,16 @@ test('computed-styles-and-themes', async () => {
     expect(entry.rail.labels.map((label) => label.text), `${name}: the rail measured one label per step`).toHaveLength(count);
   }
   expect(consoleErrors, 'no console error or page error in any tab').toEqual([]);
-  // Every refused request was one the journey provoked on purpose: the save that
-  // found a changed field (409), and the deep links to work that was never recorded.
+  // The signed-out online page reads its saved observations at opening and on
+  // each focus of the burst; every one is refused with 401. That is the page
+  // saying nobody is signed in, not a refusal of the setup walk's routes, so it
+  // is counted here and left out of the exact list below.
+  const signedOut = failedResponses.filter((entry) => entry.tab === 'F' && entry.status === 401 && entry.path === '/api/v1/village/collective-observations');
+  expect(signedOut, 'the signed-out online page refused one saved-observations read at opening and one per focus').toHaveLength(FOCUS_BURST.focuses + 1);
+  // Every other refused request was one the journey provoked on purpose: the save
+  // that found a changed field (409), and the deep links to work never recorded.
   const hash = 'a'.repeat(64);
-  const refused = failedResponses.map((entry) => `${entry.status} ${entry.method} ${entry.path.replaceAll(hash, '<hash>').replace(/\/sessions\/[0-9a-f]{32}\//, '/sessions/<id>/')}`).sort();
+  const refused = failedResponses.filter((entry) => !signedOut.includes(entry)).map((entry) => `${entry.status} ${entry.method} ${entry.path.replaceAll(hash, '<hash>').replace(/\/sessions\/[0-9a-f]{32}\//, '/sessions/<id>/')}`).sort();
   expect(refused, 'the refused requests are exactly the provoked ones').toEqual(fixture.expectedRefusals.slice().sort());
   await Promise.all([pageA, pageB].map((page) => page?.close()));
 });

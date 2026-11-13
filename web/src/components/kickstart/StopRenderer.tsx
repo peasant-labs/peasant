@@ -23,16 +23,14 @@ export function StopRenderer({
   api,
   copy,
   signIn,
-  answeredConnection,
 }: {
   stop: KickstartStop;
   session: KickstartSession;
   api: KickstartSessionApi;
   /** The words this scope uses for the review's conflict rows. */
   copy: KickstartCopy;
+  /** How the browser sign-in is going; the connection stop shows it. Its answers are in the foot. */
   signIn: VillageSignIn;
-  /** Called once the connection question's answer has been recorded. */
-  answeredConnection: () => void;
 }) {
   const answer = (key: string, value: Parameters<KickstartSessionApi['answer']>[1]) => void api.answer(key, value);
   const wide =
@@ -59,16 +57,7 @@ export function StopRenderer({
         stop.fields.map((field) => {
           if (field.kind === KickstartFieldKind.Tree) return <SelectionStep key={field.key} field={field} api={api} />;
           if (stop.kind === KickstartStopKind.Connection && field.kind === KickstartFieldKind.Action) {
-            return (
-              <ConnectionStep
-                key={field.key}
-                field={field}
-                signIn={signIn}
-                answer={async (key, value) => {
-                  if (await api.answer(key, value)) answeredConnection();
-                }}
-              />
-            );
+            return <ConnectionStep key={field.key} field={field} signIn={signIn} />;
           }
           if (field.kind === KickstartFieldKind.Notice) return <NoticeText key={field.key} field={field} />;
           if (field.example.length > 0) {

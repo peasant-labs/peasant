@@ -4,11 +4,13 @@
 # a catalogue that drops or repeats one.
 requiredNames:
   - fresh-install-redirects-to-setup
+  - answers-sit-where-continue-sits
   - scan-progress-and-tree-selection
   - second-tab-converges-without-reload
   - every-stop-the-server-shows
   - review-summary-and-collapsed-diff
   - save-finish-and-ingest-end
+  - focus-burst-reads-sign-in-once
   - config-holds-only-the-chosen-selection
   - concurrent-change-offers-mine-or-theirs
   - selection-page-saves-only-selection
@@ -18,11 +20,13 @@ requiredNames:
   - computed-styles-and-themes
 cases:
   - {name: fresh-install-redirects-to-setup}
+  - {name: answers-sit-where-continue-sits}
   - {name: scan-progress-and-tree-selection}
   - {name: second-tab-converges-without-reload}
   - {name: every-stop-the-server-shows}
   - {name: review-summary-and-collapsed-diff}
   - {name: save-finish-and-ingest-end}
+  - {name: focus-burst-reads-sign-in-once}
   - {name: config-holds-only-the-chosen-selection}
   - {name: concurrent-change-offers-mine-or-theirs}
   - {name: selection-page-saves-only-selection}
@@ -56,7 +60,9 @@ railScreens:
   10-selection-page: 3
   11-rerun-prefilled: 10
 # Every screen that is captured and probed, in both themes (one file per theme
-# and name: <theme>-<name>.png under review-capture/).
+# and name: <theme>-<name>.png under review-capture/). `12-answers-narrow` is
+# the connection stop's foot at 320 px, where the answers take their own line;
+# its rail draws numbers alone, so it is not in railScreens.
 screens:
   - 01-village
   - 02-scan-progress
@@ -69,18 +75,19 @@ screens:
   - 09-finish
   - 10-selection-page
   - 11-rerun-prefilled
+  - 12-answers-narrow
 projects:
   - {name: dark-desktop, theme: dark, width: 1280, height: 900}
   - {name: light-desktop, theme: light, width: 1280, height: 900}
 # The commit the branch was cut from. A provenance marker must be absent from
 # its web sources, or it proves nothing about this branch.
-baseCommit: 15cf2d0be79715b8e91e96c314c33ac619cdb16f
+baseCommit: 412cc8791141fb542e823ddb8fd46aa3fafab257
 provenance:
-  # Strings only this branch introduces, found in the bundle the binary serves.
+  # Strings only this branch introduces, found in the bundle the binary serves:
+  # the foot answer group and the data attribute its buttons carry.
   markers:
-    - wizard-host
-    - set up peasant
-    - your selection is saved
+    - ks-foot-answers
+    - data-foot-answer
   routes: [/kickstart/, /selection/]
 # The recordings: the ingest end-to-end fixture's Claude root session is the
 # template. Sessions name a prompt (the first is what the tree shows).

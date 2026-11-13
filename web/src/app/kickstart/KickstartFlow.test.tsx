@@ -23,6 +23,7 @@ const FILES = {
   'the finish panel': 'src/app/kickstart/testdata/finish.yaml',
   'a save that was refused': 'src/app/kickstart/testdata/commit_failures.yaml',
   'the village sign-in': 'src/app/kickstart/testdata/village.yaml',
+  'the answers in the foot': 'src/app/kickstart/testdata/foot_answers.yaml',
   'the privacy example': 'src/app/kickstart/testdata/privacy.yaml',
 } as const;
 

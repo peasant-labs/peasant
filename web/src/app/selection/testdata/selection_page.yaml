@@ -258,7 +258,7 @@ cases:
       - {tab: selection, expectText: [your selection is saved]}
       - {tab: wizard, expectNoText: [your setup is saved, your selection is saved, this setup session timed out, this selection session timed out]}
       - {tab: wizard, expectText: [step 1 of 8, peasant online]}
-      - {tab: wizard, expectControl: {role: button, name: continue}}
+      - {tab: wizard, expectFoot: {end: ["no", "yes"]}}
       # The import it started is the selection session's, not the wizard's.
       - {tab: all, push: {kind: ingest, sessionId: ses-selection, revision: 6, ingest: {state: idle, new: 12, updated: 3}}}
       - {tab: selection, expectText: [import finished]}
@@ -276,6 +276,8 @@ cases:
       "GET /api/v1/kickstart/sessions/ses-full/tree": {body: {$tree: forest}}
       "GET /api/v1/kickstart/sessions/ses-selection/tree": [{body: {$tree: forest}}, {body: {$tree: forest-two-selected}}]
       "PATCH /api/v1/kickstart/sessions/ses-selection": {body: {revision: 4, stale: false, view: {$model: selection-scope-two-selected}}}
+      # The wizard's own answer to the village question records it and sends no
+      # view, so the wizard keeps the revision it drew.
       "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "POST /api/v1/kickstart/sessions/ses-selection/commit":
         body:
@@ -285,7 +287,8 @@ cases:
           nextSteps: [config, web-start, village-login, village-push, auto-publish-settings]
     steps:
       # The wizard holds an answer of its own, on its publication stop.
-      - {tab: wizard, click: continue}
+      - {tab: wizard, click: "no"}
+      - {tab: wizard, expectCalls: {route: "PATCH /api/v1/kickstart/sessions/ses-full", count: 1}}
       - {tab: wizard, click: continue}
       - {tab: wizard, expectText: [publication preference]}
       - {tab: wizard, expectControl: {role: radio, name: plan to publish later, checked: true}}
@@ -313,8 +316,10 @@ cases:
       - {tab: wizard, expectControl: {role: radio, name: plan to publish later, checked: true}}
       - {tab: wizard, expectControl: {role: radio, name: "keep local, do not publish", checked: false}}
       # The wizard never heard from the server about its own session, and the
-      # selection page wrote nothing to it.
-      - {tab: wizard, expectNoCalls: "^(PATCH|GET) /api/v1/kickstart/sessions/ses-full$|^POST /api/v1/kickstart/sessions/ses-full/(commit|scan)$"}
+      # selection page wrote nothing to it: the one write is the wizard's own
+      # answer to the village question, made before the selection page acted.
+      - {tab: wizard, expectNoCalls: "^GET /api/v1/kickstart/sessions/ses-full$|^POST /api/v1/kickstart/sessions/ses-full/(commit|scan)$"}
+      - {tab: wizard, expectCalls: {route: "PATCH /api/v1/kickstart/sessions/ses-full", count: 1}}
       # Its next write carries the revision it last drew (2), not a revision of
       # the selection session (4, 5).
       - {tab: wizard, choose: "keep local, do not publish"}
@@ -326,7 +331,9 @@ cases:
     kind: parity
     rows: [p-ledger, g-main, s-one, s-two, p-locked]
     selectedIds: [s-one, s-two]
-    wizard: {session: ses-full, model: fresh, answered: selected-two, before: [{click: continue}]}
+    # The wizard opens with its village question settled, so it opens on its
+    # selection stop, as this page does.
+    wizard: {session: ses-full, model: connected, answered: connected-selected-two, before: []}
     selection: {session: ses-selection, model: selection-scope, answered: selection-scope-two-selected, before: []}
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: "{model}"}}

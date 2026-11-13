@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { render, screen, cleanup, fireEvent, within, act } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, within, act, waitFor } from '@testing-library/react';
 import {
   chromeFailures,
   loadShellChromeManifest,
@@ -199,7 +199,9 @@ describe('LocalSidebar — the local shell chrome manifest', () => {
     cleanup();
     signIn = { authenticated: true, username: 'alice-dev' };
     await mount();
-    expect(document.querySelector('.asb-account')).toHaveTextContent('@alice-dev');
+    // The remount has no reading to show, so the reader schedules one fresh
+    // read at the end of its gap rather than reading immediately.
+    await waitFor(() => expect(document.querySelector('.asb-account')).toHaveTextContent('@alice-dev'), { timeout: 4000 });
     expect(document.querySelector('.asb-account')).toHaveAttribute('href', '/settings?section=account');
   });
 });

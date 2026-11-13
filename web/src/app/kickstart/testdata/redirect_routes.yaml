@@ -91,9 +91,11 @@ cases:
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
       "GET /api/v1/kickstart/sessions/ses-full/tree": {body: {$tree: forest}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
     steps:
       - expectLink: {name: settings, href: /settings}
-      - click: continue
+      - click: "no"
       - click: continue
       - expectControl: {role: radio, name: plan to publish later, checked: true}
       - expectControl: {role: radio, name: "keep local, do not publish", checked: false}

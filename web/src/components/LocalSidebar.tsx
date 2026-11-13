@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Users } from 'lucide-react';
@@ -11,7 +11,7 @@ import { useServerCapabilities } from '@/contexts/ServerCapabilitiesContext';
 import { OPEN_COMMAND_PALETTE_EVENT } from '@/components/command/CommandPalette';
 import { isSectionActive, visibleNavSections } from '@/lib/nav/sections';
 import { settingsSectionHref } from '@/lib/settings/catalog';
-import { fetchVillageAuth } from '@/lib/api/settings';
+import { villageAuthFocusReader } from '@/lib/api/villageAuthFocus';
 import { DOCS_URL, onlineCollectivesHref } from '@/lib/village/links';
 
 /**
@@ -32,22 +32,14 @@ const UNDER_HOME = ['/sessions', '/projects'];
 
 /**
  * The sign-in this computer publishes with, for the account row. A read that
- * fails leaves the row out: the sidebar never guesses who is signed in.
+ * fails leaves the row out: the sidebar never guesses who is signed in. A
+ * sign-in or log-out happens in a terminal or another tab, so the sign-in is
+ * read again on return to this window, through the one reader the online page
+ * shares, so one focus is at most one read.
  */
 function useSignIn(): SyncAuthResponse | null {
   const [auth, setAuth] = useState<SyncAuthResponse | null>(null);
-  const read = useCallback(() => {
-    let live = true;
-    fetchVillageAuth().then((next) => { if (live) setAuth(next); }).catch(() => { if (live) setAuth(null); });
-    return () => { live = false; };
-  }, []);
-  useEffect(() => {
-    let cancel = read();
-    // A sign-in or log-out happens in a terminal or another tab; read again on return.
-    const onFocus = () => { cancel(); cancel = read(); };
-    window.addEventListener('focus', onFocus);
-    return () => { cancel(); window.removeEventListener('focus', onFocus); };
-  }, [read]);
+  useEffect(() => villageAuthFocusReader().subscribe(setAuth), []);
   return auth;
 }
 
