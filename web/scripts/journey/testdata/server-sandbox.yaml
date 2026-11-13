@@ -179,8 +179,10 @@ cases:
     error: did not answer
 # Every script under web/scripts that starts `peasant web start`. A required script makes its
 # sandbox with ownedServerSandbox, starts through startOwnedServer, and passes both
-# `...sandbox.args` and `env: sandbox.env` on the spawn. An exempt script isolates its server in
-# its own way, stated here; a new script that starts the binary is in neither list and fails.
+# `...sandbox.args` and `env: sandbox.env` on the spawn (or on the `launch` of the lifetime a
+# journey owns its processes through). An exempt script isolates its server in its own way, stated
+# here with the reason it cannot use the helper; a new script that starts the binary is in neither
+# list and fails.
 scripts:
   required:
     - scripts/visual/shell-nav-default-gate.mjs
@@ -190,11 +192,11 @@ scripts:
     - scripts/visual/publish-states-shoot.mjs
     - scripts/visual/share-geometry.mjs
     - scripts/visual/grouped-list-visual.mjs
-  exempt:
-    - {path: scripts/visual/home-pages-visual.mjs, reason: "sets HOME and the config, data, state and cache XDG variables to one temp root of its own"}
-    - {path: scripts/visual/root-page-visual.mjs, reason: "sets HOME and the config, data, state and cache XDG variables to one temp root per server"}
-    - {path: scripts/visual/settings-shoot.mjs, reason: "builds a temp HOME with git repositories and sets the config, data and state XDG variables under it; the cache variable is inherited"}
-    - {path: scripts/visual/transcript-segments-shoot.mjs, reason: "passes --data-dir, --config-dir and --state-dir of a seeded temp store; HOME and the cache variable are inherited"}
-    - {path: scripts/journey/api-binary.test.mjs, reason: "sets HOME and the config, data and state XDG variables under its owned lifecycle root; the cache variable is inherited"}
-    - {path: scripts/journey/run-collective-observations.mjs, reason: "sets HOME and the config, data and state XDG variables under its owned lifecycle root; the cache variable is inherited"}
-    - {path: scripts/journey/run-kickstart.mjs, reason: "sets HOME and the config, data and state XDG variables under one temp root per theme, with no config.yaml on purpose so the binary starts unconfigured; the cache variable is inherited"}
+    - scripts/visual/home-pages-visual.mjs
+    - scripts/visual/root-page-visual.mjs
+    - scripts/visual/settings-shoot.mjs
+    - scripts/visual/transcript-segments-shoot.mjs
+    - scripts/journey/api-binary.test.mjs
+    - scripts/journey/run-collective-observations.mjs
+    - scripts/journey/run-kickstart.mjs
+  exempt: []

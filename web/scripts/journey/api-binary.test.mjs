@@ -10,12 +10,14 @@ import { parse } from 'yaml';
 import * as contract from '@peasant-labs/schema';
 import { acquireLifecycle, bounded, ownedGroups } from './lib/owned-lifecycle.mjs';
 import { startVillageFixture } from './lib/village-fixture.mjs';
-import { seedConfiguredSandbox } from './lib/configured-sandbox.mjs';
+import { seedConfiguredConfigHome } from './lib/configured-sandbox.mjs';
+import { ownedServerSandbox } from '../visual/lib/owned-server-sandbox.mjs';
+import { startOwnedServer } from '../visual/lib/owned-server-start.mjs';
 
 const web = fileURLToPath(new URL('../../', import.meta.url)), repo = resolve(web, '..');
 const fixture = parse(readFileSync(new URL('./testdata/api-binary.yaml', import.meta.url), 'utf8'));
 if (new Set(fixture.cases.map(row => row.name)).size !== fixture.cases.length || fixture.requiredNames.some(name => !fixture.cases.some(row => row.name === name))) throw new Error('Required binary API scenario missing or repeated');
-let life, exported, binary, seeder, env, cleaning, source;
+let life, exported, binary, seeder, cleaning, source;
 const processes = new Set(), remotes = new Set();
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 async function clean() {
@@ -33,7 +35,7 @@ async function capture(command, args, options = {}) {
   if (bytes > 1024 * 1024) throw new Error('Binary API helper exceeded its bounded output');
   return Buffer.concat(out).toString();
 }
-async function port() {
+async function freePort() {
   const socket = createServer(); await new Promise((done, fail) => { socket.once('error', fail); socket.listen(0, '127.0.0.1', done); });
   const value = socket.address().port; await new Promise(done => socket.close(done)); return value;
 }
@@ -64,9 +66,8 @@ beforeAll(async () => {
     await launch('go', ['build', '-o', seeder, './internal/testutil/cmd/collectiveobservations-fixture'], { stdio: 'inherit' }).done;
   })(), 600000, 'API-only binary and fixture build');
   for (const [path, digest] of Object.entries(files)) if (sha(readFileSync(join(repo, path))) !== digest) throw new Error(`API proof source changed while compiling: ${path}`);
-  env = { ...process.env, XDG_CONFIG_HOME: join(root, 'config'), XDG_DATA_HOME: join(root, 'data'), XDG_STATE_HOME: join(root, 'state'), HOME: join(root, 'home'), PEASANT_OBSERVATIONS_OWNER: life.identity.owner, PEASANT_COLLECTIVE_FETCH_TIMEOUT: fixture.timeout };
-  mkdirSync(env.HOME, { recursive: true });
-  exported = JSON.parse(await capture(seeder, ['--action', 'fixture'], { env }));
+  // The fixture export reads and writes no directory; it prints the synthetic fixtures.
+  exported = JSON.parse(await capture(seeder, ['--action', 'fixture']));
 }, 600000);
 afterAll(async () => {
   for (const app of processes) await stop(app);
@@ -74,31 +75,39 @@ afterAll(async () => {
 });
 
 for (const row of fixture.cases) it(row.name, async () => {
-  for (const path of [env.XDG_CONFIG_HOME, env.XDG_DATA_HOME, env.XDG_STATE_HOME]) rmSync(path, { recursive: true, force: true });
+  // The seeder writes the store and the sign-in below the lifetime's root, beside its ownership
+  // marker, so those two directories are named and kept; HOME, state and cache are this case's own
+  // throwaway root. The fetch timeout is the case's own, so a case can start the binary on a bad one.
+  const root = life.identity.stateRoot;
+  const sandbox = ownedServerSandbox('api-binary', { configDir: join(root, 'config'), dataDir: join(root, 'data') }, { ...process.env, PEASANT_COLLECTIVE_FETCH_TIMEOUT: row.invalidTimeout ?? fixture.timeout });
+  for (const path of [sandbox.configDir, sandbox.dataDir]) rmSync(path, { recursive: true, force: true });
   const remote = await startVillageFixture(exported, contract, { token: life.identity.owner, scenarios: [row.scenario], actions: [], run() { throw new Error('No local test endpoint exists'); } });
   remotes.add(remote);
   let app;
   try {
     const seedArgs = ['--root', life.identity.stateRoot, '--village-url', remote.origin];
-    const seeded = contract.zCollectiveObservationResponse.parse(JSON.parse(await capture(seeder, [...seedArgs, '--action', 'seed'], { env })));
+    const seeded = contract.zCollectiveObservationResponse.parse(JSON.parse(await capture(seeder, [...seedArgs, '--action', 'seed'], { env: sandbox.env })));
     // The shared sandbox seed: a computer that is already set up. A row can leave it out to prove the seed is what decides.
-    if (row.configSeed !== false) seedConfiguredSandbox(env);
-    const origin = `http://127.0.0.1:${await port()}`;
-    app = launch(binary, ['web', 'start', '--foreground', '--no-browser', '--port', new URL(origin).port], { env: { ...env, PEASANT_COLLECTIVE_FETCH_TIMEOUT: row.invalidTimeout ?? fixture.timeout } });
-    processes.add(app);
-    const errors = []; app.child.stderr.on('data', bytes => { if (errors.length < 100) errors.push(bytes); }); app.child.stdout.resume();
+    if (row.configSeed !== false) seedConfiguredConfigHome(sandbox.configDir);
+    const port = await freePort();
+    const origin = `http://127.0.0.1:${port}`;
+    const errors = [];
+    // Started only when nothing answers on the port yet; the wait ends when it answers or has exited.
+    const ready = startOwnedServer({ port, withinMs: 30000, start: () => {
+      app = launch(binary, ['web', 'start', '--foreground', '--no-browser', '--port', String(port), ...sandbox.args], { env: sandbox.env });
+      processes.add(app);
+      app.child.stderr.on('data', bytes => { if (errors.length < 100) errors.push(bytes); }); app.child.stdout.resume();
+      return app.child;
+    } });
     if (row.invalidTimeout) {
+      await expect(ready).rejects.toThrow('before it answered');
       const result = await bounded(app.settled, 10000, 'invalid runtime startup refusal');
       expect(result.code).not.toBe(0); expect(Buffer.concat(errors).toString()).toContain('PEASANT_COLLECTIVE_FETCH_TIMEOUT');
       expect(remote.requests).toEqual([]);
       await expect(fetch(`${origin}/api/v1/health`, { signal: AbortSignal.timeout(1000) })).rejects.toThrow();
       return;
     }
-    await bounded((async () => { for (;;) {
-      if (app.child.exitCode !== null) throw new Error(`API server exited: ${Buffer.concat(errors)}`);
-      try { if ((await fetch(`${origin}/api/v1/health`, { signal: AbortSignal.timeout(1000) })).ok) return; } catch { /* health response is the readiness wake, with an outer 30s deadline */ }
-      await delay(100);
-    } })(), 30000, 'actual binary API readiness');
+    await ready;
     expect(realpathSync(`/proc/${app.child.pid}/exe`)).toBe(realpathSync(binary));
     expect(sha(readFileSync(`/proc/${app.child.pid}/exe`))).toBe(sha(readFileSync(binary)));
     const status = contract.zLocalKickstartStatus.parse(await (await fetch(`${origin}/api/v1/kickstart/status`)).json());

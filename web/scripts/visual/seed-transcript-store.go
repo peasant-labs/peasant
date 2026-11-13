@@ -3,11 +3,18 @@
 // Seed a synthetic multi-segment transcript into a throwaway data directory
 // so the mounted capture can open the production route. No real transcript
 // text, session id, or personal path is used.
+//
+//	go run ./web/scripts/visual/seed-transcript-store.go -data-dir <dir>
+//
+// The data directory is the one the capture's server sandbox gives the binary
+// as --data-dir; it must be an absolute path.
 package main
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -43,10 +50,12 @@ var (
 )
 
 func main() {
-	root, err := os.MkdirTemp("", "peasant-transcript-segments-")
-	if err != nil {
-		fail(err)
+	dataDir := flag.String("data-dir", "", "absolute data directory the capture's server is started with")
+	flag.Parse()
+	if !filepath.IsAbs(*dataDir) {
+		fail(errors.New("-data-dir must name the absolute data directory of the capture's server sandbox; nothing was written. Run it as: go run ./web/scripts/visual/seed-transcript-store.go -data-dir <dir>"))
 	}
+	root := *dataDir
 	dbPath := string(defaults.ResolveDBFilePathWith(root))
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 		fail(err)

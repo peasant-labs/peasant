@@ -1,8 +1,9 @@
 /* Real-binary mounted regression evidence for the root page: the shell, search
  * box, and the session list with its publish-state filters.
  *
- * It boots peasant twice, each on its own throwaway XDG directories so no
- * real session store is read:
+ * It boots peasant twice, each on its own server sandbox (every directory the
+ * binary reads or writes, and its HOME, under a throwaway root) so no real
+ * session store is read:
  *   - with the mock store (`web,sessions,qualitySessions,search,review`), which
  *     serves retained browse, project summaries, transcript details, search and
  *     the review route;
@@ -29,8 +30,9 @@
  *        PEASANT_ROOT_PORT (default 8731; the empty install uses port + 1)
  */
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
-import { seedConfiguredSandbox } from '../journey/lib/configured-sandbox.mjs'
+import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs'
+import { ownedServerSandbox } from './lib/owned-server-sandbox.mjs'
+import { startOwnedServer } from './lib/owned-server-start.mjs'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -156,23 +158,17 @@ function assertProvenance() {
   })
 }
 
-function boot(port, mock) {
-  const home = mkdtempSync(join(tmpdir(), 'peasant-root-page-'))
-  const env = { ...process.env, HOME: home, XDG_CONFIG_HOME: join(home, 'config'), XDG_DATA_HOME: join(home, 'data'), XDG_STATE_HOME: join(home, 'state'), XDG_CACHE_HOME: join(home, 'cache') }
-  // These are pages of an installed dashboard. A computer with no configuration file is sent to setup instead.
-  seedConfiguredSandbox(env)
-  const server = spawn(BIN, ['web', 'start', '--port', String(port), '--foreground', '--no-browser', `--mock-data-store=${mock}`], { cwd: REPO, env, stdio: ['ignore', 'ignore', 'pipe'] })
-  let stderr = ''
-  server.stderr.on('data', (data) => { stderr += data.toString() })
-  return { server, home, stderr: () => stderr }
-}
-
-async function waitHealthy(origin, booted) {
-  for (let i = 0; i < 60; i++) {
-    if ((await fetch(`${origin}/api/v1/health`).catch(() => null))?.status === 200) return
-    await pause(250)
-  }
-  fail(`the real binary did not become healthy on ${origin}: ${booted.stderr().trim()}`)
+/**
+ * Starts one server on its own sandbox: a throwaway root for every directory it reads or writes
+ * and its HOME, removed when the script exits. The configuration directory starts as an installed
+ * dashboard; these are its pages, and a computer with no configuration file is sent to setup. It is
+ * started only when nothing answers on the port yet, and the wait ends when it answers or has exited.
+ */
+async function boot(name, port, mock) {
+  const sandbox = ownedServerSandbox(name)
+  const server = await startOwnedServer({ port, portVariable: 'PEASANT_ROOT_PORT', start: () => spawn(BIN, ['web', 'start', '--port', String(port), '--foreground', '--no-browser', ...sandbox.args, `--mock-data-store=${mock}`], { cwd: REPO, env: sandbox.env, stdio: ['ignore', 'ignore', 'pipe'] }) })
+    .catch((error) => fail(error.message))
+  return { server }
 }
 
 /** The sync list and publication rows for the mock sessions, from the pattern. */
@@ -942,12 +938,8 @@ const servers = []
 let browser
 try {
   browser = await chromium.launch({ executablePath: CHROME, headless: true })
-  const mockServer = boot(PORT, 'web,sessions,qualitySessions,search,review')
-  servers.push(mockServer)
-  const emptyServer = boot(PORT + 1, 'none')
-  servers.push(emptyServer)
-  await waitHealthy(MOCK_ORIGIN, mockServer)
-  await waitHealthy(EMPTY_ORIGIN, emptyServer)
+  servers.push(await boot('root-page-visual', PORT, 'web,sessions,qualitySessions,search,review'))
+  servers.push(await boot('root-page-visual-empty', PORT + 1, 'none'))
   for (const chunk of chunks) {
     const servedPath = `/_next/static/chunks/${relative(join(WEB, 'out/_next/static/chunks'), chunk.path).split('\\').join('/')}`
     const served = await fetch(`${MOCK_ORIGIN}${servedPath}`)
@@ -986,7 +978,6 @@ try {
       booted.server.once('exit', () => { clearTimeout(terminate); clearTimeout(deadline); resolve() })
       booted.server.kill('SIGTERM')
     })
-    rmSync(booted.home, { recursive: true, force: true })
   })])
   const failures = cleanup.filter((result) => result.status === 'rejected').map((result) => result.reason)
   if (failures.length) throw new AggregateError(failures, 'root-page capture cleanup failed')
