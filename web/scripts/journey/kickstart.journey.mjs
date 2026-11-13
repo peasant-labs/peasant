@@ -483,35 +483,6 @@ test('second-tab-converges-without-reload', async () => {
   expect(requests.filter((entry) => /\/api\/v1\/kickstart\/sessions\/[0-9a-f]+$/.test(entry.path) && entry.method === 'GET'), 'no tab read the snapshot to learn of the other').toEqual([]);
 });
 
-test('focus-burst-reads-sign-in-once', async () => {
-  // The sidebar and the online page share one sign-in reader. Five window
-  // focuses inside one second are one leading read and one trailing read,
-  // however many listeners are mounted; the develop build read once per focus
-  // per listener, so the same burst was ten reads.
-  const pageF = await context.newPage();
-  watch(pageF, 'F');
-  const firstRead = pageF.waitForResponse((response) => new URL(response.url()).pathname === '/api/v1/sync/auth', { timeout: 20000 });
-  await pageF.goto('/village/');
-  expect(new URL(pageF.url()).pathname, 'the online page stays the online page').toBe('/village/');
-  await (await firstRead).finished();
-  const reads = () => requests.filter((entry) => entry.tab === 'F' && entry.method === 'GET' && entry.path === '/api/v1/sync/auth').length;
-  expect(reads(), 'the online page read the sign-in once when it opened').toBe(1);
-
-  // The burst starts outside the two-second gap the opening read began, so its
-  // first focus is a leading read and the rest are held for the trailing one.
-  await pageF.evaluate((ms) => new Promise((resolve) => setTimeout(resolve, ms)), FOCUS_BURST.gapMs + 500);
-  const before = reads();
-  await pageF.evaluate(async ({ focuses, intervalMs }) => {
-    for (let index = 0; index < focuses; index += 1) {
-      window.dispatchEvent(new Event('focus'));
-      if (index + 1 < focuses) await new Promise((resolve) => setTimeout(resolve, intervalMs));
-    }
-  }, FOCUS_BURST);
-  await expect.poll(reads, { message: 'the burst made one leading read and one trailing read', timeout: 15000 }).toBe(before + FOCUS_BURST.expectedReads);
-  focusBurstReads = { landed: new URL(pageF.url()).pathname, before, after: reads(), ...FOCUS_BURST };
-  await pageF.close();
-});
-
 test('every-stop-the-server-shows', async () => {
   await advance(pageA, 'auto-publish');
   await advance(pageA, 'privacy');
@@ -666,6 +637,37 @@ test('save-finish-and-ingest-end', async () => {
   expect((await (await statusRead).json()).configured, 'the page was told that setup is saved').toBe(true);
   expect(new URL(pageA.url()).pathname, 'a saved setup is never redirected').toBe('/');
   expect((await (await pageA.request.get(`${API}/status`)).json()).configured).toBe(true);
+});
+
+test('focus-burst-reads-sign-in-once', async () => {
+  // The sidebar and the online page share one sign-in reader. Five window
+  // focuses inside one second are one leading read and one trailing read,
+  // however many listeners are mounted; the develop build read once per focus
+  // per listener, so the same burst was ten reads. The setup is saved by now,
+  // so `/village` is the online page rather than a first-run redirect.
+  const pageF = await context.newPage();
+  watch(pageF, 'F');
+  const firstRead = pageF.waitForResponse((response) => new URL(response.url()).pathname === '/api/v1/sync/auth', { timeout: 20000 });
+  await pageF.goto('/village/');
+  expect(new URL(pageF.url()).pathname, 'the online page stays the online page').toBe('/village/');
+  await (await firstRead).finished();
+  const reads = () => requests.filter((entry) => entry.tab === 'F' && entry.method === 'GET' && entry.path === '/api/v1/sync/auth').length;
+  expect(reads(), 'the online page read the sign-in once when it opened').toBe(1);
+
+  // The burst starts outside the two-second gap the opening read began, so its
+  // first focus is a leading read and the rest are held for the trailing one.
+  await pageF.evaluate((ms) => new Promise((resolve) => setTimeout(resolve, ms)), FOCUS_BURST.gapMs + 500);
+  const before = reads();
+  await pageF.evaluate(async ({ focuses, intervalMs }) => {
+    for (let index = 0; index < focuses; index += 1) {
+      window.dispatchEvent(new Event('focus'));
+      if (index + 1 < focuses) await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+  }, FOCUS_BURST);
+  await expect.poll(reads, { message: 'the burst made one leading read and one trailing read', timeout: 15000 }).toBe(before + FOCUS_BURST.expectedReads);
+  await expect.poll(() => new URL(pageF.url()).pathname, 'the online page kept the reader').toBe('/village/');
+  focusBurstReads = { landed: new URL(pageF.url()).pathname, before, after: reads(), ...FOCUS_BURST };
+  await pageF.close();
 });
 
 test('config-holds-only-the-chosen-selection', async () => {

@@ -7,10 +7,10 @@ requiredNames:
   - answers-sit-where-continue-sits
   - scan-progress-and-tree-selection
   - second-tab-converges-without-reload
-  - focus-burst-reads-sign-in-once
   - every-stop-the-server-shows
   - review-summary-and-collapsed-diff
   - save-finish-and-ingest-end
+  - focus-burst-reads-sign-in-once
   - config-holds-only-the-chosen-selection
   - concurrent-change-offers-mine-or-theirs
   - selection-page-saves-only-selection
@@ -23,10 +23,10 @@ cases:
   - {name: answers-sit-where-continue-sits}
   - {name: scan-progress-and-tree-selection}
   - {name: second-tab-converges-without-reload}
-  - {name: focus-burst-reads-sign-in-once}
   - {name: every-stop-the-server-shows}
   - {name: review-summary-and-collapsed-diff}
   - {name: save-finish-and-ingest-end}
+  - {name: focus-burst-reads-sign-in-once}
   - {name: config-holds-only-the-chosen-selection}
   - {name: concurrent-change-offers-mine-or-theirs}
   - {name: selection-page-saves-only-selection}
