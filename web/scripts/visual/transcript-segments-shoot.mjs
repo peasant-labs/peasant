@@ -11,10 +11,11 @@
    assertServedBuild runs before any capture. Transient PNGs stay under review-capture/ and are not committed.
 */
 import { spawn } from 'node:child_process'
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { assertServedBuild } from './served-build.mjs'
+import { isolatedServerSandbox } from './lib/isolated-sandbox.mjs'
 import { ownedServerSandbox } from './lib/owned-server-sandbox.mjs'
 import { startOwnedServer } from './lib/owned-server-start.mjs'
 
@@ -67,12 +68,16 @@ async function directory(sessionId) {
 }
 
 mkdirSync(OUT, { recursive: true })
-// The server's configuration, data, state and cache directories and its HOME are a throwaway root of
-// this run, so it never opens the store or the home of the person running the script. The synthetic
-// transcript is seeded into the sandbox's own data directory, and the configuration directory starts
-// as an installed dashboard, so the home session list is served rather than sent to setup.
-const sandbox = ownedServerSandbox('transcript-segments')
-const seeded = JSON.parse((await run('go', ['run', './web/scripts/visual/seed-transcript-store.go', '-data-dir', sandbox.dataDir])).stdout)
+// The server's configuration, state, cache and HOME are a throwaway root of this run, so it never
+// opens the store or the home of the person running the script. The seeder creates its own data
+// directory under that root and accepts no path, so nothing can point it at a real store; the
+// sandbox then names the created directory when it starts the binary. The configuration directory
+// starts as an installed dashboard, so the home session list is served rather than sent to setup.
+const owned = ownedServerSandbox('transcript-segments')
+// Only the seeder's TMPDIR is redirected into the sandbox root; it keeps the Go tool environment
+// (module cache) it needs, and it opens nothing under that HOME.
+const seeded = JSON.parse((await run('go', ['run', './web/scripts/visual/seed-transcript-store.go'], { env: { ...process.env, TMPDIR: owned.root } })).stdout)
+const sandbox = isolatedServerSandbox(owned.root, { dataDir: seeded.dataDir }, owned.env)
 let serverLog = ''
 // It is started only when nothing answers on the port yet, and the wait ends when it answers or has
 // exited, so the pages are never driven against a server this run did not start.
@@ -311,5 +316,9 @@ try {
   console.error(serverLog)
   throw error
 } finally {
+  const stopped = new Promise((done) => (server.exitCode !== null || server.signalCode !== null ? done() : server.once('exit', done)))
   server.kill('SIGTERM')
+  await stopped
+  // The root is this run's own throwaway directory, and the server that read it has stopped.
+  rmSync(sandbox.root, { recursive: true, force: true })
 }

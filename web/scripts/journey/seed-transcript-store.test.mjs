@@ -1,17 +1,18 @@
 /* The transcript-segment seeder's data-directory boundary.
  *
- * Each case runs the real seeder, exactly as the capture does (`go run
- * ./web/scripts/visual/seed-transcript-store.go -data-dir <dir>`), in a throwaway root under the
- * test's temporary directory. A refused case must leave every byte, entry and mode it found
- * unchanged: the sentinel store is never opened, migrated or written. A fresh case must seed the
- * expected session and entries, and the test reads them back through SQLite from the seeded file,
- * which is what the capture's server reads.
+ * The seeder creates the data directory it writes to and accepts no path, so a real store cannot
+ * be named. Each case runs the real program, exactly as the capture does (`go run
+ * ./web/scripts/visual/seed-transcript-store.go`), in a throwaway root under the test's temporary
+ * directory. A supplied path must be refused before anything is created or opened, and every byte,
+ * entry and mode the invocation found must be unchanged. A run with no path must create a fresh
+ * private directory under TMPDIR, seed it, and print its path; the test reads the seeded session
+ * and entries back through SQLite, which is what the capture's server reads.
  *
  * This is a process-boundary test because the bug it protects against is at the boundary: the
  * program is separate (`//go:build ignore`) and the capture launches it by path, so no in-process
  * export can be the subject without inventing one. The harness is one test file and one YAML
  * fixture; it starts only short-lived `go run` processes in its own temporary directory, and the
- * Go build cache makes the whole file a few seconds.
+ * Go build cache keeps the whole file to a few seconds.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -29,13 +30,14 @@ assert.deepEqual(new Set(f.cases.map((row) => row.name)), new Set(f.requiredName
 
 const REPO = fileURLToPath(new URL('../../..', import.meta.url));
 const SEEDER = './web/scripts/visual/seed-transcript-store.go';
-// A relative argument this test never expects to be created, even when the guard is mutated.
+const PREFIX = 'peasant-transcript-segments-';
+// A relative argument this test never expects to be created, even when the refusal is mutated.
 const RELATIVE_ARGUMENT = 'relative-data-dir-that-must-not-be-created';
 
 // Runs the seeder as the capture does and reports its status, output and errors.
-function runSeeder(dataDir) {
+function runSeeder(args, environment = {}) {
   try {
-    const stdout = execFileSync('go', ['run', SEEDER, '-data-dir', dataDir], { cwd: REPO, env: { ...process.env, GOWORK: 'off' }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 120000 });
+    const stdout = execFileSync('go', ['run', SEEDER, ...args], { cwd: REPO, env: { ...process.env, GOWORK: 'off', ...environment }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 120000 });
     return { status: 0, stdout, stderr: '' };
   } catch (error) {
     return { status: error.status ?? -1, stdout: error.stdout ?? '', stderr: error.stderr ?? String(error) };
@@ -68,52 +70,54 @@ function sentinelDatabase(path) {
   } finally { db.close(); }
 }
 
-function populate(mode, root, dataDir) {
+function populate(mode, root, supplied) {
   if (mode === 'existing-store') {
-    sentinelDatabase(join(dataDir, 'peasant', 'peasant.db'));
-    mkdirSync(join(dataDir, 'peasant-sync'));
-    writeFileSync(join(dataDir, 'peasant-sync', 'kept.jsonl'), 'kept-transcript-bytes');
+    sentinelDatabase(join(supplied, 'peasant', 'peasant.db'));
+    mkdirSync(join(supplied, 'peasant-sync'));
+    writeFileSync(join(supplied, 'peasant-sync', 'kept.jsonl'), 'kept-transcript-bytes');
     return;
   }
-  if (mode === 'empty-dir') { mkdirSync(dataDir); return; }
+  if (mode === 'empty-dir') { mkdirSync(supplied); return; }
   if (mode === 'symlink') {
     const realStore = join(root, 'real-store');
     sentinelDatabase(join(realStore, 'peasant', 'peasant.db'));
-    symlinkSync(realStore, dataDir);
+    symlinkSync(realStore, supplied);
     return;
   }
-  if (mode === 'file') { writeFileSync(dataDir, 'sentinel-file-bytes'); return; }
-  assert.ok(['relative', 'missing-parent', 'fresh'].includes(mode), `unknown mode ${mode}`);
+  if (mode === 'file') { writeFileSync(supplied, 'sentinel-file-bytes'); return; }
+  assert.ok(['relative', 'fresh'].includes(mode), `unknown mode ${mode}`);
 }
 
 for (const row of f.cases) test(row.name, { timeout: 180000 }, async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'peasant-seed-test-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const dataDir = join(root, 'data');
-  populate(row.mode, root, dataDir);
-  const before = snapshot(root);
-  const argument = row.mode === 'relative' ? RELATIVE_ARGUMENT : row.mode === 'missing-parent' ? join(root, 'absent', 'data') : dataDir;
-  const result = runSeeder(argument);
   if (row.refused === false) {
+    const result = runSeeder([], { TMPDIR: root });
     assert.equal(result.status, 0, `the seeder seeds a fresh directory: ${result.stderr}`);
     const said = JSON.parse(result.stdout);
-    assert.equal(said.dataDir, dataDir);
+    assert.ok(said.dataDir.startsWith(join(root, PREFIX)), `the created directory is under TMPDIR: ${said.dataDir}`);
+    const stat = lstatSync(said.dataDir);
+    assert.ok(stat.isDirectory(), 'the printed path is the directory the run created');
+    assert.equal(stat.mode & 0o777, 0o700, 'the created directory is private to this run');
     assert.equal(said.turns, row.turns);
     assert.equal(said.conversationTurns, row.conversationTurns);
-    const dbPath = join(dataDir, 'peasant', 'peasant.db');
-    assert.ok(existsSync(dbPath), 'the seeded store stays in the data directory for the capture server');
+    const dbPath = join(said.dataDir, 'peasant', 'peasant.db');
+    assert.ok(existsSync(dbPath), 'the seeded store is in the directory the seeder printed');
     const db = new DatabaseSync(dbPath, { readOnly: true });
     try {
       assert.equal(db.prepare('select count(*) as n from sessions').get().n, row.sessions);
       assert.equal(db.prepare('select count(*) as n from session_entries').get().n, row.entries);
       assert.equal(db.prepare('select count(*) as n from session_entries where session_id = ?').get(said.sessionId).n, row.entries);
     } finally { db.close(); }
-    // The seeder created its data directory and nothing beside it.
-    assert.deepEqual(readdirSync(root), ['data']);
+    assert.deepEqual(readdirSync(root), [said.dataDir.slice(root.length + 1)], 'the run created only its own data directory');
     return;
   }
-  assert.equal(result.status, 1, `the seeder refuses the ${row.mode} path: ${result.stdout}${result.stderr}`);
+  const supplied = row.mode === 'relative' ? RELATIVE_ARGUMENT : join(root, 'supplied-store');
+  populate(row.mode, root, supplied);
+  const before = snapshot(root);
+  const result = runSeeder(row.form === 'positional' ? [supplied] : ['-data-dir', supplied]);
+  assert.equal(result.status, 1, `the seeder refuses a supplied path: ${result.stdout}${result.stderr}`);
   assert.deepEqual(snapshot(root), before, 'everything the invocation found is unchanged');
-  assert.match(result.stderr, new RegExp(row.error));
+  assert.match(result.stderr, /not accepted/);
   assert.equal(existsSync(join(REPO, RELATIVE_ARGUMENT)), false, 'a relative argument creates nothing in the checkout');
 });
