@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
 import { isolatedServerSandbox } from '../visual/lib/isolated-sandbox.mjs';
 import { directoryNamedBy, ownedServerSandbox } from '../visual/lib/owned-server-sandbox.mjs';
-import { startOwnedServer } from '../visual/lib/owned-server-start.mjs';
+import { startOwnedServer, stopOwnedServer } from '../visual/lib/owned-server-start.mjs';
 import { CONFIGURED_SANDBOX_CONFIG } from './lib/configured-sandbox.mjs';
 
 const f = parse(readFileSync(new URL('./testdata/server-sandbox.yaml', import.meta.url), 'utf8'));
@@ -19,6 +19,7 @@ assert.deepEqual(new Set([...f.cases.map(c => c.name), 'every-script-that-starts
 // The child programs the cases launch; each reads its case's values from its arguments.
 const FAKE_SERVER = fileURLToPath(new URL('./lib/fake-server.mjs', import.meta.url));
 const OWNED_SANDBOX_SCRIPT = fileURLToPath(new URL('./lib/owned-sandbox-script.mjs', import.meta.url));
+const LIFECYCLE_CHILD = fileURLToPath(new URL('./lib/lifecycle-child.mjs', import.meta.url));
 
 // Starts `program` with `args` and kills it when the case ends, if it is still running.
 function launch(cleanups, program, args, { ipc = false } = {}) {
@@ -84,7 +85,7 @@ const modes = {
     for (const end of row.ends) {
       const how = typeof end === 'number' ? ['--end', 'exit', '--status', end] : ['--end', end];
       const wantStatus = typeof end === 'number' ? end : end === 'uncaught-error' ? 1 : 0;
-      const { status, stdout, stderr } = runOwnedSandboxScript(root, ['--name', row.script, ...namedArgs(named), ...how]);
+      const { status, stdout, stderr } = runOwnedSandboxScript(root, ['--name', row.script, ...namedArgs(named), ...how, ...(row.keep ? ['--keep'] : [])]);
       assert.equal(status, wantStatus, `the script that ends by ${end}: ${stderr}`);
       const said = JSON.parse(stdout);
       assert.equal(said.existed, true);
@@ -92,7 +93,12 @@ const modes = {
       assert.equal(said.home, named.home ?? join(said.root, 'home'));
       assert.equal(said.dataDir, named.dataDir ?? join(said.root, 'data'));
       assert.equal(said.configDir, named.configDir ?? join(said.root, 'config'));
-      assert.equal(existsSync(said.root), false, `the sandbox is gone after the script ends by ${end}`);
+      if (row.keep) {
+        assert.equal(existsSync(said.root), true, `the sandbox is kept for the caller after the script ends by ${end}`);
+        rmSync(said.root, { recursive: true, force: true });
+      } else {
+        assert.equal(existsSync(said.root), false, `the sandbox is gone after the script ends by ${end}`);
+      }
       for (const directory of Object.values(named)) assert.equal(readFileSync(join(directory, 'marker'), 'utf8'), 'theirs', `${directory} is the caller's and is kept after the script ends by ${end}`);
       if (named.dataDir) assert.equal(existsSync(join(named.dataDir, 'peasant', 'peasant.db')), true, 'what the server wrote in the named data directory is kept');
       if (row.config !== undefined) {
@@ -154,6 +160,24 @@ const modes = {
     assert.equal(started !== null, row.started, row.started ? 'the script started its server' : 'nothing was started on an occupied port');
     if (row.server === 'answers-elsewhere') assert.equal(answeredElsewhere, true, 'the other process answered health before the started server exited');
     if (row.stopped) { await new Promise((done) => (gone(started) ? done() : started.once('exit', done))); assert.equal(started.signalCode, 'SIGKILL'); }
+  },
+  async stop(row, root, cleanups) {
+    assert.ok(['waits', 'ignores-term', 'missing'].includes(row.child), `case ${row.name} has the unknown child ${row.child}`);
+    const program = row.child === 'missing' ? join(root, 'no-such-program') : process.execPath;
+    const args = row.child === 'missing' ? [] : [LIFECYCLE_CHILD, row.child, '--exit-after-ms', String(row.exitAfterMs ?? 60000), ...(row.child === 'ignores-term' ? ['--status', '0'] : [])];
+    const child = spawn(program, args, { stdio: ['ignore', 'pipe', 'inherit'] });
+    const failed = new Promise((done) => child.once('error', done));
+    cleanups.push(() => { try { if (!gone(child)) child.kill('SIGKILL'); } catch { /* already gone */ } });
+    // The ignoring child prints ready only after its SIGTERM handler is in place.
+    if (row.child === 'ignores-term') await new Promise((done) => child.stdout.once('data', done));
+    if (row.before === 'exited') await new Promise((done) => child.once('exit', done));
+    if (row.child === 'missing') await failed;
+    const before = Date.now();
+    await stopOwnedServer(child, { termMs: row.termMs, killMs: row.killMs, what: 'the test server' });
+    if (row.child === 'missing') assert.equal(child.pid, undefined, 'a spawn that never produced a process is already stopped');
+    else assert.equal(gone(child), true, 'the child has exited');
+    assert.ok(Date.now() - before < (row.termMs ?? 3000) + (row.killMs ?? 2000) + 2000, 'the stop waits only its deadlines');
+    if (row.signal) assert.equal(child.signalCode, row.signal);
   },
 };
 

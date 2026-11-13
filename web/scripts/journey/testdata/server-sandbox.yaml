@@ -17,6 +17,7 @@ requiredNames:
   - owned-server-sandbox-is-removed-when-the-script-throws
   - owned-server-sandbox-keeps-a-named-directory
   - owned-server-sandbox-keeps-a-named-home
+  - owned-server-sandbox-keeps-the-root-when-asked
   - owned-server-sandbox-starts-as-an-installed-dashboard
   - owned-server-sandbox-leaves-a-named-config-file-as-found
   - owned-server-sandbox-writes-no-config-file-into-a-named-dir
@@ -31,6 +32,10 @@ requiredNames:
   - owned-server-start-returns-the-server-that-answers
   - owned-server-start-refuses-an-answer-from-a-server-that-then-exits
   - owned-server-start-stops-a-server-that-never-answers
+  - owned-server-stop-returns-when-the-child-exits-on-term
+  - owned-server-stop-kills-a-child-that-ignores-term
+  - owned-server-stop-returns-an-already-exited-child
+  - owned-server-stop-returns-a-child-that-never-spawned
   - every-script-that-starts-the-binary-is-sandboxed-or-exempt
 cases:
   # mode layout: `named` are the directories the caller names itself ($ROOT and $OTHER are
@@ -98,6 +103,8 @@ cases:
     script: run-kickstart
     named: {home: $OTHER/their-home}
     ends: [0, uncaught-error]
+  # `keep` asks the script to remove its own root instead of the helper doing it at exit.
+  - {name: owned-server-sandbox-keeps-the-root-when-asked, mode: owned, script: share-geometry, ends: [0], keep: true}
   - {name: owned-server-sandbox-starts-as-an-installed-dashboard, mode: owned, script: full-app-smoke, ends: [last-line, 3], config: seed}
   - name: owned-server-sandbox-leaves-a-named-config-file-as-found
     mode: owned
@@ -177,6 +184,13 @@ cases:
     started: true
     stopped: true
     error: did not answer
+# mode stop: a child the script started is stopped within explicit deadlines. `child` is the
+# lifecycle child's mode (waits exits on SIGTERM, ignores-term ignores it until SIGKILL, missing
+# never spawns); `before` is what has already happened to it; `signal` is the signal that ended it.
+  - {name: owned-server-stop-returns-when-the-child-exits-on-term, mode: stop, child: waits, exitAfterMs: 60000, termMs: 3000, killMs: 2000, signal: SIGTERM}
+  - {name: owned-server-stop-kills-a-child-that-ignores-term, mode: stop, child: ignores-term, termMs: 150, killMs: 2000, signal: SIGKILL}
+  - {name: owned-server-stop-returns-an-already-exited-child, mode: stop, child: waits, exitAfterMs: 0, before: exited}
+  - {name: owned-server-stop-returns-a-child-that-never-spawned, mode: stop, child: missing}
 # Every script under web/scripts that starts `peasant web start`. A required script makes its
 # sandbox with ownedServerSandbox, starts through startOwnedServer, and passes both
 # `...sandbox.args` and `env: sandbox.env` on the spawn (or on the `launch` of the lifetime a
