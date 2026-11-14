@@ -61,3 +61,10 @@ func (p *Pipeline) RefreshStoredMetadata(ctx context.Context, session Discovered
 // by the rule "bind without a re-parse", so the external harvest fixture can
 // count binds apart from parses.
 const IndexBindWithoutReparseReason = indexBindWithoutReparseReason
+
+// StoredDecisionForTest asks the stored-row decision for one session, so the
+// external fixture can prove the next run settles to none. loc is the stored
+// location the fixture read; no file is opened.
+func StoredDecisionForTest(p *Pipeline, session DiscoveredSession, loc SessionLocation) RefreshDecision {
+	return p.refreshDecisionForLocation(session, loc, nil)
+}

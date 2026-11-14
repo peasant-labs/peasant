@@ -12,17 +12,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 )
 
-// An omitted producer stamp predates tracking. Baseline 1 is only an eligibility
-// default; it is never persisted as historical evidence of an adapter execution.
-func (p *Pipeline) adapterNeedsRefresh(metadata *UnifiedMetadata) bool {
-	if metadata == nil || metadata.SchemaVersion > CurrentSchemaVersion {
-		return false
-	}
-	target := p.versionTargets()[metadata.ModelHarness].AdapterVersion
-	version := storedAdapterRevision(metadata.AdapterVersion)
-	return version <= target && (version < target || metadataNeedsNativeRefresh(metadata.SchemaVersion))
-}
-
 func adapterTargetMetadataPath(target reindexTarget) string {
 	return filepath.Join(filepath.Dir(target.transcriptPath), string(target.session.SessionID)+defaults.MetadataSuffix)
 }
@@ -56,7 +45,28 @@ func (p *Pipeline) adapterTargetMetadataIn(ctx context.Context, target reindexTa
 }
 
 func (p *Pipeline) adapterTargetNeedsWork(ctx context.Context, target reindexTarget) bool {
-	return p.adapterNeedsRefresh(p.adapterTargetMetadata(ctx, target))
+	metadata := p.adapterTargetMetadata(ctx, target)
+	if metadata == nil || metadata.SchemaVersion > CurrentSchemaVersion {
+		return false
+	}
+	loc, hasLocation := p.locationCache[target.session.SessionID]
+	decision := p.refreshDecisionForLocation(target.session, loc, metadata)
+	if !hasLocation {
+		version, present := storedAdapterEvidence(loc, false, metadata)
+		decision = decideRefresh(refreshEvidence{
+			StoredRow:           true,
+			Forced:              p.config.Force,
+			MetadataSchemaOld:   metadataNeedsNativeRefresh(metadata.SchemaVersion),
+			AdapterVersion:      version,
+			AdapterTarget:       p.versionTargets()[target.session.Harness].AdapterVersion,
+			AdapterStampPresent: present,
+			AdapterCanExtract:   p.adapterSupportsStoredExtraction(target.session.Harness),
+		})
+	}
+	return decision.Reason == RefreshReasonAdapterBehind ||
+		decision.Reason == RefreshReasonAdapterStampAbsent ||
+		decision.Reason == RefreshReasonAdapterBehindNativeOnly ||
+		decision.Reason == RefreshReasonMetadataSchema
 }
 
 func (p *Pipeline) nativeSessionForTarget(target reindexTarget, metadata *UnifiedMetadata) DiscoveredSession {
@@ -140,9 +150,33 @@ func (p *Pipeline) storedAdapterEntry(ctx context.Context, sid SessionID, native
 	if reconstructed == nil {
 		return nil
 	}
+	// The stored adapter pass is bounded by the same harness, session and age
+	// filters as the rest of the run. A candidate outside them contributes no
+	// work even when its row says the adapter is behind.
+	if !p.includesManagedSession(sid, reconstructed.Harness) || !p.withinRunAge(startMs) {
+		return nil
+	}
 	target := reindexTarget{session: *reconstructed, startMs: startMs, transcriptPath: transcriptPath}
 	metadata := p.adapterTargetMetadataIn(ctx, target, snap)
-	if !p.adapterNeedsRefresh(metadata) {
+	loc, hasLocation := snap[sid]
+	var decision RefreshDecision
+	if hasLocation {
+		decision = p.refreshDecisionForLocation(*reconstructed, loc, metadata)
+	} else {
+		// A legacy pair with no row is decided from its file stamp only.
+		version, present := storedAdapterEvidence(loc, false, metadata)
+		decision = decideRefresh(refreshEvidence{
+			StoredRow:           metadata != nil,
+			Forced:              p.config.Force,
+			AdapterVersion:      version,
+			AdapterTarget:       p.versionTargets()[reconstructed.Harness].AdapterVersion,
+			AdapterStampPresent: present,
+			AdapterCanExtract:   p.adapterSupportsStoredExtraction(reconstructed.Harness),
+		})
+	}
+	if decision.Lane != RefreshLaneStoredMetadata && decision.Reason != RefreshReasonAdapterBehindNativeOnly && decision.Reason != RefreshReasonMetadataSchema {
+		// The stored-index lane is settled by the index inventory from the
+		// stored pair, and a settled decision contributes no work here.
 		return nil
 	}
 	// The stored metadata carries the original native source locator. A
@@ -160,7 +194,7 @@ func (p *Pipeline) storedAdapterEntry(ctx context.Context, sid SessionID, native
 	if !p.config.IncludeActive && p.config.StalenessThreshold > 0 && !session.stalenessSourceTime().IsZero() && time.Since(session.stalenessSourceTime()) < p.config.StalenessThreshold {
 		return nil
 	}
-	return &DiffEntry{Session: session, Status: DiffUpdated, retainedOnly: !found}
+	return &DiffEntry{Session: session, Status: decision.Status(), Decision: decision, retainedOnly: !found}
 }
 
 // pairRepairCandidateIDs returns the stored sessions that may need their saved
@@ -582,6 +616,10 @@ func (p *Pipeline) appendPairRepairWork(ctx context.Context, entries []DiffEntry
 		case pairRepairMarkQueued:
 			entries[outcome.queuedIndex].pairRepair = true
 			entries[outcome.queuedIndex].repairMetadataPath = outcome.metadataPath
+			// A missing or damaged pair is a native repair regardless of what
+			// the queued path would otherwise have done.
+			entries[outcome.queuedIndex].Decision = RefreshDecision{Reason: RefreshReasonPairMissing, Lane: RefreshLaneNative}
+			entries[outcome.queuedIndex].Status = DiffUpdated
 		case pairRepairAppend:
 			entries = append(entries, outcome.entry)
 		default:
@@ -688,7 +726,8 @@ func (p *Pipeline) pairRepairDecision(ctx context.Context, sid SessionID, entrie
 		}
 	}
 	return pairRepairOutcome{kind: pairRepairAppend, entry: DiffEntry{
-		Session: session, Status: DiffUpdated, pairRepair: true, repairMetadataPath: metadataPath,
+		Session: session, Status: DiffUpdated, Decision: RefreshDecision{Reason: RefreshReasonPairMissing, Lane: RefreshLaneNative},
+		pairRepair: true, repairMetadataPath: metadataPath,
 	}, damaged: true}
 }
 
@@ -773,17 +812,39 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry, writeLan
 		metadata, metadataErr = p.metadataForRewrite(ctx, entry.Session)
 		metadataPath, pathErr = p.findMetadataPath(ctx, entry.Session)
 	}
+	decision := p.refreshDecisionForEntry(entry.Session, metadata, entry.Decision)
 	// A forced run is an explicit manual refresh and tries native input first;
 	// routine version-driven maintenance prefers sufficient stored input.
-	if metadataErr == nil && pathErr == nil && metadata != nil && p.adapterNeedsRefresh(metadata) && !metadataNeedsNativeRefresh(metadata.SchemaVersion) && !p.config.Force && !entry.pairRepair && !p.nativeInputChanged(entry.Session, metadata) {
-		refreshed := p.processRetainedSession(ctx, entry.Session, metadataPath, writeLane)
-		var insufficient *InsufficientRetainedInputError
-		if refreshed.result.Error == nil || !errors.As(refreshed.result.Error, &insufficient) {
-			// The adapter stamp is behind and the stored transcript served the
-			// refresh: no native read.
-			p.markRefreshReason(entry.Session.SessionID, OutcomeReasonRefreshAdapterBehind)
-			return refreshed
+	storedInputReadable := metadataErr == nil && pathErr == nil && metadata != nil
+	if storedInputReadable {
+		storedInput := decision.Lane == RefreshLaneStoredMetadata
+		storedInput = storedInput && !metadataNeedsNativeRefresh(metadata.SchemaVersion)
+		storedInput = storedInput && !p.config.Force
+		storedInput = storedInput && !entry.pairRepair
+		storedInput = storedInput && !p.nativeInputChanged(entry.Session, metadata)
+		if storedInput {
+			refreshed := p.processRetainedSession(ctx, entry.Session, metadataPath, writeLane)
+			var insufficient *InsufficientRetainedInputError
+			if refreshed.result.Error == nil || !errors.As(refreshed.result.Error, &insufficient) {
+				// The adapter stamp is behind and the stored transcript served
+				// the refresh: no native read.
+				p.markRefreshReason(entry.Session.SessionID, decision.OutcomeReason())
+				refreshed.result.Decision = decision
+				return refreshed
+			}
 		}
+	}
+	storedIndex := decision.Lane == RefreshLaneStoredIndex
+	settled := decision.Reason == RefreshReasonNone
+	if storedIndex || settled {
+		// The decision says the stored pair settles this session without a
+		// native capture. It should normally have been filtered before the
+		// worker; keeping the guard here means a directly constructed entry
+		// cannot turn an index-lane decision into a native read.
+		return workerResult{result: SessionResult{
+			SessionID: entry.Session.SessionID, Harness: entry.Session.Harness,
+			ParentUUID: entry.Session.ParentUUID, Status: DiffUnchanged, Decision: decision,
+		}}
 	}
 	var result workerResult
 	if entry.retainedOnly && metadata != nil && (metadata.Redaction.Applied || len(metadata.Subagents) > 0) {

@@ -1,0 +1,250 @@
+# One refresh decision per stored session, driven through the production
+# harvest pipeline with an in-memory filesystem and a real store. Each case
+# seeds the same current session, applies one mutation, and states the decision
+# the pipeline must make, whether the native source may be read, which pair
+# files may be renamed into place, whether the index is rewritten, and that the
+# stored row settles to none.
+#
+# The source transcripts are synthetic: a session id, a working directory, a
+# user turn and an assistant turn. `append_record` adds one more synthetic
+# user turn.
+session_id: 97200000-0000-4000-8000-000000000001
+transcript:
+  - '{"sessionId":"97200000-0000-4000-8000-000000000001","type":"user","uuid":"entry-first","timestamp":"2023-11-14T22:13:20Z","cwd":"/work/project","message":{"role":"user","content":"first synthetic turn"}}'
+  - '{"sessionId":"97200000-0000-4000-8000-000000000001","type":"assistant","uuid":"entry-second","timestamp":"2023-11-14T22:13:21Z","cwd":"/work/project","message":{"role":"assistant","model":"claude-synthetic","content":[{"type":"text","text":"second synthetic turn"}]}}'
+append_record: '{"sessionId":"97200000-0000-4000-8000-000000000001","type":"user","uuid":"entry-third","timestamp":"2023-11-14T22:13:22Z","cwd":"/work/project","message":{"role":"user","content":"appended synthetic turn"}}'
+cases:
+  - name: source-changed-is-captured-natively
+    harness: claude-code
+    source: changed
+    stored_adapter: current
+    metadata_schema: current
+    pair: present
+    indexer: current
+    publication: bound
+    want_reason: source_changed
+    want_lane: native
+    want_native_read: true
+    want_pair_writes: [metadata, transcript]
+    want_indexed: true
+
+  - name: missing-pair-is-captured-natively
+    harness: claude-code
+    source: current
+    stored_adapter: current
+    metadata_schema: current
+    pair: missing
+    indexer: current
+    publication: bound
+    want_reason: pair_missing
+    want_lane: native
+    want_native_read: true
+    want_pair_writes: [metadata, transcript]
+    want_indexed: true
+
+  - name: metadata-schema-refresh-is-captured-natively
+    harness: claude-code
+    source: current
+    stored_adapter: current
+    metadata_schema: native_refresh
+    pair: present
+    indexer: current
+    publication: bound
+    want_reason: metadata_schema
+    want_lane: native
+    want_native_read: true
+    want_pair_writes: [metadata]
+    want_indexed: false
+
+  - name: forced-run-is-captured-natively
+    harness: claude-code
+    source: current
+    stored_adapter: current
+    metadata_schema: current
+    pair: present
+    force: true
+    indexer: current
+    publication: bound
+    want_reason: forced
+    want_lane: native
+    want_native_read: true
+    want_pair_writes: [metadata]
+    want_indexed: true
+
+  - name: adapter-behind-refreshes-metadata-from-the-stored-copy
+    harness: claude-code
+    source: current
+    stored_adapter: behind
+    metadata_schema: current
+    pair: present
+    indexer: current
+    publication: bound
+    want_reason: adapter_behind
+    want_lane: stored-metadata
+    want_native_read: false
+    want_pair_writes: [metadata]
+    want_indexed: false
+
+  - name: adapter-behind-without-stored-extractor-is-captured-natively
+    harness: strike
+    source: current
+    stored_adapter: behind
+    metadata_schema: current
+    pair: present
+    indexer: current
+    publication: bound
+    want_reason: adapter_behind_native_only
+    want_lane: native
+    want_native_read: true
+    want_pair_writes: [metadata]
+    want_indexed: false
+
+  - name: absent-adapter-stamp-refreshes-metadata-from-the-stored-copy
+    harness: claude-code
+    source: current
+    stored_adapter: absent
+    metadata_schema: current
+    pair: present
+    indexer: current
+    publication: bound
+    want_reason: adapter_stamp_absent
+    want_lane: stored-metadata
+    want_native_read: false
+    want_pair_writes: [metadata]
+    want_indexed: false
+
+  - name: row-stamp-behind-with-current-file-stamp-reads-no-native-source
+    harness: claude-code
+    source: current
+    stored_adapter: behind
+    file_adapter: current
+    metadata_schema: current
+    pair: present
+    indexer: current
+    publication: bound
+    want_reason: adapter_behind
+    want_lane: stored-metadata
+    want_native_read: false
+    want_pair_writes: [metadata]
+    want_indexed: false
+
+  - name: indexer-behind-reindexes-the-stored-copy
+    harness: claude-code
+    source: current
+    stored_adapter: current
+    metadata_schema: current
+    pair: present
+    indexer: behind
+    publication: bound
+    want_reason: indexer_behind
+    want_lane: stored-index
+    want_native_read: false
+    want_pair_writes: []
+    want_indexed: true
+
+  - name: strict-refusal-reopened-by-indexer-bump-reindexes-the-stored-copy
+    harness: claude-code
+    source: current
+    stored_adapter: current
+    metadata_schema: current
+    pair: present
+    indexer: current
+    refusal: strict_capture_refused
+    refusal_indexer: behind
+    publication: bound
+    want_reason: refusal_reopened
+    want_lane: stored-index
+    want_native_read: false
+    want_pair_writes: []
+    want_indexed: true
+
+  - name: omitted-records-refusal-reopened-by-indexer-bump-reindexes-the-stored-copy
+    harness: claude-code
+    source: current
+    stored_adapter: current
+    metadata_schema: current
+    pair: present
+    indexer: current
+    refusal: source_records_omitted
+    refusal_indexer: behind
+    publication: bound
+    want_reason: refusal_reopened
+    want_lane: stored-index
+    want_native_read: false
+    want_pair_writes: []
+    want_indexed: true
+
+  - name: unknown-data-refusal-reopened-by-indexer-bump-reindexes-the-stored-copy
+    harness: claude-code
+    source: current
+    stored_adapter: current
+    metadata_schema: current
+    pair: present
+    indexer: current
+    refusal: unknown_data_retained
+    refusal_indexer: behind
+    publication: bound
+    want_reason: refusal_reopened
+    want_lane: stored-index
+    want_native_read: false
+    want_pair_writes: []
+    want_indexed: true
+
+  - name: refusal-at-the-current-indexer-is-left-alone
+    harness: claude-code
+    source: current
+    stored_adapter: current
+    metadata_schema: current
+    pair: present
+    indexer: current
+    refusal: strict_capture_refused
+    refusal_indexer: current
+    publication: bound
+    want_reason: none
+    want_lane: none
+    want_native_read: false
+    want_pair_writes: []
+    want_indexed: false
+
+  - name: unbound-publication-binds-without-a-reparse
+    harness: claude-code
+    source: current
+    stored_adapter: current
+    metadata_schema: current
+    pair: present
+    indexer: current
+    publication: unbound
+    want_reason: publication_unbound
+    want_lane: stored-index
+    want_native_read: false
+    want_pair_writes: []
+    want_indexed: false
+    want_bound: true
+
+  - name: settled-session-is-left-alone
+    harness: claude-code
+    source: current
+    stored_adapter: current
+    metadata_schema: current
+    pair: present
+    indexer: current
+    publication: bound
+    want_reason: none
+    want_lane: none
+    want_native_read: false
+    want_pair_writes: []
+    want_indexed: false
+
+  - name: changed-source-wins-over-a-behind-stamp
+    harness: claude-code
+    source: changed
+    stored_adapter: behind
+    metadata_schema: current
+    pair: present
+    indexer: current
+    publication: bound
+    want_reason: source_changed
+    want_lane: native
+    want_native_read: true
+    want_pair_writes: [metadata, transcript]
+    want_indexed: true

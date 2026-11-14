@@ -12,20 +12,23 @@ import (
 type RefreshLane string
 
 const (
+	RefreshLaneNone           RefreshLane = "none"
 	RefreshLaneNative         RefreshLane = "native"
 	RefreshLaneStoredMetadata RefreshLane = "stored-metadata"
 	RefreshLaneStoredIndex    RefreshLane = "stored-index"
 )
 
-// AllRefreshLanes lists every lane a refresh can take.
-var AllRefreshLanes = []RefreshLane{RefreshLaneNative, RefreshLaneStoredMetadata, RefreshLaneStoredIndex}
+// AllRefreshLanes lists every lane a decision can take. A refresh outcome row
+// is only ever written for the three work lanes; none is a decision lane that
+// records nothing.
+var AllRefreshLanes = []RefreshLane{RefreshLaneNone, RefreshLaneNative, RefreshLaneStoredMetadata, RefreshLaneStoredIndex}
 
 // NewRefreshLane validates a raw lane name.
 func NewRefreshLane(raw string) (RefreshLane, error) {
 	if lane := RefreshLane(raw); slices.Contains(AllRefreshLanes, lane) {
 		return lane, nil
 	}
-	return "", fmt.Errorf("ingest: read refresh lane %q: this build defines no such lane; nothing was recorded; use native, stored-metadata or stored-index", raw)
+	return "", fmt.Errorf("ingest: read refresh lane %q: this build defines no such lane; nothing was recorded; use none, native, stored-metadata or stored-index", raw)
 }
 
 // RefreshLane returns the lane of a refresh reason, or "" when the reason is
@@ -97,6 +100,12 @@ func (p *Pipeline) markRefreshReason(sid SessionID, reason OutcomeReason) {
 // the pipeline holds today: the session's status, the run's mode, and the
 // maintenance pass that queued it.
 func (p *Pipeline) refreshReasonFor(result SessionResult, named map[SessionID]OutcomeReason) OutcomeReason {
+	// The decision is the one record of why the session was refreshed; the
+	// status and the run mode are only fallbacks for a result a caller built
+	// without one.
+	if result.Decision.IsRefresh() {
+		return result.Decision.OutcomeReason()
+	}
 	switch {
 	case p.config.Force:
 		// A forced run reports every session it processes as new, so the
@@ -136,13 +145,22 @@ func (p *Pipeline) refreshOutcomes(results []SessionResult, indexLog []IndexLogE
 		if entry.SessionID == "" || seen[entry.SessionID] {
 			continue
 		}
-		if entry.Outcome != IndexOutcomeIndexed && entry.Outcome != IndexOutcomeReindexed && entry.Outcome != IndexOutcomeFallback {
+		namedReason := named[entry.SessionID]
+		// A parse-backed index write always refreshes. A skipped index write
+		// refreshes only when the decision named a refresh for it: that is the
+		// publication bind, where the stored index is settled without a parse
+		// but the session's metadata capture moved.
+		if entry.Outcome != IndexOutcomeIndexed && entry.Outcome != IndexOutcomeReindexed && entry.Outcome != IndexOutcomeFallback &&
+			!(entry.Outcome == IndexOutcomeSkipped && namedReason.Kind() == OutcomeKindRefresh) {
 			continue
 		}
 		seen[entry.SessionID] = true
-		reason := OutcomeReasonRefreshIndexerBehind
-		if p.config.Force {
-			reason = OutcomeReasonRefreshForced
+		reason := namedReason
+		if reason.Kind() != OutcomeKindRefresh {
+			reason = OutcomeReasonRefreshIndexerBehind
+			if p.config.Force {
+				reason = OutcomeReasonRefreshForced
+			}
 		}
 		outcomes = append(outcomes, RunOutcome{SessionID: entry.SessionID, Reason: reason, CreatedAt: createdAt})
 	}
