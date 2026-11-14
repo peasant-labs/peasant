@@ -6,6 +6,7 @@ import (
 	"os"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/peasant-labs/peasant/internal/annotations"
 	"github.com/peasant-labs/peasant/internal/api"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -14,6 +15,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/tui"
+	"github.com/peasant-labs/schema"
 	"github.com/spf13/cobra"
 )
 
@@ -64,6 +66,7 @@ func runTUI(cmd *cobra.Command, cfgPath string, mockDataStore string) error {
 
 	// Open real store
 	var realProvider api.DataProvider
+	var db *store.Store
 	dataDir := string(defaults.ResolveDataDirPathWith(dataDirOverride(cmd)))
 	dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
 	// A fully mocked TUI needs no database, so an open failure is kept and
@@ -78,9 +81,10 @@ func runTUI(cmd *cobra.Command, cfgPath string, mockDataStore string) error {
 	}
 	if err := os.MkdirAll(dataDir, defaults.PrivateDirPerm); err != nil {
 		openErr = fmt.Errorf("create the data directory %s: %w", dataDir, err)
-	} else if db, err := store.Open(dbPath); err != nil {
+	} else if opened, err := store.Open(dbPath); err != nil {
 		openErr = fmt.Errorf("open the analytics database %s: %w", dbPath, err)
 	} else {
+		db = opened
 		defer db.Close()
 		realProvider = api.NewStoreDataProvider(db, visibility, cfg.Output.BasePath)
 	}
@@ -98,9 +102,30 @@ func runTUI(cmd *cobra.Command, cfgPath string, mockDataStore string) error {
 		return fmt.Errorf("failed to fetch sessions: %w", err)
 	}
 
-	p := tea.NewProgram(tui.NewApp(sessions))
+	app, err := newTUIApp(ctx, db, sessions)
+	if err != nil {
+		cmd.SilenceUsage = true
+		return err
+	}
+	p := tea.NewProgram(app)
 	if _, err := p.Run(); err != nil {
 		return fmt.Errorf("failed to run TUI: %w", err)
 	}
 	return nil
+}
+
+// newTUIApp builds the TUI model. With an open store, the session detail loads
+// each session's turns from it, the annotation picker lists the registry's
+// types, and pending annotations are kept in it and committed to the local web
+// dashboard.
+func newTUIApp(ctx context.Context, db *store.Store, sessions []ingest.Session) (tui.AppModel, error) {
+	app := tui.NewApp(sessions)
+	if db == nil {
+		return app, nil
+	}
+	types, err := annotations.NewTypeReader(db).ListTypes(ctx, schema.TypeFilter{})
+	if err != nil {
+		return app, fmt.Errorf("tui startup: read the annotation types from the analytics database: %w", err)
+	}
+	return app.WithAnnotationStore(db, dashboardBaseURL(defaults.DefaultPort), types), nil
 }
