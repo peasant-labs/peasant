@@ -311,6 +311,10 @@ func (b *refreshLaneBench) applyMutation(testCase refreshLaneCase) {
 		if err := b.fs.Remove(b.transcriptPath); err != nil {
 			b.t.Fatal(err)
 		}
+		// The ordinary repair selector is database-driven: a cleared input
+		// proof is the durable signal that the saved pair no longer anchors
+		// the index. The pair-repair pass then owns the missing pair.
+		execSessionSQL(b.t, b.database, `UPDATE sessions SET indexed_input_hash=NULL WHERE session_id=?`, string(b.sessionID))
 	}
 	if testCase.Refusal != "" {
 		b.seedRefusal(testCase)

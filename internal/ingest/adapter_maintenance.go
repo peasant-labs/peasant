@@ -249,78 +249,75 @@ func (p *Pipeline) storedMetadataPath(ctx context.Context, sid SessionID, snap l
 // not a pair to overwrite, and a stored metadata or schema this build refuses
 // is not damage; both stay with the existing refusal paths.
 func (p *Pipeline) pairNeedsRepair(ctx context.Context, sid SessionID) bool {
-	return p.pairNeedsRepairIn(ctx, sid, nil)
+	repair, _ := p.pairNeedsRepairIn(ctx, sid, nil)
+	return repair
 }
 
 // pairNeedsRepairIn is pairNeedsRepair answering stored location reads from
 // snap when it holds the session. It writes no shared pipeline state, so the
 // repair selection calls it from parallel workers.
-func (p *Pipeline) pairNeedsRepairIn(ctx context.Context, sid SessionID, snap locationSnapshot) bool {
+func (p *Pipeline) pairNeedsRepairIn(ctx context.Context, sid SessionID, snap locationSnapshot) (repair bool, readFault bool) {
 	if p.metricsStore == nil {
-		return false
+		return false, false
 	}
 	if err := p.checkStoredMetadataCompatibilityIn(ctx, sid, nil, snap); err != nil {
-		return false
+		return false, false
 	}
 	reader, ok := p.metricsStore.(SessionIndexStateReader)
 	if !ok {
-		return false
+		return false, false
 	}
 	state, stateErr := reader.ReadIndexState(ctx, sid)
 	if stateErr != nil || state == nil {
-		return false
+		return false, false
 	}
 	// A stored producer or index format newer than this build must never be
 	// replaced from native input: the newer build's output is preserved and
 	// the refusal stays with the selection. Checking it here also keeps the
 	// pair unread for a session this run refuses.
 	if err := p.checkIndexProducer(state); err != nil {
-		return false
+		return false, false
 	}
 	metadataPath, ok := p.storedMetadataPath(ctx, sid, snap)
 	if !ok {
-		return false // No recorded location: the source-info fallback owns it.
+		return false, false // No recorded location: the source-info fallback owns it.
 	}
 	data, err := p.fs.ReadFile(metadataPath)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return true
+			return true, false
 		}
-		return false
+		return false, true
 	}
 	meta, decodeErr := decodeManagedMetadata(data, p.managedRelativePath(metadataPath))
 	if decodeErr != nil {
 		if isMetadataCompatibilityError(decodeErr) {
-			return false
+			return false, false
 		}
-		return true
+		return true, false
 	}
 	if meta.Source.Format == "" {
-		return true
+		return true, false
 	}
 	transcriptPath := filepath.Join(filepath.Dir(metadataPath), string(sid)+"--transcript."+string(meta.Source.Format))
 	transcript, readErr := p.fs.ReadFile(transcriptPath)
 	if readErr != nil {
 		if errors.Is(readErr, fs.ErrNotExist) {
-			return true
+			return true, false
 		}
-		return false
+		return false, true
 	}
-	// A present pair is compared against the recorded identity: content that no
-	// longer matches is repaired from native like a missing half. A row with no
-	// recorded identity is left to the ordinary index write, which establishes
-	// the identity from the pair it parsed.
 	if state.ArtifactHash == nil {
-		return false
+		return false, false
 	}
 	artifact, artifactErr := NewManagedArtifact(data, transcript)
 	if artifactErr != nil {
 		if isMetadataCompatibilityError(artifactErr) {
-			return false
+			return false, false
 		}
-		return true
+		return true, false
 	}
-	return artifact.ArtifactHash != *state.ArtifactHash
+	return artifact.ArtifactHash != *state.ArtifactHash, false
 }
 
 // pairSourceAvailable reports that the session's recorded native source is
@@ -622,6 +619,9 @@ func (p *Pipeline) appendPairRepairWork(ctx context.Context, entries []DiffEntry
 			entries[outcome.queuedIndex].Status = DiffUpdated
 		case pairRepairAppend:
 			entries = append(entries, outcome.entry)
+		case pairRepairSkipQueued:
+			entries[outcome.queuedIndex].Status = DiffUnchanged
+			entries[outcome.queuedIndex].Decision = RefreshDecision{Reason: RefreshReasonNone, Lane: RefreshLaneNone}
 		default:
 			continue
 		}
@@ -639,6 +639,7 @@ const (
 	pairRepairNone       pairRepairOutcomeKind = iota // no repair work
 	pairRepairMarkQueued                              // mark the already-queued entry
 	pairRepairAppend                                  // append a new repair entry
+	pairRepairSkipQueued                              // a read fault: leave the queued worker out
 )
 
 // pairRepairOutcome carries one candidate's decision from a parallel worker
@@ -675,7 +676,14 @@ func (p *Pipeline) pairRepairDecision(ctx context.Context, sid SessionID, entrie
 			// does not need.
 			return pairRepairOutcome{}
 		}
-		if !p.pairNeedsRepairIn(ctx, sid, snap) {
+		repair, readFault := p.pairNeedsRepairIn(ctx, sid, snap)
+		if !repair {
+			if readFault {
+				// A pair that cannot be read is a fault to report from the
+				// stored-index lane, not a native pair to replace. Take the
+				// queued worker out without claiming damage.
+				return pairRepairOutcome{kind: pairRepairSkipQueued, queuedIndex: i, damaged: false}
+			}
 			return pairRepairOutcome{}
 		}
 		// Queued for a reason that can settle without republishing the
@@ -686,7 +694,7 @@ func (p *Pipeline) pairRepairDecision(ctx context.Context, sid SessionID, entrie
 		metadataPath, _ := p.storedMetadataPath(ctx, sid, snap)
 		return pairRepairOutcome{kind: pairRepairMarkQueued, queuedIndex: i, metadataPath: metadataPath, damaged: true}
 	}
-	if !p.pairNeedsRepairIn(ctx, sid, snap) {
+	if repair, _ := p.pairNeedsRepairIn(ctx, sid, snap); !repair {
 		return pairRepairOutcome{}
 	}
 	metadataPath, _ := p.storedMetadataPath(ctx, sid, snap)
@@ -836,11 +844,13 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry, writeLan
 	}
 	storedIndex := decision.Lane == RefreshLaneStoredIndex
 	settled := decision.Reason == RefreshReasonNone
-	if storedIndex || settled {
+	if entry.Status == DiffUnchanged && (storedIndex || settled) {
 		// The decision says the stored pair settles this session without a
 		// native capture. It should normally have been filtered before the
 		// worker; keeping the guard here means a directly constructed entry
-		// cannot turn an index-lane decision into a native read.
+		// cannot turn an index-lane decision into a native read. An entry the
+		// classifier queued for evidence the decision does not name (a missing
+		// publication capture, an identity repair) still takes its native path.
 		return workerResult{result: SessionResult{
 			SessionID: entry.Session.SessionID, Harness: entry.Session.Harness,
 			ParentUUID: entry.Session.ParentUUID, Status: DiffUnchanged, Decision: decision,

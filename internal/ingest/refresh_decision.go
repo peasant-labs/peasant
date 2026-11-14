@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"slices"
 	"time"
@@ -149,6 +150,10 @@ type refreshEvidence struct {
 	SourceComparePending bool
 	// SourceCompared reports that captured bytes matched the stored fingerprint.
 	SourceCompared bool
+	// SourceUnproven reports a stored row whose index holds no input proof.
+	// The stored copy is not known to describe the discovered source, so the
+	// source must be compared natively instead of trusting the stored index.
+	SourceUnproven bool
 	// MetadataSchemaOld reports a stored metadata schema this build re-extracts
 	// natively.
 	MetadataSchemaOld bool
@@ -204,6 +209,8 @@ func decideRefresh(in refreshEvidence) RefreshDecision {
 		return RefreshDecision{Reason: RefreshReasonSourceCompare, Lane: RefreshLaneNative}
 	case in.CaptureRecoveryNeeded:
 		return RefreshDecision{Reason: RefreshReasonSourceChanged, Lane: RefreshLaneNative}
+	case in.SourceUnproven:
+		return RefreshDecision{Reason: RefreshReasonSourceCompare, Lane: RefreshLaneNative}
 	case in.MetadataSchemaOld:
 		return RefreshDecision{Reason: RefreshReasonMetadataSchema, Lane: RefreshLaneNative}
 	case in.AdapterVersion < in.AdapterTarget:
@@ -294,6 +301,7 @@ func (p *Pipeline) refreshEvidenceForClassification(session DiscoveredSession, c
 	in.StoredRow = loc.IngestedMs != nil
 	in.PermanentRefusal = permanentCaptureRefusal(loc.ContentFailureCode)
 	in.IndexProofPresent = loc.IndexedInputHash != nil
+	in.SourceUnproven = captured == nil && loc.SourceEvidenceSupported && loc.IndexerVersion > 0 && loc.IndexedInputHash == nil
 	in.PublicationUnbound = loc.CaptureRevision > 0 && !loc.PublicationBound &&
 		!metadataNeedsNativeRefresh(loc.SchemaVersion)
 	if captured != nil && loc.SourceEvidenceSupported {
@@ -312,8 +320,8 @@ func (p *Pipeline) refreshEvidenceForClassification(session DiscoveredSession, c
 		// time column. It is source change evidence regardless of the lane.
 		in.SourceChanged = true
 	}
-	if captured == nil && loc.IngestedMs != nil && !session.ModTime.IsZero() {
-		if session.ModTime.After(time.UnixMilli(*loc.IngestedMs)) {
+	if captured == nil && loc.IngestedMs != nil {
+		if !session.ModTime.IsZero() && session.ModTime.After(time.UnixMilli(*loc.IngestedMs)) {
 			// A newer source clock cannot be proven unchanged without reading
 			// it. The captured comparison re-decides with the bytes.
 			in.SourceClockMoved = true
@@ -321,8 +329,9 @@ func (p *Pipeline) refreshEvidenceForClassification(session DiscoveredSession, c
 			!permanentCaptureRefusal(loc.ContentFailureCode) {
 			// The ordinary compare preflight: an append can land between the
 			// previous capture and its ingest stamp, so a settled row with a
-			// fingerprint is read once to prove it unchanged. This is not a
-			// refresh and writes no outcome row.
+			// fingerprint is read once to prove it unchanged. A zero discovery
+			// clock is not evidence; the stored fingerprint still is. This is
+			// not a refresh and writes no outcome row.
 			in.SourceComparePending = true
 		}
 	}
@@ -349,6 +358,112 @@ func (p *Pipeline) refreshEvidenceForLocation(session DiscoveredSession, loc Ses
 	}
 }
 
+// storedMetadataForDecision reads the saved metadata half of the pair without
+// opening the transcript. It is the structural comparison the stored-index
+// early return needs before it may claim the stored pair still describes the
+// discovered session.
+func (p *Pipeline) storedMetadataForDecision(ctx context.Context, session DiscoveredSession) *UnifiedMetadata {
+	path, err := p.findMetadataPath(ctx, session)
+	if err != nil || path == "" {
+		return nil
+	}
+	data, err := p.fs.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	meta, err := decodeManagedMetadata(data, p.managedRelativePath(path))
+	if err != nil || meta == nil {
+		return nil
+	}
+	return meta
+}
+
+// publicationBindable reports that an unbound publication capture can be
+// settled by the stored pair: the pair is readable and a current capture row
+// exists. Otherwise the native capture is the repair.
+func (p *Pipeline) publicationBindable(ctx context.Context, sid SessionID) bool {
+	if repair, readFault := p.pairNeedsRepairIn(ctx, sid, nil); repair || readFault {
+		return false
+	}
+	reader, ok := p.metricsStore.(SessionIndexStateReader)
+	if !ok {
+		return false
+	}
+	state, err := reader.ReadIndexState(ctx, sid)
+	return err == nil && state != nil && state.PublicationCaptureRevision > 0
+}
+
+// openCodeSessionClockMoved compares the discovered OpenCode changed clock
+// with the clock the stored metadata capture records. The audit clock is not
+// this clock: an OpenCode session row can move its time_updated while still
+// sorting older than the ingest time.
+func (p *Pipeline) openCodeSessionClockMoved(ctx context.Context, session DiscoveredSession) bool {
+	if session.ModTime.IsZero() {
+		return false
+	}
+	stored := p.storedMetadataForDecision(ctx, session)
+	if stored == nil {
+		return false
+	}
+	storedClock := stored.Timestamp.End
+	if storedClock == 0 {
+		storedClock = stored.Timestamp.Start
+	}
+	if storedClock == 0 {
+		return false
+	}
+	return session.ModTime.After(time.UnixMilli(storedClock))
+}
+
+// refreshDecisionForFile is the store-free / legacy file fallback's decision.
+// The pair is the metadata file; a stored file-only harvest proves the source
+// unchanged by reading it once and comparing the owned capture marker.
+func (p *Pipeline) refreshDecisionForFile(session DiscoveredSession, metadata *UnifiedMetadata, sourceCompare bool) RefreshDecision {
+	version, present := storedAdapterEvidence(SessionLocation{}, false, metadata)
+	in := refreshEvidence{
+		StoredRow:         metadata != nil,
+		Forced:            p.config.Force,
+		MetadataSchemaOld: metadata != nil && metadataNeedsNativeRefresh(metadata.SchemaVersion),
+		// A file-only pair has no stored index producer to settle; its
+		// evidence is the marker and the saved metadata. Do not read the
+		// absent row fields as pending index work.
+		IndexProofPresent:    true,
+		SourceComparePending: sourceCompare,
+	}
+	if sourceCompare {
+		// The owned marker or a current-schema artifact makes the source
+		// worth proving again. An old artifact with neither evidence is left
+		// on the clock hint, exactly as the file fallback leaves it.
+		in.AdapterVersion = version
+		in.AdapterTarget = p.versionTargets()[session.Harness].AdapterVersion
+		in.AdapterStampPresent = present
+		in.AdapterCanExtract = p.adapterSupportsStoredExtraction(session.Harness)
+	}
+	if metadata != nil {
+		if metadata.Timestamp.Ingested != nil && !session.ModTime.IsZero() &&
+			session.ModTime.After(time.UnixMilli(*metadata.Timestamp.Ingested)) {
+			in.SourceClockMoved = true
+		}
+		if metadata.Source.FilePath != "" && metadata.Source.FilePath != session.SourcePath.String() {
+			in.SourceChanged = true
+		}
+		if metadata.Source.Format != "" && metadata.Source.Format != session.SourceFormat {
+			in.SourceChanged = true
+		}
+		if !sameParentSession(metadata.ParentUUID, session.ParentUUID) {
+			in.SourceChanged = true
+		}
+	}
+	return decideRefresh(in)
+}
+
+func sameParentSession(a, b *SessionID) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
 // refreshDecisionForEntry returns the decision a worker routes from. A decision
 // the diff phase carried is authoritative; a directly constructed entry (a
 // repair or a test) gets the same decision computed from its stored row and
@@ -359,15 +474,7 @@ func (p *Pipeline) refreshDecisionForEntry(session DiscoveredSession, metadata *
 	}
 	loc, ok := p.locationCache[session.SessionID]
 	if !ok {
-		version, present := storedAdapterEvidence(loc, false, metadata)
-		return decideRefresh(refreshEvidence{
-			StoredRow:           metadata != nil,
-			Forced:              p.config.Force,
-			AdapterVersion:      version,
-			AdapterTarget:       p.versionTargets()[session.Harness].AdapterVersion,
-			AdapterStampPresent: present,
-			AdapterCanExtract:   p.adapterSupportsStoredExtraction(session.Harness),
-		})
+		return p.refreshDecisionForFile(session, metadata, true)
 	}
 	in := p.refreshEvidenceForLocation(session, loc, metadata)
 	in.PublicationUnbound = loc.CaptureRevision > 0 && !loc.PublicationBound &&

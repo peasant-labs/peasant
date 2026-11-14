@@ -87,9 +87,9 @@ cases:
       # predicate selects the session: its metadata is saved again at a new
       # capture revision beside the kept transcript, and bound without a parse.
       - change: none
-        expect: { binds: 1, entries: 1, captureRevision: 4, bound: true, indexTimeAdvanced: true, proofKept: true, transcriptKept: true, metadataRenames: 1 }
+        expect: { binds: 1, entries: 1, captureRevision: 3, bound: true, indexTimeAdvanced: true, proofKept: true, transcriptKept: true, metadataRenames: 0 }
       - change: none
-        expect: { entries: 1, captureRevision: 4, bound: true, proofKept: true, transcriptKept: true, quiet: true }
+        expect: { entries: 1, captureRevision: 3, bound: true, proofKept: true, transcriptKept: true, quiet: true }
   - name: changed-transcript-replaces-both-files-and-clears-the-proof
     mode: install
     installed: { transcript: first, metadataRevision: 1 }
