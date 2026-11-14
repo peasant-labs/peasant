@@ -12,10 +12,9 @@ import (
 )
 
 func TestPeasantBinSeamUsesInjectedCommand(t *testing.T) {
-	fake := filepath.Join(t.TempDir(), "fake-peasant")
-	script := "#!/bin/sh\necho fake-peasant \"$@\"\n"
-	if err := os.WriteFile(fake, []byte(script), 0o700); err != nil {
-		t.Fatalf("write fake peasant: %v", err)
+	fake, err := filepath.Abs(filepath.Join("testdata", "fake-peasant", "fake-peasant"))
+	if err != nil {
+		t.Fatalf("resolve fake peasant: %v", err)
 	}
 
 	setenv(t, envPeasantBin, fake)
@@ -31,8 +30,8 @@ func TestPeasantBinSeamUsesInjectedCommand(t *testing.T) {
 	// Real installed hooks invoke `peasant` through PATH, not the returned
 	// wrapper filename. Keep a controlled older executable behind that directory
 	// so this proves the hook cannot silently run a different installed build.
-	fallback := t.TempDir()
-	if err := os.WriteFile(filepath.Join(fallback, "peasant"), []byte("#!/bin/sh\necho wrong-installed-peasant\n"), 0o700); err != nil {
+	fallback, err := filepath.Abs(filepath.Join("testdata", "installed-peasant"))
+	if err != nil {
 		t.Fatal(err)
 	}
 	shell, err := exec.LookPath("sh")
@@ -51,15 +50,13 @@ func TestPeasantBinSeamUsesInjectedCommand(t *testing.T) {
 }
 
 func TestPeasantBinWrapperQuotesInjectedCommand(t *testing.T) {
-	// Other parallel tests fork helpers. A child can inherit the wrapper's
-	// close-on-exec write descriptor before WriteFile closes it and retain it
-	// until its own exec, making the script temporarily busy. Keep this test
-	// sequential with those subprocess tests.
-	dir := t.TempDir()
-	fake := filepath.Join(dir, "fake peasant")
-	script := "#!/bin/sh\necho quoted-peasant \"$@\"\n"
-	if err := os.WriteFile(fake, []byte(script), 0o700); err != nil {
-		t.Fatalf("write fake peasant: %v", err)
+	quoted, err := filepath.Abs(filepath.Join("testdata", "fake-peasant", "quoted-peasant"))
+	if err != nil {
+		t.Fatalf("resolve fake peasant: %v", err)
+	}
+	fake := filepath.Join(t.TempDir(), "fake peasant")
+	if err := os.Symlink(quoted, fake); err != nil {
+		t.Fatalf("link fake peasant: %v", err)
 	}
 
 	wrapper, err := writePeasantBinWrapper(t.TempDir(), shellQuote(fake)+" --fixed")
@@ -377,4 +374,11 @@ func TestRefreshRejectsMissingDatabaseHandle(t *testing.T) {
 		!strings.Contains(output, "fix:") {
 		t.Fatalf("missing-database refresh fatal was not actionable\n%s", output)
 	}
+}
+
+func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }

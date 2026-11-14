@@ -483,6 +483,7 @@ func TestPublicationHookBindingFixtures(t *testing.T) {
 			binding := githooks.Binding{ConfigDir: world.hs.Config, DataDir: world.hs.Data, StateDir: world.hs.State, RequireAutoPublishRule: c.Guarded}
 			hookPath := filepath.Join(world.recorded, ".git", "hooks", "pre-push")
 			if c.Manual {
+				// Data: the hook reader inspects the pasted section; nothing runs it.
 				snippet, err := githooks.ManualSnippet(githooks.EventPrePush, world.recorded, hookPath, binding)
 				if err != nil {
 					t.Fatal(err)

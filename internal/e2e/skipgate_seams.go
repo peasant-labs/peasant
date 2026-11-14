@@ -179,19 +179,25 @@ func writePeasantBinWrapper(dir, command string) (string, error) {
 	if len(argv) == 0 {
 		return "", fmt.Errorf("PEASANT_BIN is empty after trimming whitespace")
 	}
+	var words strings.Builder
+	for _, arg := range argv {
+		if strings.Contains(arg, "\n") {
+			return "", fmt.Errorf("PEASANT_BIN word %q holds a newline", arg)
+		}
+		words.WriteString(arg + "\n")
+	}
+	wrapper, err := filepath.Abs(filepath.Join("testdata", "peasant-wrapper.sh"))
+	if err != nil {
+		return "", fmt.Errorf("resolve wrapper: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "peasant.argv"), []byte(words.String()), 0o600); err != nil {
+		return "", fmt.Errorf("write wrapper arguments in %s: %w", dir, err)
+	}
 	// Hook substrates put this directory first on PATH; the injected command
 	// must therefore retain the executable name the real generated hook uses.
 	path := filepath.Join(dir, "peasant")
-	var b strings.Builder
-	b.WriteString("#!/bin/sh\n")
-	b.WriteString("exec")
-	for _, arg := range argv {
-		b.WriteByte(' ')
-		b.WriteString(shellQuote(arg))
-	}
-	b.WriteString(" \"$@\"\n")
-	if err := os.WriteFile(path, []byte(b.String()), 0o700); err != nil {
-		return "", fmt.Errorf("write wrapper %s: %w", path, err)
+	if err := os.Symlink(wrapper, path); err != nil {
+		return "", fmt.Errorf("link wrapper %s: %w", path, err)
 	}
 	return path, nil
 }
@@ -236,13 +242,6 @@ func splitCommandLine(command string) ([]string, error) {
 		args = append(args, cur.String())
 	}
 	return args, nil
-}
-
-func shellQuote(s string) string {
-	if s == "" {
-		return "''"
-	}
-	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
 
 func uniqueName(kind string) string {

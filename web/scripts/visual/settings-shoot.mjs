@@ -324,6 +324,7 @@ try {
     const before = await page.$eval('.stg-install .btn-primary', (button) => button.textContent.trim())
     if (before !== 'install in 3 repositories') await abort(`the install action reads "${before}".`, 'reset the hooks and rerun.')
     const foreign = join(repoPath('worker'), '.git/hooks/pre-push')
+    // data the install route reads and refuses; nothing runs it
     writeFileSync(foreign, '#!/bin/sh\n# the team hook\nexit 0\n')
     chmodSync(foreign, 0o755)
     await page.click('.stg-install .btn-primary')
