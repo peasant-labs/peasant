@@ -94,6 +94,11 @@ func BuildReclaimCommand() *cobra.Command {
 				}
 			}
 
+			release, err := takeHarvestRunLock(cmd, "reclaim")
+			if err != nil {
+				return err
+			}
+			defer release()
 			result, err := db.ReclaimSupersededGenerations(ctx, limit)
 			if err != nil {
 				return fmt.Errorf("reclaim superseded generations: %w", err)

@@ -1,0 +1,24 @@
+# Each maintenance command that writes the data dir a harvest writes must wait
+# for the harvest run lock before it changes anything (#746).
+required_names: [migrate, reclaim, prune, verify-content-repair]
+cases:
+  - name: migrate
+    seed: migrate-session
+    args: [migrate, --confirm]
+    waiting_label: migrate
+    done_stdout: converted 1 session(s)
+  - name: reclaim
+    seed: golden
+    args: [reclaim, --confirm]
+    waiting_label: reclaim
+    done_stdout: reclaimed 0 session(s)
+  - name: prune
+    seed: prune-sessions
+    args: [prune, --all, --confirm]
+    waiting_label: prune
+    done_stdout: deleted 2 session(s)
+  - name: verify-content-repair
+    seed: golden
+    args: [harvest, verify, --content, --repair]
+    waiting_label: harvest verify --repair
+    done_stdout: "repair: nothing to mark"

@@ -55,10 +55,6 @@ func (p *Pipeline) lockRun(ctx context.Context) (func(), error) {
 	if p.config.DryRun || p.runLockPath == "" {
 		return func() {}, nil
 	}
-	path := p.runLockPath
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, fmt.Errorf("pipeline start: create the data directory for the harvest lock: %w", err)
-	}
 	waiting := false
 	if prog := p.config.Progress; prog != nil {
 		defer func() {
@@ -67,26 +63,52 @@ func (p *Pipeline) lockRun(ctx context.Context) (func(), error) {
 			}
 		}()
 	}
+	release, err := acquireRunLock(ctx, p.runLockPath, p.runLockNoWait, func() {
+		waiting = true
+		if p.config.Progress != nil {
+			p.config.Progress.SetWaiting(RunLockWaitNotice)
+		}
+		slog.Warn("harvest: another harvest is running on this data dir; waiting for it to finish")
+	})
+	if err != nil {
+		return nil, fmt.Errorf("pipeline start: %w", err)
+	}
+	return release, nil
+}
+
+// AcquireRunLock takes the run lock at path for a command that writes the
+// data dir outside a pipeline, such as migrate, reclaim, prune and
+// verify --content --repair, so it cannot race a harvest. While another
+// holder has it, AcquireRunLock calls onWait once and keeps waiting until the
+// lock is free or ctx is canceled. The caller must call the returned release.
+func AcquireRunLock(ctx context.Context, path string, onWait func()) (func(), error) {
+	return acquireRunLock(ctx, path, false, onWait)
+}
+
+func acquireRunLock(ctx context.Context, path string, noWait bool, onWait func()) (func(), error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, fmt.Errorf("create the data directory for the harvest lock: %w", err)
+	}
+	waiting := false
 	for {
 		release, err := filelock.Acquire(path, time.Now().Add(runLockPoll))
 		if err == nil {
 			return func() { _ = release() }, nil
 		}
 		if !filelock.IsDeadline(err) {
-			return nil, fmt.Errorf("pipeline start: take the harvest lock: %w", err)
+			return nil, fmt.Errorf("take the harvest lock: %w", err)
 		}
-		if p.runLockNoWait {
-			return nil, fmt.Errorf("pipeline start: %w; retry when it finishes", ErrHarvestRunning)
+		if noWait {
+			return nil, fmt.Errorf("%w; retry when it finishes", ErrHarvestRunning)
 		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, fmt.Errorf("pipeline start: canceled while waiting for another harvest on this data dir: %w", ctxErr)
+			return nil, fmt.Errorf("canceled while waiting for another harvest on this data dir: %w", ctxErr)
 		}
 		if !waiting {
 			waiting = true
-			if p.config.Progress != nil {
-				p.config.Progress.SetWaiting(RunLockWaitNotice)
+			if onWait != nil {
+				onWait()
 			}
-			slog.Warn("harvest: another harvest is running on this data dir; waiting for it to finish")
 		}
 	}
 }
