@@ -1,0 +1,4 @@
+requiredNames:
+  - declared-tag-vetted-without-running-tests
+  - declared-tag-type-error-fails
+  - undeclared-tag-fails
