@@ -4,13 +4,14 @@ import { createServer } from 'node:net';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, realpathSync, accessSync, constants, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { setTimeout as delay } from 'node:timers/promises';
 import { parse } from 'yaml';
 import { acquireLifecycle, bounded, ownedGroups } from './lib/owned-lifecycle.mjs';
 import { assertExportedSurface, assertPublishedFiles, hash, inventory, verifyServed } from './lib/provenance.mjs';
 import { startVillageFixture } from './lib/village-fixture.mjs';
 import { selectionRecord } from './lib/selection.mjs';
-import { seedConfiguredSandbox } from './lib/configured-sandbox.mjs';
+import { seedConfiguredConfigHome } from './lib/configured-sandbox.mjs';
+import { ownedServerSandbox } from '../visual/lib/owned-server-sandbox.mjs';
+import { startOwnedServer } from '../visual/lib/owned-server-start.mjs';
 
 const web = fileURLToPath(new URL('../../', import.meta.url)), repo = resolve(web, '..');
 const require = createRequire(join(web, 'package.json'));
@@ -100,8 +101,9 @@ try {
   const sourceFiles = Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(join(repo, path)))]));
   const artifacts = join(repo, 'review-capture', `collective-observations${process.env.OBSERVATIONS_MUTANTS === '1' ? '-mutants' : ''}-${randomUUID()}`); mkdirSync(artifacts, { recursive: true });
   const state = life.identity.stateRoot;
-  const env = { ...process.env, XDG_CONFIG_HOME: join(state, 'config'), XDG_DATA_HOME: join(state, 'data'), XDG_STATE_HOME: join(state, 'state'), HOME: join(state, 'home'), PEASANT_OBSERVATIONS_OWNER: life.identity.owner,
-    PEASANT_COLLECTIVE_FETCH_TIMEOUT: '2s' };
+  // The fixture seeder writes the configuration and data directories below the owned state root, so the sandbox names those two; HOME, state and cache are its own.
+  const sandbox = ownedServerSandbox('collective-observations', { configDir: join(state, 'config'), dataDir: join(state, 'data') }, { ...process.env, PEASANT_OBSERVATIONS_OWNER: life.identity.owner, PEASANT_COLLECTIVE_FETCH_TIMEOUT: '2s' });
+  const env = sandbox.env;
   mkdirSync(env.HOME, { recursive: true });
   const seeder = join(state, 'fixture-seeder');
   await bounded((async () => {
@@ -112,20 +114,16 @@ try {
   const binary = realpathSync(join(repo, 'peasant')), out = join(web, 'out');
   const exported = JSON.parse(await capture(seeder, ['--action', 'fixture'], { env }));
   const config = parse(readFileSync(join(web, 'scripts/journey/testdata/collective-observations.yaml'), 'utf8'));
-  let appURL = `http://127.0.0.1:${await freePort()}`;
+  const appPort = Number(process.env.OBSERVATIONS_APP_PORT) || await freePort();
+  let appURL = `http://127.0.0.1:${appPort}`;
   const mutationMode = process.env.OBSERVATIONS_MUTANTS === '1';
   manifest = { sourceCommit, sourceFiles, counterfactual: mutationMode, ...selection, lockHash: hash(readFileSync(join(web, 'pnpm-lock.yaml'))), packages, binary, binaryHash: hash(readFileSync(binary)), webAssets: inventory(out), nodeExecutable: process.execPath, nodeVersion: process.version, fetchTimeout: env.PEASANT_COLLECTIVE_FETCH_TIMEOUT, served: [], appURL };
   saveManifest = () => writeFileSync(join(artifacts, 'build-manifest.json'), JSON.stringify(manifest, null, 2));
   async function startApp() {
     // These journeys are about an installed dashboard, not first-run setup: every start is from a
     // computer that is already set up, including after a reset cleared its configuration directory.
-    seedConfiguredSandbox(env);
-    app = launch(binary, ['web', 'start', '--foreground', '--no-browser', '--port', new URL(appURL).port], { env });
-    await bounded((async () => { for (;;) {
-      if (app.child.exitCode !== null) throw new Error('The owned production binary exited during startup');
-      try { const r = await fetch(`${appURL}/api/v1/health`, { signal: AbortSignal.timeout(1000) }); if (r.ok) return; } catch { /* readiness wake is health response, bounded by startup deadline */ }
-      await delay(100);
-    } })(), 30000, 'owned binary startup');
+    seedConfiguredConfigHome(sandbox.configDir);
+    await startOwnedServer({ port: appPort, portVariable: 'OBSERVATIONS_APP_PORT', withinMs: 30000, start: () => (app = launch(binary, ['web', 'start', '--foreground', '--no-browser', '--port', String(appPort), ...sandbox.args], { env: sandbox.env })).child });
     manifest.served.push(await verifyServed(appURL, out, binary, app.child.pid)); saveManifest();
   }
   async function stopApp() {
@@ -143,7 +141,7 @@ try {
       if (action === 'reset') {
         await stopApp();
         // Only disposable directories below our immutable random state root are removed.
-        for (const directory of [env.XDG_CONFIG_HOME, env.XDG_DATA_HOME, env.XDG_STATE_HOME]) rmSync(directory, { recursive: true, force: true });
+        for (const directory of [sandbox.configDir, sandbox.dataDir, sandbox.stateDir]) rmSync(directory, { recursive: true, force: true });
         const result = await seed('seed', 'alice'); await startApp(); return result;
       }
       if (action === 'account') { await stopApp(); const result = await seed('seed', selected); await startApp(); return result; }

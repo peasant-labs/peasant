@@ -179,9 +179,9 @@ test('every-script-that-starts-the-binary-is-sandboxed-or-exempt', () => {
     assert.match(source, /\bownedServerSandbox\(/, `${path} makes its sandbox with ownedServerSandbox`);
     assert.match(source, /\bstartOwnedServer\(/, `${path} starts its server through startOwnedServer`);
     const spawns = source.split('\n').filter((line) => startsTheBinary.test(line));
-    assert.ok(spawns.length > 0, `${path}: the spawn must stay on one source line with the web start arguments, ...sandbox.args and env: sandbox.env; restore the one-line call so the sandbox check can verify it`);
+    assert.ok(spawns.length > 0, `${path}: the spawn (or the owned-lifecycle launch) must stay on one source line with the web start arguments, ...sandbox.args and env: sandbox.env; restore the one-line call so the sandbox check can verify it`);
     for (const line of spawns) {
-      assert.ok(/\bspawn\(/.test(line) && line.includes('...sandbox.args') && /\benv: sandbox\.env\b/.test(line), `${path}: the spawn must stay on one source line with the web start arguments, ...sandbox.args and env: sandbox.env so the sandbox check can verify it: ${line.trim()}`);
+      assert.ok(/\b(?:spawn|launch)\(/.test(line) && line.includes('...sandbox.args') && /\benv: sandbox\.env\b/.test(line), `${path}: the spawn (or the owned-lifecycle launch) must stay on one source line with the web start arguments, ...sandbox.args and env: sandbox.env so the sandbox check can verify it: ${line.trim()}`);
     }
   }
 });
