@@ -37,6 +37,8 @@ requiredNames:
   - session-table-plan-covers-mixed-indexed-key-sizes
   - old-store-plan-covers-keys-before-parent-indexes-exist
   - old-store-plan-covers-future-parents-from-metadata
+  - old-store-plan-covers-future-parents-from-active-evidence
+  - old-store-plan-covers-future-parents-from-latest-evidence
   - session-table-plan-covers-long-host-and-project-keys
   - session-copy-estimator-models-the-frozen-target-indexes
   - session-copy-estimator-models-the-earlier-frozen-target-indexes

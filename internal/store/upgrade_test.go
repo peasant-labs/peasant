@@ -58,12 +58,14 @@ type storeUpgradeCase struct {
 	MixedIDs            bool    `yaml:"mixedIDs,omitempty"`
 	KeyBytes            int     `yaml:"keyBytes,omitempty"`
 	MetadataParentBytes int     `yaml:"metadataParentBytes,omitempty"`
+	EvidenceParentBytes int     `yaml:"evidenceParentBytes,omitempty"`
+	EvidenceLatestOnly  bool    `yaml:"evidenceLatestOnly,omitempty"`
 	Table               string  `yaml:"table,omitempty"`
 	WantBasisMin        float64 `yaml:"wantBasisMin,omitempty"`
 	WantBasisMax        float64 `yaml:"wantBasisMax,omitempty"`
-	// MaxEntryRows replaces the entry table's read bound of an estimate
-	// case; zero keeps the production bound. WantMeasured says whether the
-	// estimate measures the tables (true) or takes the whole database.
+	// The row limits replace the entry or session table's read bound for an
+	// estimate case; zero keeps the production bound. WantMeasured says
+	// whether the estimate measures the tables or takes the whole database.
 	MaxEntryRows   int64 `yaml:"maxEntryRows,omitempty"`
 	MaxSessionRows int64 `yaml:"maxSessionRows,omitempty"`
 	WantMeasured   bool  `yaml:"wantMeasured,omitempty"`

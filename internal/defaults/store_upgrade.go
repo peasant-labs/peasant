@@ -7,8 +7,8 @@ import "time"
 // step's catalog entry: the whole database file, or the tables the step
 // rewrites, measured on the store. Every step in the upgrade step catalog
 // names one factor and one basis; the preflight asks for the largest need
-// (factor times basis) among the steps planned for a store, because each
-// step commits and its log space is reused before the next one starts.
+// (factor times basis) among the steps planned for a store. Each step commits
+// before the next begins, but readers can delay reuse of its log space.
 // Tests assert the invariant (refuse when free is below required), the
 // catalog's shape, and the need against dbstat on synthetic stores; never a
 // factor's exact value.
@@ -25,7 +25,7 @@ import "time"
 //	step 72   13ms       20,600           (0.00004)
 //	step 73   20ms      873,440           (0.0018)
 //	step 74  491ms      181,280           (0.0004)
-//	step 75  1m43s  654,091,232 high-water (1.348), database grew by 165,154,816 (0.340)
+//	step 75  1m43s  654,091,232 largest sampled log (1.348), database grew by 165,154,816 (0.340)
 //	step 76  310ms            0
 //
 // Historical sandbox measurement of step 75 by layout, 2026-11-12, store code at
@@ -46,31 +46,33 @@ import "time"
 //	  how                              the whole database    read in full         read in full, capped
 //	estimate time (entry rows read)       20 us (none)         4.8 ms (2,620)       74 ms (65,536)
 //	dbstat time, entry table + search        227 ms                96 ms               377 ms
-//	step 75 log high-water                 719,393,232          169,035,392        1,401,092,552
+//	step 75 largest sampled log            719,393,232          169,035,392        1,401,092,552
 //	step 75 database growth                194,281,472              602,112          411,136,000
-//	used (high-water + growth)             913,674,704          169,637,504        1,812,228,552
-//	used / dbstat basis                          1.760                1.020                1.848
-//	used / database                              1.749                0.224                1.834
+//	sampled log + growth                   913,674,704          169,637,504        1,812,228,552
+//	sum / dbstat basis                           1.760                1.020                1.848
+//	sum / database                               1.749                0.224                1.834
 //	plan asked for                  966,621,389 (1.06x)  311,253,095 (1.83x)  1,828,020,224 (1.01x)
 //
 // In this historical run each measured basis was at or above dbstat's: 1.011
 // and 1.017 times. The bound store's measured basis, 998,016,761, exceeded
 // its database and was capped then. The current estimator additionally models
-// index-key bytes and does not cap an estimate at the old database size.
+// index-key bytes and does not cap an estimate at the old database size. The
+// log is sampled at progress events; the largest sample is not necessarily
+// the peak, and adding later database growth need not describe concurrent use.
 const (
 	// StoreUpgradeEntryTableRebuildDiskFactor is for a step that copies the
 	// entry table and rebuilds the search indexes. Its basis is the entry
 	// table with its indexes plus the search indexes the step rebuilds
 	// (step 75), or the entry table alone (step 11, which predates search).
-	// Measured on step 75: what the step used, the log's high-water mark plus
-	// the database's growth, was 1.760 times dbstat's size of that basis on
+	// In the step 75 measurements, the largest sampled log plus the database's
+	// later growth was 1.760 times dbstat's size of that basis on
 	// the store with its text in the entry rows (1.828 on a 16 MiB store of
 	// the same layout), 1.020 times on the store with its text in the
 	// bodies, and 1.848 times on a store whose text is in the bodies and
 	// whose entry table of page-sized rows sits at the read bound. 2.0
-	// covers the largest with about 8% to spare; the measured 1.848 left
-	// under 1%. Asking too much only refuses earlier, while asking too
-	// little lets a step fill the disk and roll back. A store whose text
+	// is about 8% above the largest observed sum; using 1.848 would leave
+	// under 1%. Neither sum proves a peak. Asking too much refuses earlier,
+	// while asking too little lets a step fill the disk and roll back. A store whose text
 	// is in the bodies asks for 2.0 times its search index and entry table,
 	// not for 2.0 times its database: the 43 GB store measured on 2026-11-11, with
 	// a 39 MiB entry table and 16.4 GiB of text in the bodies, left a log of

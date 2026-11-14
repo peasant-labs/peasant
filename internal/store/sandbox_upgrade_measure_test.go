@@ -25,7 +25,8 @@ import (
 
 // TestSandboxStoreUpgradeMeasure upgrades a synthetic schema-69 store of a
 // known text size and logs, per step, the duration and the write-ahead-log
-// growth, then the free-space change and the log's high-water mark. It is
+// growth, then the free-space change and the largest log observed at a
+// progress event. The sampled maximum can miss the peak. It is
 // the measurement behind the upgrade's free-disk factors and the per-step
 // split of a long upgrade. It never runs in the gate and never touches a
 // real store: it builds its own under /tmp/opencode.
@@ -113,12 +114,12 @@ VALUES(?, ?, 'claude-code', 'text', 'assistant', 0, ?)`,
 	plan := mustPlan(t, path)
 	t.Logf("store: %d sessions, %d text bytes, database %d bytes; plan asks for %d bytes free", sessions, textBytes, storeBefore, plan.RequiredFreeBytes)
 
-	var walHighWater int64
+	var walSampleMax int64
 	started := time.Now()
 	report, err := Upgrade(t.Context(), path, UpgradeOptions{
 		Progress: func(event UpgradeEvent) {
-			if size := sizeOf(path + "-wal"); size > walHighWater {
-				walHighWater = size
+			if size := sizeOf(path + "-wal"); size > walSampleMax {
+				walSampleMax = size
 			}
 		},
 	})
@@ -129,9 +130,9 @@ VALUES(?, ?, 'claude-code', 'text', 'assistant', 0, ?)`,
 		t.Logf("step %d  %-9s %-18s %12s  wal +%d bytes  %s", step.Step.Version, step.Step.Kind, step.Step.Cost, step.Duration.Round(time.Millisecond), step.WALBytes, step.Step.Title)
 	}
 	freeAfter, _ := migrateFreeBytes(dir)
-	t.Logf("total %s; database %d -> %d bytes; write-ahead log high-water %d bytes (%.3f of the database, %.3f of the text), %d bytes after",
-		time.Since(started).Round(time.Millisecond), storeBefore, sizeOf(path), walHighWater,
-		float64(walHighWater)/float64(storeBefore), float64(walHighWater)/float64(textBytes), sizeOf(path+"-wal"))
+	t.Logf("total %s; database %d -> %d bytes; largest sampled write-ahead log %d bytes (%.3f of the database, %.3f of the text), %d bytes after",
+		time.Since(started).Round(time.Millisecond), storeBefore, sizeOf(path), walSampleMax,
+		float64(walSampleMax)/float64(storeBefore), float64(walSampleMax)/float64(textBytes), sizeOf(path+"-wal"))
 	if freeKnown {
 		t.Logf("free space changed by %d bytes", int64(freeAfter)-int64(freeBefore))
 	}
@@ -141,9 +142,10 @@ VALUES(?, ?, 'claude-code', 'text', 'assistant', 0, ?)`,
 // store per entry text layout, plus a store whose text is in the bodies and
 // whose entry table holds as many rows as the estimate reads (its worst
 // case), compares the free-disk estimate of the entry table rebuild with
-// dbstat's page count, times both, then upgrades the store and logs what
-// step 75 really used: the write-ahead log's high-water mark plus the
-// database's growth. It is the measurement behind the entry table rebuild
+// dbstat's page count, times both, then upgrades the store and logs the
+// largest log observed at a progress event plus the database's later
+// growth. The sampled maximum can miss the peak and the sum is not necessarily
+// concurrent usage. It is the measurement behind the entry table rebuild
 // factor and the estimate's bounds. It builds its stores under
 // /tmp/opencode.
 //
@@ -279,11 +281,11 @@ func TestSandboxStoreUpgradeDiskBasisMeasure(t *testing.T) {
 			t.Logf("plan asks for %d bytes free (%.3f of the database, %.3f of the basis estimate, %.3f of the dbstat entry table and search indexes)",
 				plan.RequiredFreeBytes, float64(plan.RequiredFreeBytes)/float64(storeBefore), float64(plan.RequiredFreeBytes)/float64(basis), float64(plan.RequiredFreeBytes)/float64(entriesTruth+searchTruth))
 
-			var walHighWater int64
+			var walSampleMax int64
 			started := time.Now()
 			report, err := Upgrade(t.Context(), path, UpgradeOptions{Progress: func(UpgradeEvent) {
-				if size := sizeOf(path + "-wal"); size > walHighWater {
-					walHighWater = size
+				if size := sizeOf(path + "-wal"); size > walSampleMax {
+					walSampleMax = size
 				}
 			}})
 			if err != nil {
@@ -293,9 +295,9 @@ func TestSandboxStoreUpgradeDiskBasisMeasure(t *testing.T) {
 				t.Logf("step %d  %12s  wal +%d bytes  %s", step.Step.Version, step.Duration.Round(time.Millisecond), step.WALBytes, step.Step.Title)
 			}
 			growth := sizeOf(path) - storeBefore
-			used := walHighWater + growth
-			t.Logf("upgrade %s: log high-water %d, database grew %d, together %d: %.3f of the database, %.3f of the basis estimate, %.3f of the dbstat entry table and search indexes; the plan asked for %.2f times what was used",
-				time.Since(started).Round(time.Millisecond), walHighWater, growth, used, float64(used)/float64(storeBefore), float64(used)/float64(basis), float64(used)/float64(entriesTruth+searchTruth), float64(plan.RequiredFreeBytes)/float64(used))
+			used := walSampleMax + growth
+			t.Logf("upgrade %s: largest sampled log %d, database later grew %d, sum %d: %.3f of the database, %.3f of the basis estimate, %.3f of the dbstat entry table and search indexes; the plan asked for %.2f times that sum",
+				time.Since(started).Round(time.Millisecond), walSampleMax, growth, used, float64(used)/float64(storeBefore), float64(used)/float64(basis), float64(used)/float64(entriesTruth+searchTruth), float64(plan.RequiredFreeBytes)/float64(used))
 		})
 	}
 }

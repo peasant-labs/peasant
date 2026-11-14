@@ -65,11 +65,11 @@ takes the need of the cost the plan resolves for the store.
 
 A step's need is its factor times its basis. The plan asks for the largest
 need among the steps planned for that store. Each step commits before the
-next starts, so the log space of one step is reused by the next.
+next starts, but readers can delay reuse of the previous step's log space.
 
 | factor | value | steps | basis | evidence |
 |---|---|---|---|---|
-| entry table rebuild | 2.0 | 75 (override) | the entry table with its indexes, and the two search indexes the step rebuilds, on a store whose text is in the bodies; the whole database on a store whose text is in the entry rows | measured: the step used 1.760 times the entry table and search indexes with the text in the entry rows, 1.020 times with the text in the bodies, and 1.848 times at the row bound; 2.0 leaves about 8% on the largest measured ratio |
+| entry table rebuild | 2.0 | 75 (override) | the entry table with its indexes, and the two search indexes the step rebuilds, on a store whose text is in the bodies; the whole database on a store whose text is in the entry rows | observed: the largest sampled log plus later database growth was 1.760 times the entry table and search indexes with the text in the entry rows, 1.020 times with the text in the bodies, and 1.848 times at the row bound; 2.0 is about 8% above the largest observed ratio, not a guaranteed peak |
 | entry table rebuild | 2.0 | 11 (override) | the entry table with its indexes; a store that old keeps its text in the entry rows, so the whole database | the same factor |
 | session tables rebuild | 2.0 | 73 and 78 (override) | `sessions` and `daily_summary_harness` with their indexes, every row read from its record header (at most a million rows each; past that, the whole database) | historical measurement with the earlier estimator: the step's log grew 1.02 to 1.03 times its estimated tables, 1.40 to 1.45 times a database those tables fill; the plan asked for 1.38 to 1.43 times what the log used |
 | search rebuild | 0.39 | every `scales_with_text` step that copies no table: 35, and 76 on a store with stale search results | the database | derived from the search index build estimate; not measured |
@@ -126,9 +126,9 @@ search-index estimate came out about one percent above `dbstat` on the measured
 shapes. They do not count deleted rows or the free space they leave, because
 the copy writes live rows into a fresh table. An estimated basis can exceed the
 current database: an earlier migration may create indexes the copy will then
-rebuild. A store whose search index cannot be measured (for example, its
-structure record does not decode) gets the factor times the whole database and
-one warning line saying why.
+rebuild. A basis that cannot be measured (for example, an old table is missing
+a modeled column or a search-index structure record does not decode) takes the
+whole database instead and gets one warning line saying why.
 
 What was considered, in order:
 
@@ -163,15 +163,25 @@ about a page each, the read bound (2026-11-12,
 | basis the earlier plan used | 522 MB, the whole database | 168 MB, read in full | 998 MB read, capped at 988 MB |
 | estimate time, entry rows read | 20 µs, none | 4.8 ms, 2,620 | 74 ms, 65,536 |
 | `dbstat` time over the same objects | 227 ms | 96 ms | 377 ms |
-| step 75: log high-water plus database growth | 914 MB | 170 MB | 1,812 MB |
-| the plan asked for | 967 MB (1.06 times what was used) | 311 MB (1.83 times) | 1,828 MB (1.01 times) |
+| step 75: largest sampled log plus later database growth | 914 MB | 170 MB | 1,812 MB |
+| the plan asked for | 967 MB (1.06 times that sum) | 311 MB (1.83 times) | 1,828 MB (1.01 times) |
 
 Each basis measured in those runs was at or above `dbstat`'s. The test fixtures
 add entry rows with a heavy tail (every hundredth row a hundred times the
 mean), rows rising in size with their rowid, and rows at the size where
 SQLite moves a payload to an overflow page, in both layouts. Further synthetic
 fixtures exercise long and mixed index keys, the separate index overflow rule,
-future parent keys, and refusal below the planned disk requirement.
+future parent keys, and refusal below the planned disk requirement. Progress
+events sample the log; the largest sample may miss its peak, and the database
+growth is measured later, so their sum is not a concurrent peak.
+
+The revised estimator can ask for materially more than the copied tables. In
+one synthetic mixed-ID case at revision `3d3fa24a0` (2026-11-13), the basis was
+2,751,011 bytes versus 1,241,088 bytes of upgraded table and index pages. The
+plan asked for 5,502,022 bytes; the step's observed net log growth plus later
+database growth was 1,514,944 bytes. That comparison is not a peak measurement,
+but it illustrates the conservative ask: a refusal can require freeing space an
+upgrade would not ultimately use.
 
 The incident store (43 GB, a 39 MiB entry table, 16.4 GiB of text in the
 bodies) left a log of 4.31 GB in step 75. The old rule asked it for 1.69 times
@@ -290,7 +300,8 @@ logs the duration and log growth of each step.
 `TestSandboxStoreUpgradeDiskBasisMeasure` builds one schema-74 store per entry
 text layout, and one whose entry table holds as many rows as the plan reads,
 compares the plan's basis estimate and its time with `dbstat`, and
-logs what step 75 used: the log's high-water mark plus the database's growth.
+logs the largest log size observed at progress events plus the database's later
+growth. The sampled maximum can miss the true peak.
 `TestSandboxTurnCountRecountMeasure` builds schema-76 stores of a chosen
 number of sessions with a chosen number of entries each, half of them managed
 generations, upgrades them, and logs the turn count recount's time and log
@@ -313,10 +324,11 @@ The time grows with the sessions and with their entries, so the recount is a
 row-scaled step that counts sessions, like step 74. Its log stays near 75
 bytes per session, well inside the row-scaled disk factor (0.01).
 
-The last run of step 78 (2026-11-12, load average about 8 to 17), synthetic
-sessions rows shaped like stored ones and one daily summary row per day:
+The last run of step 78 with the earlier estimator (2026-11-12, load average
+about 8 to 17), synthetic sessions rows shaped like stored ones and one daily
+summary row per day:
 
-| sessions rows | database | step 78 | per row | log written | session tables estimate |
+| sessions rows | database | step 78 | per row | net log growth | earlier session tables estimate |
 |---|---|---|---|---|---|
 | 20,000 | 17.7 MB | 0.41 to 0.51 s | 20 to 25 µs | 24.8 MB, 1.40 of the database | 24.1 MB in 41 ms |
 | 50,000 | 42.8 MB | 1.09 to 1.21 s | 22 to 24 µs | 61.8 MB, 1.45 of the database | 60.6 MB in 102 ms |
