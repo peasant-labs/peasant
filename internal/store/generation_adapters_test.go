@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -63,5 +65,49 @@ func TestGenerationBoundComputeRefusedAcrossActivation(t *testing.T) {
 	}
 	if err := s.SaveMetricsForInput(ctx, input, metrics); err == nil {
 		t.Fatal("a compute captured before the generation replacement saved over the newer generation")
+	}
+}
+
+// TestManagedGenerationRefreshAdapterSurfacesRefusalAndStaleProof pins the
+// boundary the pipeline classifies: the ingest-owned request translates to the
+// store's immutable request, and the store's refusal and stale-capture errors
+// reach the caller unchanged. A caller that cannot see them would read a
+// refused refresh as a successful settle instead of falling back to the parse.
+func TestManagedGenerationRefreshAdapterSurfacesRefusalAndStaleProof(t *testing.T) {
+	s, _ := openGenerationStore(t)
+	defer func() { _ = s.Close() }()
+	ctx := t.Context()
+	sourceMetadata, _, expected := seedManagedRefreshSource(t, s)
+	refreshed := refreshedManagedMetadata(sourceMetadata)
+
+	refused := refreshed
+	refused.ContentHash = strings.Repeat("f", 64)
+	_, err := s.RefreshManagedGenerationWithoutParse(ctx, ingest.ManagedGenerationRefreshRequest{
+		SessionID:     managedRefreshTestSession,
+		Metadata:      refused,
+		ExpectedState: expected,
+	})
+	var refusal *ManagedGenerationRefreshError
+	if !errors.As(err, &refusal) {
+		t.Fatalf("refused refresh error = %v, want a *ManagedGenerationRefreshError", err)
+	}
+	if !errors.Is(err, ErrManagedGenerationRefreshRefused) {
+		t.Fatalf("refused refresh error = %v, want errors.Is ErrManagedGenerationRefreshRefused", err)
+	}
+	if refusal.Reason != ManagedGenerationRefreshIdentityChanged {
+		t.Fatalf("refusal reason = %q, want identity-changed", refusal.Reason)
+	}
+
+	stale := *expected
+	staleAt := time.Now().UnixMilli()
+	stale.IndexedAt = &staleAt
+	_, err = s.RefreshManagedGenerationWithoutParse(ctx, ingest.ManagedGenerationRefreshRequest{
+		SessionID:     managedRefreshTestSession,
+		Metadata:      refreshed,
+		ExpectedState: &stale,
+	})
+	var staleWork *ingest.StaleIndexWorkError
+	if !errors.As(err, &staleWork) {
+		t.Fatalf("stale refresh error = %v, want a *ingest.StaleIndexWorkError", err)
 	}
 }

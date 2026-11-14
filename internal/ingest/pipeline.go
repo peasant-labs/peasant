@@ -334,6 +334,11 @@ type indexedMeta struct {
 	transcriptData       []byte // nil = read from outputTranscriptPath; non-nil = use directly
 	metadataData         []byte // nil = read from disk; non-nil = the worker's committed metadata bytes, used directly
 	indexed              bool   // true if already indexed in the drain loop (skip INDEX, include in COMPUTE)
+	// managedGenerationRefresh marks a pair this run refreshed on the
+	// adapter-behind / adapter-stamp-absent stored-metadata lane for a managed
+	// generation. The index stage may settle it through the metadata-only
+	// generation refresh instead of parsing the transcript.
+	managedGenerationRefresh bool
 }
 
 // Pipeline composes all ingest stages with dependency injection.
@@ -1750,13 +1755,14 @@ func (p *Pipeline) drainLoop(
 				indexReady := wr.result.Error == nil && !mirrorFailed[wr.result.SessionID]
 				if indexReady && wr.result.OutputPath != "" && wr.meta != nil {
 					batchMetas = append(batchMetas, indexedMeta{
-						session:              sessionFromWorkerResult(*wr),
-						startMs:              wr.startMs,
-						outputTranscriptPath: wr.outputTranscriptPath,
-						transcriptData:       wr.transcriptData,
-						metadataData:         workerMetadataJSON(wr),
-						capturedSource:       wr.capturedSource,
-						published:            wr.artifact != nil,
+						session:                  sessionFromWorkerResult(*wr),
+						startMs:                  wr.startMs,
+						outputTranscriptPath:     wr.outputTranscriptPath,
+						transcriptData:           wr.transcriptData,
+						metadataData:             workerMetadataJSON(wr),
+						capturedSource:           wr.capturedSource,
+						published:                wr.artifact != nil,
+						managedGenerationRefresh: wr.managedGenerationRefresh,
 					})
 				}
 				sessionResults = append(sessionResults, wr.result)
@@ -2018,12 +2024,16 @@ type indexParseResult struct {
 	// images is the parse-time image batch. It is installed only after the
 	// generation is accepted, or after a format-1 entry write commits. A held,
 	// skipped, or rejected attempt drops it.
-	images        *imageBatch
-	entryCount    int
-	startedAt     int64
-	logEntry      IndexLogEntry
-	parseDuration time.Duration
-	bytes         int64
+	images     *imageBatch
+	entryCount int
+	startedAt  int64
+	logEntry   IndexLogEntry
+	// managedRefreshDuration is the time the metadata-only managed-generation
+	// refresh spent on the serialized write lane. It is the write half of a
+	// result that installed or settled a generation and parsed nothing.
+	managedRefreshDuration time.Duration
+	parseDuration          time.Duration
+	bytes                  int64
 }
 
 // permanentRefusalCode names the refusal when this build can never clear it,
@@ -2293,6 +2303,31 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 		if input.bindsPublication() {
 			result.im.captureRevision = input.expected.PublicationCaptureRevision
 		}
+		// A managed generation on the adapter-behind / adapter-stamp-absent
+		// lane settles through the store's metadata-only refresh instead of a
+		// transcript parse. The refresh runs after the pair install and the
+		// managed mirror (the index input's expected state was captured after
+		// both), on the same serialized write lane as every other store write.
+		// A refusal or a stale proof falls through to the ordinary parse path;
+		// the store keeps the old generation active until that parse commits.
+		if input.managedGenerationRefresh && p.managedGenerationRefreshApplies(input) {
+			outcome, duration, refreshErr := p.refreshManagedGeneration(ctx, input, writeLane)
+			if refreshErr == nil {
+				reason := indexManagedRefreshReason + " (" + string(outcome.Disposition) + ")"
+				result.managedRefreshDuration = duration
+				result.logEntry = p.makeIndexLogEntry(im, IndexOutcomeSkipped, 0, result.startedAt, &reason, nil)
+				// No parser read the transcript: the refresh copied stored rows.
+				// The index log's byte count measures parsed work, so it must be
+				// zero even though the pair's transcript has a size.
+				result.bytes = 0
+				input.transcript, input.tree = nil, nil
+				return result
+			}
+			slog.Warn(logPrefix+": metadata-only managed generation refresh",
+				"session_id", im.session.SessionID,
+				"error", refreshErr,
+				"fallback", "transcript parse")
+		}
 		if p.capturedInputBindsWithoutReparse(input) {
 			// The rule "bind without a re-parse" holds: the flush binds the
 			// stored index to the refreshed metadata capture in one
@@ -2501,6 +2536,12 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 // by the rule "bind without a re-parse" (capturedInputBindsWithoutReparse).
 const indexBindWithoutReparseReason = "stored index already matches captured input and current producer; bound to the refreshed metadata capture"
 
+// indexManagedRefreshReason is the index-log reason of a managed generation
+// settled by the metadata-only generation refresh. The disposition the store
+// reported is appended, so an installed generation and an unchanged capture
+// are distinguishable in the run report.
+const indexManagedRefreshReason = "stored index already matches captured input; refreshed the managed generation metadata without a parse"
+
 // bindPublicationIndex performs the bind-only index write the rule "bind
 // without a re-parse" (capturedInputBindsWithoutReparse) selected. It
 // re-checks that the saved pair is still the one the input was captured from,
@@ -2542,6 +2583,30 @@ func (p *Pipeline) bindPublicationIndex(ctx context.Context, result indexParseRe
 	slog.Warn(logPrefix+": bind index to metadata capture", "session_id", sid, "error", err)
 	errMsg := err.Error()
 	return p.makeIndexLogEntry(result.im, IndexOutcomeError, 0, result.startedAt, nil, &errMsg), time.Since(start)
+}
+
+// refreshManagedGeneration performs the metadata-only managed-generation
+// refresh for one captured input. It runs on the serialized store write lane so
+// the refresh transaction cannot interleave with a pair mirror or an index
+// write. The caller only reaches it after the pair install and managed mirror
+// committed, and the input's expected state was captured after both.
+//
+// The duration is the write half of the refresh; no parser ran, so the
+// pipeline reports zero parse work and the refresh's own cost separately.
+func (p *Pipeline) refreshManagedGeneration(ctx context.Context, input *CapturedIndexInput, writeLane *storeWriteLane) (ManagedGenerationRefreshOutcome, time.Duration, error) {
+	refresher, ok := p.metricsStore.(ManagedGenerationRefresher)
+	if !ok {
+		return ManagedGenerationRefreshOutcome{}, 0, fmt.Errorf(
+			"refresh the managed generation of session %s without a parse: the configured store has no metadata-only refresh capability; no generation was installed and the active authority is unchanged; use a store that can refresh a managed generation or let the ordinary parse path run",
+			input.session.SessionID)
+	}
+	start := time.Now()
+	var outcome ManagedGenerationRefreshOutcome
+	var err error
+	p.runStoreWrite(writeLane, StageIndex, func() {
+		outcome, err = refresher.RefreshManagedGenerationWithoutParse(ctx, managedGenerationRefreshRequest(input))
+	})
+	return outcome, time.Since(start), err
 }
 
 type indexWriteFlush struct {
@@ -2652,7 +2717,7 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 			continue
 		}
 		if result.output == nil || p.metricsStore == nil {
-			record(i, indexedMeta{session: result.im.session, startMs: result.im.startMs}, result.logEntry, p.makeIndexProfileSession(result, result.logEntry, 0))
+			record(i, indexedMeta{session: result.im.session, startMs: result.im.startMs}, result.logEntry, p.makeIndexProfileSession(result, result.logEntry, result.managedRefreshDuration))
 			continue
 		}
 		if result.generationCandidate != nil {
@@ -2870,7 +2935,7 @@ func (p *Pipeline) writeIndexParseResult(ctx context.Context, result indexParseR
 	im := result.im
 	ok := false
 	logEntry := result.logEntry
-	writeDuration := time.Duration(0)
+	writeDuration := result.managedRefreshDuration
 	entriesCount := result.entryCount
 	if result.output != nil && p.metricsStore != nil {
 		// A split entries/stamp fallback could overwrite last-good output and

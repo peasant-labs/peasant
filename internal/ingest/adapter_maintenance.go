@@ -827,6 +827,7 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry, writeLan
 				// the refresh: no native read.
 				p.markRefreshReason(entry.Session.SessionID, decision.OutcomeReason())
 				refreshed.result.Decision = decision
+				refreshed.managedGenerationRefresh = p.managedGenerationRefreshLane(entry.Session, decision)
 				return refreshed
 			}
 		}

@@ -177,6 +177,11 @@ type workerResult struct {
 	// this run committed a pair, so the mirror and the published flag stay
 	// false for a fallback that only reuses stored input.
 	retainedMetadataJSON []byte
+	// managedGenerationRefresh marks a pair this run refreshed on the
+	// adapter-behind / adapter-stamp-absent stored-metadata lane for a managed
+	// generation. The index stage may settle it through the metadata-only
+	// generation refresh instead of parsing the transcript.
+	managedGenerationRefresh bool
 	// transcriptData holds the already-read bytes for the in-memory index path.
 	// Nil on error or skip.
 	//
