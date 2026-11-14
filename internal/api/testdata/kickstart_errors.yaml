@@ -19,6 +19,7 @@ requiredNames:
   - server-without-a-configuration-file-is-unavailable-on-every-route
   - save-while-another-change-holds-the-file-is-busy
   - foreign-host-is-refused-on-every-route
+  - preview-foreign-host-refusal-is-not-stored
   - unknown-connect-token-is-an-invalid-body
 codes:
   kickstart_body_missing: {case: open-without-a-body-is-refused}
@@ -257,6 +258,22 @@ cases:
       # nothing was opened
       - call: GET /api/v1/kickstart/status
         absent: [activeSessionId]
+
+  - name: preview-foreign-host-refusal-is-not-stored
+    world: {listings: two-projects}
+    steps:
+      - call: GET /api/v1/kickstart/sessions/x/tree/y/preview
+        host: site.example
+        status: 403
+        headers: {Cache-Control: [no-store]}
+        json: {code: request_host_not_local}
+        contains: {error: "/api/v1/kickstart/sessions/x/tree/y/preview"}
+      # Other local-guard refusals also echo the requested path.
+      - call: GET /api/v1/kickstart/sessions/x/tree
+        host: site.example
+        status: 403
+        headers: {Cache-Control: [no-store]}
+        json: {code: request_host_not_local}
 
   # The connect offer's answers are a closed set that the body's decoder holds,
   # so a token outside it never reaches the plan: it is an invalid body, and
