@@ -319,12 +319,31 @@ func parserVersions() map[string]versions {
   target := ingest.HarvesterVersionRegistry[harness]
   result[string(harness)] = versions{target.AdapterVersion, target.IndexerVersion}
  }
+ GENERATION_TARGETS
  return result
 }`
-	if _, err := os.Stat(filepath.Join(tree, "internal/ingest/harvester_versions.go")); os.IsNotExist(err) {
+	// A store that can persist a managed generation indexes a harness with its
+	// GenerationRepairTargets entry through the indexer's BuildGeneration, so
+	// that lane is declared beside the baseline and compared on its own. The
+	// OpenCode lane reads a SQLite snapshot through the pipeline's per-attempt
+	// access, which the probe does not wire; its native corpus stays on the
+	// adapter comparison.
+	generationTargets := ` for harness, target := range ingest.GenerationRepairTargets {
+  if _, ok := result[string(harness)]; ok && string(harness) != "opencode" {
+   result[string(harness)+guardGenerationSuffix] = versions{target.AdapterVersion, target.IndexerVersion}
+  }
+ }`
+	registry, err := os.ReadFile(filepath.Join(tree, "internal/ingest/harvester_versions.go"))
+	if os.IsNotExist(err) {
 		versionSource = strings.Replace(versionSource, "target := ingest.HarvesterVersionRegistry[harness]", "", 1)
 		versionSource = strings.Replace(versionSource, "target.AdapterVersion, target.IndexerVersion", "1, ingest.CurrentIndexVersion", 1)
+	} else if err != nil {
+		return result, err
 	}
+	if !bytes.Contains(registry, []byte("var GenerationRepairTargets")) {
+		generationTargets = ""
+	}
+	versionSource = strings.Replace(versionSource, "GENERATION_TARGETS", generationTargets, 1)
 	if err := os.WriteFile(filepath.Join(probeDir, "harvester_guard_versions_test.go"), []byte(versionSource), 0600); err != nil {
 		return result, err
 	}
