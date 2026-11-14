@@ -5,6 +5,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/store"
+	schema "github.com/peasant-labs/schema"
 )
 
 // AppModel is the top-level Bubble Tea model that delegates to sub-views.
@@ -29,6 +31,14 @@ func NewApp(s []ingest.Session) AppModel {
 	}
 }
 
+// WithAnnotationStore returns a copy of the model whose session detail loads
+// turns and pending annotations from s, lists types in the annotation picker,
+// and commits pending annotations to serverURL.
+func (m AppModel) WithAnnotationStore(s *store.Store, serverURL string, types []schema.AnnotationTypeSummary) AppModel {
+	m.sessions = m.sessions.WithPendingStore(s, serverURL).WithAnnotationTypes(types)
+	return m
+}
+
 func (m AppModel) Init() tea.Cmd {
 	return tea.RequestWindowSize
 }
@@ -47,8 +57,19 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		key := msg.String()
 
-		// Quit is always handled
-		if key == defaults.KeyQuit.String() || key == defaults.KeyInterrupt.String() {
+		if key == defaults.KeyInterrupt.String() {
+			return m, tea.Quit
+		}
+
+		// An open annotation picker owns every key but ctrl+c, so q closes
+		// the picker and can be typed into a free-text value.
+		if m.activeTab == 1 && m.sessions.EditorOpen() {
+			var cmd tea.Cmd
+			m.sessions, cmd = m.sessions.Update(msg)
+			return m, cmd
+		}
+
+		if key == defaults.KeyQuit.String() {
 			return m, tea.Quit
 		}
 

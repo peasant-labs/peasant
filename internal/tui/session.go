@@ -355,7 +355,7 @@ func (m SessionModel) Update(msg tea.Msg) (SessionModel, tea.Cmd) {
 				sid, sidErr := ingest.NewSessionID(string(sess.ID))
 				if sidErr == nil {
 					entries, err := m.pendingStore.ListEntries(context.Background(), sid)
-					if err == nil {
+					if err == nil && len(entries) > 0 {
 						m.sessions[m.selectedIdx].Turns = api.EntriesToTurns(entries)
 					}
 				}
@@ -399,6 +399,11 @@ func (m SessionModel) View() string {
 // InDetail returns whether the session detail view is active.
 func (m SessionModel) InDetail() bool {
 	return m.inDetail
+}
+
+// EditorOpen returns whether the annotation picker is open.
+func (m SessionModel) EditorOpen() bool {
+	return m.editorOpen
 }
 
 func (m SessionModel) renderDetail() string {

@@ -74,6 +74,10 @@ func (m AnnotationEditorModel) Update(msg tea.Msg) (AnnotationEditorModel, tea.C
 		switch msg.String() {
 		case defaults.KeyEscape.String():
 			return m, func() tea.Msg { return AnnotationEditorCancelMsg{} }
+		case defaults.KeyQuit.String():
+			if m.step != stepTextInput {
+				return m, func() tea.Msg { return AnnotationEditorCancelMsg{} }
+			}
 		}
 
 		switch m.step {
@@ -181,7 +185,7 @@ func (m AnnotationEditorModel) View() string {
 
 	switch m.step {
 	case stepTypeSelection:
-		lines = append(lines, AccentStyle.Render("Annotation Type Picker (1–9: select, Esc: cancel)"))
+		lines = append(lines, AccentStyle.Render("Annotation Type Picker (1–9: select, Esc/q: cancel)"))
 		lines = append(lines, "")
 
 		if len(m.types) == 0 {
@@ -206,7 +210,7 @@ func (m AnnotationEditorModel) View() string {
 	case stepValueSelection:
 		if m.selectedType != nil {
 			lines = append(lines, AccentStyle.Render(
-				fmt.Sprintf("Select value for %s (1–9: select, Esc: cancel)", m.selectedType.DisplayName),
+				fmt.Sprintf("Select value for %s (1–9: select, Esc/q: cancel)", m.selectedType.DisplayName),
 			))
 			lines = append(lines, "")
 			for i, v := range m.selectedType.ValueDomain.PermissibleValues {
