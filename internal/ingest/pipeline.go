@@ -3810,19 +3810,25 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry, wr
 			emailCtx, emailCancel := context.WithTimeout(ctx, 2*time.Second)
 			userEmail, _ := p.git.UserEmail(emailCtx)
 			emailCancel()
-			detector := newCommitDetectorWithReader(p.gitAnalyzer, userEmail, p.commitTranscriptReader)
+			reader := p.commitTranscriptReader
 			sessionStart := time.UnixMilli(meta.Timestamp.Start)
 			sessionEnd := time.UnixMilli(meta.Timestamp.End)
-			// File origins use the provider transcript. Current SQLite uses only
-			// the deterministic managed projection already written in the private
+			// File origins use the provider transcript. The capture already
+			// holds its bytes, so command validation parses those instead of
+			// reading the source again. Current SQLite uses only the
+			// deterministic managed projection already written in the private
 			// temporary directory. The shipped legacy SQLite path remains
 			// timestamp-only. DB/WAL/SHM paths never reach parsing.
 			transcriptPath := ""
 			if session.TranscriptOrigin == TranscriptOriginFile {
 				transcriptPath = session.SourcePath.String()
+				if captured.Data != nil {
+					reader = capturedTranscriptReader{data: captured.Data}
+				}
 			} else if session.TranscriptOrigin == TranscriptOriginOpenCodeCurrentSQLite {
 				transcriptPath = tmpTranscriptPath
 			}
+			detector := newCommitDetectorWithReader(p.gitAnalyzer, userEmail, reader)
 			commits, diags := detector.LayeredDetection(ctx, repoPath, sessionStart, sessionEnd, transcriptPath)
 			commitCaptureComplete = len(diags) == 0
 			meta.Git.Commits = commits

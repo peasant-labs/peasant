@@ -1,0 +1,16 @@
+# Each case runs the real pipeline on a counted in-memory filesystem with a
+# counting commit-transcript reader, and asserts how often each file is read.
+required_case_names:
+  - claude-commit-detection-uses-the-captured-bytes
+  - claude-commit-detection-without-git-activity-confirms-nothing
+cases:
+  - name: claude-commit-detection-uses-the-captured-bytes
+    transcript: '{"type":"user","message":{"role":"user","content":"git commit -am work"}}'
+    want_source_reads: 1
+    want_commit_reader_calls: 0
+    want_commits: 1
+  - name: claude-commit-detection-without-git-activity-confirms-nothing
+    transcript: '{"type":"user","message":{"role":"user","content":"explain this function"}}'
+    want_source_reads: 1
+    want_commit_reader_calls: 0
+    want_commits: 0
