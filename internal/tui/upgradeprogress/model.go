@@ -64,6 +64,13 @@ func (o Outcome) String() string {
 	}
 }
 
+// stopped reports whether the outcome stopped the upgrade before its last
+// step: cancelled by the user, or a failed step. Both leave the running step
+// rolled back and the earlier steps applied.
+func (o Outcome) stopped() bool {
+	return o == OutcomeStoppedByUser || o == OutcomeFailedStep
+}
+
 // NewOutcome validates a raw outcome at an input boundary.
 func NewOutcome(raw string) (Outcome, error) {
 	for _, outcome := range AllOutcomes {
@@ -379,7 +386,7 @@ func (m Model) stepIcon(index int, state *stepState) (string, lipgloss.Style) {
 	if state.finished {
 		return "✓", styles.Success
 	}
-	if m.final && (m.outcome == OutcomeStoppedByUser || m.outcome == OutcomeFailedStep) && index == m.activeStep() {
+	if m.final && m.outcome.stopped() && index == m.activeStep() {
 		return "✗", styles.Danger
 	}
 	return "●", styles.Accent
@@ -463,7 +470,10 @@ func (m Model) windowRows(rows []string, reserved int) ([]string, int) {
 	keep := make([]bool, len(rows))
 	used := 0
 	selectRow := func(i int) {
-		if i < 0 || i >= len(rows) || keep[i] || used >= available {
+		if i < 0 ||
+			i >= len(rows) ||
+			keep[i] ||
+			used >= available {
 			return
 		}
 		keep[i] = true
