@@ -382,6 +382,8 @@ These waits stay real, each for a stated reason:
 - `internal/githooks/script_test.go` — the kernel reports `ETXTBSY` on a freshly written
   executable, and only a later retry observes it cleared; the pacing is kept, the bound is the
   test deadline.
+- `cmd/peasant/web_stop_pid_owner_unix_test.go` `startRetryingBusy` — the same `ETXTBSY` retry for
+  a copied test binary started as a child; same pacing, bounded by the test deadline.
 - `internal/village/client_timing_test.go`, `internal/perf/perf_test.go` — simulated server latency
   is the subject under test.
 - `internal/api/server.go` — a deliberate response flush delay in production.

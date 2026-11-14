@@ -3,14 +3,20 @@
 package main
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
+
+	"github.com/peasant-labs/peasant/internal/testkit/testwait"
 )
 
 const webServerStandInEnv = "PEASANT_TEST_WEB_SERVER_STAND_IN"
@@ -37,16 +43,50 @@ func freePort(t *testing.T) int {
 	return port
 }
 
-// startChild starts cmd and returns a channel closed when it exits.
-func startChild(t *testing.T, cmd *exec.Cmd) <-chan struct{} {
+// startChild starts the command newCmd builds and returns it with a channel
+// closed when it exits. Each attempt gets a fresh command, because an exec.Cmd
+// cannot be started twice.
+func startChild(t *testing.T, newCmd func() *exec.Cmd) (*exec.Cmd, <-chan struct{}) {
 	t.Helper()
-	if err := cmd.Start(); err != nil {
+	var cmd *exec.Cmd
+	err := startRetryingBusy(testwait.Context(t), func() error {
+		cmd = newCmd()
+		return cmd.Start()
+	})
+	if err != nil {
 		t.Fatalf("start child: %v", err)
 	}
 	exited := make(chan struct{})
 	go func() { _ = cmd.Wait(); close(exited) }()
 	t.Cleanup(func() { _ = cmd.Process.Kill(); <-exited })
-	return exited
+	return cmd, exited
+}
+
+// startRetryingBusy calls start until it stops reporting ETXTBSY or ctx ends,
+// and returns the last error. A freshly copied executable is busy when a
+// parallel test forks while the copy's write descriptor is still open: the
+// forked child holds it until it execs (golang/go#22315), so only a later
+// attempt observes it cleared. The pacing matches runHook in internal/githooks,
+// and the bound is the caller's context.
+func startRetryingBusy(ctx context.Context, start func() error) error {
+	for attempt := 1; ; attempt++ {
+		err := start()
+		if !errors.Is(err, syscall.ETXTBSY) {
+			return err
+		}
+		if ctx.Err() != nil {
+			return fmt.Errorf("executable still busy after %d attempt(s): %w (%v)", attempt, err, context.Cause(ctx))
+		}
+		time.Sleep(time.Duration(attempt) * 5 * time.Millisecond)
+	}
+}
+
+// standInServer builds a command that runs exe with the detached server's
+// command line; the stand-in environment makes it sleep instead of serving.
+func standInServer(exe string, port int) *exec.Cmd {
+	cmd := exec.Command(exe, "web", "start", "--foreground", "--port", strconv.Itoa(port))
+	cmd.Env = append(os.Environ(), webServerStandInEnv+"=1")
+	return cmd
 }
 
 func writePIDFile(t *testing.T, port, pid int) string {
@@ -105,8 +145,7 @@ func assertNotSignalled(t *testing.T, what string, cmd *exec.Cmd, exited <-chan 
 func TestStopWebLeavesAnUnrelatedProcessAlone(t *testing.T) {
 	t.Parallel()
 	port := freePort(t)
-	cmd := exec.Command("sleep", "300")
-	exited := startChild(t, cmd)
+	cmd, exited := startChild(t, func() *exec.Cmd { return exec.Command("sleep", "300") })
 	pidFile := writePIDFile(t, port, cmd.Process.Pid)
 
 	err := stopWeb(port)
@@ -129,8 +168,9 @@ func TestStopWebLeavesAnotherProgramWithServerArgsAlone(t *testing.T) {
 		t.Skip("python3 not installed")
 	}
 	port := freePort(t)
-	cmd := exec.Command(python, "-c", "import time; time.sleep(300)", "web", "start", "--foreground", "--port", strconv.Itoa(port))
-	exited := startChild(t, cmd)
+	cmd, exited := startChild(t, func() *exec.Cmd {
+		return exec.Command(python, "-c", "import time; time.sleep(300)", "web", "start", "--foreground", "--port", strconv.Itoa(port))
+	})
 	writePIDFile(t, port, cmd.Process.Pid)
 	deadline := time.Now().Add(10 * time.Second)
 	for !commandLineShows(cmd.Process.Pid, "time.sleep") {
@@ -165,9 +205,7 @@ func commandLineShows(pid int, want string) bool {
 func TestStopWebStopsTheServerItStarted(t *testing.T) {
 	t.Parallel()
 	port := freePort(t)
-	cmd := exec.Command(os.Args[0], "web", "start", "--foreground", "--port", strconv.Itoa(port))
-	cmd.Env = append(os.Environ(), webServerStandInEnv+"=1")
-	exited := startChild(t, cmd)
+	cmd, exited := startChild(t, func() *exec.Cmd { return standInServer(os.Args[0], port) })
 	writePIDFile(t, port, cmd.Process.Pid)
 	waitForCommandLine(t, cmd.Process.Pid, port)
 
@@ -198,12 +236,59 @@ func TestStopWebLeavesSameNamedExecutableAtAnotherPathAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	port := freePort(t)
-	cmd := exec.Command(other, "web", "start", "--foreground", "--port", strconv.Itoa(port))
-	cmd.Env = append(os.Environ(), webServerStandInEnv+"=1")
-	exited := startChild(t, cmd)
+	cmd, exited := startChild(t, func() *exec.Cmd { return standInServer(other, port) })
 	writePIDFile(t, port, cmd.Process.Pid)
 	waitForCommandLine(t, cmd.Process.Pid, port)
 	assertNotSignalled(t, "a same-named executable at another path", cmd, exited, stopWeb(port))
+}
+
+// busyStart is the error a start returns while the executable is still open for
+// writing somewhere.
+var busyStart = &os.PathError{Op: "fork/exec", Path: "peasant.test", Err: syscall.ETXTBSY}
+
+// TestStartRetryingBusyStartsOnceTheExecutableIsFree pins the #967 retry: a
+// start that reports a busy executable twice and then succeeds starts, and an
+// error other than ETXTBSY is returned without a retry.
+func TestStartRetryingBusyStartsOnceTheExecutableIsFree(t *testing.T) {
+	t.Parallel()
+	calls := 0
+	err := startRetryingBusy(testwait.Context(t), func() error {
+		calls++
+		if calls <= 2 {
+			return busyStart
+		}
+		return nil
+	})
+	if err != nil || calls != 3 {
+		t.Fatalf("startRetryingBusy = %v after %d call(s), want success on the third", err, calls)
+	}
+
+	calls = 0
+	missing := &os.PathError{Op: "fork/exec", Path: "peasant.test", Err: syscall.ENOENT}
+	err = startRetryingBusy(testwait.Context(t), func() error { calls++; return missing })
+	if !errors.Is(err, syscall.ENOENT) || calls != 1 {
+		t.Fatalf("startRetryingBusy = %v after %d call(s), want ENOENT from one call", err, calls)
+	}
+}
+
+// TestStartRetryingBusyFailsAtTheDeadline keeps a real failure visible: a start
+// that never stops reporting a busy executable ends at the context deadline
+// with that error.
+func TestStartRetryingBusyFailsAtTheDeadline(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	calls := 0
+	err := startRetryingBusy(ctx, func() error { calls++; return busyStart })
+	if !errors.Is(err, syscall.ETXTBSY) {
+		t.Fatalf("startRetryingBusy = %v, want the ETXTBSY error", err)
+	}
+	if ctx.Err() == nil {
+		t.Fatalf("startRetryingBusy returned before the deadline after %d call(s)", calls)
+	}
+	if calls < 2 {
+		t.Fatalf("startRetryingBusy made %d call(s) before the deadline, want a retry", calls)
+	}
 }
 
 // TestCommandLineShowsFallsBackToPs covers the helper's own fallback: with the
