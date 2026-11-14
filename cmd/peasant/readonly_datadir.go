@@ -43,6 +43,19 @@ func dataDirWritable(dataDir, dbPath string) (bool, string) {
 	return true, ""
 }
 
+// refuseUnwritableDataDir returns errDataDirNotWritable when the data dir or
+// its database cannot be written, so a writing command refuses before it
+// does any work instead of failing later inside SQLite.
+func refuseUnwritableDataDir(cmd *cobra.Command) error {
+	override := dataDirOverride(cmd)
+	dataDir := string(defaults.ResolveDataDirPathWith(override))
+	dbPath := string(defaults.ResolveDBFilePathWith(override))
+	if ok, path := dataDirWritable(dataDir, dbPath); !ok {
+		return errDataDirNotWritable(path)
+	}
+	return nil
+}
+
 // openDBForRead opens the analytics store for a command that only reads it.
 // On a writable data dir it is openDB, unchanged. On a read-only one it opens
 // the existing database read-only (no migration, no schema creation) so

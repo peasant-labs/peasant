@@ -312,6 +312,15 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 		cmd.SilenceUsage = true
 		return levelErr
 	}
+	// A real run writes the store and its run lock in the data dir: refuse an
+	// unwritable one before discovery, with the same error every writing
+	// command gives, instead of SQLite's after the work.
+	if !flags.dryRun {
+		if err := refuseUnwritableDataDir(cmd); err != nil {
+			cmd.SilenceUsage = true
+			return err
+		}
+	}
 	if err := ctx.Err(); err != nil {
 		cmd.SilenceUsage = true
 		return harvestCancellationError(err)

@@ -93,8 +93,8 @@ func openDB(cmd *cobra.Command) (*store.Store, func(), error) {
 	if err := os.MkdirAll(dataDir, defaults.PrivateDirPerm); err != nil {
 		return nil, func() {}, fmt.Errorf("create data directory: %w", err)
 	}
-	if ok, path := dataDirWritable(dataDir, dbPath); !ok {
-		return nil, func() {}, errDataDirNotWritable(path)
+	if err := refuseUnwritableDataDir(cmd); err != nil {
+		return nil, func() {}, err
 	}
 	// A non-interactive caller never runs migration v76's whole-index
 	// rebuild invisibly: refuse on residue instead of opening.
