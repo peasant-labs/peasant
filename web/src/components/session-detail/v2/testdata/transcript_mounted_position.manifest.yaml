@@ -31,4 +31,5 @@ mutations:
     expectedFailedTestNames:
       - visible sparse target reaches the real viewer
       - applying scope reveal positions without remount
+      - renders retained images via the local route and does not request missing images
     expectedFailurePattern: mounted positioning scroll invariant failed
