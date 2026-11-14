@@ -403,7 +403,8 @@ the §5 regression gate. Needs both dev servers up: FAIRTRADE `pnpm dev` (:5180)
   with the page elsewhere, never fixed — with
   "peasant isn't running on this computer", "your internet is fine", `peasant web start --port <port>`
   and `try again`; the live region saying the manifest's `stopped` text; the chrome manifest intact;
-  `--app-notice-height` set; `<main>` starting under the chrome plus the notice; the root's
+  `--app-notice-height` set; `<main>` starting under the chrome with the notice at its top (fairtrade's
+  `.asb-notice` slot) and the page body under the chrome plus the notice; the root's
   `scroll-padding-top` equal to what stays on screen (the pinned notice where it is pinned, the phone's
   top bar elsewhere, so a focused element never scrolls under either); `<main>` with no tabindex
   at rest. The cases come from `testdata/shell-offline-cases.yaml` (loaded strictly: unknown fields fail
