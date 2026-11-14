@@ -29,6 +29,7 @@ type publicationDocumentLimitCase struct {
 	RedactedBytes  int    `yaml:"redactedBytes"`
 	Accepted       bool   `yaml:"accepted"`
 	RedactorCalled bool   `yaml:"redactorCalled"`
+	Reason         string `yaml:"reason,omitempty"`
 	Error          string `yaml:"error,omitempty"`
 }
 
@@ -40,12 +41,14 @@ type publicationDocumentLimitsFixture struct {
 		InputCapBytes  int    `yaml:"inputCapBytes"`
 		OutputRefusal  string `yaml:"outputRefusal"`
 		InputRefusal   string `yaml:"inputRefusal"`
+		InputReason    string `yaml:"inputReason"`
 	} `yaml:"policy"`
 	Mechanics struct {
 		OutputLimitBytes int `yaml:"outputLimitBytes"`
 		InputLimitBytes  int `yaml:"inputLimitBytes"`
 	} `yaml:"mechanics"`
 	Cases         []publicationDocumentLimitCase `yaml:"cases"`
+	EntryCases    []publicationDocumentLimitCase `yaml:"entryCases"`
 	RealSizeCases []publicationDocumentLimitCase `yaml:"realSizeCases"`
 }
 
@@ -59,7 +62,7 @@ func loadPublicationDocumentLimits(t *testing.T) publicationDocumentLimitsFixtur
 	if err != nil {
 		t.Fatal(err)
 	}
-	all := append(append([]publicationDocumentLimitCase(nil), fixture.Cases...), fixture.RealSizeCases...)
+	all := append(append(append([]publicationDocumentLimitCase(nil), fixture.Cases...), fixture.EntryCases...), fixture.RealSizeCases...)
 	names := make([]string, len(all))
 	for i, c := range all {
 		names[i] = c.Name
@@ -83,8 +86,8 @@ func assertPublicationDocumentPolicy(t *testing.T, f publicationDocumentLimitsFi
 	if defaults.PushTranscriptDocumentCapBytes != f.Policy.OutputCapBytes {
 		t.Fatalf("production transcript output cap=%d want literal %d", defaults.PushTranscriptDocumentCapBytes, f.Policy.OutputCapBytes)
 	}
-	if transcriptInputRedactionCapBytes != f.Policy.InputCapBytes {
-		t.Fatalf("production transcript input cap=%d want literal %d", transcriptInputRedactionCapBytes, f.Policy.InputCapBytes)
+	if defaults.PushRedactionInputCapBytes != f.Policy.InputCapBytes {
+		t.Fatalf("production redaction input cap=%d want literal %d", defaults.PushRedactionInputCapBytes, f.Policy.InputCapBytes)
 	}
 	if f.Policy.BelowCapBytes != f.Policy.OutputCapBytes-1 || f.Policy.AboveCapBytes != f.Policy.OutputCapBytes+1 {
 		t.Fatalf("output boundary literals below/above=%d/%d are not cap-1/cap+1 of %d", f.Policy.BelowCapBytes, f.Policy.AboveCapBytes, f.Policy.OutputCapBytes)
@@ -92,8 +95,11 @@ func assertPublicationDocumentPolicy(t *testing.T, f publicationDocumentLimitsFi
 	if !strings.Contains(f.Policy.OutputRefusal, "schema.ScanRawJSONDocument") || !strings.Contains(f.Policy.OutputRefusal, strconv.Itoa(f.Policy.OutputCapBytes)) {
 		t.Fatalf("output refusal literal %q does not name the scanner and cap %d", f.Policy.OutputRefusal, f.Policy.OutputCapBytes)
 	}
-	if !strings.Contains(f.Policy.InputRefusal, "schema.ScanRawJSONDocument") || !strings.Contains(f.Policy.InputRefusal, strconv.Itoa(f.Policy.InputCapBytes)) {
-		t.Fatalf("input refusal literal %q does not name the scanner and cap %d", f.Policy.InputRefusal, f.Policy.InputCapBytes)
+	if !strings.Contains(f.Policy.InputRefusal, "too large to publish") || !strings.Contains(f.Policy.InputRefusal, strconv.Itoa(f.Policy.InputCapBytes)) {
+		t.Fatalf("input refusal literal %q does not name the too-large refusal and cap %d", f.Policy.InputRefusal, f.Policy.InputCapBytes)
+	}
+	if NotReadyReason(f.Policy.InputReason) != NotReadyTooLargeToPublish {
+		t.Fatalf("input refusal reason literal %q, want %q", f.Policy.InputReason, NotReadyTooLargeToPublish)
 	}
 	if f.Mechanics.OutputLimitBytes <= 0 || f.Mechanics.InputLimitBytes <= 0 {
 		t.Fatalf("mechanics limits=%d/%d must be positive", f.Mechanics.OutputLimitBytes, f.Mechanics.InputLimitBytes)
@@ -154,6 +160,7 @@ func TestPushContent_PublicationDocumentLimits(t *testing.T) {
 				if err == nil || err.Error() != c.Error || body != nil {
 					t.Fatalf("publication refusal = %v, emitted %d bytes; want %q and no output", err, len(body), c.Error)
 				}
+				assertPublicationRefusalReason(t, err, c.Reason)
 				return
 			}
 			if err != nil {
@@ -161,6 +168,93 @@ func TestPushContent_PublicationDocumentLimits(t *testing.T) {
 			}
 			if len(body) != c.RedactedBytes {
 				t.Fatalf("publication emitted %d bytes, want %d", len(body), c.RedactedBytes)
+			}
+		})
+	}
+}
+
+// assertPublicationRefusalReason checks the not-ready reason a refusal carries.
+// An empty want means the refusal is not a not-ready decision.
+func assertPublicationRefusalReason(t *testing.T, err error, want string) {
+	t.Helper()
+	reason, notReady := NotReadyReasonOf(err)
+	if want == "" {
+		if notReady {
+			t.Fatalf("refusal carries not-ready reason %q, want none", reason)
+		}
+		return
+	}
+	if !notReady || reason != NotReadyReason(want) {
+		t.Fatalf("refusal reason = %q (not ready %v), want %q", reason, notReady, want)
+	}
+}
+
+// identityPublicationRedactor returns the document unchanged and records that
+// the redaction ran.
+type identityPublicationRedactor struct{ called bool }
+
+func (r *identityPublicationRedactor) RedactJSON(value any) any {
+	r.called = true
+	return value
+}
+
+var _ redact.JSONRedactor = (*identityPublicationRedactor)(nil)
+
+// entriesForLimit returns one entry whose marshalled list is exactly size bytes.
+func entriesForLimit(t *testing.T, size int) []schema.SessionEntry {
+	t.Helper()
+	preview := ""
+	entries := []schema.SessionEntry{{
+		SessionID: testutil.TestSessionUUID, EntryIndex: 0, Depth: 0, Role: schema.RoleAssistant,
+		EntryType: schema.EntryTypeText, ContentPreview: &preview,
+	}}
+	base, err := json.Marshal(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if size < len(base) {
+		t.Fatalf("entry list target %d is below the %d-byte base", size, len(base))
+	}
+	preview = strings.Repeat("x", size-len(base))
+	return entries
+}
+
+// TestPushContent_EntriesRedactionInputLimit drives the entries redaction seam at
+// its injected input limit. A list over it is refused before redaction as too
+// large to publish, a not-ready decision the dry-run plan reports per session.
+func TestPushContent_EntriesRedactionInputLimit(t *testing.T) {
+	fixture := loadPublicationDocumentLimits(t)
+	for _, c := range fixture.EntryCases {
+		t.Run(c.Name, func(t *testing.T) {
+			entries := entriesForLimit(t, c.InputBytes)
+			raw, err := json.Marshal(entries)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(raw) != c.InputBytes {
+				t.Fatalf("entry list is %d bytes, want %d", len(raw), c.InputBytes)
+			}
+			redactor := &identityPublicationRedactor{}
+			redacted, err := redactEntriesWithInputCap(redactor, entries, fixture.Mechanics.InputLimitBytes)
+			if redactor.called != c.RedactorCalled {
+				t.Fatalf("redactor called = %v, want %v", redactor.called, c.RedactorCalled)
+			}
+			if !c.Accepted {
+				if err == nil || err.Error() != c.Error || redacted != nil {
+					t.Fatalf("entries refusal = %v, returned %d entries; want %q and none", err, len(redacted), c.Error)
+				}
+				assertPublicationRefusalReason(t, err, c.Reason)
+				return
+			}
+			if err != nil {
+				t.Fatalf("entries at or below the input limit refused: %v", err)
+			}
+			out, err := json.Marshal(redacted)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(out) != c.RedactedBytes {
+				t.Fatalf("redacted entry list is %d bytes, want %d", len(out), c.RedactedBytes)
 			}
 		})
 	}
