@@ -1,7 +1,8 @@
 /* Mounted transcript-segment capture.
 
    Boots this worktree's peasant binary, which embeds this branch's web export,
-   against a throwaway store holding a synthetic multi-segment transcript.
+   in its own server sandbox, against a store seeded in the sandbox's data
+   directory with a synthetic multi-segment transcript.
    Opens the production transcript route on a middle turn so both load-more
    boundaries are on screen, in both themes. The seed holds system and tool rows,
    so a boundary's conversation turn range never equals its row indexes. Before
@@ -15,6 +16,8 @@ import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { assertServedBuild } from './served-build.mjs'
+import { ownedServerSandbox } from './lib/owned-server-sandbox.mjs'
+import { startOwnedServer } from './lib/owned-server-start.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE, '../../..')
@@ -57,19 +60,6 @@ function run(command, args, options = {}) {
   })
 }
 
-async function waitForHealth(child) {
-  const started = Date.now()
-  while (Date.now() - started < 30_000) {
-    if (child.exitCode != null) throw fail('starting peasant', `the server exited ${child.exitCode}`)
-    try {
-      const response = await fetch(`${ORIGIN}/api/v1/health`)
-      if (response.ok) return
-    } catch { /* not up yet */ }
-    await pause(250)
-  }
-  throw fail('starting peasant', 'health did not answer within 30s')
-}
-
 async function directory(sessionId) {
   const response = await fetch(`${ORIGIN}/api/v1/sessions/${sessionId}/transcript/segments`)
   const body = await response.json()
@@ -78,19 +68,14 @@ async function directory(sessionId) {
 }
 
 mkdirSync(OUT, { recursive: true })
-const seeded = JSON.parse((await run('go', ['run', './web/scripts/visual/seed-transcript-store.go'])).stdout)
-const server = spawn(BIN, [
-  'web', 'start', '--foreground', '--no-browser',
-  '--port', PORT,
-  '--data-dir', seeded.dataDir,
-  '--config-dir', seeded.dataDir,
-  '--state-dir', seeded.dataDir,
-], { cwd: REPO, stdio: ['ignore', 'pipe', 'pipe'] })
+const sandbox = ownedServerSandbox('transcript-segments-shoot')
+const seeded = JSON.parse((await run('go', ['run', './web/scripts/visual/seed-transcript-store.go', sandbox.dataDir])).stdout)
+const server = await startOwnedServer({ port: PORT, portVariable: 'PEASANT_TRANSCRIPT_SEGMENTS_PORT', withinMs: 30_000, start: () => spawn(BIN, ['web', 'start', '--foreground', '--no-browser', '--port', PORT, ...sandbox.args], { cwd: REPO, env: sandbox.env, stdio: ['ignore', 'pipe', 'pipe'] }) })
+  .catch((error) => { throw fail('starting peasant', error.message) })
 let serverLog = ''
 server.stdout.on('data', (chunk) => { serverLog += chunk })
 server.stderr.on('data', (chunk) => { serverLog += chunk })
 try {
-  await waitForHealth(server)
   const provenance = await assertServedBuild({ origin: ORIGIN, markers: [MARKER, 'data-segment-boundaries', 'data-mounted-turn-bound'], bin: BIN, webRoot: WEB })
   const hostChunk = (await import('node:fs')).readdirSync(resolve(WEB, 'out/_next/static/chunks/app/projects/[[...segments]]')).find((name) => name.startsWith('page-'))
   if (!hostChunk) throw fail('verifying build provenance', 'the projects page chunk is missing from web/out')

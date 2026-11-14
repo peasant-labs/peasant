@@ -163,11 +163,11 @@ scripts:
     - scripts/visual/publish-states-shoot.mjs
     - scripts/visual/share-geometry.mjs
     - scripts/visual/grouped-list-visual.mjs
+    - scripts/visual/home-pages-visual.mjs
+    - scripts/visual/root-page-visual.mjs
+    - scripts/visual/settings-shoot.mjs
+    - scripts/visual/transcript-segments-shoot.mjs
+    - scripts/journey/api-binary.test.mjs
+    - scripts/journey/run-collective-observations.mjs
   exempt:
-    - {path: scripts/visual/home-pages-visual.mjs, reason: "sets HOME and the config, data, state and cache XDG variables to one temp root of its own"}
-    - {path: scripts/visual/root-page-visual.mjs, reason: "sets HOME and the config, data, state and cache XDG variables to one temp root per server"}
-    - {path: scripts/visual/settings-shoot.mjs, reason: "builds a temp HOME with git repositories and sets the config, data and state XDG variables under it; the cache variable is inherited"}
-    - {path: scripts/visual/transcript-segments-shoot.mjs, reason: "passes --data-dir, --config-dir and --state-dir of a seeded temp store; HOME and the cache variable are inherited"}
-    - {path: scripts/journey/api-binary.test.mjs, reason: "sets HOME and the config, data and state XDG variables under its owned lifecycle root; the cache variable is inherited"}
-    - {path: scripts/journey/run-collective-observations.mjs, reason: "sets HOME and the config, data and state XDG variables under its owned lifecycle root; the cache variable is inherited"}
     - {path: scripts/journey/run-kickstart.mjs, reason: "sets HOME and the config, data and state XDG variables under one temp root per theme, with no config.yaml on purpose so the binary starts unconfigured; the cache variable is inherited"}
