@@ -4,3 +4,7 @@ requiredNames:
   - cancelled-upgrade-is-stopped-by-user
   - low-disk-refusal-is-refused-for-low-disk
   - step-error-is-a-failed-step
+  - light-config-uses-the-light-palette
+  - dark-config-uses-the-dark-palette
+  - absent-config-falls-back-to-dark
+  - malformed-config-falls-back-to-dark

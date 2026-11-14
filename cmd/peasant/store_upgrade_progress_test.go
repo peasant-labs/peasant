@@ -5,12 +5,15 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/internal/tui/theme"
 	"github.com/peasant-labs/peasant/internal/tui/upgradeprogress"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -48,9 +51,17 @@ type upgradeProgressOutcomeCase struct {
 	Want  string `yaml:"want"`
 }
 
+type upgradeProgressThemeCase struct {
+	Name   string `yaml:"name"`
+	Config string `yaml:"config"`
+	Absent bool   `yaml:"absent"`
+	Want   string `yaml:"want"`
+}
+
 type upgradeProgressFixtures struct {
 	PlainCases   []upgradeProgressPlainCase   `yaml:"plainCases"`
 	OutcomeCases []upgradeProgressOutcomeCase `yaml:"outcomeCases"`
+	ThemeCases   []upgradeProgressThemeCase   `yaml:"themeCases"`
 }
 
 func loadUpgradeProgressFixtures(t *testing.T) upgradeProgressFixtures {
@@ -74,6 +85,9 @@ func loadUpgradeProgressFixtures(t *testing.T) upgradeProgressFixtures {
 		present[c.Name] = true
 	}
 	for _, c := range fixtures.OutcomeCases {
+		present[c.Name] = true
+	}
+	for _, c := range fixtures.ThemeCases {
 		present[c.Name] = true
 	}
 	if err := testutil.RequireFixtureNames("store upgrade progress", "case", manifest.RequiredNames, present); err != nil {
@@ -196,6 +210,63 @@ func TestRunUpgradeWithProgressUsesPlainLinesOffTerminal(t *testing.T) {
 	}
 	if isTerminalWriter(&out) {
 		t.Fatal("a bytes.Buffer was classified as an interactive terminal")
+	}
+}
+
+// TestStoreUpgradeThemeFromConfig is the production-wiring test for the
+// inline upgrade child's palette: the same resolveConfigPath/loadConfig/
+// themeModeFor path the rest of the CLI uses picks the theme before the store
+// opens, a configured light theme reaches the production model, and an absent
+// or malformed config falls back to dark.
+func TestStoreUpgradeThemeFromConfig(t *testing.T) {
+	fixtures := loadUpgradeProgressFixtures(t)
+	plan := store.UpgradePlan{From: 69, To: 70, StoreBytes: 1 << 20, Steps: []store.UpgradeStep{{
+		Version: 70, Kind: store.UpgradeStepSchema, Title: "add derived lookups", Cost: store.UpgradeCostQuick,
+	}}}
+	var lightView, darkView string
+	for _, c := range fixtures.ThemeCases {
+		t.Run(c.Name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if !c.Absent {
+				if err := os.WriteFile(path, []byte(c.Config), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cmd := &cobra.Command{Use: "upgrade-theme-test"}
+			cmd.Flags().String("config", "", "")
+			if err := cmd.Flags().Set("config", path); err != nil {
+				t.Fatal(err)
+			}
+			got := storeUpgradeTheme(cmd)
+			want, err := theme.ModeFromConfig(c.Want)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Mode != want {
+				t.Fatalf("resolved theme = %q, want %q", got.Mode, want)
+			}
+			production := newUpgradeProgressModel(plan, got)
+			production.SetSize(80, 24)
+			explicit := upgradeprogress.New(upgradeprogress.Options{Theme: theme.New(want), Plan: plan})
+			explicit.SetSize(80, 24)
+			if view := production.View(); view != explicit.View() {
+				t.Fatalf("the production model did not render in the resolved %q palette", want)
+			}
+			switch want {
+			case theme.ModeLight:
+				lightView = production.View()
+			case theme.ModeDark:
+				darkView = production.View()
+			}
+		})
+	}
+	// The comparison above is only evidence when the two palettes actually
+	// differ for this surface.
+	if lightView == "" || darkView == "" {
+		t.Fatal("the theme cases did not render both palettes")
+	}
+	if lightView == darkView {
+		t.Fatal("the light and dark palettes render identically for the upgrade surface; the wiring test would be vacuous")
 	}
 }
 

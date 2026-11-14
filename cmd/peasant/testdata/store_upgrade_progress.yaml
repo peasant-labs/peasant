@@ -22,3 +22,17 @@ outcomeCases:
   - {name: cancelled-upgrade-is-stopped-by-user, error: interrupted, want: stopped by user}
   - {name: low-disk-refusal-is-refused-for-low-disk, error: low-disk, want: refused for low disk}
   - {name: step-error-is-a-failed-step, error: step, want: failed step}
+
+themeCases:
+  - name: light-config-uses-the-light-palette
+    config: "display:\n  theme: light\n"
+    want: light
+  - name: dark-config-uses-the-dark-palette
+    config: "display:\n  theme: dark\n"
+    want: dark
+  - name: absent-config-falls-back-to-dark
+    absent: true
+    want: dark
+  - name: malformed-config-falls-back-to-dark
+    config: "display: [\n"
+    want: dark

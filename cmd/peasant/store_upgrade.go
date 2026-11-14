@@ -428,7 +428,7 @@ func runUpgradeWithProgressMode(cmd *cobra.Command, plan store.UpgradePlan, prog
 		}
 		return report, nil
 	}
-	return runUpgradeProgressProgram(ctx, stderr, plan, options)
+	return runUpgradeProgressProgram(ctx, stderr, plan, options, storeUpgradeTheme(cmd))
 }
 
 // isTerminalWriter reports whether w is an interactive terminal.
@@ -437,13 +437,32 @@ func isTerminalWriter(w io.Writer) bool {
 	return ok && term.IsTerminal(int(file.Fd()))
 }
 
+// storeUpgradeTheme resolves the palette for the upgrade progress child from
+// the command's config without opening the store. It follows the same path as
+// the other pre-store terminal surfaces: resolveConfigPath, loadConfig, and
+// themeModeFor. A missing, unreadable, or invalid config falls back to dark,
+// the default the rest of the CLI uses.
+func storeUpgradeTheme(cmd *cobra.Command) theme.Theme {
+	if cfg, err := loadConfig(resolveConfigPath(cmd)); err == nil && cfg != nil {
+		return theme.New(themeModeFor(cfg))
+	}
+	return theme.New(theme.ModeDark)
+}
+
+// newUpgradeProgressModel builds the production progress model. The theme is
+// resolved before the store opens and passed in, so the child renders in the
+// command's configured palette.
+func newUpgradeProgressModel(plan store.UpgradePlan, th theme.Theme) upgradeprogress.Model {
+	return upgradeprogress.New(upgradeprogress.Options{Theme: th, Plan: plan})
+}
+
 // runUpgradeProgressProgram mounts the inline progress child over the
 // upgrade. It occupies only its content rows (no alternate screen) and leaves
 // the terminal's final block in place. Input is disabled so the terminal stays
 // in cooked mode and ctrl+c reaches the command's signal context; the model
 // has no keyboard interaction.
-func runUpgradeProgressProgram(ctx context.Context, out io.Writer, plan store.UpgradePlan, options store.UpgradeOptions) (store.UpgradeReport, error) {
-	model := upgradeprogress.New(upgradeprogress.Options{Theme: theme.New(theme.ModeDark), Plan: plan})
+func runUpgradeProgressProgram(ctx context.Context, out io.Writer, plan store.UpgradePlan, options store.UpgradeOptions, th theme.Theme) (store.UpgradeReport, error) {
+	model := newUpgradeProgressModel(plan, th)
 	if file, ok := out.(*os.File); ok {
 		if width, height, err := term.GetSize(int(file.Fd())); err == nil {
 			model.SetSize(width, height)
