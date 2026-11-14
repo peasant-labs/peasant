@@ -146,7 +146,7 @@ func (s *Store) PruneSessions(ctx context.Context, sessionIDs []ingest.SessionID
 		err = fmt.Errorf("store.PruneSessions: read the search index health: %w", gateErr)
 		return ingest.PruneResult{}, err
 	} else if state.NeedsRebuild {
-		if gateErr := rebuildSearchIndexOnConn(conn); gateErr != nil {
+		if gateErr := rebuildSearchIndexOnConn(ctx, conn); gateErr != nil {
 			err = fmt.Errorf("store.PruneSessions: rebuild the flagged search index before pruning: %w; nothing was pruned", gateErr)
 			return ingest.PruneResult{}, err
 		}
@@ -263,7 +263,7 @@ func (s *Store) PruneSessions(ctx context.Context, sessionIDs []ingest.SessionID
 	// ran with values the trigger cannot un-index exactly. Rebuild through
 	// the one path before committing, so prune never leaves the flag set.
 	if mismatched {
-		if err = rebuildSearchIndexOnConn(conn); err != nil {
+		if err = rebuildSearchIndexOnConn(ctx, conn); err != nil {
 			return ingest.PruneResult{}, fmt.Errorf("store.PruneSessions: rebuild the search index after an untrusted delete: %w", err)
 		}
 	}

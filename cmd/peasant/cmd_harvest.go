@@ -534,7 +534,7 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 	// place an already-stored session on the branch the setup tree lists it under.
 	var storedSessions ingest.KnownSessionIndex
 	if !skipDB {
-		db, err := openRunStore(cmd, flags.dryRun, string(resolvedOutput), cfg.Write)
+		db, err := openRunStore(cmd, flags.dryRun, string(resolvedOutput), cfg.Write, storeUpgradeProgressPlain)
 		if err != nil {
 			return fmt.Errorf("open analytics store: %w", err)
 		}
@@ -544,7 +544,12 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 		// keeps the state crash-safe. Skipped on dry runs, which must not
 		// write.
 		if !flags.dryRun {
-			if _, err := db.EnsureSearchIndexHealthy(ctx); err != nil {
+			// A flagged index is rebuilt before any harvest work. The rebuild
+			// reports through the same upgrade step events as the explicit
+			// upgrade, as plain lines because the harvest renderer already owns
+			// the terminal.
+			searchPrinter := newStoreUpgradeLinePrinter(cmd.ErrOrStderr())
+			if _, err := db.EnsureSearchIndexHealthyWithProgress(ctx, searchPrinter.event); err != nil {
 				return fmt.Errorf("heal the flagged search index: %w", err)
 			}
 		}

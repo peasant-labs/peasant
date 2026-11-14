@@ -1,0 +1,5 @@
+requiredNames:
+  - harvest-start-rebuild-emits-uncounted-step-events
+  - current-store-emits-no-step-events
+  - cancelled-rebuild-before-it-starts-changes-nothing
+  - deferred-commit-failure-is-returned

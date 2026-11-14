@@ -31,18 +31,23 @@ const (
 	// running bar, the canceling acknowledgment, and the canceled final,
 	// in both themes at both terminal sizes.
 	sheetPullProgress sheetName = "pull-progress"
+	// sheetUpgradeProgress is the explicit store upgrade's terminal progress:
+	// the plan, a running uncounted step, a running counted step, and the four
+	// terminal outcomes, in both themes at both terminal sizes.
+	sheetUpgradeProgress sheetName = "upgrade-progress"
 )
 
 type sheetKind string
 
 const (
-	sheetKindGuided       sheetKind = "guided"
-	sheetKindSelection    sheetKind = "selection"
-	sheetKindPush         sheetKind = "push"
-	sheetKindIngest       sheetKind = "ingest-progress"
-	sheetKindCompletion   sheetKind = "ingest-completion"
-	sheetKindDiscovery    sheetKind = "discovery-progress"
-	sheetKindPullProgress sheetKind = "pull-progress"
+	sheetKindGuided          sheetKind = "guided"
+	sheetKindSelection       sheetKind = "selection"
+	sheetKindPush            sheetKind = "push"
+	sheetKindIngest          sheetKind = "ingest-progress"
+	sheetKindCompletion      sheetKind = "ingest-completion"
+	sheetKindDiscovery       sheetKind = "discovery-progress"
+	sheetKindPullProgress    sheetKind = "pull-progress"
+	sheetKindUpgradeProgress sheetKind = "upgrade-progress"
 )
 
 type captureTheme string
@@ -297,6 +302,54 @@ type pullProgressCaptureFixture struct {
 }
 
 // pushCaptureFixture is one push screen at one palette and one region.
+// upgradeProgressState is the closed set of explicit-upgrade progress screens
+// the harness captures: the untouched plan, the long-step plan, a running
+// uncounted step, a running counted step, and the four terminal outcomes.
+type upgradeProgressState string
+
+const (
+	upgradeProgressStatePlanQuick    upgradeProgressState = "plan-quick-only"
+	upgradeProgressStatePlanLong     upgradeProgressState = "plan-with-long-step-awaiting-confirm"
+	upgradeProgressStateRunningPlain upgradeProgressState = "running-uncounted-step"
+	upgradeProgressStateRunningCount upgradeProgressState = "running-counted-step"
+	upgradeProgressStateDone         upgradeProgressState = "done"
+	upgradeProgressStateStopped      upgradeProgressState = "stopped-by-user"
+	upgradeProgressStateRefused      upgradeProgressState = "refused-low-disk"
+	upgradeProgressStateFailed       upgradeProgressState = "failed-step"
+)
+
+func (s upgradeProgressState) valid() bool {
+	switch s {
+	case upgradeProgressStatePlanQuick, upgradeProgressStatePlanLong, upgradeProgressStateRunningPlain,
+		upgradeProgressStateRunningCount, upgradeProgressStateDone, upgradeProgressStateStopped,
+		upgradeProgressStateRefused, upgradeProgressStateFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+// requiresBothThemes reports whether an upgrade-progress state is reviewed in
+// both palettes. Every state is user-visible, so all of them are.
+func (s upgradeProgressState) requiresBothThemes() bool { return s.valid() }
+
+// upgradeProgressStateFixture names what one captured upgrade-progress screen
+// must show. WantAbsent proves a terminal state does not also render the
+// running footer, and that an uncounted step renders no bar.
+type upgradeProgressStateFixture struct {
+	Key          upgradeProgressState `yaml:"key"`
+	WantContains []string             `yaml:"wantContains"`
+	WantAbsent   []string             `yaml:"wantAbsent"`
+}
+
+type upgradeProgressCaptureFixture struct {
+	Name   string               `yaml:"name"`
+	State  upgradeProgressState `yaml:"state"`
+	Theme  captureTheme         `yaml:"theme"`
+	Width  int                  `yaml:"width"`
+	Height int                  `yaml:"height"`
+}
+
 type pushCaptureFixture struct {
 	Name   string       `yaml:"name"`
 	State  pushState    `yaml:"state"`
@@ -441,6 +494,8 @@ type captureDocument struct {
 	PullProgressCaptures      []pullProgressCaptureFixture      `yaml:"pullProgressCaptures"`
 	DiscoveryProgressStates   []discoveryProgressStateFixture   `yaml:"discoveryProgressStates"`
 	DiscoveryProgressCaptures []discoveryProgressCaptureFixture `yaml:"discoveryProgressCaptures"`
+	UpgradeProgressStates     []upgradeProgressStateFixture     `yaml:"upgradeProgressStates"`
+	UpgradeProgressCaptures   []upgradeProgressCaptureFixture   `yaml:"upgradeProgressCaptures"`
 	Push                      pushFixture                       `yaml:"push"`
 	Sheets                    []sheetFixture                    `yaml:"sheets"`
 	GuidedSections            []guidedSectionFixture            `yaml:"guidedSections"`
@@ -492,6 +547,9 @@ func decodeCaptureDocument(data []byte) (captureDocument, error) {
 		return document, err
 	}
 	if err := validateDiscoveryProgressMatrix(document.DiscoveryProgressStates, document.DiscoveryProgressCaptures); err != nil {
+		return document, err
+	}
+	if err := validateUpgradeProgressMatrix(document.UpgradeProgressStates, document.UpgradeProgressCaptures); err != nil {
 		return document, err
 	}
 	if err := validateCompletionMatrix(document.Completion); err != nil {
@@ -662,6 +720,59 @@ func validatePullProgressMatrix(states []pullProgressStateFixture, captures []pu
 	return nil
 }
 
+// validateUpgradeProgressMatrix requires one capture per explicit-upgrade
+// screen, per palette, per region: the upgrade progress is reviewed in both
+// themes at both sizes.
+func validateUpgradeProgressMatrix(states []upgradeProgressStateFixture, captures []upgradeProgressCaptureFixture) error {
+	stateRows := make(map[upgradeProgressState]upgradeProgressStateFixture, len(states))
+	for _, state := range states {
+		if !state.Key.valid() ||
+			stateRows[state.Key].Key != "" ||
+			!nonEmptyStrings(state.WantContains) ||
+			(len(state.WantAbsent) > 0 && !nonEmptyStrings(state.WantAbsent)) {
+			return fmt.Errorf("screenshot fixture has an invalid or duplicate upgrade progress state: %#v", state)
+		}
+		stateRows[state.Key] = state
+	}
+	for _, required := range []upgradeProgressState{
+		upgradeProgressStatePlanQuick, upgradeProgressStatePlanLong, upgradeProgressStateRunningPlain,
+		upgradeProgressStateRunningCount, upgradeProgressStateDone, upgradeProgressStateStopped,
+		upgradeProgressStateRefused, upgradeProgressStateFailed,
+	} {
+		if stateRows[required].Key == "" {
+			return fmt.Errorf("screenshot fixture omits upgrade progress state %q", required)
+		}
+	}
+	seenNames := make(map[string]bool, len(captures))
+	pairs := make(map[string]int, len(captures))
+	for _, capture := range captures {
+		wantName := fmt.Sprintf("upgrade-progress-%s-%s-%dx%d", capture.State, capture.Theme, capture.Width, capture.Height)
+		if capture.Name != wantName || seenNames[capture.Name] || stateRows[capture.State].Key == "" ||
+			!capture.Theme.valid() || (!capture.State.requiresBothThemes() && capture.Theme != captureThemeDark) ||
+			!validCaptureSize(capture.Width, capture.Height) {
+			return fmt.Errorf("screenshot fixture has an invalid or duplicate upgrade progress capture: %#v", capture)
+		}
+		seenNames[capture.Name] = true
+		pairs[fmt.Sprintf("%s/%s/%dx%d", capture.State, capture.Theme, capture.Width, capture.Height)]++
+	}
+	for state := range stateRows {
+		themes := []captureTheme{captureThemeDark}
+		if state.requiresBothThemes() {
+			themes = append(themes, captureThemeLight)
+		}
+		for _, name := range themes {
+			for _, viewport := range []viewportFixture{{Width: 80, Height: 24}, {Width: 120, Height: 40}} {
+				pair := fmt.Sprintf("%s/%s/%dx%d", state, name, viewport.Width, viewport.Height)
+				captureName := fmt.Sprintf("upgrade-progress-%s-%s-%dx%d", state, name, viewport.Width, viewport.Height)
+				if pairs[pair] != 1 {
+					return fmt.Errorf("screenshot fixture upgrade progress pair %q has %d captures, want exactly one (missing capture %q)", pair, pairs[pair], captureName)
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // validatePushMatrix requires one capture per push screen, per palette, per
 // region: the push wizard is reviewed in both themes at both sizes.
 func validatePushMatrix(states []pushStateFixture, captures []pushCaptureFixture) error {
@@ -778,14 +889,15 @@ func validateSheets(sheets []sheetFixture) error {
 		theme         captureTheme
 		width, height int
 	}{
-		sheetGuidedDark:   {kind: sheetKindGuided, theme: captureThemeDark, width: 1800, height: 3980},
-		sheetGuidedLight:  {kind: sheetKindGuided, theme: captureThemeLight, width: 1800, height: 3980},
-		sheetSelection:    {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 11170},
-		sheetPush:         {kind: sheetKindPush, theme: captureThemeDark, width: 1800, height: 7900},
-		sheetIngest:       {kind: sheetKindIngest, theme: captureThemeDark, width: 1800, height: 4590},
-		sheetCompletion:   {kind: sheetKindCompletion, theme: captureThemeDark, width: 1800, height: 3420},
-		sheetDiscovery:    {kind: sheetKindDiscovery, theme: captureThemeDark, width: 1800, height: 3600},
-		sheetPullProgress: {kind: sheetKindPullProgress, theme: captureThemeDark, width: 1800, height: 3600},
+		sheetGuidedDark:      {kind: sheetKindGuided, theme: captureThemeDark, width: 1800, height: 3980},
+		sheetGuidedLight:     {kind: sheetKindGuided, theme: captureThemeLight, width: 1800, height: 3980},
+		sheetSelection:       {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 11170},
+		sheetPush:            {kind: sheetKindPush, theme: captureThemeDark, width: 1800, height: 7900},
+		sheetIngest:          {kind: sheetKindIngest, theme: captureThemeDark, width: 1800, height: 4590},
+		sheetCompletion:      {kind: sheetKindCompletion, theme: captureThemeDark, width: 1800, height: 3420},
+		sheetDiscovery:       {kind: sheetKindDiscovery, theme: captureThemeDark, width: 1800, height: 3600},
+		sheetPullProgress:    {kind: sheetKindPullProgress, theme: captureThemeDark, width: 1800, height: 3600},
+		sheetUpgradeProgress: {kind: sheetKindUpgradeProgress, theme: captureThemeDark, width: 1800, height: 9600},
 	}
 	seen := make(map[sheetName]bool, len(sheets))
 	for _, sheet := range sheets {

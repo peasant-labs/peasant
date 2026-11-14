@@ -1,0 +1,25 @@
+# Search-index rebuild: the production one-statement rebuild, its uncounted
+# progress events, and the transaction error it must return. The corpus is
+# synthetic and generated from these parameters; it never reads transcript
+# data.
+#
+# A batched rebuild (delete-all, then ranged inserts from the union view) was
+# measured against the one-statement rebuild on a synthetic 20.7 MB corpus:
+# 1.64x slower at 512-row pages and 1.22x slower at 16384-row pages, slower in
+# every paired run. The accepted fallback is the one-statement rebuild with an
+# uncounted progress indicator, so no batched case remains here.
+corpus:
+  sessions: 3
+  entriesPerSession: 40
+  termPrefix: fixtureterm
+  previewPadding: " lorem ipsum dolor sit amet consectetur adipiscing elit"
+
+cases:
+  - name: harvest-start-rebuild-emits-uncounted-step-events
+    description: a flagged store emits started, progress and finished uncounted search-step events
+  - name: current-store-emits-no-step-events
+    description: a healthy store rebuilds nothing and emits no events
+  - name: cancelled-rebuild-before-it-starts-changes-nothing
+    description: a cancelled context returns an error, keeps the flag, and leaves the old index answering
+  - name: deferred-commit-failure-is-returned
+    description: a COMMIT failure reaches the caller instead of being reported as success

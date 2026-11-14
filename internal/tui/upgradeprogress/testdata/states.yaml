@@ -1,0 +1,221 @@
+# Strict capture states for the explicit store upgrade's terminal progress.
+# Every plan, event, duration and byte count is synthetic. The test renders
+# each state in both themes at 80x24 and 120x40 through the production model.
+states:
+  - key: plan-quick-only
+    plan:
+      from: 71
+      to: 74
+      storeBytes: 46170898432
+      steps:
+        - {version: 72, kind: schema, title: "add the model reference table", cost: quick}
+        - {version: 73, kind: schema, title: "widen the stored harness set", cost: scales_with_rows}
+        - {version: 74, kind: schema, title: "count conversation turns and fill the count", cost: scales_with_rows, counts: sessions}
+    events: []
+    wantContains: [upgrading the local store, "schema 71 → 74", "43.0 GiB", "step 1 of 3", "add the model reference table", "○"]
+    wantAbsent: ["█", "░", "estimate", "finished 7 step(s)"]
+
+  - key: plan-with-long-step-awaiting-confirm
+    plan:
+      from: 69
+      to: 76
+      storeBytes: 46170898432
+      steps:
+        - {version: 70, kind: schema, title: "add derived lookups", cost: quick}
+        - {version: 71, kind: schema, title: "add the dispatch index", cost: quick}
+        - {version: 72, kind: schema, title: "add the model reference table", cost: quick}
+        - {version: 73, kind: schema, title: "widen the stored harness set", cost: scales_with_rows}
+        - {version: 74, kind: schema, title: "count conversation turns and fill the count", cost: scales_with_rows, counts: sessions}
+        - {version: 75, kind: schema, title: "widen entry types and rebuild search", cost: scales_with_text}
+        - {version: 76, kind: schema, title: "repair the search triggers", cost: quick}
+    events: []
+    wantContains: [upgrading the local store, "schema 69 → 76", "step 6 of 7", "widen entry types and rebuild search", "long", "a precise fraction is not available", "○"]
+    wantAbsent: ["█", "░", "estimate", "finished 7 step(s)"]
+
+  - key: running-uncounted-step
+    plan:
+      from: 69
+      to: 76
+      storeBytes: 46170898432
+      steps:
+        - {version: 70, kind: schema, title: "add derived lookups", cost: quick}
+        - {version: 71, kind: schema, title: "add the dispatch index", cost: quick}
+        - {version: 72, kind: schema, title: "add the model reference table", cost: quick}
+        - {version: 73, kind: schema, title: "widen the stored harness set", cost: scales_with_rows}
+        - {version: 74, kind: schema, title: "count conversation turns and fill the count", cost: scales_with_rows, counts: sessions}
+        - {version: 75, kind: schema, title: "widen entry types and rebuild search", cost: scales_with_text}
+        - {version: 76, kind: schema, title: "repair the search triggers", cost: quick}
+    events:
+      - {kind: step_started, step: 1, elapsedMs: 0}
+      - {kind: step_finished, step: 1, elapsedMs: 2000, walBytes: 4096}
+      - {kind: step_started, step: 2, elapsedMs: 0}
+      - {kind: step_finished, step: 2, elapsedMs: 4000, walBytes: 8192}
+      - {kind: step_started, step: 3, elapsedMs: 0}
+      - {kind: step_finished, step: 3, elapsedMs: 3000, walBytes: 8192}
+      - {kind: step_started, step: 4, elapsedMs: 0}
+      - {kind: step_finished, step: 4, elapsedMs: 41000, walBytes: 262144}
+      - {kind: step_started, step: 5, elapsedMs: 0}
+      - {kind: step_finished, step: 5, elapsedMs: 185000, walBytes: 1048576}
+      - {kind: step_started, step: 6, elapsedMs: 0}
+      - {kind: step_progress, step: 6, elapsedMs: 41000, walBytes: 13107200}
+    wantContains: ["step 6 of 7", "widen entry types and rebuild search", "41s elapsed", "write-ahead log grew 12.5 MiB", "●"]
+    wantAbsent: ["estimate", "█", "░", "finished 7 step(s)"]
+
+  - key: running-counted-step
+    plan:
+      from: 69
+      to: 76
+      storeBytes: 46170898432
+      steps:
+        - {version: 70, kind: schema, title: "add derived lookups", cost: quick}
+        - {version: 71, kind: schema, title: "add the dispatch index", cost: quick}
+        - {version: 72, kind: schema, title: "add the model reference table", cost: quick}
+        - {version: 73, kind: schema, title: "widen the stored harness set", cost: scales_with_rows}
+        - {version: 74, kind: schema, title: "count conversation turns and fill the count", cost: scales_with_rows, counts: sessions}
+        - {version: 75, kind: schema, title: "widen entry types and rebuild search", cost: scales_with_text}
+        - {version: 76, kind: schema, title: "repair the search triggers", cost: quick}
+    events:
+      - {kind: step_started, step: 1, elapsedMs: 0}
+      - {kind: step_finished, step: 1, elapsedMs: 2000, walBytes: 4096}
+      - {kind: step_started, step: 2, elapsedMs: 0}
+      - {kind: step_finished, step: 2, elapsedMs: 4000, walBytes: 8192}
+      - {kind: step_started, step: 3, elapsedMs: 0}
+      - {kind: step_finished, step: 3, elapsedMs: 3000, walBytes: 8192}
+      - {kind: step_started, step: 4, elapsedMs: 0}
+      - {kind: step_finished, step: 4, elapsedMs: 41000, walBytes: 262144}
+      - {kind: step_started, step: 5, elapsedMs: 0}
+      - {kind: step_progress, step: 5, elapsedMs: 179000, done: 12000, of: 20616}
+      - {kind: step_progress, step: 5, elapsedMs: 182000, done: 13000, of: 20616}
+      - {kind: step_progress, step: 5, elapsedMs: 185000, done: 13902, of: 20616}
+    wantContains: ["step 5 of 7", "count conversation turns and fill the count", "13902/20616", "sessions", "estimate", "3m5s"]
+    wantAbsent: ["write-ahead log grew", "finished 7 step(s)"]
+
+  - key: done
+    plan:
+      from: 69
+      to: 76
+      storeBytes: 46170898432
+      steps:
+        - {version: 70, kind: schema, title: "add derived lookups", cost: quick}
+        - {version: 71, kind: schema, title: "add the dispatch index", cost: quick}
+        - {version: 72, kind: schema, title: "add the model reference table", cost: quick}
+        - {version: 73, kind: schema, title: "widen the stored harness set", cost: scales_with_rows}
+        - {version: 74, kind: schema, title: "count conversation turns and fill the count", cost: scales_with_rows, counts: sessions}
+        - {version: 75, kind: schema, title: "widen entry types and rebuild search", cost: scales_with_text}
+        - {version: 76, kind: schema, title: "repair the search triggers", cost: quick}
+    events:
+      - {kind: step_started, step: 1, elapsedMs: 0}
+      - {kind: step_finished, step: 1, elapsedMs: 2000}
+      - {kind: step_started, step: 2, elapsedMs: 0}
+      - {kind: step_finished, step: 2, elapsedMs: 4000}
+      - {kind: step_started, step: 3, elapsedMs: 0}
+      - {kind: step_finished, step: 3, elapsedMs: 3000}
+      - {kind: step_started, step: 4, elapsedMs: 0}
+      - {kind: step_finished, step: 4, elapsedMs: 41000}
+      - {kind: step_started, step: 5, elapsedMs: 0}
+      - {kind: step_finished, step: 5, elapsedMs: 185000}
+      - {kind: step_started, step: 6, elapsedMs: 0}
+      - {kind: step_finished, step: 6, elapsedMs: 72000}
+      - {kind: step_started, step: 7, elapsedMs: 0}
+      - {kind: step_finished, step: 7, elapsedMs: 5000}
+    finished:
+      - {step: 1, durationMs: 2000}
+      - {step: 2, durationMs: 4000}
+      - {step: 3, durationMs: 3000}
+      - {step: 4, durationMs: 41000}
+      - {step: 5, durationMs: 185000}
+      - {step: 6, durationMs: 72000}
+      - {step: 7, durationMs: 5000}
+    outcome: done
+    wantContains: ["finished 7 step(s) in 5m12s", "schema 69 → 76", "✓"]
+    wantAbsent: ["ctrl+c rolls back", "stopped by user", "failed:", "refused:"]
+
+  - key: stopped-by-user
+    plan:
+      from: 69
+      to: 76
+      storeBytes: 46170898432
+      steps:
+        - {version: 70, kind: schema, title: "add derived lookups", cost: quick}
+        - {version: 71, kind: schema, title: "add the dispatch index", cost: quick}
+        - {version: 72, kind: schema, title: "add the model reference table", cost: quick}
+        - {version: 73, kind: schema, title: "widen the stored harness set", cost: scales_with_rows}
+        - {version: 74, kind: schema, title: "count conversation turns and fill the count", cost: scales_with_rows, counts: sessions}
+        - {version: 75, kind: schema, title: "widen entry types and rebuild search", cost: scales_with_text}
+        - {version: 76, kind: schema, title: "repair the search triggers", cost: quick}
+    events:
+      - {kind: step_started, step: 1, elapsedMs: 0}
+      - {kind: step_finished, step: 1, elapsedMs: 2000}
+      - {kind: step_started, step: 2, elapsedMs: 0}
+      - {kind: step_finished, step: 2, elapsedMs: 4000}
+      - {kind: step_started, step: 3, elapsedMs: 0}
+      - {kind: step_finished, step: 3, elapsedMs: 3000}
+      - {kind: step_started, step: 4, elapsedMs: 0}
+      - {kind: step_finished, step: 4, elapsedMs: 41000}
+      - {kind: step_started, step: 5, elapsedMs: 0}
+      - {kind: step_finished, step: 5, elapsedMs: 185000}
+      - {kind: step_started, step: 6, elapsedMs: 0}
+      - {kind: step_progress, step: 6, elapsedMs: 41000, walBytes: 13107200}
+    finished:
+      - {step: 1, durationMs: 2000}
+      - {step: 2, durationMs: 4000}
+      - {step: 3, durationMs: 3000}
+      - {step: 4, durationMs: 41000}
+      - {step: 5, durationMs: 185000}
+    outcome: stopped by user
+    wantContains: ["stopped by user", "running step rolled back", "5 step(s) finished", "✗", "step 6 of 7"]
+    wantAbsent: ["ctrl+c rolls back", "finished 7 step(s)"]
+
+  - key: refused-low-disk
+    plan:
+      from: 69
+      to: 76
+      storeBytes: 46170898432
+      steps:
+        - {version: 70, kind: schema, title: "add derived lookups", cost: quick}
+        - {version: 71, kind: schema, title: "add the dispatch index", cost: quick}
+        - {version: 72, kind: schema, title: "add the model reference table", cost: quick}
+        - {version: 73, kind: schema, title: "widen the stored harness set", cost: scales_with_rows}
+        - {version: 74, kind: schema, title: "count conversation turns and fill the count", cost: scales_with_rows, counts: sessions}
+        - {version: 75, kind: schema, title: "widen entry types and rebuild search", cost: scales_with_text}
+        - {version: 76, kind: schema, title: "repair the search triggers", cost: quick}
+    events: []
+    outcome: refused for low disk
+    wantContains: ["refused: not enough free disk", "nothing was changed", "step 1 of 7", "○"]
+    wantAbsent: ["ctrl+c rolls back", "finished"]
+
+  - key: failed-step
+    plan:
+      from: 69
+      to: 76
+      storeBytes: 46170898432
+      steps:
+        - {version: 70, kind: schema, title: "add derived lookups", cost: quick}
+        - {version: 71, kind: schema, title: "add the dispatch index", cost: quick}
+        - {version: 72, kind: schema, title: "add the model reference table", cost: quick}
+        - {version: 73, kind: schema, title: "widen the stored harness set", cost: scales_with_rows}
+        - {version: 74, kind: schema, title: "count conversation turns and fill the count", cost: scales_with_rows, counts: sessions}
+        - {version: 75, kind: schema, title: "widen entry types and rebuild search", cost: scales_with_text}
+        - {version: 76, kind: schema, title: "repair the search triggers", cost: quick}
+    events:
+      - {kind: step_started, step: 1, elapsedMs: 0}
+      - {kind: step_finished, step: 1, elapsedMs: 2000}
+      - {kind: step_started, step: 2, elapsedMs: 0}
+      - {kind: step_finished, step: 2, elapsedMs: 4000}
+      - {kind: step_started, step: 3, elapsedMs: 0}
+      - {kind: step_finished, step: 3, elapsedMs: 3000}
+      - {kind: step_started, step: 4, elapsedMs: 0}
+      - {kind: step_finished, step: 4, elapsedMs: 41000}
+      - {kind: step_started, step: 5, elapsedMs: 0}
+      - {kind: step_finished, step: 5, elapsedMs: 185000}
+      - {kind: step_started, step: 6, elapsedMs: 0}
+      - {kind: step_progress, step: 6, elapsedMs: 41000, walBytes: 13107200}
+    finished:
+      - {step: 1, durationMs: 2000}
+      - {step: 2, durationMs: 4000}
+      - {step: 3, durationMs: 3000}
+      - {step: 4, durationMs: 41000}
+      - {step: 5, durationMs: 185000}
+    outcome: failed step
+    wantContains: ["failed: the running step rolled back", "5 step(s) finished", "✗", "step 6 of 7"]
+    wantAbsent: ["ctrl+c rolls back", "stopped by user", "refused:"]

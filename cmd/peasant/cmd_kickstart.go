@@ -554,7 +554,7 @@ func buildFTUEIngestRunnerWithProgress(cmd *cobra.Command, configPath string) (f
 		dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
 		// Kickstart upgraded the store before discovery; this check is a
 		// no-op then, and it covers a runner started any other way.
-		if err := ensureStoreCurrent(cmd, dbPath, storeEntryModeFor(cmd)); err != nil {
+		if err := ensureStoreCurrentPlain(cmd, dbPath, storeEntryModeFor(cmd)); err != nil {
 			return nil, err
 		}
 		db, err := store.Open(dbPath, generationOptions...)

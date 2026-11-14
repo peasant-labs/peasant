@@ -350,12 +350,14 @@ func (s *Store) rebuildSearchIndexWhenFlagged(ctx context.Context, sessionID sch
 	if !needsRebuild {
 		return false, nil
 	}
-	txnErr := error(nil)
-	endFn := sqlitex.Transaction(conn)
-	defer endFn(&txnErr)
-	if err := rebuildSearchIndexOnConn(conn); err != nil {
-		txnErr = fmt.Errorf("store: rebuild the search index while sweeping session %s: %w; the health flag stays set and the sweep flag is unchanged", sessionID, err)
-		return false, txnErr
+	// The rebuild owns its transaction here too. The sweep keeps no outer
+	// transaction across it, and the helper returns a failed COMMIT instead
+	// of reporting a rolled-back rebuild as success.
+	err = runSearchRebuildTransaction(ctx, conn, func() error {
+		return rebuildSearchIndexOnConn(ctx, conn)
+	})
+	if err != nil {
+		return false, fmt.Errorf("store: rebuild the search index while sweeping session %s: %w; the health flag stays set and the sweep flag is unchanged", sessionID, err)
 	}
 	return true, nil
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
@@ -111,20 +112,56 @@ func (s *Store) SearchState(ctx context.Context) (SearchState, error) {
 // re-tokenizes the union view and clears the needs_rebuild flag, so search
 // is trusted again. FTS5 cannot remove postings by rowid without the
 // original values, so the rebuild is whole-index, never per-row.
-func (s *Store) RebuildSearchIndex(ctx context.Context) error {
+//
+// The rebuild is one FTS5 statement, which cannot report a count part way
+// through. A batched form (delete-all, then ranged inserts from the union
+// view) was measured on a synthetic 20.7 MB corpus: 1.64x the one-statement
+// rebuild at 512-row pages and 1.22x at 16384-row pages, slower in every
+// paired run. The accepted fallback keeps this statement and reports an
+// uncounted step rather than a fraction the store cannot know.
+//
+// progress, when non-nil, is called once with (0, 0) before the rebuild so a
+// caller can announce the uncounted step. It is called on the calling
+// goroutine.
+func (s *Store) RebuildSearchIndex(ctx context.Context, progress func(done, of int64)) error {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return fmt.Errorf("store: take connection to rebuild the search index: %w", err)
 	}
 	defer s.pool.Put(conn)
-	txnErr := error(nil)
-	endFn := sqlitex.Transaction(conn)
-	defer endFn(&txnErr)
-	if err := rebuildSearchIndexOnConn(conn); err != nil {
-		txnErr = err
-		return txnErr
+	// Pool.Take arms the connection's interrupt from the take context. SQLite
+	// can abort the rebuild statement when that fires, and the aborted
+	// statement can make its own ROLLBACK fail. The rebuild therefore checks
+	// the context at its boundaries (before the statement, and before the
+	// caller's transaction commits) instead of interrupting the statement.
+	conn.SetInterrupt(nil)
+	if progress != nil {
+		progress(0, 0)
 	}
-	return nil
+	err = runSearchRebuildTransaction(ctx, conn, func() error {
+		return rebuildSearchIndexOnConn(ctx, conn)
+	})
+	if err != nil && ctx.Err() != nil {
+		return fmt.Errorf("store: rebuild the search index: %w; the index is unchanged and search still refuses", ctx.Err())
+	}
+	return err
+}
+
+// runSearchRebuildTransaction runs the rebuild inside one transaction and
+// returns the transaction's error, including a COMMIT failure. The deferred
+// end function reports a failed COMMIT by writing into its error argument,
+// so the caller must return that variable: returning a separate nil would
+// report a rolled-back rebuild as a success. A cancellation that arrives
+// before the commit rolls the transaction back.
+func runSearchRebuildTransaction(ctx context.Context, conn *sqlite.Conn, rebuild func() error) (err error) {
+	endFn := sqlitex.Transaction(conn)
+	defer func() {
+		if err == nil {
+			err = ctx.Err()
+		}
+		endFn(&err)
+	}()
+	return rebuild()
 }
 
 // EnsureSearchIndexHealthy runs the index-health gate every writer-lane entry
@@ -132,6 +169,18 @@ func (s *Store) RebuildSearchIndex(ctx context.Context) error {
 // whole index and clears the flag, so the flag keeps the state crash-safe.
 // It reports whether it rebuilt.
 func (s *Store) EnsureSearchIndexHealthy(ctx context.Context) (bool, error) {
+	return s.EnsureSearchIndexHealthyWithProgress(ctx, nil)
+}
+
+// EnsureSearchIndexHealthyWithProgress is EnsureSearchIndexHealthy with the
+// rebuild reported as upgrade step events: one step_started, a progress event
+// with no count, and one step_finished, carrying how much the store's
+// write-ahead log grew between the first and last event. The one-statement
+// rebuild cannot report a text-position count, so the step's unit is
+// UpgradeUnitNone and no fraction is claimed. Events arrive in order on the
+// calling goroutine. A rebuild that fails or is cancelled sends no
+// step_finished. progress may be nil.
+func (s *Store) EnsureSearchIndexHealthyWithProgress(ctx context.Context, progress func(UpgradeEvent)) (bool, error) {
 	state, err := s.SearchState(ctx)
 	if err != nil {
 		return false, err
@@ -139,20 +188,80 @@ func (s *Store) EnsureSearchIndexHealthy(ctx context.Context) (bool, error) {
 	if !state.NeedsRebuild {
 		return false, nil
 	}
-	if err := s.RebuildSearchIndex(ctx); err != nil {
+	step := searchRebuildStep()
+	started := time.Now()
+	// The path is read once, before the rebuild holds the pool's only
+	// connection. Events then measure the log with a file stat, never a
+	// second connection: a nested Take on a one-connection pool would wait on
+	// the rebuild that is asking for the measurement.
+	walPath, walMeasured := s.walPath(ctx)
+	startWAL := int64(0)
+	if walMeasured {
+		startWAL = walFileBytes(walPath)
+	}
+	report := func(kind UpgradeEventKind) {
+		if progress == nil {
+			return
+		}
+		event := UpgradeEvent{Kind: kind, Step: step, Index: 1, Total: 1, Elapsed: time.Since(started)}
+		if walMeasured {
+			event.WALBytes = max(0, walFileBytes(walPath)-startWAL)
+		}
+		progress(event)
+	}
+	report(UpgradeEventStepStarted)
+	if err := s.RebuildSearchIndex(ctx, func(int64, int64) { report(UpgradeEventStepProgress) }); err != nil {
 		return false, err
 	}
+	report(UpgradeEventStepFinished)
 	return true, nil
+}
+
+// walPath reads the store's database file path from the connection's own
+// database list. It reports false for an in-memory or unknown database, so a
+// caller never claims a measured log that does not exist.
+func (s *Store) walPath(ctx context.Context) (string, bool) {
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return "", false
+	}
+	path := dbMainFileOnConn(conn)
+	s.pool.Put(conn)
+	if path == "" {
+		return "", false
+	}
+	return path, true
+}
+
+// searchRebuildStep is the standalone whole-index rebuild a writer-lane entry
+// point runs when the health flag is set. It is not a schema step and cannot
+// report a text-position count, so it is long and uncounted: a surface shows
+// its elapsed time and the write-ahead log's growth rather than a fraction.
+func searchRebuildStep() UpgradeStep {
+	return UpgradeStep{
+		Kind:   UpgradeStepSearch,
+		Title:  "rebuild the search index",
+		Cost:   UpgradeCostScalesWithText,
+		Counts: UpgradeUnitNone,
+	}
 }
 
 // rebuildSearchIndexOnConn runs the whole-index rebuild on the caller's
 // connection: it re-tokenizes the union view and clears the needs_rebuild
 // flag. Callers already inside a transaction (prune, the sweep) run it
 // inline; RebuildSearchIndex wraps it in its own transaction. This is the
-// one home for the rebuild statements.
-func rebuildSearchIndexOnConn(conn *sqlite.Conn) error {
+// one home for the rebuild statements. A cancelled context stops before the
+// statement or before the flag clear, and the caller's transaction rolls the
+// whole rebuild back.
+func rebuildSearchIndexOnConn(ctx context.Context, conn *sqlite.Conn) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("store: rebuild the search index: %w; the index is unchanged and search still refuses", err)
+	}
 	if err := sqlitex.Execute(conn, `INSERT INTO session_search_fts(session_search_fts) VALUES('rebuild')`, nil); err != nil {
 		return fmt.Errorf("store: rebuild the search index over the union view: %w; the index is unchanged and search still refuses; free disk space and retry", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("store: rebuild the search index: %w; the index is unchanged and search still refuses", err)
 	}
 	if err := sqlitex.Execute(conn, `UPDATE session_search_state SET needs_rebuild = 0 WHERE id = 1`, nil); err != nil {
 		return fmt.Errorf("store: clear the search rebuild flag after the rebuild: %w; the index was rebuilt but search still refuses; retry the flag clear", err)

@@ -403,7 +403,7 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 				}
 				cfg.Output.BasePath = string(resolvedOutput)
 
-				db, err := openRunStore(cmd, dryRun, string(resolvedOutput), cfg.Write)
+				db, err := openRunStore(cmd, dryRun, string(resolvedOutput), cfg.Write, storeUpgradeProgressAuto)
 				if err != nil {
 					// A store whose open would run the one-time search index
 					// repair is refused here, before any village request, so the
