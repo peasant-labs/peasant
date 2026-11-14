@@ -14,7 +14,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -27,6 +26,12 @@ import (
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"gopkg.in/yaml.v3"
 )
+
+// ingestPackageDirectory locates this package's source files for the source
+// guards. `go test` runs each test binary in its package directory, so the path
+// survives -trimpath, where runtime.Caller reports a module-relative path that
+// no filesystem resolves.
+const ingestPackageDirectory = "."
 
 const (
 	expectedDeniedCatalogStatementCount = 20
@@ -196,11 +201,7 @@ func TestDeniedStatementFixtureIsNonVacuous(t *testing.T) {
 
 func TestSQLiteSourceFilesContainNoDirectMutationEscape(t *testing.T) {
 	fixture := loadSourceSafetyFixture(t)
-	_, currentFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve source guard location")
-	}
-	directory := filepath.Dir(currentFile)
+	directory := ingestPackageDirectory
 	sourceBoundary := []string{
 		filepath.Join(directory, "opencode_sqlite_source.go"),
 		filepath.Join(directory, "opencode_sqlite_source_zombiezen.go"),
@@ -549,11 +550,7 @@ func TestCurrentMessageCancellationAfterPendingRowReturnsNoPartialPageAndReusesS
 }
 
 func TestCurrentMessagePendingCheckpointFollowsPageAppend(t *testing.T) {
-	_, currentFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve current reader source position guard")
-	}
-	filename := filepath.Join(filepath.Dir(currentFile), "opencode_sqlite_source_zombiezen.go")
+	filename := filepath.Join(ingestPackageDirectory, "opencode_sqlite_source_zombiezen.go")
 	fileSet := token.NewFileSet()
 	parsed, err := parser.ParseFile(fileSet, filename, nil, parser.AllErrors)
 	if err != nil {
