@@ -201,8 +201,11 @@ func (s *zombiezenOpenCodeSQLiteSource) withReadTransaction(ctx context.Context,
 		return fmt.Errorf("begin OpenCode SQLite snapshot for %q: %w", s.path, err)
 	}
 	s.permit <- struct{}{}
-	defer s.endReadTransaction(ctx, &err)
+	defer s.endReadTransaction(&err)
 	err = fn()
+	if ctxErr := ctx.Err(); ctxErr != nil && !errors.Is(err, ctxErr) {
+		err = errors.Join(err, ctxErr)
+	}
 	return err
 }
 
@@ -212,23 +215,42 @@ func (s *zombiezenOpenCodeSQLiteSource) beginReadTransactionLocked(ctx context.C
 	return s.executeRowsLocked(ctx, "BEGIN", nil, nil)
 }
 
-func (s *zombiezenOpenCodeSQLiteSource) endReadTransaction(ctx context.Context, operationErr *error) {
+func (s *zombiezenOpenCodeSQLiteSource) endReadTransaction(operationErr *error) {
+	// The source is private to this materialization. A cancelled read must not
+	// cancel its rollback: give cleanup its own bounded deadline, as for Close.
+	// Individual reads restore their interrupt before releasing the permit;
+	// install the cleanup interrupt while this transaction-end statement runs.
+	cleanupCtx, cancel := s.options.clock.WithTimeout(context.Background(), s.options.queryTimeout)
+	defer cancel()
 	select {
 	case <-s.permit:
-	case <-ctx.Done():
+	case <-cleanupCtx.Done():
+		*operationErr = errors.Join(*operationErr, fmt.Errorf("end OpenCode SQLite read transaction for %q stopped while waiting for the connection: %w; the transaction may still be active; retry bounded source cleanup", s.path, context.Cause(cleanupCtx)))
 		return
 	}
 	defer func() { s.permit <- struct{}{} }()
+	if cleanupCtx.Err() != nil {
+		*operationErr = errors.Join(*operationErr, fmt.Errorf("end OpenCode SQLite read transaction for %q stopped before cleanup: %w; the transaction may still be active; retry bounded source cleanup", s.path, context.Cause(cleanupCtx)))
+		return
+	}
+	oldInterrupt := s.conn.SetInterrupt(cleanupCtx.Done())
+	defer s.conn.SetInterrupt(oldInterrupt)
 	s.allowTransaction = true
+	defer func() { s.allowTransaction = false }()
 	var endErr error
 	if *operationErr != nil {
-		endErr = s.executeRowsLocked(ctx, "ROLLBACK", nil, nil)
+		// SQLite may already have rolled back an interrupted transaction.
+		if !s.conn.AutocommitEnabled() {
+			endErr = s.executeRowsLocked(cleanupCtx, "ROLLBACK", nil, nil)
+		}
 	} else {
-		endErr = s.executeRowsLocked(ctx, "COMMIT", nil, nil)
+		endErr = s.executeRowsLocked(cleanupCtx, "COMMIT", nil, nil)
 	}
-	s.allowTransaction = false
 	if endErr != nil {
-		*operationErr = errors.Join(*operationErr, endErr)
+		if cleanupCtx.Err() != nil {
+			endErr = errors.Join(endErr, context.Cause(cleanupCtx))
+		}
+		*operationErr = errors.Join(*operationErr, fmt.Errorf("end OpenCode SQLite read transaction for %q failed: %w; retry bounded source cleanup", s.path, endErr))
 	}
 }
 
