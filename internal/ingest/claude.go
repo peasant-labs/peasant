@@ -27,6 +27,7 @@ const DiscoveryCodeClaudeAgentIDCollision = "claude_agent_id_collision"
 
 // ClaudeAdapter discovers and extracts metadata from Claude Code JSONL transcripts.
 type ClaudeAdapter struct {
+	discoveryProgressAttachment
 	diagnostics         []DiscoveryDiagnostic
 	fs                  FileSystem
 	git                 GitResolver
@@ -52,6 +53,7 @@ var _ ClaudeEvidenceCaching = (*ClaudeAdapter)(nil)
 var _ ClaudeSessionLocationLookupCapable = (*ClaudeAdapter)(nil)
 var _ ClaudeLogicalParentLookupCapable = (*ClaudeAdapter)(nil)
 var _ DiscoveryStatistics = (*ClaudeAdapter)(nil)
+var _ DiscoveryProgressReporting = (*ClaudeAdapter)(nil)
 var _ OriginEvidenceMiner = (*ClaudeAdapter)(nil)
 
 // NewClaudeAdapter creates a ClaudeAdapter with injected dependencies.
@@ -1606,6 +1608,12 @@ func (a *ClaudeAdapter) buildClaudeSessions(
 		// cached evidence row is still this run's to prune.
 		memberPaths = append(memberPaths, locatedMissing...)
 	}
+	// Only a full walk reports source counts; a scoped build is not discovery.
+	var progress DiscoveryProgress
+	if mode == ClaudeBuildFullWalk {
+		progress = a.progress
+	}
+	discoveryTotal(progress, HarnessClaudeCode, len(memberPaths))
 
 	state := claudeBuildEvidence{mined: make(map[ResolvedPath]ClaudeTranscriptEvidence), missing: make(map[ResolvedPath]struct{})}
 	cacheComplete := false
@@ -1625,7 +1633,7 @@ func (a *ClaudeAdapter) buildClaudeSessions(
 
 	sessions := make([]DiscoveredSession, 0, len(memberPaths))
 	for _, root := range enumerated {
-		rootSessions := a.buildClaudeRootEntries(root, mode, &state)
+		rootSessions := a.buildClaudeRootEntries(root, mode, &state, progress)
 		sessions = append(sessions, rootSessions...)
 	}
 
@@ -1694,11 +1702,18 @@ func (a *ClaudeAdapter) buildClaudeSessions(
 // enumeration order; a later transcript for an id already admitted under the
 // same source root is left out, and a distinct parent makes that collision
 // visible.
-func (a *ClaudeAdapter) buildClaudeRootEntries(root claudeEnumeratedRoot, mode ClaudeBuildMode, state *claudeBuildEvidence) []DiscoveredSession {
+//
+// Each finished source, including a skipped one, advances progress with the
+// number of sources this build has had to read again so far.
+func (a *ClaudeAdapter) buildClaudeRootEntries(root claudeEnumeratedRoot, mode ClaudeBuildMode, state *claudeBuildEvidence, progress DiscoveryProgress) []DiscoveredSession {
 	var sessions []DiscoveredSession
 	rootIndex := make(map[string]int, len(root.roots))
 
-	for _, entry := range root.roots {
+	for i, entry := range root.roots {
+		// The preceding source has finished, including any skipped source.
+		if i > 0 {
+			discoveryAdvanceWithRereads(progress, HarnessClaudeCode, len(state.remined))
+		}
 		info := entry.info
 		if info == nil {
 			observed, err := a.fs.Stat(entry.path)
@@ -1744,6 +1759,9 @@ func (a *ClaudeAdapter) buildClaudeRootEntries(root claudeEnumeratedRoot, mode C
 		rootIndex[entry.sessionID] = len(sessions)
 		sessions = append(sessions, ds)
 	}
+	if len(root.roots) > 0 {
+		discoveryAdvanceWithRereads(progress, HarnessClaudeCode, len(state.remined))
+	}
 
 	// admitted maps each subagent id admitted under this source root to its
 	// transcript. Workflow transcripts come first, and a workflow child keeps
@@ -1754,7 +1772,10 @@ func (a *ClaudeAdapter) buildClaudeRootEntries(root claudeEnumeratedRoot, mode C
 	ordered := make([]claudeSubagentEntry, 0, len(root.workflows)+len(root.subagents))
 	ordered = append(ordered, root.workflows...)
 	ordered = append(ordered, root.subagents...)
-	for _, entry := range ordered {
+	for i, entry := range ordered {
+		if i > 0 {
+			discoveryAdvanceWithRereads(progress, HarnessClaudeCode, len(state.remined))
+		}
 		if kept, taken := admitted[entry.subagentID]; taken {
 			slog.Debug("claude discovery: transcript left out, another transcript holds its agent id",
 				"session_id", entry.subagentID.String(), "left_out", entry.path, "kept", kept.String())
@@ -1819,6 +1840,9 @@ func (a *ClaudeAdapter) buildClaudeRootEntries(root claudeEnumeratedRoot, mode C
 		admitted[entry.subagentID] = rp
 		admittedParent[entry.subagentID] = parentSID
 		sessions = append(sessions, ds)
+	}
+	if len(ordered) > 0 {
+		discoveryAdvanceWithRereads(progress, HarnessClaudeCode, len(state.remined))
 	}
 	return sessions
 }

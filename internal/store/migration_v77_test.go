@@ -48,14 +48,14 @@ type turnCountRecountSession struct {
 }
 
 type turnCountRecountFixture struct {
-	RequiredSessions     []string                  `yaml:"requiredSessions"`
-	RequiredRows         []string                  `yaml:"requiredRows"`
-	Sessions             []turnCountRecountSession `yaml:"sessions"`
-	InterruptedFirstOpen struct {
+	RequiredSessions   []string                  `yaml:"requiredSessions"`
+	RequiredRows       []string                  `yaml:"requiredRows"`
+	Sessions           []turnCountRecountSession `yaml:"sessions"`
+	InterruptedRecount struct {
 		FailAfterSessions             int `yaml:"failAfterSessions"`
 		SentinelTurnCount             int `yaml:"sentinelTurnCount"`
 		SentinelConversationTurnCount int `yaml:"sentinelConversationTurnCount"`
-	} `yaml:"interruptedFirstOpen"`
+	} `yaml:"interruptedRecount"`
 }
 
 const (
@@ -67,10 +67,10 @@ const (
 // turnCountRecountRows binds each fixture row name to the test that runs it,
 // so a row cannot be listed without a test or tested without being listed.
 var turnCountRecountRows = map[string]func(*testing.T, turnCountRecountFixture){
-	"from-v75":               runTurnCountRecountFromV75,
-	"from-v73":               runTurnCountRecountFromV73,
-	"interrupted-first-open": runTurnCountRecountInterruptedFirstOpen,
-	"new-store":              runTurnCountRecountNewStore,
+	"from-v75":            runTurnCountRecountFromV75,
+	"from-v73":            runTurnCountRecountFromV73,
+	"interrupted-recount": runTurnCountRecountInterrupted,
+	"new-store":           runTurnCountRecountNewStore,
 }
 
 func loadTurnCountRecountFixture(t *testing.T) turnCountRecountFixture {
@@ -200,19 +200,20 @@ func seedTurnCountRecountStore(t *testing.T, fixture turnCountRecountFixture, ve
 type storedTurnCounts struct{ turnCount, conversationTurnCount int }
 
 // requireUnrecountedState fails unless every session still holds exactly what
-// was seeded: its stored counts, or no stats row at all.
-func requireUnrecountedState(t *testing.T, fixture turnCountRecountFixture, counts map[string]storedTurnCounts) {
+// was seeded: its stored counts, or no stats row at all. what names the run
+// that must have changed nothing.
+func requireUnrecountedState(t *testing.T, fixture turnCountRecountFixture, counts map[string]storedTurnCounts, what string) {
 	t.Helper()
 	for _, session := range fixture.Sessions {
 		got, hasRow := counts[session.SessionID]
 		if session.NoStatsRow {
 			if hasRow {
-				t.Errorf("%s: the failed open left a stats row %+v, want none", session.Name, got)
+				t.Errorf("%s: %s left a stats row %+v, want none", session.Name, what, got)
 			}
 			continue
 		}
 		if want := (storedTurnCounts{session.StoredTurnCount, session.StoredConversationTurnCount}); !hasRow || got != want {
-			t.Errorf("%s: the failed open wrote counts %+v (row present: %t), want the stored %+v", session.Name, got, hasRow, want)
+			t.Errorf("%s: %s wrote counts %+v (row present: %t), want the stored %+v", session.Name, what, got, hasRow, want)
 		}
 	}
 }
@@ -241,7 +242,7 @@ func readStatsUpdatedAtMs(t *testing.T, path, sessionID string) int64 {
 }
 
 // readTurnCountRecountState reads the stored counts, the marker and the schema
-// version from the raw file, without Open, so reading never runs the recount.
+// version from the raw file, without Open or Upgrade.
 func readTurnCountRecountState(t *testing.T, path string) (counts map[string]storedTurnCounts, markerPending bool, version int64) {
 	t.Helper()
 	conn, err := sqlite.OpenConn(path, sqlite.OpenReadWrite)
@@ -268,9 +269,14 @@ func readTurnCountRecountState(t *testing.T, path string) (counts map[string]sto
 	return counts, markerPending, version
 }
 
-func openAndCloseForRecount(t *testing.T, path string, options ...OpenOption) error {
+// upgradeAndOpenForRecount runs the explicit upgrade with opts, then opens and
+// closes the store the way a command does after it.
+func upgradeAndOpenForRecount(t *testing.T, path string, opts UpgradeOptions) error {
 	t.Helper()
-	s, err := Open(path, append([]OpenOption{WithPoolSize(1)}, options...)...)
+	if _, err := Upgrade(t.Context(), path, opts); err != nil {
+		return err
+	}
+	s, err := Open(path, WithPoolSize(1))
 	if err != nil {
 		return err
 	}
@@ -278,7 +284,8 @@ func openAndCloseForRecount(t *testing.T, path string, options ...OpenOption) er
 }
 
 // TestMigrationV77RecountsTurnCounts runs every fixture row through the real
-// Open on a database file at an older schema version.
+// Upgrade on a database file at an older schema version: migration 77 marks
+// the recount as owed and the recount step that follows it clears the mark.
 func TestMigrationV77RecountsTurnCounts(t *testing.T) {
 	t.Parallel()
 	fixture := loadTurnCountRecountFixture(t)
@@ -293,15 +300,15 @@ func TestMigrationV77RecountsTurnCounts(t *testing.T) {
 
 func runTurnCountRecountFromV75(t *testing.T, fixture turnCountRecountFixture) {
 	path := seedTurnCountRecountStore(t, fixture, 75)
-	if err := openAndCloseForRecount(t, path); err != nil {
-		t.Fatalf("open the V75 store: %v", err)
+	if err := upgradeAndOpenForRecount(t, path, UpgradeOptions{}); err != nil {
+		t.Fatalf("upgrade the V75 store: %v", err)
 	}
 	counts, pending, version := readTurnCountRecountState(t, path)
-	if version != 78 {
-		t.Fatalf("schema version = %d, want 78", version)
+	if version != int64(CurrentSchemaVersion()) {
+		t.Fatalf("schema version = %d, want %d", version, CurrentSchemaVersion())
 	}
 	if pending {
-		t.Fatal("the recount marker is still set after a completed open")
+		t.Fatal("the recount marker is still set after a completed upgrade")
 	}
 	for _, session := range fixture.Sessions {
 		want := storedTurnCounts{session.WantTurnCount, session.WantConversationTurnCount}
@@ -337,9 +344,14 @@ func runTurnCountRecountFromV75(t *testing.T, fixture turnCountRecountFixture) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
+	conn, err = pool.Take(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Put(conn)
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&logs, nil))
-	report, ran, err := recountTurnCounts(pool, nil, logger)
+	report, ran, err := recountTurnCountsOnConn(t.Context(), conn, nil, nil, logger)
 	if err != nil || !ran {
 		t.Fatalf("recount ran = %t, err = %v; want a completed run", ran, err)
 	}
@@ -367,8 +379,6 @@ func runTurnCountRecountFromV75(t *testing.T, fixture turnCountRecountFixture) {
 	logTurnCountRecount(logger, report)
 	logged := logs.String()
 	for _, fragment := range []string{
-		"recounting turn counts for every stored session",
-		"sessions=7",
 		"could not be read during the turn count recount",
 		"session_id=" + string(wantUnreadable[0]),
 		"turn count recount complete",
@@ -380,7 +390,7 @@ func runTurnCountRecountFromV75(t *testing.T, fixture turnCountRecountFixture) {
 			t.Errorf("recount log lacks %q:\n%s", fragment, logged)
 		}
 	}
-	if _, ranAgain, err := recountTurnCounts(pool, nil, logger); err != nil || ranAgain {
+	if _, ranAgain, err := recountTurnCountsOnConn(t.Context(), conn, nil, nil, logger); err != nil || ranAgain {
 		t.Fatalf("second recount ran = %t, err = %v; want no run once the marker is cleared", ranAgain, err)
 	}
 }
@@ -399,15 +409,15 @@ func equalSessionIDs(got, want []ingest.SessionID) bool {
 
 func runTurnCountRecountFromV73(t *testing.T, fixture turnCountRecountFixture) {
 	path := seedTurnCountRecountStore(t, fixture, 73)
-	if err := openAndCloseForRecount(t, path); err != nil {
-		t.Fatalf("open the V73 store: %v", err)
+	if err := upgradeAndOpenForRecount(t, path, UpgradeOptions{}); err != nil {
+		t.Fatalf("upgrade the V73 store: %v", err)
 	}
 	counts, pending, version := readTurnCountRecountState(t, path)
-	if version != 78 {
-		t.Fatalf("schema version = %d, want 78", version)
+	if version != int64(CurrentSchemaVersion()) {
+		t.Fatalf("schema version = %d, want %d", version, CurrentSchemaVersion())
 	}
 	if pending {
-		t.Fatal("the recount marker is still set after a completed open")
+		t.Fatal("the recount marker is still set after a completed upgrade")
 	}
 	seeded := 0
 	for _, session := range fixture.Sessions {
@@ -424,15 +434,15 @@ func runTurnCountRecountFromV73(t *testing.T, fixture turnCountRecountFixture) {
 		t.Fatalf("store holds %d stats rows for %d seeded sessions", len(counts), seeded)
 	}
 	// Neither upgrade fold runs again: a value written after the upgrade
-	// survives the next open.
-	sentinel := storedTurnCounts{fixture.InterruptedFirstOpen.SentinelTurnCount, fixture.InterruptedFirstOpen.SentinelConversationTurnCount}
+	// survives the next upgrade and open.
+	sentinel := storedTurnCounts{fixture.InterruptedRecount.SentinelTurnCount, fixture.InterruptedRecount.SentinelConversationTurnCount}
 	writeTurnCountSentinel(t, path, fixture.Sessions[0].SessionID, sentinel)
-	if err := openAndCloseForRecount(t, path); err != nil {
-		t.Fatalf("reopen the upgraded store: %v", err)
+	if err := upgradeAndOpenForRecount(t, path, UpgradeOptions{}); err != nil {
+		t.Fatalf("upgrade and reopen the upgraded store: %v", err)
 	}
 	counts, _, _ = readTurnCountRecountState(t, path)
 	if got := counts[fixture.Sessions[0].SessionID]; got != sentinel {
-		t.Fatalf("a reopen folded again: stored counts = %+v, want the written %+v", got, sentinel)
+		t.Fatalf("a second upgrade folded again: stored counts = %+v, want the written %+v", got, sentinel)
 	}
 }
 
@@ -452,82 +462,76 @@ func writeTurnCountSentinel(t *testing.T, path, sessionID string, sentinel store
 	}
 }
 
-func runTurnCountRecountInterruptedFirstOpen(t *testing.T, fixture turnCountRecountFixture) {
+func runTurnCountRecountInterrupted(t *testing.T, fixture turnCountRecountFixture) {
 	path := seedTurnCountRecountStore(t, fixture, 75)
-	failAfter := fixture.InterruptedFirstOpen.FailAfterSessions
+	failAfter := fixture.InterruptedRecount.FailAfterSessions
 	interrupted := errors.New("fixture interruption")
 	handled := 0
-	err := openAndCloseForRecount(t, path, func(o *openOptions) {
-		o.turnCountRecountHook = func(done int, _ ingest.SessionID) error {
-			handled = done
-			if done == failAfter {
-				return interrupted
-			}
-			return nil
+	err := upgradeAndOpenForRecount(t, path, UpgradeOptions{afterRecountSession: func(done int, _ ingest.SessionID) error {
+		handled = done
+		if done == failAfter {
+			return interrupted
 		}
-	})
+		return nil
+	}})
 	if !errors.Is(err, interrupted) {
-		t.Fatalf("interrupted open returned %v, want the hook's error", err)
+		t.Fatalf("interrupted upgrade returned %v, want the hook's error", err)
 	}
 	if handled != failAfter {
 		t.Fatalf("the recount handled %d sessions before stopping, want %d", handled, failAfter)
 	}
-	for _, fragment := range []string{"turn count recount stopped after 2 of 7 sessions", "the recount stays pending", "reopen the store"} {
+	for _, fragment := range []string{"turn count recount stopped after 2 of 7 sessions", "the recount stays owed", "peasant migrate --schema-only"} {
 		if !strings.Contains(err.Error(), fragment) {
-			t.Errorf("interrupted open error lacks %q: %v", fragment, err)
+			t.Errorf("interrupted upgrade error lacks %q: %v", fragment, err)
 		}
 	}
 	counts, pending, version := readTurnCountRecountState(t, path)
-	if version != 78 {
-		t.Fatalf("schema version after the failed open = %d, want 78: the version cannot say the recount is owed", version)
+	if version != 77 {
+		t.Fatalf("schema version after the failed recount = %d, want 77: migration 77 committed and the steps after the recount did not run", version)
 	}
 	if !pending {
-		t.Fatal("the failed open cleared the recount marker; the next open would not recount")
+		t.Fatal("the failed recount cleared its marker; the next upgrade would not recount")
 	}
-	requireUnrecountedState(t, fixture, counts)
+	requireUnrecountedState(t, fixture, counts, "the failed recount")
 
-	if err := openAndCloseForRecount(t, path); err != nil {
-		t.Fatalf("reopen after the interrupted open: %v", err)
+	if err := upgradeAndOpenForRecount(t, path, UpgradeOptions{}); err != nil {
+		t.Fatalf("upgrade after the interrupted recount: %v", err)
 	}
 	counts, pending, _ = readTurnCountRecountState(t, path)
 	if pending {
-		t.Fatal("the reopen left the recount marker set")
+		t.Fatal("the second upgrade left the recount marker set")
 	}
 	for _, session := range fixture.Sessions {
 		want := storedTurnCounts{session.WantTurnCount, session.WantConversationTurnCount}
 		if got := counts[session.SessionID]; got != want {
-			t.Errorf("%s: counts after the reopen = %+v, want %+v", session.Name, got, want)
+			t.Errorf("%s: counts after the second upgrade = %+v, want %+v", session.Name, got, want)
 		}
 	}
 
-	sentinel := storedTurnCounts{fixture.InterruptedFirstOpen.SentinelTurnCount, fixture.InterruptedFirstOpen.SentinelConversationTurnCount}
+	sentinel := storedTurnCounts{fixture.InterruptedRecount.SentinelTurnCount, fixture.InterruptedRecount.SentinelConversationTurnCount}
 	writeTurnCountSentinel(t, path, fixture.Sessions[0].SessionID, sentinel)
 	hookCalls := 0
-	if err := openAndCloseForRecount(t, path, func(o *openOptions) {
-		o.turnCountRecountHook = func(int, ingest.SessionID) error { hookCalls++; return nil }
-	}); err != nil {
-		t.Fatalf("third open: %v", err)
+	if err := upgradeAndOpenForRecount(t, path, UpgradeOptions{afterRecountSession: func(int, ingest.SessionID) error { hookCalls++; return nil }}); err != nil {
+		t.Fatalf("third upgrade: %v", err)
 	}
 	if hookCalls != 0 {
-		t.Fatalf("the third open folded %d sessions, want none", hookCalls)
+		t.Fatalf("the third upgrade folded %d sessions, want none", hookCalls)
 	}
 	counts, _, _ = readTurnCountRecountState(t, path)
 	if got := counts[fixture.Sessions[0].SessionID]; got != sentinel {
-		t.Fatalf("the third open changed stored counts to %+v, want the written %+v", got, sentinel)
+		t.Fatalf("the third upgrade changed stored counts to %+v, want the written %+v", got, sentinel)
 	}
 }
 
 func runTurnCountRecountNewStore(t *testing.T, _ turnCountRecountFixture) {
 	path := filepath.Join(t.TempDir(), "new.db")
 	hookCalls := 0
-	if err := openAndCloseForRecount(t, path, func(o *openOptions) {
-		o.turnCountRecountHook = func(int, ingest.SessionID) error { hookCalls++; return nil }
-	}); err != nil {
+	if err := upgradeAndOpenForRecount(t, path, UpgradeOptions{afterRecountSession: func(int, ingest.SessionID) error { hookCalls++; return nil }}); err != nil {
 		t.Fatalf("open a new store: %v", err)
 	}
 	counts, pending, version := readTurnCountRecountState(t, path)
-	if version != 78 {
-		t.Fatalf("new store schema version = %d, want 78", version)
+	if version != int64(CurrentSchemaVersion()) {
+		t.Fatalf("new store schema version = %d, want %d", version, CurrentSchemaVersion())
 	}
 	if pending {
 		t.Fatal("a new store holds a pending recount after its first open")

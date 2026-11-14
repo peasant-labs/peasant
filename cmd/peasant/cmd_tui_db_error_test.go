@@ -20,9 +20,7 @@ import (
 func TestTUINamesAnUnreadableDatabase(t *testing.T) {
 	// No t.Parallel: the test stubs the process-global TTY probe, which is
 	// only safe while no other test runs concurrently.
-	previous := tuiTerminalAvailable
-	tuiTerminalAvailable = func() bool { return true }
-	t.Cleanup(func() { tuiTerminalAvailable = previous })
+	stubTerminal(t, true)
 	dir := t.TempDir()
 	dbPath := string(defaults.ResolveDBFilePathWith(dir))
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
@@ -56,15 +54,10 @@ func TestTUINamesAnUnreadableDatabase(t *testing.T) {
 // tui` fails on the terminal check before opening the store: on an affected
 // store it must not migrate (and rebuild) invisibly on the way to the same
 // refusal. The database file is byte-identical and still at version 75
-// afterwards. Both TTY detectors are stubbed false so the test is
+// afterwards. The one terminal check is stubbed false so the test is
 // TTY-independent.
 func TestTUISkipsResidueRebuildWithoutTerminal(t *testing.T) {
-	previousTTY := tuiTerminalAvailable
-	tuiTerminalAvailable = func() bool { return false }
-	t.Cleanup(func() { tuiTerminalAvailable = previousTTY })
-	previousStdin := stdinIsTerminal
-	stdinIsTerminal = func() bool { return false }
-	t.Cleanup(func() { stdinIsTerminal = previousStdin })
+	stubTerminal(t, false)
 	dir := t.TempDir()
 	dbPath := string(defaults.ResolveDBFilePathWith(dir))
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {

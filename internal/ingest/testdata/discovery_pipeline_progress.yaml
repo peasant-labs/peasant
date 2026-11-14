@@ -1,0 +1,11 @@
+cases:
+  - name: discover-stage-has-a-total-before-it-ends
+    root: /sources
+    files:
+      - path: project/11111111-1111-4111-8111-111111111111.jsonl
+        body: '{"type":"user","message":{"role":"user","content":"first"}}'
+      - path: project/22222222-2222-4222-8222-222222222222.jsonl
+        body: '{"type":"user","message":{"role":"user","content":"second"}}'
+    block: project/22222222-2222-4222-8222-222222222222.jsonl
+    done: 1
+    total: 2

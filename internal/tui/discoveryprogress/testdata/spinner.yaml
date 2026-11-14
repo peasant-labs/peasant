@@ -1,0 +1,63 @@
+# Each case drives one Spinner through its public setters in this order:
+# a previous phase (when present) with its counts and re-read count, then the
+# case phase, its progress, its found increments, and its re-read updates in
+# order. A frame-0 view must equal want exactly; counts are never grouped.
+cases:
+  - name: mid-run-names-required-rereads
+    phase: discovering claude code sessions...
+    done: 812
+    total: 13631
+    rereads: [219]
+    want: "⠋ discovering claude code sessions... (812/13631) · 219 required re-read"
+  - name: complete-names-required-rereads
+    phase: discovering claude code sessions...
+    done: 13631
+    total: 13631
+    rereads: [819]
+    want: "⠋ discovering claude code sessions... (13631/13631) · 819 required re-read"
+  - name: counts-of-ten-thousand-or-more-are-not-grouped
+    phase: discovering claude code sessions...
+    done: 10000
+    total: 1234567
+    rereads: [10000]
+    want: "⠋ discovering claude code sessions... (10000/1234567) · 10000 required re-read"
+  - name: zero-required-rereads-is-shown
+    phase: discovering claude code sessions...
+    done: 3
+    total: 4
+    rereads: [0]
+    want: "⠋ discovering claude code sessions... (3/4) · 0 required re-read"
+  - name: unreported-rereads-show-no-count
+    phase: Discovering Codex sessions...
+    done: 5
+    total: 9
+    want: "⠋ Discovering Codex sessions... (5/9)"
+  - name: negative-rereads-mean-not-reported
+    phase: discovering claude code sessions...
+    done: 5
+    total: 9
+    rereads: [3, -1]
+    want: "⠋ discovering claude code sessions... (5/9)"
+  - name: phase-only-adapter-inherits-no-counts
+    previous:
+      phase: discovering claude code sessions...
+      done: 13631
+      total: 13631
+      rereads: 819
+    phase: discovering other sessions...
+    want: "⠋ discovering other sessions..."
+  - name: new-phase-clears-the-previous-rereads
+    previous:
+      phase: discovering claude code sessions...
+      done: 2
+      total: 2
+      rereads: 1
+    phase: Discovering Codex sessions...
+    done: 1
+    total: 12000
+    want: "⠋ Discovering Codex sessions... (1/12000)"
+  - name: found-count-without-total-is-not-grouped
+    phase: Scanning sessions...
+    found: 10001
+    rereads: [7]
+    want: "⠋ Scanning sessions... (10001 found)"

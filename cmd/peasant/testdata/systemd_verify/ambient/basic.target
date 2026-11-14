@@ -1,0 +1,4 @@
+[Unit]
+Description=Unrelated user target for unit verification
+Requires=poison.socket
+DefaultDependencies=no

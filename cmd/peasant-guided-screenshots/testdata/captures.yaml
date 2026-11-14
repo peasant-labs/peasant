@@ -24,7 +24,7 @@ sheets:
     kind: push
     title: "mounted push wizard: start, selection, published-transcript preview, consent, receipt, and keyboard help in both themes"
     theme: dark
-    viewport: {width: 1800, height: 7840}
+    viewport: {width: 1800, height: 7900}
   - name: ingest-progress
     kind: ingest-progress
     title: "shared local import progress: kickstart and inline harvest"
@@ -38,6 +38,11 @@ sheets:
   - name: pull-progress
     kind: pull-progress
     title: "mounted collective pull progress: running, canceling, and canceled in both themes"
+    theme: dark
+    viewport: {width: 1800, height: 3600}
+  - name: discovery-progress
+    kind: discovery-progress
+    title: "mounted kickstart discovery: file counts, completed count, and a phase-only adapter"
     theme: dark
     viewport: {width: 1800, height: 3600}
 
@@ -189,6 +194,24 @@ pullProgressStates:
   - key: canceled
     wantContains: [collective pull progress, 2/4, "█", "elapsed: 12s", pull canceled]
     wantAbsent: [ctrl+c to cancel, canceling pull]
+
+discoveryProgressStates:
+  - key: mid-run
+    phase: discovering claude code sessions...
+    done: 812
+    total: 13631
+    requiredRereads: 219
+    wantContains: ["⠋", "discovering claude code sessions...", "(812/13631)", "219 required re-read"]
+  - key: complete
+    phase: discovering claude code sessions...
+    done: 13631
+    total: 13631
+    requiredRereads: 819
+    wantContains: ["⠋", "discovering claude code sessions...", "(13631/13631)", "819 required re-read"]
+  - key: phase-only
+    phase: discovering other sessions...
+    wantContains: ["⠋", "discovering other sessions..."]
+    wantAbsent: ["(", ")", "re-read", "1/2"]
 
 selection:
   repositories:
@@ -512,3 +535,17 @@ pullProgressCaptures:
   - {name: pull-progress-canceled-dark-120x40, state: canceled, theme: dark, width: 120, height: 40}
   - {name: pull-progress-canceled-light-80x24, state: canceled, theme: light, width: 80, height: 24}
   - {name: pull-progress-canceled-light-120x40, state: canceled, theme: light, width: 120, height: 40}
+
+discoveryProgressCaptures:
+  - {name: discovery-progress-mid-run-dark-80x24, state: mid-run, theme: dark, width: 80, height: 24}
+  - {name: discovery-progress-mid-run-dark-120x40, state: mid-run, theme: dark, width: 120, height: 40}
+  - {name: discovery-progress-mid-run-light-80x24, state: mid-run, theme: light, width: 80, height: 24}
+  - {name: discovery-progress-mid-run-light-120x40, state: mid-run, theme: light, width: 120, height: 40}
+  - {name: discovery-progress-complete-dark-80x24, state: complete, theme: dark, width: 80, height: 24}
+  - {name: discovery-progress-complete-dark-120x40, state: complete, theme: dark, width: 120, height: 40}
+  - {name: discovery-progress-complete-light-80x24, state: complete, theme: light, width: 80, height: 24}
+  - {name: discovery-progress-complete-light-120x40, state: complete, theme: light, width: 120, height: 40}
+  - {name: discovery-progress-phase-only-dark-80x24, state: phase-only, theme: dark, width: 80, height: 24}
+  - {name: discovery-progress-phase-only-dark-120x40, state: phase-only, theme: dark, width: 120, height: 40}
+  - {name: discovery-progress-phase-only-light-80x24, state: phase-only, theme: light, width: 80, height: 24}
+  - {name: discovery-progress-phase-only-light-120x40, state: phase-only, theme: light, width: 120, height: 40}

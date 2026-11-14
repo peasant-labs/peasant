@@ -35,7 +35,6 @@ func openSnapshotStore(t *testing.T, poolSizes ...int) *store.Store {
 	path := filepath.Join(t.TempDir(), "snapshot-test.db")
 	storetest.CopyGoldenTo(t, path)
 	db, err := store.Open(path,
-		store.WithSkipMigrations(),
 		store.WithPoolSize(poolSize),
 		store.WithIndexFormats(store.V2IndexFormat()),
 		store.WithGenerationArtifacts(artifacts, locker))
@@ -242,7 +241,6 @@ func TestHarmonizedSnapshotLockFree(t *testing.T) {
 	path := t.TempDir() + "/lockfree-test.db"
 	storetest.CopyGoldenTo(t, path)
 	db, err := store.Open(path,
-		store.WithSkipMigrations(),
 		store.WithPoolSize(1),
 		store.WithIndexFormats(store.V2IndexFormat()),
 		store.WithGenerationArtifacts(artifacts, locker))

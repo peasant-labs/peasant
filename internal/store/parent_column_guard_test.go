@@ -63,6 +63,7 @@ var parentColumnResidualClasses = map[string]bool{
 	"write-guard":       true,
 	"writers":           true,
 	"ddl":               true,
+	"disk-estimate":     true,
 	// cross-package is the class of a parent answer whose rendering belongs to
 	// the cross-package reader slice: it is used only while that slice has not
 	// yet routed the declaration, and it disappears from the fixture when those

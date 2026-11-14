@@ -96,10 +96,11 @@ type kickstartSpec struct {
 	// RetentionDays is the cleanup period Claude Code already has, which the
 	// retention stop shows and the review explains. Empty keeps 90.
 	RetentionDays int `yaml:"retentionDays"`
-	// StaleSearchIndex leaves the local store with a search index that needs
-	// its one-time repair, which a server-triggered import refuses to run. The
-	// case fails if the store file is changed by the time it ends.
-	StaleSearchIndex bool `yaml:"staleSearchIndex"`
+	// BehindStore leaves the local store behind the schema this build needs (a
+	// schema-75 store with stale search results), which a server-triggered
+	// import refuses: a server never upgrades the store. The case fails if the
+	// store file is changed by the time it ends.
+	BehindStore bool `yaml:"behindStore"`
 	// RetentionFails makes the write of Claude Code's retention period fail with
 	// this text, after the configuration was saved.
 	RetentionFails string `yaml:"retentionFails"`
@@ -385,8 +386,8 @@ func newKickstartWorld(t *testing.T, c kickstartCase, sets kickstartListingSets)
 	homes := newTestXDGHomes(t)
 	configPath := defaults.ResolveConfigFilePathWith(homes.Config).String()
 	w.saving.prepare(t, w.dir, homes, c.World)
-	if c.World.StaleSearchIndex {
-		seedStaleSearchIndex(t, homes.dbPath())
+	if c.World.BehindStore {
+		seedBehindStore(t, homes.dbPath())
 	}
 	c.World.Config = w.saving.fill(c.World.Config)
 	w.configPath, w.configBytes = configPath, c.World.Config
@@ -1145,10 +1146,10 @@ func (w *kickstartWorld) blockConfigDir(index int) {
 	}
 }
 
-// seedStaleSearchIndex writes a store whose search index needs its one-time
-// repair where the server keeps its store, and holds the case to leaving that
-// file byte for byte as it was: a refused import opens nothing.
-func seedStaleSearchIndex(t *testing.T, dbPath string) {
+// seedBehindStore writes a store behind the schema this build needs where the
+// server keeps its store, and holds the case to leaving that file byte for byte
+// as it was: a refused import changes nothing.
+func seedBehindStore(t *testing.T, dbPath string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 		t.Fatalf("create the store directory: %v", err)
@@ -1165,7 +1166,7 @@ func seedStaleSearchIndex(t *testing.T, dbPath string) {
 			return
 		}
 		if !bytes.Equal(before, after) {
-			t.Error("the store whose search index needs repair was modified; a refused import must not open it")
+			t.Error("the behind store was modified; a refused import must not change it")
 		}
 	})
 }

@@ -548,6 +548,36 @@ func (s *SessionIndexState) Completed() bool {
 	return s != nil && s.IndexerVersion > 0 && s.IndexedAt != nil
 }
 
+// PublicationIndexBind is one bind-only index write: the stored index of
+// SessionID was built from the bytes IndexedInputHash names, and it is settled
+// against the refreshed pair, and bound to the metadata capture at
+// CaptureRevision, without parsing or replacing entries.
+type PublicationIndexBind struct {
+	SessionID SessionID
+	// ExpectedState is the SQL state captured with the index input. The store
+	// refuses the bind when the row no longer reads the same.
+	ExpectedState *SessionIndexState
+	// IndexedInputHash is the digest of the transcript bytes the caller read.
+	// The store binds only when the stored input proof equals it.
+	IndexedInputHash string
+	// CaptureRevision is the current publication metadata capture revision the
+	// index is bound to. Zero binds nothing and only advances the index time.
+	CaptureRevision int64
+	// IndexedAtMs is the time of this settle. The store records it as the
+	// session's index time, so a pair saved this run is not selected again as
+	// saved after it was indexed.
+	IndexedAtMs int64
+}
+
+// PublicationIndexBinder is the constant-size index write of the rule "bind
+// without a re-parse", which Pipeline.capturedInputBindsWithoutReparse in
+// index_selection.go states once. An implementation does not re-decide that
+// rule: it is a compare-and-swap against the captured state. A store without
+// it is served by the ordinary parse and write.
+type PublicationIndexBinder interface {
+	BindPublicationIndex(ctx context.Context, bind PublicationIndexBind) error
+}
+
 // StaleIndexWorkError means the captured SQL state changed before the index
 // replacement. The caller must capture current input and plan a new parser run.
 type StaleIndexWorkError struct {
@@ -886,12 +916,16 @@ type ProfiledSessionClassifier interface {
 	SessionClassifier
 	// AnnotateWithProfile runs Annotate and records implementation-specific timing
 	// and counters into profiler. A nil profiler must behave like Annotate.
+	// Detail that costs work per annotation result is recorded only when
+	// profiler.AnnotationResultDetail is set; the always-on profile must not
+	// pay per entry.
 	AnnotateWithProfile(ctx context.Context, sessionID SessionID, profiler *IndexProfiler) error
 }
 
 // BufferedSessionClassifier is an optional ANNOTATE-stage fast path. It lets the
 // pipeline prepare annotation writes for many sessions in parallel, then flush
-// those prepared writes through larger serial store batches.
+// those prepared writes through larger serial store batches. Both methods
+// follow AnnotateWithProfile's profiler rule.
 type BufferedSessionClassifier interface {
 	SessionClassifier
 	PrepareAnnotations(ctx context.Context, sessionID SessionID, profiler *IndexProfiler) (SessionAnnotationBatch, error)

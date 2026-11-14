@@ -36,7 +36,7 @@ func TestPublicationCommitMergePreservesDurableBindings(t *testing.T) {
 		}
 		seen[c.Name] = true
 		t.Run(c.Name, func(t *testing.T) {
-			s, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
+			s, err := store.Open(storetest.CopyGoldenDB(t))
 			if err != nil {
 				t.Fatal(err)
 			}

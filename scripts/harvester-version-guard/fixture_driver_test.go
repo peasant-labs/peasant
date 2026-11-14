@@ -45,6 +45,9 @@ func loadFixtureDriverCases(t *testing.T) []fixtureDriverCase {
 		"identical historical driver remains untouched":                         "identical",
 		"different historical runtime cannot be overwritten":                    "different",
 		"additional historical runtime cannot be hidden":                        "additional",
+		"unrelated migration package keeps its historical implementation":       "unrelated",
+		"different transitive fixture dependency cannot be hidden":              "transitive",
+		"unresolved fixture dependency fails closed":                            "unresolved",
 		"original module based fixture builder needs no driver injection":       "legacy",
 	}
 	seen := make(map[string]bool)
@@ -69,6 +72,17 @@ func loadFixtureDriverCases(t *testing.T) []fixtureDriverCase {
 			if c.HistoricalFiles["extra.go"] == "" || c.CandidateFiles["extra.go"] != "" || c.ExpectedError != "cannot replace historical production driver" {
 				t.Fatalf("additional-driver refusal is inert: %q", c.Name)
 			}
+		case "unrelated", "transitive":
+			if c.CandidateFiles["sqlite.go"] == "" || c.CandidateFiles["sqlite.go"] != c.HistoricalFiles["sqlite.go"] || c.CandidateFiles["sqlitemigration/migrate.go"] == c.HistoricalFiles["sqlitemigration/migrate.go"] {
+				t.Fatalf("package-dependency obligation is inert: %q", c.Name)
+			}
+			if (c.Mode == "transitive") != (c.ExpectedError != "") {
+				t.Fatalf("package-dependency refusal is incorrect: %q", c.Name)
+			}
+		case "unresolved":
+			if c.CandidateFiles["sqlite.go"] == "" || c.CandidateFiles["sqlite.go"] != c.HistoricalFiles["sqlite.go"] || c.CandidateFiles["sqlitemigration/migrate.go"] == "" || c.HistoricalFiles["sqlitemigration/migrate.go"] != "" || c.ExpectedError == "" {
+				t.Fatalf("unresolved dependency obligation is inert: %q", c.Name)
+			}
 		case "legacy":
 			if len(c.CandidateFiles) != 0 || len(c.HistoricalFiles) != 0 || len(c.ExpectedFiles) != 0 || c.ExpectedError != "" {
 				t.Fatalf("legacy candidate obligation changed: %q", c.Name)
@@ -88,8 +102,10 @@ func TestSharedFixtureDriverSupport(t *testing.T) {
 	for _, c := range loadFixtureDriverCases(t) {
 		t.Run(c.Name, func(t *testing.T) {
 			candidate, historical := filepath.Join(t.TempDir(), "candidate"), filepath.Join(t.TempDir(), "historical")
-			writeFixtureFiles(t, candidate, map[string]string{"go.mod": "module candidate\n"})
-			writeFixtureFiles(t, historical, map[string]string{"go.mod": "module historical\n", "internal/ingest/reader.go": "original production imports\n"})
+			module := "module github.com/peasant-labs/peasant\n"
+			builder := "package testfixture\nimport _ \"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite\"\n"
+			writeFixtureFiles(t, candidate, map[string]string{"go.mod": module, "internal/ingest/testfixture/builder.go": builder})
+			writeFixtureFiles(t, historical, map[string]string{"go.mod": module, "internal/ingest/testfixture/builder.go": builder, "internal/ingest/reader.go": "original production imports\n"})
 			writeFixtureFiles(t, filepath.Join(candidate, fixtureDriverPath), c.CandidateFiles)
 			writeFixtureFiles(t, filepath.Join(historical, fixtureDriverPath), c.HistoricalFiles)
 			err := supplyFixtureDriver(historical, candidate)
@@ -127,7 +143,7 @@ func TestSharedFixtureDriverSupport(t *testing.T) {
 			if !reflect.DeepEqual(actual, c.ExpectedFiles) {
 				t.Fatalf("historical fixture support changed: got %#v, want %#v", actual, c.ExpectedFiles)
 			}
-			for name, expected := range map[string]string{"go.mod": "module historical\n", "internal/ingest/reader.go": "original production imports\n"} {
+			for name, expected := range map[string]string{"go.mod": module, "internal/ingest/reader.go": "original production imports\n"} {
 				content, err := os.ReadFile(filepath.Join(historical, name))
 				if err != nil {
 					t.Fatal(err)

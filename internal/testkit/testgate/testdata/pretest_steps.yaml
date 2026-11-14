@@ -47,9 +47,9 @@ steps:
     fragment: "ast-grep scan --error=unused-suppression --config sgconfig.yml ."
   - step: ast-grep-gate-test
     program: go
-    args: ["test", "-race", "-tags=astgrep", "./internal/tui/gates/..."]
+    args: ["test", "-race", "-tags=astgrep", "./internal/tui/gates/...", "./internal/testkit/astgreprules/..."]
     target: check
-    fragment: "go test -tags=astgrep $(GORACE_FLAG) ./internal/tui/gates/..."
+    fragment: "go test -tags=astgrep $(GORACE_FLAG) ./internal/tui/gates/... ./internal/testkit/astgreprules/..."
   - step: projection-negative-seed
     program: go
     args: ["test", "-tags=projection_negative_seed", "-run", "^(TestThinkingSeedNegativeFailsOnlyDesignatedCases|TestModelProjectionNegativeFailsOnlyDesignatedCase)$", "./internal/transcript/"]

@@ -458,7 +458,7 @@ measured, why, and the rules that keep it fast.
 | pool size | 55.1s | `store.Open` opened a fixed **10-connection** pool every call (sqlitex default), each re-parsing the 33-migration schema. Tests need **1** → `store.WithPoolSize` + `PEASANT_DB_POOL_SIZE`, set to `1` in `cmd/peasant`'s `TestMain`. |
 | parallelize | 40.2s | The suite ran **fully serial** — tests isolated via process-global `t.Setenv(XDG_*)`, which forbids `t.Parallel()`. Replaced with per-invocation flag injection (below). |
 | `$HOME` isolation | 30.1s | Tests resolved local default transcript stores instead of isolated fixtures. `TestMain` points `HOME`+`XDG_*` at a throwaway temp dir. |
-| skip-migrate on golden copies | ~30s (store 22.4→20.7s) | `storetest.Open` copies a freshly-migrated golden DB, then re-ran the migration check on every copy → `store.WithSkipMigrations`. |
+| skip-migrate on golden copies | ~30s (store 22.4→20.7s) | `storetest.Open` copies a freshly-migrated golden DB, then re-ran the migration check on every copy → a skip option on the copy. Since removed: `store.Open` no longer migrates a store that holds data, so a golden copy opens current with no option. |
 | deeper DI (creds/sync/state) | **19.6s** | The last serial cohort (push credentials/timing, redact file-writing) was blocked by *production* helpers reading env directly; made them override-aware. |
 
 Other packages for reference (uncached `-race`): `internal/store` ~20–26s,
@@ -857,25 +857,26 @@ Freeze invocation, or PNG dimension check fails.
 
 ### Contact sheets and evidence review
 
-The harness publishes seven contact sheets under the commit-derived directory
+The harness publishes eight contact sheets under the commit-derived directory
 `out/test/screenshots/peasant-guided-final-<commit>/`:
 
 | File | PNG dimensions | Contents |
 |------|----------------|----------|
-| `guided-dark.png` | `1800x3420` | The six guided sections in the dark theme: auto-ingest, publication, privacy, license, destination, and retention. Each section includes `80x24` and `120x40` terminal renders. |
-| `guided-light.png` | `1800x3420` | The same guided sections and terminal sizes in the light theme. |
-| `selection.png` | `1800x6750` | The mounted selection view, including search, project/branch/session previews, and origin filtering. |
-| `push.png` | `1800x7840` | The mounted publication wizard: start, selection, transcript preview, consent, receipt, and the keyboard help card. |
-| `ingest-progress.png` | `1800x1200` | Local import progress after the guided configuration is saved. |
+| `guided-dark.png` | `1800x3980` | The seven guided sections in the dark theme: auto-ingest, publication, auto-publish, privacy, license, destination, and retention. Each section includes `80x24` and `120x40` terminal renders. |
+| `guided-light.png` | `1800x3980` | The same guided sections and terminal sizes in the light theme. |
+| `selection.png` | `1800x11170` | The mounted selection view, including search, project/branch/session previews, and origin filtering. |
+| `push.png` | `1800x7900` | The mounted publication wizard: start, selection, transcript preview, consent, receipt, and the keyboard help card. |
+| `ingest-progress.png` | `1800x4590` | Local import progress in kickstart and inline harvest. |
 | `ingest-completion.png` | `1800x3420` | Local import completion with multiple actionable warnings at the top and bottom of the scrollable result, plus a no-warning control. Every state includes both themes and both terminal sizes. |
 | `pull-progress.png` | `1800x3600` | The bulk collective-pull progress bar: running, canceling, and canceled. Every state includes both themes and both terminal sizes. |
+| `discovery-progress.png` | `1800x3600` | The inline kickstart discovery spinner: mid-run and completed file counts with required re-reads, plus a phase-only adapter. Every state includes both themes and both terminal sizes. |
 
-The selection fixture contains six synthetic sessions across two harnesses. One session is marked as
+The selection fixture contains synthetic sessions across multiple harnesses. One session is marked as
 already ingested. One carries scrubbed transcript turns in the store. One carries a scrubbed harness
 transcript that the harness wrote and the store does not hold. Its states exercise the mounted
 hierarchy, global search, grouped repository and branch context, the stored session transcript
 preview, and the preview of a session that Peasant has not imported yet, without depending on a
-developer's repository or session history. The guided matrix contains 24 captures: six sections x
+developer's repository or session history. The guided matrix contains 28 captures: seven sections x
 two themes x two terminal sizes. The pull-progress matrix contains 12 captures: three states
 (running, canceling, canceled) x two themes x two terminal sizes, mounted from the real
 `pullprogress.Model` over scrubbed synthetic counts.

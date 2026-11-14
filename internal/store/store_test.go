@@ -92,7 +92,6 @@ func openTestStore(t *testing.T) *store.Store {
 func TestStore_Open_CreatesDB(t *testing.T) {
 	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	// ast-grep-ignore: no-migrating-store-open-in-tests -- tests that opening a brand-new path creates the full schema; requires migrations to run.
 	s, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -138,7 +137,6 @@ func TestStore_Open_TwiceIdempotent(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 
 	// First open: creates DB and tables.
-	// ast-grep-ignore: no-migrating-store-open-in-tests -- tests idempotent reopen: the first open must migrate to create the database that the second open then reopens.
 	s1, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatalf("first Open: %v", err)
@@ -159,7 +157,6 @@ func TestStore_Open_TwiceIdempotent(t *testing.T) {
 	}
 
 	// Second open: should succeed without error and preserve data.
-	// ast-grep-ignore: no-migrating-store-open-in-tests -- tests idempotent reopen: the second open must migrate against the existing database and preserve its rows.
 	s2, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatalf("second Open: %v", err)

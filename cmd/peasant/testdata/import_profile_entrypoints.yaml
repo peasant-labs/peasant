@@ -1,0 +1,27 @@
+# Each import entry point stores a profile. The command cases run the mounted
+# command over one synthetic Claude session and read the stage rows back from
+# the store the command wrote.
+requiredNames:
+  - harvest-stores-a-profile-without-the-flag
+  - profile-index-flag-still-prints
+  - kickstart-import-stores-a-profile
+session:
+  sessionId: "97100000-0000-4000-8000-0000000000e1"
+  projectDir: -fixtures-synthetic-project
+  projectName: synthetic-project
+  workingDir: /fixtures/synthetic-project
+  branch: main
+  title: import profile fixture
+# A line only the printed profile carries.
+printedProfileMarker: "partial-batch flush waits:"
+cases:
+  - name: harvest-stores-a-profile-without-the-flag
+    entry: harvest
+    wantPrinted: false
+  - name: profile-index-flag-still-prints
+    entry: harvest
+    args: ["--profile-index"]
+    wantPrinted: true
+  - name: kickstart-import-stores-a-profile
+    entry: kickstart
+    wantPrinted: false

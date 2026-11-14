@@ -65,7 +65,7 @@ func newPublishingWorld(t *testing.T) *publishingWorld {
 		t.Fatal(err)
 	}
 	storetest.CopyGoldenTo(t, hs.dbPath())
-	db, err := store.Open(hs.dbPath(), store.WithSkipMigrations())
+	db, err := store.Open(hs.dbPath())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func newPublishingWorld(t *testing.T) *publishingWorld {
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	db, err = store.Open(hs.dbPath(), store.WithSkipMigrations())
+	db, err = store.Open(hs.dbPath())
 	if err != nil {
 		t.Fatal(err)
 	}

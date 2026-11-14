@@ -119,7 +119,7 @@ func OpenReadOnlyWithOptions(path string, opts ...OpenOption) (*Store, error) {
 		return fail(fmt.Errorf("store: dry-run inspection of %s: database schema is version %d, but this build understands only up to version %d (the database was upgraded by a newer Peasant); no files were changed; install that version or newer to inspect it", path, version, current))
 	}
 	if version != CurrentSchemaVersion() {
-		return fail(fmt.Errorf("store: dry-run inspection of %s: database schema is %d, this build needs schema %d; no files were changed; run a normal harvest to migrate this database, or use the matching Peasant version", path, version, CurrentSchemaVersion()))
+		return fail(fmt.Errorf("store: dry-run inspection of %s: database schema is %d, this build needs schema %d; no files were changed; run `peasant migrate --schema-only` in a terminal to upgrade this database, or use the matching Peasant version", path, version, CurrentSchemaVersion()))
 	}
 
 	var installationSalt salt.Salt

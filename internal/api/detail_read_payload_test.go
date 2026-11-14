@@ -51,7 +51,7 @@ func TestDetailReadPayloadCarriesStoredTitleMediansAndRevision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := store.Open(hs.dbPath(), append(storeOptions, store.WithSkipMigrations())...)
+	db, err := store.Open(hs.dbPath(), storeOptions...)
 	if err != nil {
 		t.Fatal(err)
 	}

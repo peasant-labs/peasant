@@ -132,7 +132,7 @@ func harvestLikeTheCLI(t *testing.T, dbPath string, cfg *config.Config) {
 		t.Fatal(err)
 	}
 	storetest.CopyGoldenTo(t, dbPath)
-	db, err := store.Open(dbPath, append(storeOptions, store.WithSkipMigrations())...)
+	db, err := store.Open(dbPath, storeOptions...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func TestSessionReindexRoute(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			db, err := store.Open(hs.dbPath(), append(storeOptions, store.WithSkipMigrations())...)
+			db, err := store.Open(hs.dbPath(), storeOptions...)
 			if err != nil {
 				t.Fatal(err)
 			}

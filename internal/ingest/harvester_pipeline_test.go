@@ -53,7 +53,7 @@ func TestPipelineHarvesterTargets(t *testing.T) {
 			t.Parallel()
 			ctx := t.Context()
 			fs := testutil.NewMemFS()
-			db, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
+			db, err := store.Open(storetest.CopyGoldenDB(t))
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -25,6 +25,78 @@ type SourceAdapter interface {
 	ExtractMetadata(ctx context.Context, session DiscoveredSession) (*UnifiedMetadata, error)
 }
 
+// DiscoveryProgress reports the number of source files enumerated and built
+// by a Discover call. The total precedes every advance; an advance includes a
+// source that disappeared or was rejected while it was being built. An adapter
+// may call the reporter concurrently, but all calls must finish before Discover
+// returns; callers may read or replace the reporter after that point.
+type DiscoveryProgress interface {
+	DiscoveryTotal(harness Harness, total int)
+	DiscoveryAdvance(harness Harness, step DiscoveryStep)
+}
+
+// RequiredRereadsNotReported is the DiscoveryStep re-read count of an adapter
+// that keeps no discovery evidence cache and so has no re-read count to report.
+// Any negative count means the same.
+const RequiredRereadsNotReported = -1
+
+// DiscoveryStep is one advance of a Discover call's source count.
+type DiscoveryStep struct {
+	// Sources is how many sources finished with this step, including a source
+	// that disappeared or was rejected while it was being built.
+	Sources int
+	// RequiredRereads is how many sources this Discover call has so far had to
+	// read again because their cached discovery evidence could not be reused.
+	// It is negative when the adapter does not report it. After Discover
+	// returns, the adapter's DiscoveryStatistics is the authoritative count.
+	RequiredRereads int
+}
+
+// RereadsReported reports whether the step carries a required re-read count.
+func (s DiscoveryStep) RereadsReported() bool { return s.RequiredRereads >= 0 }
+
+// DiscoveryProgressReporting is an optional adapter capability. Attaching a
+// reporter does not change discovery results or require other adapters to report.
+type DiscoveryProgressReporting interface {
+	SetDiscoveryProgress(DiscoveryProgress)
+}
+
+// AttachDiscoveryProgress attaches a reporter to adapters that support it.
+// Passing nil removes a reporter from a supporting adapter.
+func AttachDiscoveryProgress(adapter SourceAdapter, progress DiscoveryProgress) {
+	if capable, ok := adapter.(DiscoveryProgressReporting); ok {
+		capable.SetDiscoveryProgress(progress)
+	}
+}
+
+// discoveryProgressAttachment supplies the optional capability to adapters
+// without changing their constructors or their Discover signatures.
+type discoveryProgressAttachment struct{ progress DiscoveryProgress }
+
+func (a *discoveryProgressAttachment) SetDiscoveryProgress(progress DiscoveryProgress) {
+	a.progress = progress
+}
+
+func discoveryTotal(progress DiscoveryProgress, harness Harness, total int) {
+	if progress != nil {
+		progress.DiscoveryTotal(harness, total)
+	}
+}
+
+// discoveryAdvance reports one finished source for an adapter that keeps no
+// discovery evidence cache.
+func discoveryAdvance(progress DiscoveryProgress, harness Harness) {
+	discoveryAdvanceWithRereads(progress, harness, RequiredRereadsNotReported)
+}
+
+// discoveryAdvanceWithRereads reports one finished source together with the
+// number of sources this Discover call has had to read again so far.
+func discoveryAdvanceWithRereads(progress DiscoveryProgress, harness Harness, rereads int) {
+	if progress != nil {
+		progress.DiscoveryAdvance(harness, DiscoveryStep{Sources: 1, RequiredRereads: rereads})
+	}
+}
+
 // TranscriptMaterializer converts a typed provider source into the managed
 // transcript bytes Peasant stores. Most adapters ingest a transcript file
 // directly and do not implement this interface. It exists for sources such as

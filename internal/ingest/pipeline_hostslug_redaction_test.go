@@ -179,7 +179,7 @@ func ingestOneSessionAtMaximum(t *testing.T, slug string, redactor ingest.TextRe
 		ModTime:      time.Now().Add(-time.Hour),
 	}
 
-	database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
+	database, err := store.Open(storetest.CopyGoldenDB(t))
 	if err != nil {
 		t.Fatalf("open the analytics store: %v", err)
 	}

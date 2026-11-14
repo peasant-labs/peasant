@@ -1,0 +1,5 @@
+requiredNames:
+  - gc-reads-the-directory-once-per-run
+  - unreferenced-file-is-collected-at-the-end-of-the-run
+  - stopped-run-leaves-garbage-the-next-run-collects
+  - gc-does-not-remove-a-file-a-concurrent-put-just-wrote

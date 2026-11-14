@@ -409,7 +409,7 @@ func runOrphanCaseWith(t *testing.T, byID map[string]orphanSessionFixture, tc or
 		t.Fatalf("create output directory %q: %v", env.outputDir, err)
 	}
 	dbPath := storetest.CopyGoldenDB(t)
-	db, err := store.Open(dbPath, store.WithSkipMigrations())
+	db, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -554,7 +554,7 @@ func runOrphanCaseWith(t *testing.T, byID map[string]orphanSessionFixture, tc or
 	if err := db.Close(); err != nil {
 		t.Fatalf("close store before reopen: %v", err)
 	}
-	reopened, err := store.Open(dbPath, store.WithSkipMigrations())
+	reopened, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatalf("reopen store: %v", err)
 	}

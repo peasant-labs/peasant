@@ -233,6 +233,8 @@ func (s *Store) PersistImage(ctx context.Context, pending attachments.Pending) e
 // ReplaceSessionImages installs the activated generation's image set and drops
 // every other attachment row for that session. A rejected attempt never calls
 // this, so it cannot overwrite the active generation or leave an orphan row.
+// It does not collect: a file the replace left unreferenced stays on disk
+// until CollectUnreferencedImages runs at the end of the run.
 func (s *Store) ReplaceSessionImages(ctx context.Context, sessionID string, pending []attachments.Pending) error {
 	if s.attachments == nil {
 		return fmt.Errorf("store attachment replace for session %q: the attachment store was not constructed; open the database before activating a generation", sessionID)
@@ -240,11 +242,22 @@ func (s *Store) ReplaceSessionImages(ctx context.Context, sessionID string, pend
 	if err := s.EnsureAttachmentDir(); err != nil {
 		return err
 	}
-	if err := s.attachments.ReplaceSession(ctx, sessionID, pending); err != nil {
-		return err
+	return s.attachments.ReplaceSession(ctx, sessionID, pending)
+}
+
+// CollectUnreferencedImages removes the image files no attachment row
+// references. The pipeline calls it once per run, from its cleanup stage,
+// after the last activation: one listing of referenced digests and one
+// listing of the image directory, under the lock shared with Put and
+// ReplaceSession. A run that stops before its cleanup stage leaves the
+// unreferenced files in place, and the next run's collection removes them.
+func (s *Store) CollectUnreferencedImages(ctx context.Context) error {
+	// A store with no image directory holds no image files to collect.
+	if s.attachments == nil || s.attachmentDir == "" {
+		return nil
 	}
 	if _, err := s.attachments.GC(ctx); err != nil {
-		return fmt.Errorf("store attachment replace for session %q: the rows were installed but unreferenced files were not collected: %w; retry garbage collection", sessionID, err)
+		return fmt.Errorf("store image collection failed at store.CollectUnreferencedImages at the end of the run: %w; every referenced image was kept and unreferenced files stay on disk until the next run collects them; rerun harvest", err)
 	}
 	return nil
 }

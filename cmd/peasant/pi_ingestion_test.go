@@ -195,7 +195,7 @@ func TestPiHarvestCommonModes(t *testing.T) {
 				}
 				return
 			}
-			db, err := store.Open(dbPath, store.WithSkipMigrations())
+			db, err := store.Open(dbPath)
 			if err != nil {
 				t.Fatal(err)
 			}

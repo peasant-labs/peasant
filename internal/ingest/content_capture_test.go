@@ -253,7 +253,7 @@ func TestNormalIngestStoresAuthoritativeContent(t *testing.T) {
 			meta.Source.Format = session.SourceFormat
 			meta.ParentUUID = session.ParentUUID
 			path := storetest.CopyGoldenDB(t)
-			database, err := store.Open(path, store.WithSkipMigrations())
+			database, err := store.Open(path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -280,7 +280,7 @@ func TestNormalIngestStoresAuthoritativeContent(t *testing.T) {
 			if err := database.Close(); err != nil {
 				t.Fatal(err)
 			}
-			database, err = store.Open(path, store.WithSkipMigrations())
+			database, err = store.Open(path)
 			if err != nil {
 				t.Fatal(err)
 			}

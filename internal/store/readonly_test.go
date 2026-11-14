@@ -20,7 +20,7 @@ import (
 // and buffered the whole file in memory first.
 func TestOpenReadOnlyReadsWithLiveWriter(t *testing.T) {
 	path := storetest.CopyGoldenDB(t)
-	writer, err := store.Open(path, store.WithSkipMigrations())
+	writer, err := store.Open(path)
 	if err != nil {
 		t.Fatalf("open writer: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestOpenReadOnlyReadsWithLiveWriter(t *testing.T) {
 // A schema this build does not understand is refused without migrating.
 func TestOpenReadOnlyRefusesOtherSchema(t *testing.T) {
 	path := storetest.CopyGoldenDB(t)
-	s, err := store.Open(path, store.WithSkipMigrations())
+	s, err := store.Open(path)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

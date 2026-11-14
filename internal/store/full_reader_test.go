@@ -58,7 +58,7 @@ func loadFullReadFixtures(t *testing.T, data []byte) fullReadFixture {
 func seedFullRead(t *testing.T, n, bytes int) (*store.Store, ingest.SessionID, []schema.SessionEntry, string) {
 	t.Helper()
 	path := storetest.CopyGoldenDB(t)
-	s, err := store.Open(path, store.WithSkipMigrations(), store.WithPoolSize(1))
+	s, err := store.Open(path, store.WithPoolSize(1))
 	if err != nil {
 		t.Fatal(err)
 	}

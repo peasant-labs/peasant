@@ -300,6 +300,7 @@ commands:
     use: migrate
     flags:
       - { name: dry-run, type: bool, default: "false" }
+      - { name: schema-only, type: bool, default: "false" }
       - { name: limit, type: int, default: "0" }
       - { name: confirm, type: bool, default: "false" }
       - { name: json, type: bool, default: "false" }

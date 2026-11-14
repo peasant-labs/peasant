@@ -34,6 +34,7 @@ import (
 func BuildMigrateCommand() *cobra.Command {
 	var (
 		dryRun     bool
+		schemaOnly bool
 		limit      int
 		confirm    bool
 		jsonOutput bool
@@ -41,8 +42,16 @@ func BuildMigrateCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "migrate",
-		Short: "Convert file-backed sessions to the harmonized content model",
-		Long: "Convert file-backed native sessions to the harmonized content model in place.\n\n" +
+		Short: "Upgrade the store schema, then convert file-backed sessions to the harmonized content model",
+		Long: "Upgrade the local store to the schema this build needs, then convert\n" +
+			"file-backed native sessions to the harmonized content model in place.\n\n" +
+			"The schema phase runs first. It is the one explicit store upgrade: no\n" +
+			"other command changes the schema of a store that holds data. It prints\n" +
+			"each step, asks before a long step unless --confirm is given, holds the\n" +
+			"data directory lock, and reports each step's duration. Ctrl-C rolls the\n" +
+			"running step back and keeps the finished ones. --schema-only stops\n" +
+			"after this phase. With --dry-run it prints the upgrade plan for a store\n" +
+			"that is behind and changes nothing.\n\n" +
 			"Phase 0 preflights read-only (--dry-run stops here): counts per phase,\n" +
 			"pending intents and superseded generations to discard, sampled\n" +
 			"field/blob mismatches, free disk, and an advisory no-other-writer note.\n" +
@@ -72,6 +81,28 @@ func BuildMigrateCommand() *cobra.Command {
 			}
 
 			dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
+			// The schema phase. A dry run prints the plan of a behind store
+			// and stops: the later phases read the head schema, so there is
+			// nothing more to forecast until the store is upgraded.
+			if dryRun {
+				upgrade, err := planStoreUpgrade(dbPath)
+				if err != nil {
+					return err
+				}
+				if len(upgrade.Steps) > 0 || schemaOnly {
+					return writeSchemaUpgradePlan(cmd, upgrade, jsonOutput)
+				}
+			}
+			if schemaOnly {
+				before, err := planStoreUpgrade(dbPath)
+				if err != nil {
+					return err
+				}
+				if err := ensureStoreCurrentConfirmed(cmd, dbPath, storeEntryModeFor(cmd), confirm); err != nil {
+					return err
+				}
+				return writeSchemaUpgradeResult(cmd, before, jsonOutput)
+			}
 			db, closeStore, err := openMigrateStore(cmd, dryRun, confirm, string(ownedRoot), dbPath)
 			if err != nil {
 				return err
@@ -123,7 +154,8 @@ func BuildMigrateCommand() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Report per-phase counts without converting any session")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Report the schema upgrade plan and per-phase counts without changing anything")
+	cmd.Flags().BoolVar(&schemaOnly, "schema-only", false, "Upgrade the store schema and stop before converting any session")
 	cmd.Flags().IntVar(&limit, "limit", 0, "Convert at most this many sessions with work (0 = all); re-run to continue where this pass stopped")
 	cmd.Flags().BoolVar(&confirm, "confirm", false, "Skip interactive confirmation (for scripts/CI)")
 	cmd.Flags().BoolVar(&jsonOutput, defaults.JSONFlagName, false, "Output results as JSON")
@@ -133,9 +165,9 @@ func BuildMigrateCommand() *cobra.Command {
 
 // openMigrateStore opens the analytics store with the managed-generation
 // artifact store rooted at the configured output base. A dry run opens
-// read-only and creates no file; a real run opens read-write, refusing a
-// non-interactive run without confirm before the open when the open would
-// rebuild the whole search index.
+// read-only and creates no file; a real run runs the schema phase first
+// (the store upgrade, under the entry-point policy or by --confirm) and
+// then opens read-write.
 func openMigrateStore(cmd *cobra.Command, dryRun, confirm bool, ownedRoot, dbPath string) (*store.Store, func(), error) {
 	if dryRun {
 		options, err := generationStoreOptionsReadOnly(ownedRoot)
@@ -158,16 +190,12 @@ func openMigrateStore(cmd *cobra.Command, dryRun, confirm bool, ownedRoot, dbPat
 	if err != nil {
 		return nil, func() {}, err
 	}
-	options = append(options, store.WithMigrationConsent(store.PromptMigrationConsentOnTTY()))
-	// The residue gate runs before the open unless --confirm was given: an
-	// explicit --confirm is the user's own act, so the one-time search index
-	// repair runs by consent even off-terminal. Without it, a
-	// non-interactive run would pay the whole-index rebuild unseen and then
-	// refuse at the confirmation prompt anyway, so it refuses here first.
-	if !confirm {
-		if err := refuseStaleSearchIndex(dbPath); err != nil {
-			return nil, func() {}, err
-		}
+	// A behind store is upgraded first. An explicit --confirm is the user's
+	// own consent, so the upgrade runs without a prompt, also off-terminal.
+	// Without it the entry-point policy applies: a terminal asks before a
+	// long step, and a run with no terminal refuses one.
+	if err := ensureStoreCurrentConfirmed(cmd, dbPath, storeEntryModeFor(cmd), confirm); err != nil {
+		return nil, func() {}, err
 	}
 	db, err := store.Open(dbPath, options...)
 	if err != nil {
@@ -436,5 +464,72 @@ func writeMigrateResult(cmd *cobra.Command, result store.MigrateResult, jsonOutp
 	if result.BytesFreed > 0 {
 		fmt.Fprintf(out, "\nSQLite reuses the freed pages but does not shrink the file. To reclaim the space, stop every process using the database and run offline:\n  sqlite3 %s \"INSERT INTO session_search_fts(session_search_fts) VALUES('optimize'); VACUUM;\"\n", dbPath)
 	}
+	return nil
+}
+
+// writeSchemaUpgradePlan prints the schema phase's plan for a dry run: every
+// step with its cost, and the disk the long steps ask for. Nothing changes.
+func writeSchemaUpgradePlan(cmd *cobra.Command, plan store.UpgradePlan, jsonOutput bool) error {
+	if jsonOutput {
+		steps := make([]map[string]any, 0, len(plan.Steps))
+		for _, step := range plan.Steps {
+			steps = append(steps, map[string]any{
+				"version": step.Version,
+				"kind":    step.Kind.String(),
+				"title":   step.Title,
+				"cost":    step.Cost.String(),
+				"counts":  step.Counts.String(),
+			})
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{
+			"dry_run": true,
+			"schema_upgrade": map[string]any{
+				"db_path": plan.DBPath,
+				"from":    plan.From,
+				"to":      plan.To,
+				"steps":   steps,
+				"disk": map[string]any{
+					"store_bytes":      plan.StoreBytes,
+					"free_bytes":       plan.FreeBytes,
+					"free_bytes_known": plan.FreeBytesKnown,
+					"required_bytes":   plan.RequiredFreeBytes,
+				},
+			},
+		})
+	}
+	out := cmd.OutOrStdout()
+	if len(plan.Steps) == 0 {
+		fmt.Fprintf(out, "schema: the store at %s is current at schema %d; nothing to upgrade\n", plan.DBPath, plan.To)
+		return nil
+	}
+	writeStoreUpgradePlan(out, plan)
+	fmt.Fprintln(out, "dry run: nothing was changed; run `peasant migrate --schema-only` to upgrade, then `peasant migrate --dry-run` again for the per-phase counts")
+	return nil
+}
+
+// writeSchemaUpgradeResult prints the outcome of `--schema-only`. before is
+// the plan read before the upgrade ran; the per-step lines already went to
+// standard error.
+func writeSchemaUpgradeResult(cmd *cobra.Command, before store.UpgradePlan, jsonOutput bool) error {
+	if jsonOutput {
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{
+			"schema_upgrade": map[string]any{
+				"db_path": before.DBPath,
+				"from":    before.From,
+				"to":      before.To,
+				"steps":   len(before.Steps),
+			},
+		})
+	}
+	out := cmd.OutOrStdout()
+	if len(before.Steps) == 0 {
+		fmt.Fprintf(out, "schema: the store at %s is current at schema %d; nothing to upgrade\n", before.DBPath, before.To)
+		return nil
+	}
+	if before.From == before.To {
+		fmt.Fprintf(out, "schema: finished %d step(s) an earlier upgrade of the store at %s left owed; it is at schema %d\n", len(before.Steps), before.DBPath, before.To)
+		return nil
+	}
+	fmt.Fprintf(out, "schema: upgraded the store at %s from schema %d to %d\n", before.DBPath, before.From, before.To)
 	return nil
 }

@@ -1163,7 +1163,8 @@ type ingestStart struct {
 //
 // preflight refuses to claim, with the reason, when the import could not start
 // (see ingestPreflight): an invalid saved selection, a redaction level this
-// version cannot apply, or a search index that needs its one-time repair. preflight false keeps the route's
+// version cannot apply, or a store that is behind and needs the upgrade a
+// server never runs. preflight false keeps the route's
 // long-standing behavior: such a configuration is reported by the run, in the
 // status route, not by the request that started it.
 func (h *syncHandler) reserveIngest(preflight bool) (ingestStart, func(observe func(schema.LocalKickstartIngest)), error) {
@@ -1231,17 +1232,19 @@ func (h *syncHandler) ingestPreflight(cfg *config.Config) error {
 	if err := checkIngestable(cfg); err != nil {
 		return err
 	}
-	return h.refuseStaleSearchIndex()
+	return h.refuseBehindStore()
 }
 
-// refuseStaleSearchIndex refuses an import while the store's search index
-// still needs its one-time repair. A server-triggered run never pays that
-// repair: there is no terminal watching it. The refusal names the terminal
-// command that performs it, and the store is not opened. This is defensive: a
-// running server already opened the store, so the refusal means the store
-// changed under the server or the server started before the repair.
-func (h *syncHandler) refuseStaleSearchIndex() error {
-	return store.RefuseStaleSearchRebuild(false, string(h.dbPath()))
+// refuseBehindStore refuses an import while the store is behind the schema
+// this build needs, or still owes a recount an earlier upgrade did not
+// finish. A server never upgrades the store: there is no terminal watching
+// it. The check only reads, so a refused import changes no byte, and the
+// refusal is the one store.Open gives a behind store: it names the terminal
+// command that runs the upgrade. This is defensive: the server refuses a
+// behind store at start, so the refusal means the store fell behind under a
+// running server.
+func (h *syncHandler) refuseBehindStore() error {
+	return store.RefuseBehind(string(h.dbPath()))
 }
 
 // checkIngestable refuses a configuration the import cannot apply, before any
@@ -1574,7 +1577,9 @@ func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *
 		OutputDir:          resolvedOutput,
 		StalenessThreshold: staleness,
 		Write:              cfg.Write,
-		Progress:           progState,
+		// Always on: the pipeline stores the run's profile with its audit row.
+		IndexProfiler: &ingest.IndexProfiler{},
+		Progress:      progState,
 	}
 	if scope != nil {
 		// The same scope as `peasant harvest --session <id> --force`: related
@@ -1604,10 +1609,13 @@ func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *
 	if err != nil {
 		return nil, err
 	}
+	// A server never upgrades the store: there is no terminal watching it.
 	// The run asks again at the point it would open the store: a run that was
 	// not asked first (the import route, a one-session re-index) is refused
-	// here, and so is a store that changed since the caller asked.
-	if err := h.refuseStaleSearchIndex(); err != nil {
+	// here, and so is a store that fell behind since the caller asked, or
+	// under a running server. The refusal names the terminal command that
+	// runs the upgrade, and the store is not opened.
+	if err := h.refuseBehindStore(); err != nil {
 		return nil, err
 	}
 	db, err := store.Open(string(h.dbPath()), append(storeOptions, store.WithWriteConfig(cfg.Write))...)

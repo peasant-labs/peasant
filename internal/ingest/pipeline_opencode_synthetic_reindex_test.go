@@ -74,7 +74,7 @@ func TestPipeline_ReindexReclassifiesAnInjectedOpenCodeTaskResult(t *testing.T) 
 	meta.ModelHarness = schema.Harness(defaults.HarnessOpenCode)
 	session.ModTime = time.Now().Add(-1 * time.Hour)
 
-	database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
+	database, err := store.Open(storetest.CopyGoldenDB(t))
 	if err != nil {
 		t.Fatalf("open the analytics store: %v", err)
 	}

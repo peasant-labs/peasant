@@ -41,8 +41,7 @@ type searchResidueGateCase struct {
 }
 
 type searchResidueGateFixtures struct {
-	Cases              []searchResidueGateCase `yaml:"cases"`
-	MessageMustContain []string                `yaml:"messageMustContain"`
+	Cases []searchResidueGateCase `yaml:"cases"`
 }
 
 func loadSearchResidueGateFixtures(t *testing.T) searchResidueGateFixtures {
@@ -64,15 +63,12 @@ func loadSearchResidueGateFixtures(t *testing.T) searchResidueGateFixtures {
 	if err := validateRecoveryRequiredNames(manifest, actual, "search residue gate"); err != nil {
 		t.Fatal(err)
 	}
-	if len(decoded.MessageMustContain) == 0 {
-		t.Fatal("search_residue_gate.yaml carries no messageMustContain fragments; the refusal message is unpinned")
-	}
-	return searchResidueGateFixtures{Cases: decoded.Cases, MessageMustContain: decoded.MessageMustContain}
+	return searchResidueGateFixtures{Cases: decoded.Cases}
 }
 
 // seedSearchResidueDB builds the minimal store the helper reads from one
 // fixture case through the shared residue fixture: a stamped user_version
-// plus the two FTS docsize tables. Only what NeedsSearchResidueRebuild
+// plus the two FTS docsize tables. Only what the upgrade plan
 // inspects exists, so the cases pin the gate and nothing else.
 func seedSearchResidueDB(t *testing.T, path string, c searchResidueGateCase) {
 	t.Helper()
@@ -97,13 +93,13 @@ func fileHash(t *testing.T, path string) []byte {
 	return sum[:]
 }
 
-// TestNeedsSearchResidueRebuild pins the read-only pre-open check against the
+// TestSearchRepairCost pins the read-only upgrade plan against the
 // vendored SQLite: the version gate first (74, 76, and missing files proceed
 // without touching the predicate), then the residue verdict per window. Every
 // case also proves the helper never writes: the database file hashes
 // identically before and after, and no -wal/-shm sidecars appear (the minimal
 // fixtures use rollback journals).
-func TestNeedsSearchResidueRebuild(t *testing.T) {
+func TestSearchRepairCost(t *testing.T) {
 	t.Parallel()
 	fixtures := loadSearchResidueGateFixtures(t)
 	for _, c := range fixtures.Cases {
@@ -112,7 +108,7 @@ func TestNeedsSearchResidueRebuild(t *testing.T) {
 			t.Parallel()
 			if c.Missing {
 				path := filepath.Join(t.TempDir(), "absent.db")
-				got, err := NeedsSearchResidueRebuild(path)
+				got, err := searchRepairIsLong(t, path)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -124,12 +120,12 @@ func TestNeedsSearchResidueRebuild(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "residue.db")
 			seedSearchResidueDB(t, path, c)
 			before := fileHash(t, path)
-			got, err := NeedsSearchResidueRebuild(path)
+			got, err := searchRepairIsLong(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if got != c.WantResidue {
-				t.Errorf("NeedsSearchResidueRebuild = %v, want %v", got, c.WantResidue)
+				t.Errorf("plan classifies the search repair long = %v, want %v", got, c.WantResidue)
 			}
 			if after := fileHash(t, path); string(after) != string(before) {
 				t.Error("the residue check modified the database file; the read-only probe must never write")
@@ -143,12 +139,12 @@ func TestNeedsSearchResidueRebuild(t *testing.T) {
 	}
 }
 
-// TestNeedsSearchResidueRebuildWALModeClosed drives the no--wal branch on a
+// TestSearchRepairCostWALModeClosed drives the no--wal branch on a
 // WAL-mode store after every connection closed, the state a real store is in
 // between runs: the header says WAL but no -wal or -shm exists. The check
 // must open it with immutable=1, report the residue, leave the database file
 // byte-identical, and create neither sidecar.
-func TestNeedsSearchResidueRebuildWALModeClosed(t *testing.T) {
+func TestSearchRepairCostWALModeClosed(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "residue-wal-closed.db")
 	residuefixture.SeedAffected(t, path)
@@ -169,7 +165,7 @@ func TestNeedsSearchResidueRebuildWALModeClosed(t *testing.T) {
 		}
 	}
 	before := fileHash(t, path)
-	got, err := NeedsSearchResidueRebuild(path)
+	got, err := searchRepairIsLong(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +182,7 @@ func TestNeedsSearchResidueRebuildWALModeClosed(t *testing.T) {
 	}
 }
 
-// TestNeedsSearchResidueRebuildWALPresent drives the -wal-present branch of
+// TestSearchRepairCostWALPresent drives the -wal-present branch of
 // the read-only open on a live WAL store. A writer connection stays open with
 // automatic checkpoints off and commits, into the -wal only, the change that
 // makes the store affected: user_version 74 -> 75 and a union-only posting.
@@ -194,7 +190,7 @@ func TestNeedsSearchResidueRebuildWALModeClosed(t *testing.T) {
 // report 75 and residue by reading the uncheckpointed -wal. The database
 // file and the -wal are byte-identical afterwards. The -shm is not compared:
 // every reader of a live WAL store records its read mark there.
-func TestNeedsSearchResidueRebuildWALPresent(t *testing.T) {
+func TestSearchRepairCostWALPresent(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "residue-wal.db")
 	residuefixture.Seed(t, path, 74, residuefixture.CleanUnion, residuefixture.CleanLegacy)
@@ -230,32 +226,17 @@ PRAGMA user_version = 75;`, ghost.ID+100, ghost.Text), nil); err != nil {
 	if version != 75 {
 		t.Errorf("SchemaVersionAt = %d, want the uncheckpointed 75 from the -wal", version)
 	}
-	got, err := NeedsSearchResidueRebuild(path)
+	got, err := searchRepairIsLong(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !got {
-		t.Error("NeedsSearchResidueRebuild = false, want the residue committed to the -wal")
+		t.Error("the plan classifies the search repair quick; want long from the residue committed to the -wal")
 	}
 	if after := fileHash(t, path); string(after) != string(dbBefore) {
 		t.Error("the WAL-present check modified the database file")
 	}
 	if after := fileHash(t, path+"-wal"); string(after) != string(walBefore) {
 		t.Error("the WAL-present check modified the -wal")
-	}
-}
-
-// TestSearchResidueRefusalMessage pins the six-part refusal every gated entry
-// point prints or returns: what failed, why, where, when, meaning, and the
-// terminal fix. The fragments live in the fixture so the message stays
-// reviewable as data.
-func TestSearchResidueRefusalMessage(t *testing.T) {
-	t.Parallel()
-	fixtures := loadSearchResidueGateFixtures(t)
-	msg := (&SearchResidueRebuildError{DBPath: "/synthetic/peasant.db"}).Error()
-	for _, fragment := range fixtures.MessageMustContain {
-		if !strings.Contains(msg, fragment) {
-			t.Errorf("refusal message misses %q:\n%s", fragment, msg)
-		}
 	}
 }

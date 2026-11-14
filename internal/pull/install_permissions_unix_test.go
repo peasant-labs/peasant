@@ -80,7 +80,7 @@ func TestContentInstallSearchOnlyAncestor(t *testing.T) {
 			t.Logf("effective unprivileged permission boundary: uid=%d, unchanged ancestor mode=0111, existing data anchor mode=0700", os.Geteuid())
 			dbPath := filepath.Join(anchor, "index.db")
 			storetest.CopyGoldenTo(t, dbPath)
-			db, err := store.Open(dbPath, store.WithSkipMigrations())
+			db, err := store.Open(dbPath)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -119,7 +119,7 @@ func TestContentInstallSearchOnlyAncestor(t *testing.T) {
 				if err := db.Close(); err != nil {
 					t.Fatal(err)
 				}
-				db, err = store.Open(dbPath, store.WithSkipMigrations())
+				db, err = store.Open(dbPath)
 				if err != nil {
 					t.Fatal(err)
 				}

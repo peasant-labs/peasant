@@ -1,0 +1,44 @@
+# Bind-only index write cases. Every case seeds one indexed session with a
+# settled input proof and publication capture revision 3 that the index is not
+# yet bound to.
+#
+# action:
+#   bind   -> BindPublicationIndex with the captured state. revision is the
+#             capture revision requested; move changes the row after the state
+#             was captured; wrongInput binds with a digest the proof does not
+#             name. A refused bind changes nothing.
+#   mirror -> MirrorArtifacts with a pair whose identity moved. transcriptKept
+#             is what the install reported.
+cases:
+  - name: binds-the-index-to-the-current-capture-without-touching-entries
+    action: bind
+    revision: 3
+    wantBoundRevision: 3
+    wantIndexedAt: 500
+  - name: zero-revision-advances-the-index-time-only
+    action: bind
+    revision: 0
+    wantBoundRevision: 0
+    wantIndexedAt: 500
+  - name: mirror-keeps-the-proof-beside-a-kept-transcript
+    action: mirror
+    transcriptKept: true
+    wantProofKept: true
+  - name: mirror-clears-the-proof-when-the-pair-changed-otherwise
+    action: mirror
+    transcriptKept: false
+    wantProofKept: false
+  - name: refuses-a-row-that-moved-since-it-was-captured
+    action: bind
+    revision: 3
+    move: true
+    wantStale: true
+    wantBoundRevision: 0
+    wantIndexedAt: 300
+  - name: refuses-an-input-the-stored-proof-does-not-name
+    action: bind
+    revision: 3
+    wrongInput: true
+    wantStale: true
+    wantBoundRevision: 0
+    wantIndexedAt: 100
