@@ -1,0 +1,155 @@
+cases:
+  - name: release-header-is-the-tag-section
+    mounted: true
+    tag: v2.4.0
+    changelog: |
+      # Changelog
+
+      ## [Unreleased]
+      Unreleased work.
+
+      ## [2.4.0] - 2030-01-02
+
+      ### Upgrade notes
+      - Refresh the synthetic index once.
+
+      ### Fixed
+      - Keep a literal {{ example }} intact.
+
+      ## [2.3.0] - 2029-12-01
+      Older work.
+    header: |-
+      ## [2.4.0] - 2030-01-02
+
+      ### Upgrade notes
+      - Refresh the synthetic index once.
+
+      ### Fixed
+      - Keep a literal {{ example }} intact.
+    commits: |-
+      ## Changelog
+      * abc1234 Synthetic change
+      * def5678 Another synthetic change
+    body: |-
+      ## [2.4.0] - 2030-01-02
+
+      ### Upgrade notes
+      - Refresh the synthetic index once.
+
+      ### Fixed
+      - Keep a literal {{ example }} intact.
+
+      ## Changelog
+      * abc1234 Synthetic change
+      * def5678 Another synthetic change
+  - name: rc-and-final-are-distinct
+    mounted: true
+    tag: v2.4.0-rc1
+    changelog: |
+      ## [2.4.0] - 2030-01-02
+      Final.
+
+      ## [2.4.0-rc10] - 2030-01-01
+      Tenth candidate.
+
+      ## [2.4.0-rc1] - 2029-12-30
+      First candidate.
+    header: |-
+      ## [2.4.0-rc1] - 2029-12-30
+      First candidate.
+  - name: exact-version-does-not-match-a-prefix
+    tag: v2.4.0
+    changelog: |
+      ## [2.4.00] - 2030-01-02
+      Not the requested release.
+      ## [2.4.0-rc1] - 2030-01-01
+      Nor this one.
+    error_contains: has no section for tag "v2.4.0"
+  - name: missing-section-fails
+    mounted: true
+    tag: v2.5.0
+    changelog: |
+      ## [Unreleased]
+      Not a release section.
+      ## [2.4.0]
+      Previous release.
+    error_contains: has no section for tag "v2.5.0"
+  - name: duplicate-section-fails
+    mounted: true
+    tag: v2.4.0
+    changelog: |
+      ## [2.4.0] - 2030-01-02
+      First.
+      ## [2.3.0]
+      Previous.
+      ## [2.4.0] - 2030-01-03
+      Duplicate.
+    error_contains: has multiple sections for tag "v2.4.0"
+  - name: fenced-headings-are-content
+    tag: v2.4.0
+    changelog: |
+      ## [2.4.0]
+      ```markdown
+      ## [2.4.0]
+      ## Example
+      ```
+      ~~~~
+      ## Example two
+      ~~~
+      ## Still fenced
+      ~~~~
+      After the examples.
+      ## [2.3.0]
+      Previous.
+    header: |-
+      ## [2.4.0]
+      ```markdown
+      ## [2.4.0]
+      ## Example
+      ```
+      ~~~~
+      ## Example two
+      ~~~
+      ## Still fenced
+      ~~~~
+      After the examples.
+  - name: commented-heading-does-not-count
+    tag: v2.4.0
+    changelog: |
+      <!--
+      ## [2.4.0]
+      An example, not a section.
+      -->
+      ## [2.4.0] - 2030-01-02
+      Real section.
+    header: |-
+      ## [2.4.0] - 2030-01-02
+      Real section.
+  - name: final-section-excludes-global-link-definitions
+    tag: v2.3.0
+    changelog: |
+      ## [2.4.0]
+      Newer.
+
+      ## [2.3.0]
+      Final section.
+
+      [2.4.0]: https://example.invalid/v2.4.0
+      [2.3.0]: https://example.invalid/v2.3.0
+    header: |-
+      ## [2.3.0]
+      Final section.
+  - name: crlf-section-preserves-line-endings
+    tag: v2.4.0
+    changelog: "# Changelog\r\n\r\n## [2.4.0]\r\n\r\nFirst line.\r\nSecond line.\r\n\r\n## [2.3.0]\r\nOlder.\r\n"
+    header: "## [2.4.0]\r\n\r\nFirst line.\r\nSecond line."
+  - name: non-tag-input-fails
+    tag: 2.4.0
+    changelog: |
+      ## [2.4.0]
+      A section.
+    error_contains: must start with v
+  - name: nul-byte-fails-closed
+    tag: v2.4.0
+    changelog: "## [2.4.0]\ninvalid\u0000text\n"
+    error_contains: contains a NUL byte
