@@ -82,6 +82,7 @@ slots:
   - {name: v76-search-trigger-repair, slot: 76, needle: "SELECT 'rebuild' WHERE"}
   - {name: v77-turn-count-recount-marker, slot: 77, needle: "CREATE TABLE pending_recounts ("}
   - {name: v78-harness-check-widening, slot: 78, needle: "CREATE TABLE sessions_v78 AS SELECT * FROM sessions;"}
+  - {name: v79-import-profile-and-outcome-reasons, slot: 79, needle: "CREATE TABLE ingest_outcome_reasons ("}
 guards:
   - name: deleted-required-slot
     operation: delete-required-slot

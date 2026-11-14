@@ -104,7 +104,7 @@ func TestCodexLexicalReopenExport(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
 			dbPath := storetest.CopyGoldenDB(t)
-			db, err := store.Open(dbPath, store.WithSkipMigrations())
+			db, err := store.Open(dbPath)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -141,7 +141,7 @@ func TestCodexLexicalReopenExport(t *testing.T) {
 			if err := db.Close(); err != nil {
 				t.Fatal(err)
 			}
-			db2, err := store.Open(dbPath, store.WithSkipMigrations())
+			db2, err := store.Open(dbPath)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -208,7 +208,7 @@ func TestCodexWideReopenExport(t *testing.T) {
 	}
 	ctx := context.Background()
 	dbPath := storetest.CopyGoldenDB(t)
-	db, err := store.Open(dbPath, store.WithSkipMigrations())
+	db, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +267,7 @@ func TestCodexWideReopenExport(t *testing.T) {
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	db2, err := store.Open(dbPath, store.WithSkipMigrations())
+	db2, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}

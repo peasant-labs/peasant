@@ -16,6 +16,7 @@ import (
 
 // PiAdapter discovers normal Pi v3 JSONL recordings through the common pipeline.
 type PiAdapter struct {
+	discoveryProgressAttachment
 	fs          FileSystem
 	git         GitResolver
 	salt        salt.Salt
@@ -23,6 +24,7 @@ type PiAdapter struct {
 }
 
 var _ SourceAdapter = (*PiAdapter)(nil)
+var _ DiscoveryProgressReporting = (*PiAdapter)(nil)
 var _ DiscoveryDiagnosticReporter = (*PiAdapter)(nil)
 var _ SessionLocator = (*PiAdapter)(nil)
 
@@ -53,6 +55,7 @@ type piCandidate struct {
 func (a *PiAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]DiscoveredSession, error) {
 	a.diagnostics = nil
 	if !cfg.Enabled {
+		discoveryTotal(a.progress, HarnessPi, 0)
 		return nil, nil
 	}
 	var sources []piSource
@@ -68,7 +71,8 @@ func (a *PiAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Discovere
 			sources = append(sources, piSource{root: root, path: path})
 		}
 	}
-	return a.buildPiSessions(ctx, sources)
+	discoveryTotal(a.progress, HarnessPi, len(sources))
+	return a.buildPiSessions(ctx, sources, a.progress)
 }
 
 // buildPiSessions is the one construction path for Discover and
@@ -77,9 +81,12 @@ func (a *PiAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Discovere
 // source (want set) returns the failure instead of skipping it, because the
 // core decides whether a stored session is unreadable and a selected one is a
 // miss.
-func (a *PiAdapter) buildPiSessions(ctx context.Context, sources []piSource) ([]DiscoveredSession, error) {
+func (a *PiAdapter) buildPiSessions(ctx context.Context, sources []piSource, progress DiscoveryProgress) ([]DiscoveredSession, error) {
 	winners := make(map[SessionID]piCandidate)
-	for _, source := range sources {
+	for i, source := range sources {
+		if i > 0 {
+			discoveryAdvance(progress, HarnessPi)
+		}
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -163,6 +170,9 @@ func (a *PiAdapter) buildPiSessions(ctx context.Context, sources []piSource) ([]
 			winners[sid] = candidate
 		}
 	}
+	if len(sources) > 0 {
+		discoveryAdvance(progress, HarnessPi)
+	}
 	result := make([]DiscoveredSession, 0, len(winners))
 	for _, candidate := range winners {
 		result = append(result, candidate.session)
@@ -224,7 +234,7 @@ func (a *PiAdapter) DiscoverSessionAt(ctx context.Context, cfg SourceConfig, at 
 	if !ok {
 		return LocatedBuild{}, fmt.Errorf("ingest: the located Pi path %q lies outside every configured Pi source root; a located source must be attributed to the root the full walk would have found it under, or the member would carry a different OriginalRoot than discovery gives it; where: ingest.PiAdapter.DiscoverSessionAt in internal/ingest/pi.go; when: resolving the source root of the located path; impact: nothing was read and no member was built; fix: restore the recording under a configured Pi source path, or add the path's root to the configured source paths", at.Path)
 	}
-	sessions, err := a.buildPiSessions(ctx, []piSource{{root: root, path: at.Path.String(), want: at.ID}})
+	sessions, err := a.buildPiSessions(ctx, []piSource{{root: root, path: at.Path.String(), want: at.ID}}, nil)
 	if err != nil {
 		return LocatedBuild{}, err
 	}

@@ -44,6 +44,39 @@ cases:
       sqlite.go: "package sqlite\n"
       extra.go: "package sqlite\n"
     expected_error: cannot replace historical production driver
+  - name: unrelated migration package keeps its historical implementation
+    mode: unrelated
+    candidate_files:
+      sqlite.go: "package sqlite\n"
+      sqlitemigration/migrate.go: "package sqlitemigration // candidate\n"
+    historical_files:
+      sqlite.go: "package sqlite\n"
+      sqlitemigration/migrate.go: "package sqlitemigration // historical\n"
+    expected_files:
+      sqlite.go: "package sqlite\n"
+      sqlitemigration/migrate.go: "package sqlitemigration // historical\n"
+  - name: different transitive fixture dependency cannot be hidden
+    mode: transitive
+    candidate_files:
+      sqlite.go: "package sqlite\nimport _ \"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitemigration\"\n"
+      sqlitemigration/migrate.go: "package sqlitemigration // candidate\n"
+    historical_files:
+      sqlite.go: "package sqlite\nimport _ \"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitemigration\"\n"
+      sqlitemigration/migrate.go: "package sqlitemigration // historical\n"
+    expected_files:
+      sqlite.go: "package sqlite\nimport _ \"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitemigration\"\n"
+      sqlitemigration/migrate.go: "package sqlitemigration // historical\n"
+    expected_error: cannot replace historical production driver
+  - name: unresolved fixture dependency fails closed
+    mode: unresolved
+    candidate_files:
+      sqlite.go: "package sqlite\nimport _ \"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitemigration\"\n"
+      sqlitemigration/migrate.go: "package sqlitemigration\n"
+    historical_files:
+      sqlite.go: "package sqlite\nimport _ \"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitemigration\"\n"
+    expected_files:
+      sqlite.go: "package sqlite\nimport _ \"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitemigration\"\n"
+    expected_error: resolve shared fixture builder dependencies in historical
   - name: original module based fixture builder needs no driver injection
     mode: legacy
     expected_files: {}

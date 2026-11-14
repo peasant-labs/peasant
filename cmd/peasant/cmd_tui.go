@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -71,13 +72,22 @@ func runTUI(cmd *cobra.Command, cfgPath string, mockDataStore string) error {
 	var openErr error
 	// The TUI only runs on a terminal, so require it before touching the
 	// store: a non-interactive invocation must fail here instead of
-	// migrating (and rebuilding) the database invisibly on the way to the
-	// same refusal below.
-	if !tuiTerminalAvailable() {
-		return noTerminalError{command: "tui"}
+	// upgrading the database on the way to the same refusal below.
+	if err := requireTerminal("tui"); err != nil {
+		return err
 	}
 	if err := os.MkdirAll(dataDir, defaults.PrivateDirPerm); err != nil {
 		openErr = fmt.Errorf("create the data directory %s: %w", dataDir, err)
+	} else if err := ensureStoreCurrent(cmd, dbPath, storeEntryTerminal); err != nil {
+		// A declined or refused upgrade is the answer, not a store that
+		// failed to open. Any other failure is kept like an open failure:
+		// a fully mocked TUI needs no database.
+		var refusal *storeUpgradeRefusal
+		if errors.As(err, &refusal) {
+			cmd.SilenceUsage = true
+			return err
+		}
+		openErr = fmt.Errorf("check the analytics database %s for a pending upgrade: %w", dbPath, err)
 	} else if db, err := store.Open(dbPath); err != nil {
 		openErr = fmt.Errorf("open the analytics database %s: %w", dbPath, err)
 	} else {

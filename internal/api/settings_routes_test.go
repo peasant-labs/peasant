@@ -133,7 +133,7 @@ func newSettingsRulesWorld(t *testing.T, cfg *config.Config) *settingsRulesWorld
 		t.Fatal(err)
 	}
 	storetest.CopyGoldenTo(t, hs.dbPath())
-	db, err := store.Open(hs.dbPath(), store.WithSkipMigrations())
+	db, err := store.Open(hs.dbPath())
 	if err != nil {
 		t.Fatal(err)
 	}

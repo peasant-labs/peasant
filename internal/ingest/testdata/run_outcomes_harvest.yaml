@@ -5,7 +5,7 @@ sessions:
     sessionId: 59000000-0000-0000-0000-000000000001
     workerFailure: true
     kind: worker_error
-    reason: adapter_refresh_unavailable
+    reason: adapter_capture_failed
   - name: warning-source
     sessionId: 59000000-0000-0000-0000-000000000002
     workerFailure: false

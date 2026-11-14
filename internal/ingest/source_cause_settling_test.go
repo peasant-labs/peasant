@@ -77,7 +77,7 @@ func TestSourceCauseSettling(t *testing.T) {
 func testSourceCauseChange(t *testing.T, firstReason, secondReason, firstMentions, secondMentions string) {
 	t.Helper()
 	memfs := testutil.NewMemFS()
-	database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
+	database, err := store.Open(storetest.CopyGoldenDB(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func testSourceCauseChange(t *testing.T, firstReason, secondReason, firstMention
 func testHarvestIndexReportsOneCause(t *testing.T, wantReason string) {
 	t.Helper()
 	memfs := testutil.NewMemFS()
-	database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
+	database, err := store.Open(storetest.CopyGoldenDB(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func testPairLaneStoreFaultKeepsFailure(t *testing.T, fault string) {
 	t.Helper()
 	ctx := t.Context()
 	memfs := testutil.NewMemFS()
-	database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
+	database, err := store.Open(storetest.CopyGoldenDB(t))
 	if err != nil {
 		t.Fatal(err)
 	}

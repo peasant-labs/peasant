@@ -1,0 +1,13 @@
+requiredNames:
+  - codex-total-is-known-before-the-first-advance
+  - codex-advances-once-per-source
+  - codex-counts-across-roots
+  - opencode-total-is-known-before-the-first-advance
+  - opencode-advances-once-per-source
+  - pi-total-is-known-before-the-first-advance
+  - pi-advances-once-per-source
+  - cursor-total-is-known-before-the-first-advance
+  - cursor-advances-once-per-source
+  - cursor-counts-across-roots
+  - strike-total-is-known-before-the-first-advance
+  - strike-advances-once-per-source

@@ -67,7 +67,7 @@ func TestPermanentRefusalReachesASteadyState(t *testing.T) {
 		t.Run(fixture.Name, func(t *testing.T) {
 			ctx := context.Background()
 			fs := testutil.NewCountingFS(testutil.NewMemFS())
-			database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
+			database, err := store.Open(storetest.CopyGoldenDB(t))
 			if err != nil {
 				t.Fatal(err)
 			}

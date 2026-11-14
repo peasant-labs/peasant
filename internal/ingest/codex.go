@@ -29,6 +29,7 @@ import (
 // "response_item" (the OpenAI Responses API stream), and "event_msg" (UI
 // events including the periodic "token_count" totals).
 type CodexAdapter struct {
+	discoveryProgressAttachment
 	fs          FileSystem
 	git         GitResolver
 	salt        salt.Salt
@@ -48,6 +49,7 @@ type CodexAdapter struct {
 }
 
 var _ SourceAdapter = (*CodexAdapter)(nil)
+var _ DiscoveryProgressReporting = (*CodexAdapter)(nil)
 var _ SessionLocator = (*CodexAdapter)(nil)
 var _ RolloutEnumerator = (*CodexAdapter)(nil)
 
@@ -124,11 +126,18 @@ func (a *CodexAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Discov
 		// because it prunes only under the roots it was given. NotWalked states
 		// the fact the two writers agree on.
 		a.enumeration = RolloutEnumeration{Status: RolloutEnumerationNotWalked}
+		discoveryTotal(a.progress, HarnessCodex, 0)
 		return nil, nil
 	}
 	a.enumeration = RolloutEnumeration{Status: RolloutEnumerationComplete}
 	var sessions []DiscoveredSession
 	var enumerated []RolloutFile
+	type sourceGroup struct {
+		sources []codexRolloutSource
+		titles  map[ResolvedPath]map[string]string
+	}
+	groups := make([]sourceGroup, 0, len(cfg.Paths))
+	total := 0
 
 	for _, basePath := range cfg.Paths {
 		// Read sibling session_index.jsonl once per root. Missing/corrupt index
@@ -153,7 +162,12 @@ func (a *CodexAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Discov
 		// the build: the catalog answers the duplicate and parent questions,
 		// and both are about rollout files, not about stored sessions.
 		enumerated = append(enumerated, codexRolloutFiles(sources)...)
-		sessions = append(sessions, a.buildCodexSessions(sources, titles)...)
+		groups = append(groups, sourceGroup{sources: sources, titles: titles})
+		total += len(sources)
+	}
+	discoveryTotal(a.progress, HarnessCodex, total)
+	for _, group := range groups {
+		sessions = append(sessions, a.buildCodexSessions(group.sources, group.titles)...)
 	}
 
 	a.enumeration.Files = dedupeRolloutFiles(enumerated)
@@ -295,12 +309,18 @@ func (n codexBuildNeed) needsParent() bool { return n == codexBuildWithParent }
 // be identified cannot be processed.
 func (a *CodexAdapter) buildCodexSessions(sources []codexRolloutSource, titles map[ResolvedPath]map[string]string) []DiscoveredSession {
 	sessions := make([]DiscoveredSession, 0, len(sources))
-	for _, source := range sources {
+	for index, source := range sources {
+		if index > 0 {
+			discoveryAdvance(a.progress, HarnessCodex)
+		}
 		build, err := a.buildCodexSession(source, titles[source.root], codexBuildSessionOnly)
 		if err != nil {
 			continue
 		}
 		sessions = append(sessions, build.Session)
+	}
+	if len(sources) > 0 {
+		discoveryAdvance(a.progress, HarnessCodex)
 	}
 	return sessions
 }

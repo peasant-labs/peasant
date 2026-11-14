@@ -1,0 +1,332 @@
+# Store upgrade cases. Open never changes the schema of a store that holds
+# data; PlanUpgrade reads without changing a file; Upgrade is the only
+# function that applies migrations. Every behind store here is built on the
+# frozen migration chain: `from` is the number of shipped migrations applied
+# before the case starts. A refusal asserts that the database file's SHA-256
+# is unchanged.
+#
+# stopAt names the schema version whose step is interrupted, after its script
+# and its data fill and before its commit; wantVersion is the schema the
+# store is left at. fault names how the step is stopped: `cancel` cancels the
+# upgrade's context, `error` fails inside the step the way a killed process
+# would leave it (an uncommitted transaction).
+cases:
+  - name: fresh-store-is-created-at-head-without-a-plan
+    kind: fresh
+  - name: current-store-has-no-steps
+    kind: current
+  - name: behind-store-plan-lists-every-step-with-title-and-cost
+    kind: plan
+    from: 69
+  - name: open-refuses-a-behind-store-and-changes-no-byte
+    kind: open-refuses
+    from: 69
+  - name: newer-store-is-refused-before-any-step
+    kind: newer
+  - name: cancel-during-a-step-rolls-it-back-and-keeps-finished-steps
+    kind: interrupted
+    from: 69
+    stopAt: 72
+    fault: cancel
+    wantVersion: 71
+  - name: data-fill-commits-with-its-schema-step
+    kind: data-fill
+    from: 73
+    stopAt: 74
+    fault: error
+    wantVersion: 73
+  - name: insufficient-free-disk-refuses-before-the-first-step
+    kind: disk-insufficient
+    from: 69
+  - name: unknown-free-disk-warns-and-continues
+    kind: disk-unknown
+    from: 69
+  - name: wal-is-truncated-after-the-last-step
+    kind: wal-truncated
+    from: 69
+  - name: second-process-waits-on-the-run-lock
+    kind: run-lock
+    from: 75
+  - name: every-migration-has-a-catalog-entry
+    kind: catalog
+  # A schema-75 store whose retired search index is missing: the plan cannot
+  # compare the two indexes, so the upgrade prints one warning and runs; the
+  # repair rebuilds the index.
+  - name: precheck-missing-retired-index-warns-and-continues
+    kind: precheck-retired-missing
+    from: 75
+  # A schema-75 store whose live search index is missing cannot be repaired:
+  # the plan returns the actionable error, with no warning and no raw
+  # "no such table" from SQLite.
+  - name: precheck-missing-live-index-returns-the-actionable-error
+    kind: precheck-live-missing
+    from: 75
+  # The rebuild notice reaches the caller through UpgradeOptions.Notices; no
+  # package variable carries it.
+  - name: notice-writer-is-an-open-option
+    kind: notice-option
+    from: 75
+  - name: events-arrive-in-order-for-every-step
+    kind: events
+    from: 69
+  # Disk need. Each step's need is its disk factor times its basis: the
+  # whole database, or the tables the step rewrites. The plan asks for the
+  # largest need among its steps. wantFactorMin and wantFactorMax bound
+  # RequiredFreeBytes / StoreBytes. residue seeds stale search results into a
+  # schema-75 store, so its repair rebuilds the index.
+  # From 78 the plan is light steps only: from 77 and below it holds step 78,
+  # which copies the session tables and asks for twice their size.
+  - name: plan-of-light-steps-asks-for-the-small-share
+    kind: disk-need
+    from: 78
+    wantFactorMin: 0.0001
+    wantFactorMax: 0.02
+  - name: plan-with-a-search-rebuild-asks-for-its-own-share
+    kind: disk-need
+    from: 75
+    residue: true
+    wantFactorMin: 0.2
+    wantFactorMax: 0.6
+  - name: disk-need-is-the-largest-step-not-the-sum
+    kind: disk-need-largest
+    from: 69
+  - name: too-little-free-disk-for-light-steps-refuses-and-names-needed-and-free-bytes
+    kind: disk-insufficient
+    from: 75
+  # Every cost class implies a disk need; a catalog entry overrides it only
+  # when the step copies a table, and an override that restates the need
+  # its cost implies fails.
+  - name: every-cost-class-has-a-disk-need-and-no-override-restates-it
+    kind: catalog
+  # The entry table rebuild (schema 75) asks for its factor times the entry
+  # table and the search indexes it rebuilds. Where the store keeps its text
+  # in the bodies, the entry table is read in full, row by row from the
+  # record headers, and each search index is sized by its structure record.
+  # Where the text is in the entry rows, that table dominates the database
+  # and the basis is the whole database. wantBasisMin and wantBasisMax bound
+  # the need over the factor times dbstat's page count of those objects;
+  # wantFactorMin and wantFactorMax bound it over the database size.
+  # sessions, textEntries (per session), meanEntryBytes, rowEntries (entry
+  # rows a converted store keeps, of sessions never converted) and
+  # contentBytes (stored transcript per session) size the synthetic
+  # schema-74 store.
+  - name: entry-text-in-bodies-store-asks-for-the-factor-times-its-small-entry-table-and-search-index
+    kind: disk-layout-need
+    layout: entry-text-in-bodies
+    sessions: 40
+    textEntries: 25
+    meanEntryBytes: 1024
+    rowEntries: 2
+    contentBytes: 131072
+    wantBasisMin: 1.0
+    wantBasisMax: 1.6
+    wantFactorMin: 0.05
+    wantFactorMax: 0.5
+  - name: entry-text-in-rows-store-asks-for-the-factor-times-its-database
+    kind: disk-layout-need
+    layout: entry-text-in-rows
+    sessions: 40
+    textEntries: 25
+    meanEntryBytes: 1024
+    wantBasisMin: 1.0
+    wantBasisMax: 1.8
+    wantFactorMin: 1.99
+    wantFactorMax: 2.01
+  # An entry table with more rows than the read bound (maxEntryRows) stops
+  # the read one row past the bound and takes the whole database.
+  - name: entry-table-estimate-reads-no-more-than-its-row-bound
+    kind: disk-estimate-bound
+    layout: entry-text-in-bodies
+    sessions: 20
+    textEntries: 2
+    meanEntryBytes: 256
+    rowEntries: 10
+    maxEntryRows: 64
+  # A heavy tail of entry sizes never makes the basis come in low: the
+  # estimate is at least dbstat's page count of the entry table and search
+  # indexes, and the plan at least the factor times that. entryShape
+  # distributes the entry row sizes: one-percent-hundredfold makes every
+  # hundredth row a hundred times the mean, rising-with-rowid grows each row
+  # from near zero to twice the mean. In the bodies layout the shaped rows
+  # are the entry rows of never-converted sessions (rowEntries of mean
+  # rowEntryBytes, the text in their tool output). wantMeasured: the bodies
+  # layout is read in full; the rows layout takes the whole database.
+  - name: heavy-tail-in-entry-rows-of-a-bodies-store-is-counted-in-full
+    kind: disk-estimate-never-low
+    layout: entry-text-in-bodies
+    entryShape: one-percent-hundredfold
+    sessions: 40
+    textEntries: 5
+    meanEntryBytes: 512
+    rowEntries: 25
+    rowEntryBytes: 1024
+    wantMeasured: true
+    wantBasisMax: 1.6
+  - name: entry-rows-rising-with-rowid-in-a-bodies-store-are-counted-in-full
+    kind: disk-estimate-never-low
+    layout: entry-text-in-bodies
+    entryShape: rising-with-rowid
+    sessions: 40
+    textEntries: 5
+    meanEntryBytes: 512
+    rowEntries: 25
+    rowEntryBytes: 4096
+    wantMeasured: true
+    wantBasisMax: 1.6
+  # Rows whose payload sits at the size where SQLite moves it to an overflow
+  # page: the record header in front of the values decides the side, so the
+  # measure counts it.
+  - name: entry-rows-at-the-overflow-size-are-counted-on-the-right-side
+    kind: disk-estimate-never-low
+    layout: entry-text-in-bodies
+    entryShape: one-percent-hundredfold
+    sessions: 40
+    textEntries: 5
+    meanEntryBytes: 512
+    rowEntries: 25
+    rowEntryBytes: 3800
+    wantMeasured: true
+    wantBasisMax: 1.6
+  - name: heavy-tail-in-a-rows-store-takes-the-whole-database
+    kind: disk-estimate-never-low
+    layout: entry-text-in-rows
+    entryShape: one-percent-hundredfold
+    sessions: 40
+    textEntries: 25
+    meanEntryBytes: 1024
+  - name: entry-rows-rising-with-rowid-in-a-rows-store-take-the-whole-database
+    kind: disk-estimate-never-low
+    layout: entry-text-in-rows
+    entryShape: rising-with-rowid
+    sessions: 40
+    textEntries: 25
+    meanEntryBytes: 1024
+  - name: long-indexed-entry-keys-are-counted-in-the-plan
+    kind: disk-estimate-never-low
+    layout: entry-text-in-bodies
+    sessions: 20
+    textEntries: 5
+    meanEntryBytes: 512
+    rowEntries: 25
+    idBytes: 1024
+    contentBytes: 131072
+    wantMeasured: true
+    wantBasisMax: 3.0
+  - name: session-table-plan-covers-long-indexed-keys
+    kind: disk-session-keys
+    from: 77
+    sessions: 200
+    idBytes: 1024
+    keyBytes: 64
+    wantBasisMax: 2.5
+  - name: session-table-estimate-respects-its-row-bound
+    kind: disk-session-keys
+    from: 77
+    sessions: 24
+    idBytes: 36
+    keyBytes: 64
+    maxSessionRows: 8
+    wantBasisMax: 2.5
+  - name: session-table-plan-covers-large-index-overflow-keys
+    kind: disk-session-keys
+    from: 77
+    sessions: 100
+    idBytes: 4096
+    keyBytes: 64
+    wantBasisMax: 2.5
+  - name: session-table-plan-covers-mixed-indexed-key-sizes
+    kind: disk-session-keys
+    from: 77
+    sessions: 200
+    idBytes: 1024
+    mixedIDs: true
+    keyBytes: 64
+    wantBasisMax: 2.5
+  - name: old-store-plan-covers-keys-before-parent-indexes-exist
+    kind: disk-session-keys
+    from: 69
+    sessions: 200
+    idBytes: 1024
+    keyBytes: 64
+    wantBasisMax: 2.5
+  - name: old-store-plan-covers-future-parents-from-metadata
+    kind: disk-session-keys
+    from: 69
+    sessions: 120
+    idBytes: 36
+    keyBytes: 64
+    metadataParentBytes: 1024
+    wantBasisMax: 2.5
+  - name: old-store-plan-covers-future-parents-from-active-evidence
+    kind: disk-session-keys
+    from: 69
+    sessions: 40
+    idBytes: 36
+    keyBytes: 64
+    evidenceParentBytes: 4096
+    wantBasisMax: 2.5
+  - name: old-store-plan-covers-future-parents-from-latest-evidence
+    kind: disk-session-keys
+    from: 69
+    sessions: 40
+    idBytes: 36
+    keyBytes: 64
+    evidenceParentBytes: 4096
+    evidenceLatestOnly: true
+    wantBasisMax: 2.5
+  - name: session-table-plan-covers-long-host-and-project-keys
+    kind: disk-session-keys
+    from: 77
+    sessions: 120
+    idBytes: 36
+    keyBytes: 1024
+    wantBasisMax: 2.5
+  - name: session-copy-estimator-models-the-frozen-target-indexes
+    kind: disk-index-inventory
+    from: 78
+    stopAt: 78
+    table: sessions
+  - name: session-copy-estimator-models-the-earlier-frozen-target-indexes
+    kind: disk-index-inventory
+    from: 73
+    stopAt: 73
+    table: sessions
+  - name: entry-copy-estimator-models-the-frozen-target-indexes
+    kind: disk-index-inventory
+    from: 75
+    stopAt: 75
+    table: session_entries
+  # A search index whose structure record does not decode cannot be
+  # measured: the plan asks for the factor times the whole database and
+  # says why in one notice.
+  - name: unmeasurable-search-index-falls-back-to-the-whole-database-with-a-notice
+    kind: disk-basis-fallback
+    layout: entry-text-in-bodies
+    sessions: 4
+    textEntries: 5
+    meanEntryBytes: 512
+    rowEntries: 1
+  # The turn count recount. Migration 77 records it as owed with a marker row
+  # in pending_recounts when the store holds sessions. The recount is an
+  # upgrade step of its own, right after 77, and deletes the marker in the
+  # transaction of its writes; a store at any schema that still holds the
+  # marker is behind. The sessions are those of turn_count_recount.yaml.
+  - name: plan-includes-the-turn-count-recount-when-its-marker-exists
+    kind: recount-plan
+  - name: store-at-head-with-a-pending-recount-is-behind
+    kind: recount-owed-at-head
+  - name: open-never-runs-the-recount
+    kind: recount-open-never-runs
+  - name: cancelled-recount-keeps-its-marker
+    kind: recount-cancelled
+    from: 76
+    stopAfterSessions: 2
+    wantVersion: 77
+  - name: upgrade-from-0.16.2-runs-77-recount-78-and-79-in-order
+    kind: recount-in-order
+    from: 76
+  # A 0.17.0 store whose recount finished: schema 77, no marker. Its plan is
+  # 78, then 79, with no recount, and the counts the recount wrote stay.
+  - name: upgrade-from-0.17.0-with-the-recount-done-runs-78-and-79-in-order
+    kind: recount-done-in-order
+    from: 77

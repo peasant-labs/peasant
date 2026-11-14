@@ -21,7 +21,6 @@ import (
 func BenchmarkFullContentWriteLargeSession(b *testing.B) {
 	for _, entries := range []int{2000, 20000} {
 		b.Run(fmt.Sprintf("entries=%d", entries), func(b *testing.B) {
-			// ast-grep-ignore: no-migrating-store-open-in-tests -- benchmark setup outside the measured section: storetest helpers require *testing.T, so the corpus is built with one migrating open.
 			s, err := store.Open(filepath.Join(b.TempDir(), "bench.db"), store.WithPoolSize(1))
 			if err != nil {
 				b.Fatal(err)

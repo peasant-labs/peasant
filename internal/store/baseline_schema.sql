@@ -333,7 +333,7 @@ CREATE TABLE index_log (
     started_at        INTEGER NOT NULL,
     finished_at       INTEGER,
     error_message     TEXT
-, index_format_version INTEGER CHECK (index_format_version > 0)) STRICT;
+, index_format_version INTEGER CHECK (index_format_version > 0), parse_ms INTEGER CHECK (parse_ms IS NULL OR parse_ms >= 0), write_ms INTEGER CHECK (write_ms IS NULL OR write_ms >= 0), bytes    INTEGER CHECK (bytes    IS NULL OR bytes    >= 0)) STRICT;
 
 CREATE TABLE ingest_log (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -349,14 +349,36 @@ CREATE TABLE ingest_log (
     source_path       TEXT
 ) STRICT;
 
-CREATE TABLE ingest_run_outcomes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    run_id INTEGER NOT NULL REFERENCES ingest_log(id) ON DELETE CASCADE,
+CREATE TABLE ingest_outcome_kinds (
+    id   INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE
+) STRICT;
+
+CREATE TABLE ingest_outcome_reasons (
+    id      INTEGER PRIMARY KEY,
+    kind_id INTEGER NOT NULL REFERENCES ingest_outcome_kinds(id),
+    code    TEXT    NOT NULL UNIQUE,
+    retired INTEGER NOT NULL DEFAULT 0 CHECK (retired IN (0,1))
+) STRICT;
+
+CREATE TABLE "ingest_run_outcomes" (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id     INTEGER NOT NULL REFERENCES ingest_log(id) ON DELETE CASCADE,
     session_id TEXT,
-    kind TEXT NOT NULL CHECK(kind IN ('worker_error', 'diagnostic')),
-    reason_code TEXT NOT NULL CHECK(length(reason_code) > 0),
+    reason_id  INTEGER NOT NULL REFERENCES ingest_outcome_reasons(id),
     created_at INTEGER NOT NULL
 ) STRICT;
+
+CREATE TABLE ingest_run_stages (
+    run_id       INTEGER NOT NULL REFERENCES ingest_log(id) ON DELETE CASCADE,
+    stage        TEXT    NOT NULL CHECK (length(stage) > 0),
+    duration_ms  INTEGER NOT NULL CHECK (duration_ms  >= 0),
+    done         INTEGER NOT NULL DEFAULT 0 CHECK (done         >= 0),
+    total        INTEGER NOT NULL DEFAULT 0 CHECK (total        >= 0),
+    bytes        INTEGER NOT NULL DEFAULT 0 CHECK (bytes        >= 0),
+    lane_wait_ms INTEGER NOT NULL DEFAULT 0 CHECK (lane_wait_ms >= 0),
+    PRIMARY KEY (run_id, stage)
+) STRICT, WITHOUT ROWID;
 
 CREATE TABLE lesson_sources (
     id                    TEXT PRIMARY KEY,
@@ -2177,6 +2199,96 @@ INSERT INTO "annotators" ("id", "kind_id", "name", "display_name", "description"
 INSERT INTO "annotators" ("id", "kind_id", "name", "display_name", "description", "model_id", "provider_key", "status", "created_at") VALUES ('835e67a0-c0f3-5023-88cd-2d59cd15313e', 1, 'human-web', 'Web Dashboard User', 'Human annotations created through the Peasant web dashboard.', NULL, NULL, 'active', CAST(strftime('%s','now') AS INTEGER) * 1000);
 INSERT INTO "annotators" ("id", "kind_id", "name", "display_name", "description", "model_id", "provider_key", "status", "created_at") VALUES ('2537b2d1-6a47-57a1-a7e1-72568bfe3975', 3, 'frustration-signal-classifier', 'Frustration Signal Classifier', 'Rule-based classifier that detects frustration signals at individual entry level.', NULL, NULL, 'active', CAST(strftime('%s','now') AS INTEGER) * 1000);
 INSERT INTO "annotators" ("id", "kind_id", "name", "display_name", "description", "model_id", "provider_key", "status", "created_at") VALUES ('32238cf8-cd88-5927-adbb-d94843a1872b', 3, 'resolution-evidence-classifier', 'Resolution Evidence Classifier', 'Rule-based classifier that detects resolution evidence at individual entry level.', NULL, NULL, 'active', CAST(strftime('%s','now') AS INTEGER) * 1000);
+INSERT INTO "ingest_outcome_kinds" ("id", "name") VALUES (1, 'worker_error');
+INSERT INTO "ingest_outcome_kinds" ("id", "name") VALUES (2, 'diagnostic');
+INSERT INTO "ingest_outcome_kinds" ("id", "name") VALUES (3, 'refresh');
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (1, 1, 'error', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (2, 1, 'adapter_capture_failed', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (100, 2, 'adapter_refresh_unavailable', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (101, 2, 'artifact_cleanup', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (102, 2, 'artifact_mirror_pending', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (103, 2, 'artifact_relocation', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (104, 2, 'codex_checkpoint_metadata_misaligned', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (105, 2, 'codex_copied_prefix_incomplete', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (106, 2, 'codex_copy_boundary_malformed', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (107, 2, 'codex_history_envelope_malformed', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (108, 2, 'codex_history_mode_unsupported', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (109, 2, 'codex_item_body_malformed', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (110, 2, 'codex_item_variant_unknown', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (111, 2, 'codex_lifecycle_unbalanced', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (112, 2, 'codex_native_pointer_identity_mismatch', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (113, 2, 'codex_native_pointer_unreadable', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (114, 2, 'codex_ordinal_regression', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (115, 2, 'codex_paginated_rollback_anomaly', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (116, 2, 'codex_record_malformed', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (117, 2, 'codex_reference_ambiguous', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (118, 2, 'codex_reference_bounds_invalid', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (119, 2, 'codex_reference_byte_boundary_invalid', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (120, 2, 'codex_reference_coverage_incomplete', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (121, 2, 'codex_reference_cycle', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (122, 2, 'codex_reference_depth_exceeded', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (123, 2, 'codex_reference_mode_unsupported', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (124, 2, 'codex_reference_segments_bounded', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (125, 2, 'codex_reference_unavailable', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (126, 2, 'codex_reference_unreadable', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (127, 2, 'codex_rollback_beyond_history', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (128, 2, 'codex_turn_aborted', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (129, 2, 'content_capture_incomplete', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (130, 2, 'content_recovery_refused', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (131, 2, 'content_recovery_unavailable', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (132, 2, 'copy_failed', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (133, 2, 'derive_identity_error', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (134, 2, 'dry_run_unindexed', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (135, 2, 'duplicate_session_id', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (136, 2, 'event_data_parse_error', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (137, 2, 'git_failure', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (138, 2, 'git_timeout', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (139, 2, 'inactive_dangling_parent', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (140, 2, 'incomplete_tail', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (141, 2, 'index_coverage_unavailable', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (142, 2, 'index_empty_unverified', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (143, 2, 'index_refused', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (144, 2, 'invalid_model', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (145, 2, 'invalid_parent_cycle', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (146, 2, 'invalid_parent_session_id', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (147, 2, 'metadata_refused', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (148, 2, 'metrics_incomplete', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (149, 2, 'missing_model', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (150, 2, 'missing_project', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (151, 2, 'missing_session_meta', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (152, 2, 'missing_sidecar', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (153, 2, 'missing_user_email', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (154, 2, 'native_cursor_unavailable', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (155, 2, 'native_discovery_unavailable', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (156, 2, 'native_refresh_unavailable', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (157, 2, 'opencode_missing_parent', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (158, 2, 'opencode_orphan_part_dropped', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (159, 2, 'opencode_unknown_part_type', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (160, 2, 'oversize_write_advisory', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (161, 2, 'pair_repair_unavailable', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (162, 2, 'parent_session_mismatch', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (163, 2, 'parse_error', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (164, 2, 'read_error', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (165, 2, 'record_too_large', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (166, 2, 'sidecar_parse_error', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (167, 2, 'sidecar_session_mismatch', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (168, 2, 'stale_index_missing_input', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (169, 2, 'stale_index_outside_selection', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (170, 2, 'stats-overflow', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (171, 2, 'transcript_read_failed', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (172, 2, 'transcript_read_timeout', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (173, 2, 'unknown_data_retained', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (300, 3, 'new', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (301, 3, 'source_changed', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (302, 3, 'pair_missing', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (303, 3, 'metadata_schema', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (304, 3, 'forced', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (305, 3, 'adapter_behind', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (306, 3, 'adapter_behind_native_only', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (307, 3, 'adapter_stamp_absent', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (308, 3, 'indexer_behind', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (309, 3, 'refusal_reopened', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (310, 3, 'publication_unbound', 0);
 INSERT INTO "scale_kinds" ("id", "name") VALUES (1, 'nominal');
 INSERT INTO "scale_kinds" ("id", "name") VALUES (2, 'ordinal');
 INSERT INTO "scale_kinds" ("id", "name") VALUES (3, 'continuous');
@@ -2199,4 +2311,4 @@ DELETE FROM "session_search_fts_data";
 INSERT INTO "session_search_fts_data" ("id", "block") VALUES (1, X'000000000000');
 INSERT INTO "session_search_fts_data" ("id", "block") VALUES (10, X'00000000000000');
 
-PRAGMA user_version = 78;
+PRAGMA user_version = 79;

@@ -1,0 +1,28 @@
+# The stored import profile: stage rows written with the run row, their
+# retention, and the per-attempt timings on index_log. Durations are given, not
+# measured: no case reads a clock or sleeps.
+segments:
+  - {stage: DISCOVER, durationMs: 40, done: 3, total: 3}
+  - {stage: INDEX, durationMs: 100, done: 2, total: 5, bytes: 1000, laneWaitMs: 7}
+  - {stage: INDEX, durationMs: 50, done: 5, total: 5, bytes: 500, laneWaitMs: 3}
+  - {stage: AUDIT, durationMs: 0, done: 1, total: 1}
+wantRows:
+  - {stage: AUDIT, durationMs: 0, done: 1, total: 1}
+  - {stage: DISCOVER, durationMs: 40, done: 3, total: 3}
+  - {stage: INDEX, durationMs: 150, done: 5, total: 5, bytes: 1500, laneWaitMs: 10}
+unknownStage: "NOT A STAGE"
+indexLog:
+  session: "77000000-0000-4000-8000-000000000900"
+  parseMs: 12
+  writeMs: 34
+  bytes: 5678
+cases:
+  - name: run-writes-one-row-per-stage
+  - name: stage-segments-are-summed-into-one-row
+  - name: run-row-and-stage-rows-commit-together
+  - name: unknown-stage-name-is-refused-at-the-write-boundary
+  - name: deleting-a-run-row-cascades-to-its-stage-rows
+  - name: retention-keeps-the-stage-rows-of-the-last-n-runs
+  - name: retention-deletes-no-run-row-and-no-index-row
+  - name: indexed-row-carries-parse-write-and-bytes
+  - name: row-written-before-the-migration-reads-as-not-measured

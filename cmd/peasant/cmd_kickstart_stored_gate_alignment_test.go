@@ -441,7 +441,7 @@ func seedKickstartStoredGateWorld(t *testing.T, testCase kickstartStoredGateCase
 	// at-head database, so neither this setup open nor the command under test
 	// replays the migration chain.
 	storetest.CopyGoldenTo(t, world.DBPath)
-	db, err := store.Open(world.DBPath, store.WithSkipMigrations(), store.WithIndexFormats(store.V2IndexFormat()))
+	db, err := store.Open(world.DBPath, store.WithIndexFormats(store.V2IndexFormat()))
 	if err != nil {
 		t.Fatalf("open stored gate database: %v", err)
 	}
@@ -708,7 +708,7 @@ func assertKickstartStoredGateCandidates(
 	listings []ftue.SessionListing,
 ) {
 	t.Helper()
-	db, err := store.Open(world.DBPath, store.WithSkipMigrations(), store.WithIndexFormats(store.V2IndexFormat()))
+	db, err := store.Open(world.DBPath, store.WithIndexFormats(store.V2IndexFormat()))
 	if err != nil {
 		t.Fatalf("open stored gate database for candidate assertion: %v", err)
 	}
@@ -788,7 +788,7 @@ func assertKickstartStoredGateCrossSurfaces(t *testing.T, testCase kickstartStor
 	if err != nil {
 		t.Fatalf("load stored gate config for cross-surface assertions: %v", err)
 	}
-	db, err := store.Open(world.DBPath, store.WithSkipMigrations(), store.WithIndexFormats(store.V2IndexFormat()))
+	db, err := store.Open(world.DBPath, store.WithIndexFormats(store.V2IndexFormat()))
 	if err != nil {
 		t.Fatalf("open stored gate database for cross-surface assertions: %v", err)
 	}

@@ -1,0 +1,43 @@
+# The store-write lane's wait and busy accounting. Each job names the clock
+# reading when it was queued, when the lane started it, and when it finished,
+# in milliseconds; the test feeds those readings through a scripted clock, so
+# no case sleeps or reads the real clock.
+requiredNames:
+  - idle-lane-reports-no-wait
+  - queued-jobs-accumulate-wait
+  - busy-time-excludes-idle-time
+  - wait-is-attributed-to-the-callers-stage
+  - nil-lane-reports-zero
+cases:
+  - name: idle-lane-reports-no-wait
+    jobs:
+      - {stage: INDEX, queuedAt: 0, startedAt: 0, finishedAt: 5}
+    want: {jobs: 1, waitMs: 0, busyMs: 5}
+    wantStageWaitMs: {INDEX: 0}
+  - name: queued-jobs-accumulate-wait
+    jobs:
+      - {stage: INDEX, queuedAt: 0, startedAt: 0, finishedAt: 10}
+      - {stage: INDEX, queuedAt: 1, startedAt: 10, finishedAt: 14}
+      - {stage: INDEX, queuedAt: 2, startedAt: 14, finishedAt: 20}
+    want: {jobs: 3, waitMs: 21, busyMs: 20}
+    wantStageWaitMs: {INDEX: 21}
+  - name: busy-time-excludes-idle-time
+    jobs:
+      - {stage: INDEX, queuedAt: 0, startedAt: 0, finishedAt: 3}
+      - {stage: INDEX, queuedAt: 1000, startedAt: 1000, finishedAt: 1004}
+    want: {jobs: 2, waitMs: 0, busyMs: 7}
+    wantStageWaitMs: {INDEX: 0}
+  - name: wait-is-attributed-to-the-callers-stage
+    jobs:
+      - {stage: "EXTRACT+WRITE", queuedAt: 0, startedAt: 4, finishedAt: 6}
+      - {stage: INDEX, queuedAt: 1, startedAt: 6, finishedAt: 9}
+      - {stage: "EXTRACT+WRITE", queuedAt: 2, startedAt: 9, finishedAt: 10}
+      - {stage: ANNOTATE, queuedAt: 10, startedAt: 10, finishedAt: 12}
+    want: {jobs: 4, waitMs: 16, busyMs: 8}
+    wantStageWaitMs: {"EXTRACT+WRITE": 11, INDEX: 5, ANNOTATE: 0, COMPUTE: 0}
+  - name: nil-lane-reports-zero
+    nilRecorder: true
+    jobs:
+      - {stage: INDEX, queuedAt: 0, startedAt: 3, finishedAt: 9}
+    want: {jobs: 0, waitMs: 0, busyMs: 0}
+    wantStageWaitMs: {INDEX: 0}

@@ -3,6 +3,10 @@
 # with no listed name fails. Removing a classified site without updating this
 # manifest is a deletion, and the guard refuses it.
 requiredResidual:
+  - store-upgrade-disk-measure
+  - store-upgrade-disk-index-keys
+  - store-upgrade-disk-index-inventory
+  - store-upgrade-disk-future-parent-size
   - store-home-identity-parent-cache
   - store-parent-cache-reader
   - store-logical-parent-renderer

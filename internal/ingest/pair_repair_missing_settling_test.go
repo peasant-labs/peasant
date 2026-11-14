@@ -28,7 +28,7 @@ const missingPairNativeTranscript = `{"type":"user","message":{"role":"user","co
 func TestMissingPairSettlesWithoutRepeatedIndexAcquisition(t *testing.T) {
 	ctx := t.Context()
 	memfs := testutil.NewMemFS()
-	database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
+	database, err := store.Open(storetest.CopyGoldenDB(t))
 	if err != nil {
 		t.Fatal(err)
 	}

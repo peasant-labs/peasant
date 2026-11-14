@@ -22,7 +22,8 @@
 #             pair), migration-oracle (the V1 lane's durable logical record),
 #             write-guard (the reverse lookup's own NULL-only and cycle guards),
 #             writers (the four statements that SET the column), ddl (immutable
-#             historical schema and migration text), and cross-package (a parent
+#             historical schema and migration text), disk-estimate (measures
+#             stored byte lengths without answering a parent question), and cross-package (a parent
 #             answer whose rendering belongs to the cross-package reader slice;
 #             it appears here only while that slice has not yet routed the
 #             declaration, and it disappears from this section — and from the
@@ -45,6 +46,39 @@
 # and the exact-set assertion fails if the move is half-done in either
 # direction.
 residual:
+  - name: store-upgrade-disk-measure
+    file: internal/store/upgrade_disk_basis.go
+    declaration: measureTableBytesOnConn
+    literals: 2
+    class: disk-estimate
+    reason: >-
+      Detects whether the projected column exists and accounts for a future
+      value's byte length in a copied row. It does not decide parent identity.
+  - name: store-upgrade-disk-index-keys
+    file: internal/store/upgrade_disk_basis.go
+    declaration: upgradeIndexKeysOnConn
+    literals: 1
+    class: disk-estimate
+    reason: >-
+      Selects a byte-length expression when the future projected column is
+      absent; it does not read or choose a parent answer.
+  - name: store-upgrade-disk-index-inventory
+    file: internal/store/upgrade_disk_basis.go
+    declaration: upgradeIndexDefinitions
+    literals: 2
+    class: disk-estimate
+    reason: >-
+      Names indexed columns of the frozen table copies to estimate their size;
+      it does not resolve or return a parent.
+  - name: store-upgrade-disk-future-parent-size
+    file: internal/store/upgrade_disk_basis.go
+    declaration: futureResolvedParentLengthExpr
+    literals: 3
+    class: disk-estimate
+    reason: >-
+      Takes a conservative maximum of cached, metadata-document and evidence
+      lengths solely to size a later migration. It does not choose a parent,
+      determine relationship state, or replace the logical-parent rule.
   - name: store-home-identity-parent-cache
     file: internal/store/home_reader.go
     declaration: Store.HomeIdentityCohort

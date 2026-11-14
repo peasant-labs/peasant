@@ -93,7 +93,7 @@ func TestPreflightSeparatesRunWideFailureFromSessionRefusal(t *testing.T) {
 // database's actual failure rather than a hand-written message.
 func closedStoreReadError(t *testing.T) error {
 	t.Helper()
-	db, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
+	db, err := store.Open(storetest.CopyGoldenDB(t))
 	if err != nil {
 		t.Fatal(err)
 	}

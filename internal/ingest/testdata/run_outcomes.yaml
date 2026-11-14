@@ -9,7 +9,7 @@ cases:
     sessionId: 59000000-0000-0000-0000-000000000002
     workerError: true
     acquisition: true
-    reason: adapter_refresh_unavailable
+    reason: adapter_capture_failed
     kind: worker_error
   - name: session-warning
     sessionId: 59000000-0000-0000-0000-000000000003

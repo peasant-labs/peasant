@@ -125,7 +125,7 @@ func TestHarvestRebuildFromFiles(t *testing.T) {
 			}
 
 			output := "/output"
-			database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
+			database, err := store.Open(storetest.CopyGoldenDB(t))
 			if err != nil {
 				t.Fatal(err)
 			}

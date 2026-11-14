@@ -103,7 +103,7 @@ check: fmt-check lint docs-cli-check
 	@set -e; \
 	export CHECK_START_NS="$(CHECK_START_NS)"; \
 	ast-grep scan --error=unused-suppression --config sgconfig.yml .; \
-	go test -tags=astgrep $(GORACE_FLAG) ./internal/tui/gates/...; \
+	go test -tags=astgrep $(GORACE_FLAG) ./internal/tui/gates/... ./internal/testkit/astgreprules/...; \
 	go test -tags=projection_negative_seed -run '^(TestThinkingSeedNegativeFailsOnlyDesignatedCases|TestModelProjectionNegativeFailsOnlyDesignatedCase)$$' ./internal/transcript/; \
 	go test -tags=projection_negative_scope -run '^(TestThinkingSeedNegativeFailsOnlyDesignatedCases|TestModelProjectionNegativeFailsOnlyDesignatedCase)$$' ./internal/transcript/; \
 	go run github.com/peasant-labs/schema/cmd/release-guard check-workflow --policy .github/release-guard.policy.yml --release .github/workflows/release.yml; \
@@ -111,11 +111,10 @@ check: fmt-check lint docs-cli-check
 	# The gate above replaces the single `go test` pass. It computes the run
 	# plan from `go test -list`, runs a race pass and a no-race pass (or one
 	# no-race pass when RACE=0), merges the streams, and applies the
-	# exactly-once screen. The key grep gate (internal/tui/gates/astrules/,
-	# enforced by keys_astgrep_test.go) runs as a pre-test step above because it
-	# is gated behind the "astgrep" build tag, so a plain `go test` never depends
-	# on the ast-grep binary; ast-grep is already a hard `make check` dependency
-	# via the untagged scan.
+	# exactly-once screen. The ast-grep gate and rule tests run as a pre-test
+	# step above because they are gated behind the "astgrep" build tag, so a
+	# plain `go test` never depends on the ast-grep binary; ast-grep is already
+	# a hard `make check` dependency via the untagged scan.
 	#
 	# That untagged scan runs with --error=unused-suppression: its config loads
 	# every ast-grep/ rule, so a suppression that no longer suppresses the code

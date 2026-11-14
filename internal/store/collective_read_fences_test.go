@@ -35,7 +35,7 @@ func TestCollectiveLatestIssuedReadFences(t *testing.T) {
 	for _, c := range fixtures.Cases {
 		t.Run(c.Name, func(t *testing.T) {
 			path := storetest.CopyGoldenDB(t)
-			db, err := store.Open(path, store.WithSkipMigrations(), store.WithPoolSize(1))
+			db, err := store.Open(path, store.WithPoolSize(1))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -113,7 +113,7 @@ func TestCollectiveLatestIssuedReadFences(t *testing.T) {
 			}
 			writer := db
 			if c.Reopen {
-				writer, err = store.Open(path, store.WithSkipMigrations(), store.WithPoolSize(1))
+				writer, err = store.Open(path, store.WithPoolSize(1))
 				if err != nil {
 					t.Fatal(err)
 				}

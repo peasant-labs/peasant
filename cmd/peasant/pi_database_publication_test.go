@@ -85,7 +85,7 @@ func TestPiDatabasePublicationThroughCLI(t *testing.T) {
 			if err != nil {
 				t.Fatalf("native harvest: %v %s", err, output)
 			}
-			db, err := store.Open(string(defaults.ResolveDBFilePathWith(root)), store.WithSkipMigrations())
+			db, err := store.Open(string(defaults.ResolveDBFilePathWith(root)))
 			if err != nil {
 				t.Fatal(err)
 			}

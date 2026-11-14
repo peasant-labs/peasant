@@ -263,7 +263,7 @@ func (p *Pool) open(ctx context.Context, uri string, schema Schema) (*sqlitex.Po
 			return nil, err
 		}
 
-		err = migrateDB(ctx, conn, schema, p.opts.OnStartMigrate)
+		err = migrateDB(ctx, conn, schema, p.opts.OnStartMigrate, nil)
 		pool.Put(conn)
 		if err != nil {
 			if closeErr := pool.Close(); closeErr != nil {
@@ -278,10 +278,26 @@ func (p *Pool) open(ctx context.Context, uri string, schema Schema) (*sqlitex.Po
 
 // Migrate performs any unapplied migrations in the schema on the database.
 func Migrate(ctx context.Context, conn *sqlite.Conn, schema Schema) error {
-	return migrateDB(ctx, conn, schema, nil)
+	return migrateDB(ctx, conn, schema, nil, nil)
 }
 
-func migrateDB(ctx context.Context, conn *sqlite.Conn, schema Schema, onStart SignalFunc) error {
+// AfterScriptFunc is called inside a migration's transaction, after the
+// migration's script has run and before its COMMIT. version is the schema
+// version the migration produces (the 1-based position of the migration in
+// Schema.Migrations). The function may read and write through conn; its
+// writes commit with the migration. A non-nil error rolls the whole
+// migration back, and MigrateWithAfterScript returns it.
+type AfterScriptFunc func(conn *sqlite.Conn, version int32) error
+
+// MigrateWithAfterScript performs any unapplied migrations in the schema on
+// the database, as Migrate does, and calls afterScript once per applied
+// migration, after its script and before its COMMIT. A nil afterScript makes
+// it identical to Migrate.
+func MigrateWithAfterScript(ctx context.Context, conn *sqlite.Conn, schema Schema, afterScript AfterScriptFunc) error {
+	return migrateDB(ctx, conn, schema, nil, afterScript)
+}
+
+func migrateDB(ctx context.Context, conn *sqlite.Conn, schema Schema, onStart SignalFunc, afterScript AfterScriptFunc) error {
 	defer conn.SetInterrupt(conn.SetInterrupt(ctx.Done()))
 
 	schemaVersion, err := ensureAppID(conn, schema.AppID)
@@ -349,6 +365,12 @@ func migrateDB(ctx context.Context, conn *sqlite.Conn, schema Schema, onStart Si
 			if err := sqlitex.ExecScript(conn, schema.RepeatableMigration); err != nil {
 				rollback(conn)
 				return fmt.Errorf("migrate database: apply repeatable migration: %w", err)
+			}
+		}
+		if afterScript != nil {
+			if err := afterScript(conn, schemaVersion+1); err != nil {
+				rollback(conn)
+				return fmt.Errorf("migrate database: after migrations[%d]: %w", schemaVersion, err)
 			}
 		}
 

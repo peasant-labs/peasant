@@ -945,3 +945,13 @@ No threshold gate: this is one serial pair on a shared box.
 L companion: 10.29 (before) -> 11.00 (after). Both columns were measured in this
 change's own worktree against the same benchmark file, so the only change
 between them is the fresh path itself.
+
+## Store open no longer migrates
+
+The sections above name the open option `store.WithSkipMigrations()` and the
+ast-grep rule `no-migrating-store-open-in-tests`. Both are gone: `store.Open`
+never changes the schema of a store that holds data, and `store.Upgrade` is
+the only function that applies migrations (`docs/store-upgrade.md`). The
+golden-copy conversions recorded above stand; their opens pass no skip
+option, because a golden copy is already current. The records above are
+history at their SHAs.

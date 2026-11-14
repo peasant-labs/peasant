@@ -300,6 +300,65 @@ func TestTranscriptDirectoryByteLengthMatchesServedSegment(t *testing.T) {
 	}
 }
 
+// transcriptDirectoryRaceSlowdown rounds up the measured race-instrumented
+// slowdown for the 32 MiB store path. Three alternating synthetic pairs on
+// linux/amd64, Go 1.26.5 and GOMAXPROCS=4 measured medians of 0.542 s without
+// instrumentation and 5.975 s with it, roughly 11x. The race build adds pointer
+// checks to SQLite byte copies. It still gets a finite regression ceiling;
+// the production build keeps the unmodified ceiling in defaults.
+const transcriptDirectoryRaceSlowdown = 12
+
+func transcriptDirectoryColdBuildCeiling(raceEnabled bool) time.Duration {
+	ceiling := defaults.TranscriptSegmentColdBuildCeiling
+	if raceEnabled {
+		ceiling *= transcriptDirectoryRaceSlowdown
+	}
+	return ceiling
+}
+
+func TestTranscriptDirectoryColdBuildTimingPolicy(t *testing.T) {
+	t.Parallel()
+	data, err := os.ReadFile("testdata/transcript_cold_build_policy.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture struct {
+		RequiredNames []string `yaml:"requiredNames"`
+		Cases         []struct {
+			Name          string `yaml:"name"`
+			RaceEnabled   *bool  `yaml:"raceEnabled"`
+			CeilingMillis int64  `yaml:"ceilingMillis"`
+		} `yaml:"cases"`
+	}
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&fixture); err != nil {
+		t.Fatal(err)
+	}
+	present := make(map[string]bool, len(fixture.Cases))
+	names := make([]string, 0, len(fixture.Cases))
+	for _, c := range fixture.Cases {
+		present[c.Name] = true
+		names = append(names, c.Name)
+	}
+	if err := testutil.RequireFixtureNames("transcript_cold_build_policy.yaml", "cases", fixture.RequiredNames, present); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.ValidateRequiredNames(testutil.RequiredNamesManifest{RequiredNames: fixture.RequiredNames}, names, "cold-build timing policy"); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range fixture.Cases {
+		t.Run(c.Name, func(t *testing.T) {
+			if c.RaceEnabled == nil {
+				t.Fatal("timing policy case must state whether the race detector is enabled")
+			}
+			if got, want := transcriptDirectoryColdBuildCeiling(*c.RaceEnabled), time.Duration(c.CeilingMillis)*time.Millisecond; got != want {
+				t.Fatalf("cold-build ceiling = %s, want %s", got, want)
+			}
+		})
+	}
+}
+
 // TestTranscriptDirectoryColdBuildThroughStore measures a cold directory build
 // over the real store pass on a synthetic 32 MiB transcript (1,312 turns, no
 // real text, session id or personal path).
@@ -378,16 +437,17 @@ func TestTranscriptDirectoryColdBuildThroughStore(t *testing.T) {
 	if segment.ByteLength != directory.Segments[0].ByteLength {
 		t.Fatalf("served segment byteLength = %d, directory declared %d", segment.ByteLength, directory.Segments[0].ByteLength)
 	}
-	// The store-path measurement includes the full 32 MiB content pass and its
-	// capture verification. It is reported against the ratified 600 ms target and
-	// fails only at the 2 s catastrophic ceiling: shared-runner contention must
-	// not turn a normal build into a red gate.
-	t.Logf("cold directory build through the store: %d ms (target %d ms, ceiling %d ms), %d segments",
-		elapsed.Milliseconds(), defaults.TranscriptSegmentColdBuildBudget.Milliseconds(), defaults.TranscriptSegmentColdBuildCeiling.Milliseconds(), len(directory.Segments))
-	if elapsed > defaults.TranscriptSegmentColdBuildCeiling {
-		t.Fatalf("cold build through the store took %d ms, over the %d ms catastrophic ceiling", elapsed.Milliseconds(), defaults.TranscriptSegmentColdBuildCeiling.Milliseconds())
+	// The store pass includes full-content verification. Instrumented timing is
+	// not a production latency measurement: keep the ratified target and
+	// ceiling unchanged for a normal build, and use a separately calibrated race
+	// ceiling while still testing this mounted path with the race detector.
+	ceiling := transcriptDirectoryColdBuildCeiling(transcriptDirectoryRaceEnabled)
+	t.Logf("cold directory build through the store: %d ms (production target %d ms, test ceiling %d ms, race=%t), %d segments",
+		elapsed.Milliseconds(), defaults.TranscriptSegmentColdBuildBudget.Milliseconds(), ceiling.Milliseconds(), transcriptDirectoryRaceEnabled, len(directory.Segments))
+	if elapsed > ceiling {
+		t.Fatalf("cold build through the store took %d ms, over the %d ms test ceiling (race=%t)", elapsed.Milliseconds(), ceiling.Milliseconds(), transcriptDirectoryRaceEnabled)
 	}
-	if elapsed > defaults.TranscriptSegmentColdBuildBudget {
+	if !transcriptDirectoryRaceEnabled && elapsed > defaults.TranscriptSegmentColdBuildBudget {
 		t.Logf("WARNING: cold build through the store took %d ms, over the ratified %d ms target (recorded local range 430-510 ms; shared runners can be slower)", elapsed.Milliseconds(), defaults.TranscriptSegmentColdBuildBudget.Milliseconds())
 	}
 }

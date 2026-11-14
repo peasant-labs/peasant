@@ -165,7 +165,7 @@ func runLocateStepCase(t *testing.T, testCase locateStepCase) {
 	}
 
 	dbPath := storetest.CopyGoldenDB(t)
-	db, err := store.Open(dbPath, store.WithSkipMigrations())
+	db, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -826,7 +826,7 @@ func TestLocateRefusesStoreWithoutDerivedLookup(t *testing.T) {
 		t.Fatalf("write source: %v", err)
 	}
 	dbPath := storetest.CopyGoldenDB(t)
-	db, err := store.Open(dbPath, store.WithSkipMigrations())
+	db, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -894,7 +894,7 @@ func TestLocateRefusesStoreWithoutDerivedLookupForClaudeCohort(t *testing.T) {
 		t.Fatalf("write source: %v", err)
 	}
 	dbPath := storetest.CopyGoldenDB(t)
-	db, err := store.Open(dbPath, store.WithSkipMigrations())
+	db, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

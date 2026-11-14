@@ -102,7 +102,7 @@ func scalarInt(t *testing.T, conn *sqlite.Conn, sql string) int {
 func TestMigrationV33Applies(t *testing.T) {
 	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	s, err := Open(dbPath)
+	s, err := openUpgraded(dbPath)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

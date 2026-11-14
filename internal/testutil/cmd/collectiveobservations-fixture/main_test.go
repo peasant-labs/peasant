@@ -123,7 +123,7 @@ func TestDisposableSeederProductionStore(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				db, err := store.Open(defaults.ResolveDBFilePathWith(filepath.Join(root, "data")).String(), store.WithSkipMigrations())
+				db, err := store.Open(defaults.ResolveDBFilePathWith(filepath.Join(root, "data")).String())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -169,7 +169,7 @@ func TestDisposableSeederProductionStore(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				db, err := store.Open(defaults.ResolveDBFilePathWith(filepath.Join(root, "data")).String(), store.WithSkipMigrations())
+				db, err := store.Open(defaults.ResolveDBFilePathWith(filepath.Join(root, "data")).String())
 				if err != nil {
 					t.Fatal(err)
 				}

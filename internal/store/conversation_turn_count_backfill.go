@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 
@@ -10,6 +9,10 @@ import (
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 )
+
+// conversationTurnCountProgressEvery is how many folded sessions pass between
+// two progress reports of the backfill.
+const conversationTurnCountProgressEvery = 100
 
 // ConversationTurnCountBackfillReport is the report of an upgrade fold over
 // the stored sessions: the one-time V74 backfill and the V77 turn count
@@ -25,27 +28,71 @@ type ConversationTurnCountBackfillReport struct {
 	UnreadableSessions []ingest.SessionID
 }
 
-// backfillConversationTurnCounts fills session_captured_stats.conversation_turn_count
-// for every session on a store that predates V74, including legacy sessions
-// that never had a captured stats row. It folds the stored entries through the
-// same ingest definition every reader uses, so the copied number is the
-// conversation count and not the retired raw record count. An entry-less
-// session has nothing to fold: it keeps its legacy value and is reported for
-// re-indexing.
+// backfillConversationTurnCountsOnConn fills
+// session_captured_stats.conversation_turn_count for every session on a store
+// that predates V74, including legacy sessions that never had a captured
+// stats row. It folds the stored entries through the same ingest definition
+// every reader uses, so the copied number is the conversation count and not
+// the retired raw record count. An entry-less session has nothing to fold: it
+// keeps its legacy value and is reported for re-indexing.
 //
-// It runs once, from Open, immediately after the V74 migration. The caller
-// decides that from the database's pre-migration user_version, so a later open
-// at the head schema never re-folds.
-func backfillConversationTurnCounts(pool *sqlitex.Pool) (report ConversationTurnCountBackfillReport, err error) {
-	conn, err := pool.Take(context.Background())
-	if err != nil {
-		return report, fmt.Errorf("store: take connection for the conversation turn count backfill: %w; no count was changed", err)
-	}
-	defer pool.Put(conn)
+// It runs once, inside the transaction of the schema step that adds the
+// column: the upgrade registers it as that step's data fill, so the column
+// and its values commit together and a process that dies mid-fold leaves the
+// store one version below, with the fold still owed. It opens no transaction
+// of its own. report receives the running session count.
+func backfillConversationTurnCountsOnConn(conn *sqlite.Conn, report func(done, of int64)) (ConversationTurnCountBackfillReport, error) {
+	var filled ConversationTurnCountBackfillReport
+	err := foldStoredSessions(conn, "the conversation turn count backfill", report, func(_, _ int, session storedSessionEntries, readErr error) error {
+		if readErr != nil {
+			if session.managed {
+				return fmt.Errorf("store: read the generation snapshot for session %s during the conversation turn count backfill: %w; no count was changed", session.id, readErr)
+			}
+			return fmt.Errorf("store: read entries for session %s during the conversation turn count backfill: %w; no count was changed", session.id, readErr)
+		}
+		count := 0
+		if len(session.entries) == 0 {
+			filled.EntryLessSessions = append(filled.EntryLessSessions, session.id)
+			legacy, err := legacySessionTurnCountOnConn(conn, session.id)
+			if err != nil {
+				return err
+			}
+			count = legacy
+		} else {
+			count = ingest.ConversationTurnCount(ingest.EntriesToTurns(session.entries))
+		}
+		if err := writeConversationTurnCountOnConn(conn, session.id, count); err != nil {
+			return err
+		}
+		filled.SessionsUpdated++
+		return nil
+	})
+	return filled, err
+}
 
-	end := sqlitex.Transaction(conn)
-	defer end(&err)
+// storedSessionEntries is one stored session as an upgrade fold reads it.
+type storedSessionEntries struct {
+	id ingest.SessionID
+	// managed is true when the entries are the main entries of the
+	// session's active generation, false when they are its mirror rows.
+	managed bool
+	entries []schema.SessionEntry
+}
 
+// foldStoredSessions is the one walk over the stored sessions that both
+// upgrade folds share: the conversation turn count fill of schema step 74 and
+// the turn count recount that migration 77 marks as owed. It lists every
+// stored session in id order and reads the entries a reader serves for it: a
+// managed session's mirror rows clear their source refs and may omit content,
+// so its active generation's emitted main entries are read instead; any other
+// session's mirror rows are its only stored entries. visit receives each
+// session, its 1-based position and the number of sessions, with the error of
+// that read, and decides what the fold does with
+// it; an error from visit stops the walk. progress receives the number of
+// sessions visited every conversationTurnCountProgressEvery sessions and at
+// the last one. It opens no transaction: the caller's step owns it. purpose
+// names the fold in its errors.
+func foldStoredSessions(conn *sqlite.Conn, purpose string, progress func(done, of int64), visit func(done, total int, session storedSessionEntries, readErr error) error) error {
 	type storedSession struct {
 		id     ingest.SessionID
 		active string
@@ -57,49 +104,26 @@ func backfillConversationTurnCounts(pool *sqlitex.Pool) (report ConversationTurn
 			sessions = append(sessions, storedSession{ingest.SessionID(stmt.ColumnText(0)), stmt.ColumnText(1)})
 			return nil
 		}}); err != nil {
-		return report, fmt.Errorf("store: list managed sessions for the conversation turn count backfill: %w; no count was changed", err)
+		return fmt.Errorf("store: list the stored sessions for %s: %w; no count was changed", purpose, err)
 	}
 
-	for _, session := range sessions {
-		sessionID := session.id
-		var entries []schema.SessionEntry
-		if session.active != "" {
-			// A managed session's mirror rows clear their source refs and may
-			// omit content, so folding them undercounts what a reader serves.
-			// Fold the generation's emitted main entries instead.
-			generationEntries, err := nativeGenerationEntriesOnConn(conn, sessionID, session.active)
-			if err != nil {
-				return report, fmt.Errorf("store: read the generation snapshot for session %s during the conversation turn count backfill: %w; no count was changed", sessionID, err)
-			}
-			entries = generationEntries
-			if len(entries) == 0 {
-				report.EntryLessSessions = append(report.EntryLessSessions, sessionID)
-			}
+	for i, stored := range sessions {
+		session := storedSessionEntries{id: stored.id, managed: stored.active != ""}
+		var readErr error
+		if session.managed {
+			session.entries, readErr = nativeGenerationEntriesOnConn(conn, stored.id, stored.active)
 		} else {
-			var err error
-			entries, err = listEntriesOnConn(conn, sessionID)
-			if err != nil {
-				return report, fmt.Errorf("store: read entries for session %s during the conversation turn count backfill: %w; no count was changed", sessionID, err)
-			}
+			session.entries, readErr = listEntriesOnConn(conn, stored.id)
 		}
-		count := 0
-		if len(entries) == 0 {
-			if session.active == "" {
-				report.EntryLessSessions = append(report.EntryLessSessions, sessionID)
-			}
-			count, err = legacySessionTurnCountOnConn(conn, sessionID)
-			if err != nil {
-				return report, err
-			}
-		} else {
-			count = ingest.ConversationTurnCount(ingest.EntriesToTurns(entries))
+		done := i + 1
+		if err := visit(done, len(sessions), session, readErr); err != nil {
+			return err
 		}
-		if err := writeConversationTurnCountOnConn(conn, sessionID, count); err != nil {
-			return report, err
+		if progress != nil && (done%conversationTurnCountProgressEvery == 0 || done == len(sessions)) {
+			progress(int64(done), int64(len(sessions)))
 		}
-		report.SessionsUpdated++
 	}
-	return report, nil
+	return nil
 }
 
 // nativeGenerationEntriesOnConn returns the emitted main entries of a managed
@@ -174,6 +198,9 @@ VALUES (?, ?, 'harness', 0)`, &sqlitex.ExecOptions{Args: []any{string(sessionID)
 // entry-less session's copied count is a placeholder fact, so every one names
 // its repair rather than passing the copy on silently.
 func logConversationTurnCountBackfill(report ConversationTurnCountBackfillReport) {
+	if report.SessionsUpdated == 0 {
+		return
+	}
 	slog.Info("store: conversation turn count backfill complete",
 		"sessions", report.SessionsUpdated,
 		"entry_less", len(report.EntryLessSessions))

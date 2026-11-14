@@ -36,10 +36,6 @@ func (c storedHarnessCheckCase) ddlList() string {
 	return "'" + strings.Join(c.Values, "','") + "'"
 }
 
-// harnessCheckTables are the two tables that mirror the stored harness set in
-// a CHECK.
-var harnessCheckTables = []string{"sessions", "daily_summary_harness"}
-
 // unknownHarnessValue is the value every stored-harness CHECK must refuse.
 const unknownHarnessValue = "not-a-harness"
 

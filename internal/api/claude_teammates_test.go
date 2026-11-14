@@ -301,7 +301,7 @@ func harvestClaudeTeammateScenario(t *testing.T, testCase claudeTeammateAPICase)
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := store.Open(homes.dbPath(), append(storeOptions, store.WithSkipMigrations())...)
+	db, err := store.Open(homes.dbPath(), storeOptions...)
 	if err != nil {
 		t.Fatalf("open harvested store: %v", err)
 	}

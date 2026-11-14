@@ -155,7 +155,7 @@ INSERT INTO session_source_unavailability(session_id, reason) VALUES('unusable-s
 
 func TestRecordSourceUnavailableReplacesChangedCause(t *testing.T) {
 	t.Parallel()
-	db, err := Open(filepath.Join(t.TempDir(), "upsert.db"))
+	db, err := openUpgraded(filepath.Join(t.TempDir(), "upsert.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -90,7 +90,7 @@ func ingestConsumerSession(t *testing.T, dbPath string, fixture fullConsumerFixt
 		t.Fatal(err)
 	}
 	storetest.CopyGoldenTo(t, dbPath)
-	db, err := store.Open(dbPath, store.WithSkipMigrations())
+	db, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}

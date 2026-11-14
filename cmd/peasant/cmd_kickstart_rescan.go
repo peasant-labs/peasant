@@ -40,8 +40,7 @@ func openReusableStore(dbPath string) *store.Store {
 	if err != nil || version != store.CurrentSchemaVersion() {
 		return nil
 	}
-	// The version check above is the guarantee WithSkipMigrations requires.
-	db, err := store.Open(dbPath, store.WithPoolSize(1), store.WithSkipMigrations())
+	db, err := store.Open(dbPath, store.WithPoolSize(1))
 	if err != nil {
 		return nil
 	}

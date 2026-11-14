@@ -1,10 +1,19 @@
 ## peasant migrate
 
-Convert file-backed sessions to the harmonized content model
+Upgrade the store schema, then convert file-backed sessions to the harmonized content model
 
 ### Synopsis
 
-Convert file-backed native sessions to the harmonized content model in place.
+Upgrade the local store to the schema this build needs, then convert
+file-backed native sessions to the harmonized content model in place.
+
+The schema phase runs first. It is the one explicit store upgrade: no
+other command changes the schema of a store that holds data. It prints
+each step, asks before a long step unless --confirm is given, holds the
+data directory lock, and reports each step's duration. Ctrl-C rolls the
+running step back and keeps the finished ones. --schema-only stops
+after this phase. With --dry-run it prints the upgrade plan for a store
+that is behind and changes nothing.
 
 Phase 0 preflights read-only (--dry-run stops here): counts per phase,
 pending intents and superseded generations to discard, sampled
@@ -27,11 +36,12 @@ peasant migrate [flags]
 ### Options
 
 ```
-      --confirm     Skip interactive confirmation (for scripts/CI)
-      --dry-run     Report per-phase counts without converting any session
-  -h, --help        help for migrate
-      --json        Output results as JSON
-      --limit int   Convert at most this many sessions with work (0 = all); re-run to continue where this pass stopped
+      --confirm       Skip interactive confirmation (for scripts/CI)
+      --dry-run       Report the schema upgrade plan and per-phase counts without changing anything
+  -h, --help          help for migrate
+      --json          Output results as JSON
+      --limit int     Convert at most this many sessions with work (0 = all); re-run to continue where this pass stopped
+      --schema-only   Upgrade the store schema and stop before converting any session
 ```
 
 ### Options inherited from parent commands

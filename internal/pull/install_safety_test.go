@@ -65,7 +65,7 @@ func newSafetySandbox(t *testing.T) (string, *store.Store, ingest.FileSystem) {
 	root := t.TempDir()
 	path := filepath.Join(root, "index.db")
 	storetest.CopyGoldenTo(t, path)
-	db, err := store.Open(path, store.WithSkipMigrations())
+	db, err := store.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}

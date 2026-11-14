@@ -224,7 +224,7 @@ func runIngestSelectionCase(t *testing.T, ids ingestSelectionIDs, item ingestSel
 		if err != nil {
 			t.Fatal(err)
 		}
-		db, err := store.Open(hs.dbPath(), append(opts, store.WithWriteConfig(cfg.Write), store.WithSkipMigrations())...)
+		db, err := store.Open(hs.dbPath(), append(opts, store.WithWriteConfig(cfg.Write))...)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -338,7 +338,7 @@ func runScopedIngestIgnoresSelection(t *testing.T, ids ingestSelectionIDs, item 
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := store.Open(hs.dbPath(), append(storeOptions, store.WithWriteConfig(cfg.Write), store.WithSkipMigrations())...)
+	db, err := store.Open(hs.dbPath(), append(storeOptions, store.WithWriteConfig(cfg.Write))...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -477,7 +477,7 @@ func runMovedCloneTreeAndImportAgree(t *testing.T, ids ingestSelectionIDs, item 
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := store.Open(hs.dbPath(), append(storeOptions, store.WithWriteConfig(cfg.Write), store.WithSkipMigrations())...)
+	db, err := store.Open(hs.dbPath(), append(storeOptions, store.WithWriteConfig(cfg.Write))...)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -342,7 +342,6 @@ func openBarrierStoreWithRoot(t *testing.T, root, destPath string, attempts chan
 	}
 	s, err := store.Open(
 		destPath,
-		store.WithSkipMigrations(),
 		store.WithPoolSize(2),
 		store.WithIndexFormats(store.V2IndexFormat()),
 		store.WithGenerationArtifacts(artifacts, &attemptBarrierLocker{SessionLocker: locker, attempts: attempts, acquired: acquired}),

@@ -128,7 +128,7 @@ func TestForcedRepairOutcomeFailsEveryUnroutedShape(t *testing.T) {
 		t.Run(fixture.Name, func(t *testing.T) {
 			ctx := t.Context()
 			memfs := testutil.NewMemFS()
-			database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
+			database, err := store.Open(storetest.CopyGoldenDB(t))
 			if err != nil {
 				t.Fatal(err)
 			}

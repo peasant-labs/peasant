@@ -795,7 +795,7 @@ if [ "$peasant_hook_status" -ne 0 ]; then
 	fi
 	peasant_hook_warn \
 		"the peasant online upload command exited $peasant_hook_status" \
-		'the upload failed, most often an expired peasant online login, no network, or a rejected payload' \
+		'the upload failed or was refused; the peasant output above names the cause' \
 		"$peasant_hook_meaning" \
 		"retry by hand with this exact bound command - it runs without this hook's quiet output and without its time budget, so it prints the full result and is not cut off (add --verbose for per-session detail, and run peasant village login first if the login expired): $peasant_hook_recovery"
 fi

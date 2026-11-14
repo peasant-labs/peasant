@@ -85,11 +85,7 @@ func openVerifyContentStore(cmd *cobra.Command, ownedRoot, dbPath string, repair
 	if err != nil {
 		return nil, func() {}, err
 	}
-	options = append(options, store.WithMigrationConsent(store.PromptMigrationConsentOnTTY()))
-	// A non-interactive caller never runs migration v76's whole-index
-	// rebuild invisibly: refuse on residue instead of opening. The verify
-	// report names the terminal harvest that performs the repair.
-	if err := refuseStaleSearchIndex(dbPath); err != nil {
+	if err := ensureStoreCurrent(cmd, dbPath, storeEntryModeFor(cmd)); err != nil {
 		return nil, func() {}, err
 	}
 	db, err := store.Open(dbPath, options...)

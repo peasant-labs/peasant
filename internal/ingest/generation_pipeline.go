@@ -447,7 +447,7 @@ func (p *Pipeline) commitGenerationResult(ctx context.Context, prepared prepared
 	}
 	var activationOutcome ActivationOutcome
 	var activationErr error
-	p.runStoreWrite(writeLane, func() {
+	p.runStoreWrite(writeLane, StageIndex, func() {
 		activationErr = p.withCurrentIndexInput(ctx, result.input, func() error {
 			var err error
 			if staged := prepared.staged; staged != nil {
@@ -476,6 +476,26 @@ func activationInstallsImages(disposition ActivationDisposition) bool {
 // cannot do this is not given image rows.
 type sessionImageReplacer interface {
 	ReplaceSessionImages(ctx context.Context, sessionID string, pending []attachments.Pending) error
+}
+
+// unreferencedImageCollector removes image files no attachment row references.
+type unreferencedImageCollector interface {
+	CollectUnreferencedImages(ctx context.Context) error
+}
+
+// collectUnreferencedImages runs the image collection once per run, from the
+// cleanup stage. Installing a session's images does not collect, so the cost
+// is one directory listing per run instead of one per session. It is
+// best-effort: a failed or skipped collection removes nothing, and the next
+// run collects the same files.
+func (p *Pipeline) collectUnreferencedImages(ctx context.Context, logPrefix string) {
+	collector, ok := p.store.(unreferencedImageCollector)
+	if !ok || p.config.DryRun || ctx.Err() != nil {
+		return
+	}
+	if err := collector.CollectUnreferencedImages(ctx); err != nil {
+		slog.Warn(logPrefix+": collect unreferenced images", "error", err)
+	}
 }
 
 // commitStagedImages installs the parse-time image batch. The caller decides

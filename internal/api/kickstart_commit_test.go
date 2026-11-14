@@ -342,7 +342,7 @@ func (w *kickstartWorld) storeCheck(index int, check kickstartIngestCheck) {
 	if err != nil {
 		w.fail(index, "open the managed generation options: %v", err)
 	}
-	db, err := store.Open(w.saving.homes.dbPath(), append(options, store.WithWriteConfig(cfg.Write), store.WithSkipMigrations())...)
+	db, err := store.Open(w.saving.homes.dbPath(), append(options, store.WithWriteConfig(cfg.Write))...)
 	if err != nil {
 		w.fail(index, "open the local store: %v", err)
 	}

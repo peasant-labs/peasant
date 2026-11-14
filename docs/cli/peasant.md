@@ -27,7 +27,7 @@ peasant [flags]
 * [peasant kickstart](peasant_kickstart.md)	 - Run the first-time setup wizard
 * [peasant layout](peasant_layout.md)	 - Describe and capture the storage layout of tools Peasant does not ingest yet
 * [peasant metrics](peasant_metrics.md)	 - Manage session metrics
-* [peasant migrate](peasant_migrate.md)	 - Convert file-backed sessions to the harmonized content model
+* [peasant migrate](peasant_migrate.md)	 - Upgrade the store schema, then convert file-backed sessions to the harmonized content model
 * [peasant models](peasant_models.md)	 - Manage model reference data
 * [peasant open](peasant_open.md)	 - Record one session and open its transcript in the web dashboard
 * [peasant prune](peasant_prune.md)	 - Remove sessions from local store and database

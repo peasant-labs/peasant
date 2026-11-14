@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/config"
@@ -59,6 +60,9 @@ func Scan(
 		setPhase(progress, DiscoveringPhase(provider))
 		adapter := factory(fs, git, salt.Salt{})
 		ingest.AttachClaudeEvidenceCache(adapter, evidence)
+		if progress != nil {
+			ingest.AttachDiscoveryProgress(adapter, &scanDiscoveryProgress{harness: provider, progress: progress})
+		}
 		discovered, err := adapter.Discover(ctx, src)
 		if err != nil {
 			discovery.State = DiscoveryFailed
@@ -138,6 +142,42 @@ func Scan(
 		inventory[provider] = discovery
 	}
 	return inventory, sessions, subagents
+}
+
+// scanDiscoveryProgress translates a single adapter's source counts into the
+// current scan phase. Every adapter gets a fresh instance, so counts never leak
+// from one harness into another.
+type scanDiscoveryProgress struct {
+	mu       sync.Mutex
+	harness  ingest.Harness
+	progress ScanProgress
+	done     int
+	total    int
+}
+
+var _ ingest.DiscoveryProgress = (*scanDiscoveryProgress)(nil)
+
+func (p *scanDiscoveryProgress) DiscoveryTotal(harness ingest.Harness, total int) {
+	if harness != p.harness {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.done, p.total = 0, total
+	p.progress.SetProgress(p.done, p.total)
+}
+
+func (p *scanDiscoveryProgress) DiscoveryAdvance(harness ingest.Harness, step ingest.DiscoveryStep) {
+	if harness != p.harness {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.done += step.Sources
+	p.progress.SetProgress(p.done, p.total)
+	if sink, ok := p.progress.(ScanRereadProgress); ok && step.RereadsReported() {
+		sink.SetDiscoveryRequiredRereads(step.RequiredRereads)
+	}
 }
 
 // DiscoveringPhase is what a scan says while it lists a harness's sessions. It

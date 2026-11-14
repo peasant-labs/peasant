@@ -1,0 +1,41 @@
+# The rule "bind without a re-parse" assumes the format-1 entry parse reads
+# nothing from the metadata capture beyond the session identity its input
+# digest covers. Each case captures the same Claude transcript beside metadata
+# that differs from a baseline in one group of fields a parse could plausibly
+# read, and asserts the same input digest and identical entries.
+#
+# change names a closed set of metadata edits the test applies:
+#   cwd            working directory (path context, cwd-derived redaction)
+#   git            branch, remote and worktree
+#   project        project hash, name and local path
+#   parent         parent session
+#   sourcePath     recorded native source path
+#   adapterVersion adapter revision that produced the metadata
+#   redaction      redaction record: applied, level and rule set
+transcript: |
+  {"type":"user","uuid":"u1","cwd":"/home/test/testrepo","timestamp":"2024-02-19T00:00:00Z","message":{"role":"user","content":"read /home/test/testrepo/main.go"}}
+  {"type":"assistant","uuid":"a1","parentUuid":"u1","cwd":"/home/test/testrepo","timestamp":"2024-02-19T00:00:01Z","message":{"role":"assistant","model":"fixture-model","content":[{"type":"text","text":"reading it"},{"type":"tool_use","id":"call-1","name":"Read","input":{"file_path":"/home/test/testrepo/main.go"}}]}}
+  {"type":"user","uuid":"u2","parentUuid":"a1","cwd":"/home/test/testrepo","timestamp":"2024-02-19T00:00:02Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-1","content":"package main // in /home/test/testrepo"}]}}
+cases:
+  - name: working-directory-is-not-read
+    change: cwd
+  - name: git-context-is-not-read
+    change: git
+  - name: project-is-not-read
+    change: project
+  - name: parent-session-is-not-read
+    change: parent
+  - name: native-source-path-is-not-read
+    change: sourcePath
+  - name: adapter-revision-is-not-read
+    change: adapterVersion
+  - name: redaction-record-is-not-read
+    change: redaction
+requiredNames:
+  - working-directory-is-not-read
+  - git-context-is-not-read
+  - project-is-not-read
+  - parent-session-is-not-read
+  - native-source-path-is-not-read
+  - adapter-revision-is-not-read
+  - redaction-record-is-not-read

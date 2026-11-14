@@ -50,7 +50,7 @@ func TestCopyGoldenToIfAbsentKeepsExistingFile(t *testing.T) {
 
 	CopyGoldenToIfAbsent(t, path)
 
-	db, err = store.Open(path, store.WithSkipMigrations())
+	db, err = store.Open(path)
 	if err != nil {
 		t.Fatalf("reopen the prepared file: %v", err)
 	}

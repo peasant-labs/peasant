@@ -94,6 +94,10 @@ func initDocsRepo(t *testing.T) string {
 	} {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = repo
+		// Isolate the seed repository from the developer's git configuration:
+		// a global commit.gpgsign blocks on a pinentry prompt the test cannot
+		// answer.
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %s: %v (%s)", strings.Join(args, " "), err, out)
 		}

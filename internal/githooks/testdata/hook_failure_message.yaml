@@ -1,0 +1,14 @@
+# What a generated hook says when its upload command exits non-zero. The
+# "why" line names no specific cause: the command can fail for a login, the
+# network or a payload, and it can also be refused before it starts, for
+# example when the local store needs an upgrade. The peasant output above the
+# hook's lines names the actual cause.
+requiredNames:
+  - hook-why-line-names-no-specific-cause
+cases:
+  - name: hook-why-line-names-no-specific-cause
+    mustContain:
+      - "'the upload failed or was refused; the peasant output above names the cause'"
+    mustNotContain:
+      - "most often"
+      - "expired peasant online login, no network, or a rejected payload"

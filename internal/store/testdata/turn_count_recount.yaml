@@ -1,4 +1,5 @@
-# The V77 upgrade folds every stored session once and writes both turn counts:
+# The turn count recount that migration 77 marks as owed, an upgrade step of
+# its own, folds every stored session once and writes both turn counts:
 # turnCount is the number of folded turns, conversationTurnCount is the folded
 # turns on the allowed list. Every session carries stored counts the fold does
 # not produce, so a row that was not recounted, or was recounted when it should
@@ -30,7 +31,7 @@ requiredSessions:
 requiredRows:
   - from-v75
   - from-v73
-  - interrupted-first-open
+  - interrupted-recount
   - new-store
 sessions:
   - name: unmanaged-session
@@ -118,10 +119,10 @@ sessions:
     report: recounted
     wantTurnCount: 3
     wantConversationTurnCount: 2
-interruptedFirstOpen:
+interruptedRecount:
   # The per-session hook fails after this many sessions.
   failAfterSessions: 2
-  # A later open must not fold again: these values are written after the
-  # recount finished and must survive the third open.
+  # A later upgrade must not fold again: these values are written after the
+  # recount finished and must survive the third upgrade.
   sentinelTurnCount: 77
   sentinelConversationTurnCount: 66

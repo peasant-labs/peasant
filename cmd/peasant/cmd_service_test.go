@@ -517,12 +517,54 @@ func TestServiceUnitsVerifyWithSystemd(t *testing.T) {
 	if out, err := h.run(t, "install"); err != nil {
 		t.Fatalf("install: %v\n%s", err, out)
 	}
-	cmd := exec.Command(analyze, "--user", "verify", "--man=no", filepath.Join(h.unitDir, serviceUnitName), filepath.Join(h.unitDir, timerUnitName))
-	// A private runtime dir: --user verify never reaches a real user manager.
-	cmd.Env = append(os.Environ(), "SYSTEMD_LOG_LEVEL=warning", "XDG_RUNTIME_DIR="+t.TempDir())
-	out, err := cmd.CombinedOutput()
+	fixtureDir, err := filepath.Abs(filepath.Join("testdata", "systemd_verify"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Make the runtime path longer than a Unix socket address on purpose. An
+	// unrelated user socket that expands %t must not affect these unit files.
+	runtimeDir := filepath.Join(t.TempDir(), strings.Repeat("x", 100))
+	if err := os.Mkdir(runtimeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	verify := func(unitDir, dependencies string) ([]byte, error) {
+		cmd := exec.Command(analyze, "--user", "verify", "--man=no", filepath.Join(unitDir, serviceUnitName), filepath.Join(unitDir, timerUnitName))
+		// Do not load the host user's unrelated units: the private basic.target
+		// is enough to verify the generated service and timer. --user verify
+		// never connects to a real user manager.
+		cmd.Env = append(os.Environ(), "LC_ALL=C", "HOME="+h.dir,
+			defaults.EnvXDGConfigHome.String()+"="+filepath.Join(h.dir, "config"),
+			defaults.EnvXDGDataHome.String()+"="+filepath.Join(h.dir, "data"),
+			"XDG_RUNTIME_DIR="+runtimeDir, "SYSTEMD_LOG_LEVEL=warning",
+			"SYSTEMD_UNIT_PATH="+unitDir+string(os.PathListSeparator)+dependencies)
+		return cmd.CombinedOutput()
+	}
+	// Prove the private search path matters: this unrelated socket is invalid
+	// with the long runtime directory, but is not a Peasant unit.
+	poisoned, poisonedErr := verify(h.unitDir, filepath.Join(fixtureDir, "ambient"))
+	if !bytes.Contains(poisoned, []byte("poison.socket")) {
+		t.Fatalf("systemd-analyze did not detect the unrelated invalid socket: %v\n%s", poisonedErr, poisoned)
+	}
+	out, err := verify(h.unitDir, filepath.Join(fixtureDir, "private"))
 	if err != nil || len(bytes.TrimSpace(out)) > 0 {
 		t.Fatalf("systemd-analyze verify: %v\n%s", err, out)
+	}
+	// The isolation must not hide an invalid directive in Peasant's own unit.
+	service := h.read(t, serviceUnitName)
+	if !strings.Contains(service, "Nice=10\n") {
+		t.Fatal("the generated service no longer has the directive used by the verifier mutation")
+	}
+	badDir := t.TempDir()
+	badService := strings.Replace(service, "Nice=10\n", "Nice=not-a-number\n", 1)
+	if err := os.WriteFile(filepath.Join(badDir, serviceUnitName), []byte(badService), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(badDir, timerUnitName), []byte(h.read(t, timerUnitName)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	badOutput, badErr := verify(badDir, filepath.Join(fixtureDir, "private"))
+	if !bytes.Contains(badOutput, []byte("not-a-number")) {
+		t.Fatalf("systemd-analyze did not diagnose the invalid Nice directive: %v\n%s", badErr, badOutput)
 	}
 }
 

@@ -17,7 +17,7 @@ import (
 
 func TestMigrationV35_FTSObjectsExist(t *testing.T) {
 	t.Parallel()
-	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	s, err := openUpgraded(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

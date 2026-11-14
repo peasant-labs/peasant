@@ -1,6 +1,6 @@
-// Package residuefixture seeds the minimal stores the v75 search-residue
-// gate reads, and carries the one shared affected/clean term sets and
-// refusal fragments every residue test pins. It imports only SQLite, never
+// Package residuefixture seeds the minimal schema-75 stores the upgrade plan
+// reads to cost the search repair, and carries the one shared affected/clean
+// term sets and refusal fragments every such test pins. It imports only SQLite, never
 // the store package, so the store package's own tests share it with the
 // command and API tests instead of keeping a second copy.
 package residuefixture
@@ -32,11 +32,10 @@ var (
 	CleanLegacy    = []ResidueTerm{{ID: 1, Text: "keep me"}, {ID: 2, Text: "steady state"}}
 )
 
-// RefusalFragments are the user-facing parts of the residue refusal every
-// caller-side test checks: the cause, both terminal fixes, and the
-// no-change promise. The store package pins the full six-part message from
-// its own fixture.
-var RefusalFragments = []string{"0.16.1", "`peasant harvest` in a terminal", "`peasant web start` in a terminal", "no files were changed"}
+// RefusalFragments are the user-facing parts every refusal of a behind store
+// carries, whichever entry point refuses: the command that upgrades the
+// store, and the promise that nothing was changed.
+var RefusalFragments = []string{"`peasant migrate --schema-only`", "nothing was changed"}
 
 // SeedAffected seeds a version-75 minimal store carrying union residue.
 func SeedAffected(t *testing.T, path string) {
@@ -52,7 +51,7 @@ func SeedClean(t *testing.T, path string) {
 
 // Seed builds the minimal store the residue gate reads: a stamped
 // user_version plus the two FTS docsize tables seeded from the given rows.
-// Only what store.NeedsSearchResidueRebuild inspects exists, so cases pin
+// Only what the upgrade plan (store.PlanUpgrade) inspects exists, so cases pin
 // the gate and nothing else.
 func Seed(t *testing.T, path string, version int, unionTerms, legacyTerms []ResidueTerm) {
 	t.Helper()

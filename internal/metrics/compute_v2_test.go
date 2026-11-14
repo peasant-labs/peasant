@@ -484,7 +484,7 @@ func TestComputeInsights_StillWorks(t *testing.T) {
 	ctx := context.Background()
 
 	dbPath := storetest.CopyGoldenDB(t)
-	s, err := store.Open(dbPath, store.WithSkipMigrations())
+	s, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}

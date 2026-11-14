@@ -491,10 +491,12 @@ original meaning for every other row and is not a refusal for these.
   measured-inapplicable this epoch (text varies per call; constant-text guard).
   `preparePragmas` excluded (once per connection; caching buys nothing).
   `applyV23DataMigration` is T3-covered (non-skip branch only).
-- **T3 — per-test DB setup (dominant).** Fresh opens → golden pre-migrated DB +
-  `WithSkipMigrations` (owned store for its whole life), or golden copy + skip
-  where the path must be stable across close/reopen. The CLI cannot skip
-  migrations: the cmd win is zero pending migrations on a prepared path.
+- **T3 — per-test DB setup (dominant).** Fresh opens → golden pre-migrated DB
+  (owned store for its whole life), or golden copy where the path must be
+  stable across close/reopen. `store.Open` never migrates a store that holds
+  data, so a golden copy opens current with no option (the former
+  skip-migrations open option is gone); the cmd win is zero pending
+  migrations on a prepared path.
   Never converted: migration/creation-behavior subjects (#30), per-case
   NotExist assertions, open-time refusal assertions (`store.go:409`).
 - **T4 — fixture/payload construction.** Build once per test, share read-only:

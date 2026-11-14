@@ -119,7 +119,7 @@ func TestMigrationV59CaptureFormatClosesTheStoredSet(t *testing.T) {
 				// user actually holds it — at whatever schema their last build
 				// left — naming the blocking row and how to clear it, before any
 				// migration runs and reduces the report to a constraint failure.
-				refused, openErr := Open(dbPath, WithPoolSize(1))
+				refused, openErr := openUpgraded(dbPath, WithPoolSize(1))
 				if openErr == nil {
 					_ = refused.Close()
 					t.Fatal("the production store opened a database the capture-format upgrade cannot map")

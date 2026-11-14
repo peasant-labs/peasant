@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitemigration"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
@@ -58,9 +57,11 @@ func buildChainDatabase(dbPath string) error {
 		pool.Put(conn)
 		return fmt.Errorf("store: check capture formats on the scratch database: %w", err)
 	}
-	if err := sqlitemigration.Migrate(context.Background(), conn, dbSchema); err != nil {
-		pool.Put(conn)
-		return fmt.Errorf("store: run the migration chain on the scratch database: %w", err)
+	for version := 1; version <= len(dbSchema.Migrations); version++ {
+		if err := applyUpgradeStep(context.Background(), conn, version, nil, nil); err != nil {
+			pool.Put(conn)
+			return fmt.Errorf("store: run the migration chain on the scratch database: %w", err)
+		}
 	}
 	pool.Put(conn)
 	if err := applyV23DataMigration(pool); err != nil {

@@ -92,7 +92,7 @@ func TestMigrationV52LegacyCaptureIncomplete(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "legacy.db")
 			seedFrozenSchema(t, ctx, path, 51, append(append([]string(nil), document.Seed...), row.Seed...))
 
-			db, err := Open(path, WithPoolSize(1))
+			db, err := openUpgraded(path, WithPoolSize(1))
 			if err != nil {
 				t.Fatalf("upgrade a genuine V51 database: %v", err)
 			}

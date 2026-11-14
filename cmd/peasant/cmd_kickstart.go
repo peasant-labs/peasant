@@ -52,6 +52,9 @@ type kickstartCommandDeps struct {
 	// flowIngest is a focused test seam for the post-save callback. Production
 	// uses localIngest so the runner and progress source always share one attempt.
 	flowIngest kickstart.IngestFunc
+	// ensureStore upgrades a behind store before discovery reads it. A nil
+	// value selects the production check, so no dependency set can skip it.
+	ensureStore func(*cobra.Command, string) error
 }
 
 func defaultKickstartCommandDeps() kickstartCommandDeps {
@@ -80,6 +83,7 @@ func defaultKickstartCommandDeps() kickstartCommandDeps {
 			return villageAlreadyConnected(configDir)
 		},
 		localIngest: kickstartLocalIngest,
+		ensureStore: ensureKickstartStore,
 		existingUser: func(configDir string) string {
 			if creds, err := auth.LoadCredentialsFrom(configDir); err == nil && creds != nil && creds.IsValid() {
 				return creds.Username
@@ -87,6 +91,12 @@ func defaultKickstartCommandDeps() kickstartCommandDeps {
 			return ""
 		},
 	}
+}
+
+// ensureKickstartStore is kickstart's store upgrade check, under the
+// entry-point policy.
+func ensureKickstartStore(cmd *cobra.Command, dbPath string) error {
+	return ensureStoreCurrent(cmd, dbPath, storeEntryModeFor(cmd))
 }
 
 func BuildKickstartCommand() *cobra.Command {
@@ -152,8 +162,21 @@ func buildKickstartCommand(deps kickstartCommandDeps) *cobra.Command {
 			// Show a progress spinner during discovery since git resolution can take several seconds.
 			// A database this build can reuse turns that resolution into a lookup
 			// for every session already recorded and unchanged since.
-			spinner := newDiscoverySpinner(os.Stderr)
 			dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
+			// Upgrade first, then discover, then mount read-only. A store
+			// that is current when discovery asks to reuse it keeps its
+			// saved scan results, and the mount never migrates behind the
+			// screen. A declined or refused upgrade ends here with nothing
+			// changed.
+			ensureStore := deps.ensureStore
+			if ensureStore == nil {
+				ensureStore = ensureKickstartStore
+			}
+			if err := ensureStore(cmd, dbPath); err != nil {
+				cmd.SilenceUsage = true
+				return err
+			}
+			spinner := newDiscoverySpinner(os.Stderr)
 			inventory, sessions, subagents := deps.discover(ctx, configPath, dbPath, spinner)
 			spinner.Stop()
 
@@ -511,8 +534,10 @@ func buildFTUEIngestRunnerWithProgress(cmd *cobra.Command, configPath string) (f
 			StalenessThreshold: staleness,
 			Parallelism:        0,
 			Write:              cfg.Write,
-			Progress:           progState,
-			AllowedSessionIDs:  allowedIDs,
+			// Always on: the pipeline stores the run's profile with its audit row.
+			IndexProfiler:     &ingest.IndexProfiler{},
+			Progress:          progState,
+			AllowedSessionIDs: allowedIDs,
 			// The wizard's allowlist is the user's selection.
 			AllowedSessionIDsIsSelection: true,
 		}
@@ -527,11 +552,9 @@ func buildFTUEIngestRunnerWithProgress(cmd *cobra.Command, configPath string) (f
 			return nil, generationErr
 		}
 		dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
-		// A non-interactive caller never runs migration v76's whole-index
-		// rebuild invisibly: refuse on residue instead of opening. The
-		// wizard itself requires a terminal, so this only fires for
-		// off-terminal ingest runs.
-		if err := refuseStaleSearchIndex(dbPath); err != nil {
+		// Kickstart upgraded the store before discovery; this check is a
+		// no-op then, and it covers a runner started any other way.
+		if err := ensureStoreCurrent(cmd, dbPath, storeEntryModeFor(cmd)); err != nil {
 			return nil, err
 		}
 		db, err := store.Open(dbPath, generationOptions...)

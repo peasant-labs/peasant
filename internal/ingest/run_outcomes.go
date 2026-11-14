@@ -1,42 +1,22 @@
 package ingest
 
 import (
+	"cmp"
 	"errors"
-	"fmt"
 	"slices"
 	"strings"
 )
-
-// RunOutcomeKind separates worker failures from nonfatal diagnostics. Neither
-// is an index-stage counter; index_log remains the index attempt ledger.
-type RunOutcomeKind string
-
-const (
-	RunOutcomeWorkerError RunOutcomeKind = "worker_error"
-	RunOutcomeDiagnostic  RunOutcomeKind = "diagnostic"
-)
-
-func NewRunOutcomeKind(raw string) (RunOutcomeKind, error) {
-	switch raw {
-	case string(RunOutcomeWorkerError):
-		return RunOutcomeWorkerError, nil
-	case string(RunOutcomeDiagnostic):
-		return RunOutcomeDiagnostic, nil
-	default:
-		return "", fmt.Errorf("read run outcome kind %q during audit: unknown kind; no outcome was recorded; use worker_error or diagnostic", raw)
-	}
-}
 
 // RunOutcome is deliberately payload-free. Messages and paths from raw errors
 // and diagnostics can contain source text or private filesystem locations.
 // The durable ledger retains identity and the existing reason vocabulary only.
 // An empty SessionID denotes a run-wide diagnostic, not a guessed session.
+// The kind is not stored: it derives from the reason.
 type RunOutcome struct {
-	RunID      int64
-	SessionID  SessionID
-	Kind       RunOutcomeKind
-	ReasonCode AuditReason
-	CreatedAt  int64
+	RunID     int64
+	SessionID SessionID
+	Reason    OutcomeReason
+	CreatedAt int64
 }
 
 type sessionDiagnostic struct {
@@ -44,7 +24,7 @@ type sessionDiagnostic struct {
 	diagnostic DiagnosticEntry
 }
 
-func (p *Pipeline) runOutcomes(results []SessionResult, createdAt int64) []RunOutcome {
+func (p *Pipeline) runOutcomes(results []SessionResult, indexLog []IndexLogEntry, createdAt int64) []RunOutcome {
 	var outcomes []RunOutcome
 	for _, result := range results {
 		if result.Error == nil {
@@ -52,41 +32,52 @@ func (p *Pipeline) runOutcomes(results []SessionResult, createdAt int64) []RunOu
 		}
 		// Untyped worker errors have no existing finer reason code. Reuse the
 		// existing error outcome rather than classifying arbitrary error text.
-		reason := AuditReasonError
+		reason := OutcomeReasonError
 		var acquisition *adapterAcquisitionError
 		if errors.As(result.Error, &acquisition) {
-			reason = AuditReasonAdapterRefreshUnavailable
+			// The capture failed. This is not the diagnostic of the same wire
+			// spelling, which says a refresh fell back to the stored pair.
+			reason = OutcomeReasonAdapterCaptureFailed
 		}
-		outcomes = append(outcomes, RunOutcome{SessionID: result.SessionID, Kind: RunOutcomeWorkerError, ReasonCode: reason, CreatedAt: createdAt})
+		outcomes = append(outcomes, RunOutcome{SessionID: result.SessionID, Reason: reason, CreatedAt: createdAt})
 	}
+	outcomes = append(outcomes, p.refreshOutcomes(results, indexLog, createdAt)...)
 	p.diagnosticsMu.Lock()
 	defer p.diagnosticsMu.Unlock()
 	associated := make(map[DiagnosticEntry]bool, len(p.diagnosticSessions))
 	for entry := range p.diagnosticSessions {
 		associated[entry.diagnostic] = true
-		// An unknown producer code becomes the invalid zero value, never raw
-		// text. The store rejects it while preserving the independent aggregate.
-		reason, _ := NewAuditReason(entry.diagnostic.ErrorType)
-		outcomes = append(outcomes, RunOutcome{SessionID: entry.sessionID, Kind: RunOutcomeDiagnostic, ReasonCode: reason, CreatedAt: createdAt})
+		outcomes = append(outcomes, RunOutcome{SessionID: entry.sessionID, Reason: diagnosticOutcomeReason(entry.diagnostic), CreatedAt: createdAt})
 	}
 	for diagnostic := range p.diagnosticSet {
 		if associated[diagnostic] {
 			continue
 		}
-		reason, _ := NewAuditReason(diagnostic.ErrorType)
-		outcomes = append(outcomes, RunOutcome{Kind: RunOutcomeDiagnostic, ReasonCode: reason, CreatedAt: createdAt})
+		outcomes = append(outcomes, RunOutcome{Reason: diagnosticOutcomeReason(diagnostic), CreatedAt: createdAt})
 	}
 	slices.SortFunc(outcomes, func(a, b RunOutcome) int {
 		if order := strings.Compare(string(a.SessionID), string(b.SessionID)); order != 0 {
 			return order
 		}
-		if order := strings.Compare(string(a.Kind), string(b.Kind)); order != 0 {
+		if order := cmp.Compare(a.Reason.Kind(), b.Reason.Kind()); order != 0 {
 			return order
 		}
-		return strings.Compare(string(a.ReasonCode), string(b.ReasonCode))
+		return cmp.Compare(a.Reason, b.Reason)
 	})
 	outcomes = slices.Compact(outcomes)
 	return outcomes
+}
+
+// diagnosticOutcomeReason converts a wire diagnostic to its audit reason at the
+// audit boundary. The wire ErrorType is untouched. An unknown producer code,
+// or a code that is not a diagnostic, becomes the invalid zero value, never raw
+// text: the store rejects it while preserving the independent aggregate.
+func diagnosticOutcomeReason(diagnostic DiagnosticEntry) OutcomeReason {
+	reason, err := NewOutcomeReason(diagnostic.ErrorType)
+	if err != nil || reason.Kind() != OutcomeKindDiagnostic {
+		return 0
+	}
+	return reason
 }
 
 func (p *Pipeline) reportSessionDiagnostic(sid SessionID, diagnostic DiagnosticEntry) {

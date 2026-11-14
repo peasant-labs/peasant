@@ -15,13 +15,8 @@ ALTER TABLE session_captured_stats ADD COLUMN conversation_turn_count INTEGER NO
  CHECK(conversation_turn_count >= 0);
 `
 
-// conversationTurnCountBackfillSchemaVersion is the last schema version before
-// V74. Only a store upgraded from an earlier version runs the one-time fold; a
-// later head version must not re-run it on every future migration.
-const conversationTurnCountBackfillSchemaVersion int64 = 74
-
-// shouldBackfillConversationTurnCounts reports whether a pre-migration
-// user_version needs the one-time conversation count fold.
-func shouldBackfillConversationTurnCounts(version int64) bool {
-	return version > 0 && version < conversationTurnCountBackfillSchemaVersion
-}
+// conversationTurnCountBackfillSchemaVersion is the schema version whose
+// upgrade step carries the one-time conversation count fold. The fold is
+// that step's data fill and commits in its transaction, so it runs exactly
+// when a store crosses this version and never again.
+const conversationTurnCountBackfillSchemaVersion = 74

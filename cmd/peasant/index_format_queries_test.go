@@ -94,7 +94,7 @@ func TestIndexFormatCommandsValidateScopedCandidatesBeforeProjection(t *testing.
 			// no pending migrations; the seeded sessions and annotations below
 			// are unchanged.
 			storetest.CopyGoldenTo(t, dbPath)
-			db, err := store.Open(dbPath, store.WithSkipMigrations(), store.WithPoolSize(1))
+			db, err := store.Open(dbPath, store.WithPoolSize(1))
 			if err != nil {
 				t.Fatal(err)
 			}

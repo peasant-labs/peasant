@@ -91,7 +91,7 @@ func TestWALCommitFrameCounterBaseline(t *testing.T) {
 				t.Fatal(err)
 			}
 			dbPath := storetest.CopyGoldenDB(t)
-			db, err := store.Open(dbPath, store.WithSkipMigrations(), store.WithWALAutocheckpointDisabled(), store.WithPoolSize(1))
+			db, err := store.Open(dbPath, store.WithWALAutocheckpointDisabled(), store.WithPoolSize(1))
 			if err != nil {
 				t.Fatal(err)
 			}

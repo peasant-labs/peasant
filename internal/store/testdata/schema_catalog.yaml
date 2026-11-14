@@ -44,7 +44,10 @@ tables:
   - host_slugs
   - index_log
   - ingest_log
+  - ingest_outcome_kinds
+  - ingest_outcome_reasons
   - ingest_run_outcomes
+  - ingest_run_stages
   - _install_salt
   - lessons
   - lesson_sources

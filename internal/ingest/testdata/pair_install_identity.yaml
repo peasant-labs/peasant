@@ -1,0 +1,138 @@
+# Pair-install identity cases. Each case seeds an installed pair and installs a
+# candidate through the production write path.
+#
+# mode:
+#   install -> one pair install over a counting filesystem and a real store
+#              with a settled index input proof. The expected counts are the
+#              contract: one WriteFile and one Rename per replaced file, and
+#              one WAL commit frame only when the transcript is replaced
+#              (the proof clear). A kept file has zero of each, and an install
+#              that writes nothing creates no directory.
+#   gated   -> the same install with the metadata rename held; the pair is read
+#              while it is held and again after it is released.
+#   harvest -> full harvests of one session on a real store, one per entry in
+#              runs. The first run is the initial harvest of source first.
+#              Each later run makes one change before it harvests:
+#                metadata   -> a newer adapter revision, so only the metadata
+#                              changes;
+#                transcript -> the source becomes the named transcript;
+#                none       -> nothing.
+#              moveCaptureBeforeBind advances the session's metadata capture
+#              revision after the run captured its index input and before the
+#              bind writes, as a concurrent capture would.
+#              After each run the expectations are checked:
+#                parses / binds / refusedBinds: index-log rows of this run that
+#                  parsed, bound without a re-parse, or failed;
+#                entries: the session's index rows; entriesRewritten: whether
+#                  any index row changed;
+#                captureRevision / bound: the session's metadata capture
+#                  revision and whether the index is bound to it;
+#                indexTimeAdvanced: whether indexed_at moved;
+#                proofKept: the index input proof equals the previous run's;
+#                transcriptKept: the installed transcript file was not
+#                  written, renamed over or removed;
+#                metadataRenames: renames onto the metadata file;
+#                quiet: no file was written or renamed at all.
+#   retained -> a stored-copy metadata refresh of the pair in
+#              adapter_transcript.yaml under a newer adapter revision. The
+#              verified pair read is the only read of the transcript file; the
+#              install does not stat or read it again, and renames the
+#              metadata alone.
+#
+# transcripts are named bodies. metadataRevision selects the metadata variant;
+# the metadata always records the checksum of metadataFor (default: the pair's
+# own transcript), so a pair whose metadataFor differs is torn.
+transcripts:
+  first: |
+    {"sessionId":"test","type":"user","message":{"role":"user","content":"hi"},"timestamp":"2024-02-19T00:00:00Z"}
+  second: |
+    {"sessionId":"test","type":"user","message":{"role":"user","content":"hi"},"timestamp":"2024-02-19T00:00:00Z"}
+    {"sessionId":"test","type":"user","message":{"role":"user","content":"again"},"timestamp":"2024-02-19T00:00:01Z"}
+cases:
+  - name: identical-pair-installs-nothing
+    mode: install
+    installed: { transcript: first, metadataRevision: 1 }
+    candidate: { transcript: first, metadataRevision: 1 }
+    expect: { transcriptReplaced: false, metadataReplaced: false, writes: 0, renames: 0, walCommits: 0, proofKept: true }
+  - name: metadata-only-change-keeps-the-transcript-file-and-the-index-proof
+    mode: harvest
+    runs:
+      - change: initial
+        expect: { parses: 1, entries: 1, entriesRewritten: true, captureRevision: 1, bound: true, indexTimeAdvanced: true, metadataRenames: 1 }
+      - change: metadata
+        expect: { binds: 1, entries: 1, captureRevision: 2, bound: true, indexTimeAdvanced: true, proofKept: true, transcriptKept: true, metadataRenames: 1 }
+      - change: none
+        expect: { entries: 1, captureRevision: 2, bound: true, proofKept: true, transcriptKept: true, quiet: true }
+  - name: metadata-change-binds-then-transcript-change-reindexes-then-nothing-is-done
+    mode: harvest
+    runs:
+      - change: initial
+        expect: { parses: 1, entries: 1, entriesRewritten: true, captureRevision: 1, bound: true, indexTimeAdvanced: true, metadataRenames: 1 }
+      - change: metadata
+        expect: { binds: 1, entries: 1, captureRevision: 2, bound: true, indexTimeAdvanced: true, proofKept: true, transcriptKept: true, metadataRenames: 1 }
+      - change: transcript
+        transcript: second
+        expect: { parses: 1, entries: 2, entriesRewritten: true, captureRevision: 3, bound: true, indexTimeAdvanced: true, metadataRenames: 1 }
+      - change: none
+        expect: { entries: 2, captureRevision: 3, bound: true, proofKept: true, transcriptKept: true, quiet: true }
+  - name: capture-moved-before-the-bind-is-refused-and-the-next-run-binds
+    mode: harvest
+    runs:
+      - change: initial
+        expect: { parses: 1, entries: 1, entriesRewritten: true, captureRevision: 1, bound: true, indexTimeAdvanced: true, metadataRenames: 1 }
+      - change: metadata
+        moveCaptureBeforeBind: true
+        expect: { refusedBinds: 1, entries: 1, captureRevision: 3, bound: false, proofKept: true, transcriptKept: true, metadataRenames: 1 }
+      # The refused bind left the index time behind the save, so the repair
+      # predicate selects the session: its metadata is saved again at a new
+      # capture revision beside the kept transcript, and bound without a parse.
+      - change: none
+        expect: { binds: 1, entries: 1, captureRevision: 4, bound: true, indexTimeAdvanced: true, proofKept: true, transcriptKept: true, metadataRenames: 1 }
+      - change: none
+        expect: { entries: 1, captureRevision: 4, bound: true, proofKept: true, transcriptKept: true, quiet: true }
+  - name: changed-transcript-replaces-both-files-and-clears-the-proof
+    mode: install
+    installed: { transcript: first, metadataRevision: 1 }
+    candidate: { transcript: second, metadataRevision: 1 }
+    expect: { transcriptReplaced: true, metadataReplaced: true, writes: 2, renames: 2, walCommits: 1, proofKept: false }
+  - name: torn-installed-pair-is-replaced-in-full
+    mode: install
+    # The installed transcript is not the one its metadata names. The candidate
+    # metadata is byte-identical to the installed metadata and is still renamed.
+    installed: { transcript: second, metadataFor: first, metadataRevision: 1 }
+    candidate: { transcript: first, metadataRevision: 1 }
+    expect: { transcriptReplaced: true, metadataReplaced: true, writes: 2, renames: 2, walCommits: 1, proofKept: false }
+  - name: unchanged-debug-and-marker-files-are-kept
+    mode: install
+    installed: { transcript: first, metadataRevision: 1, debug: { trace.log: "trace one", other.log: "other one" }, marker: "marker one" }
+    candidate: { transcript: first, metadataRevision: 2, debug: { trace.log: "trace one", other.log: "other two" }, marker: "marker one" }
+    expect:
+      transcriptReplaced: false
+      metadataReplaced: true
+      writes: 2
+      renames: 2
+      walCommits: 0
+      proofKept: true
+      untouched: [debug/trace.log, marker]
+      replaced: [debug/other.log]
+  - name: obsolete-owned-file-is-still-pruned
+    mode: install
+    installed: { transcript: first, metadataRevision: 1, debug: { trace.log: "trace one", stale.log: "no longer produced" }, marker: "stale marker" }
+    candidate: { transcript: first, metadataRevision: 1, debug: { trace.log: "trace one" } }
+    expect:
+      transcriptReplaced: false
+      metadataReplaced: false
+      writes: 0
+      renames: 0
+      walCommits: 0
+      proofKept: true
+      untouched: [debug/trace.log]
+      absent: [debug/stale.log, marker]
+  - name: interrupted-metadata-only-install-is-consistent-on-the-next-read
+    mode: gated
+    installed: { transcript: first, metadataRevision: 1 }
+    candidate: { transcript: first, metadataRevision: 2 }
+    expect: { transcriptReplaced: false, metadataReplaced: true }
+  - name: retained-metadata-refresh-reads-the-transcript-once
+    mode: retained
+    expect: { transcriptReplaced: false, metadataReplaced: true, writes: 1, renames: 1, transcriptReads: 1, transcriptStats: 0 }

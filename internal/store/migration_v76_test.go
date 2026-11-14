@@ -711,17 +711,19 @@ func TestMigrationV76ResiduePredicate(t *testing.T) {
 	}
 }
 
-// TestMigrationV76OpenNotice drives real Opens with the notice writer
-// captured. It runs sequentially (no t.Parallel): the writer swap is
-// process-global, and sequential tests never run concurrently with parallel
-// ones. The affected window prints the one-line rebuild notice and heals the
+// TestMigrationV76OpenNotice drives real upgrades with the notices captured
+// through UpgradeOptions.Notices: the writer is an option of the upgrade, so
+// no package variable is swapped and the cases run in parallel. The affected
+// window prints the one-line rebuild notice and heals the
 // window; the crossing, insert, and same-count windows stay silent. The
 // notice only warns. The body-half sentinel probes the gate: it is gone after
 // a rebuild and survives the targeted insert.
 func TestMigrationV76OpenNotice(t *testing.T) {
+	t.Parallel()
 	for _, c := range loadMigrationV76OpenCases(t) {
 		c := c
 		t.Run(c.Name, func(t *testing.T) {
+			t.Parallel()
 			path := filepath.Join(t.TempDir(), "v76open.db")
 			conn := openMigrationV76Store(t, path, c.Window, c.PresetNeedsRebuild)
 			before, err := searchIndexResiduePresent(conn)
@@ -754,13 +756,13 @@ func TestMigrationV76OpenNotice(t *testing.T) {
 			if err := conn.Close(); err != nil {
 				t.Fatal(err)
 			}
-			previous := searchIndexRebuildNoticeWriter
 			var notice bytes.Buffer
-			searchIndexRebuildNoticeWriter = &notice
+			if _, err := Upgrade(context.Background(), path, UpgradeOptions{Notices: &notice}); err != nil {
+				t.Fatalf("Upgrade with v75 residue: %v", err)
+			}
 			s, err := Open(path, WithPoolSize(1))
-			searchIndexRebuildNoticeWriter = previous
 			if err != nil {
-				t.Fatalf("Open with v75 residue: %v", err)
+				t.Fatalf("Open after the upgrade: %v", err)
 			}
 			t.Cleanup(func() {
 				if err := s.Close(); err != nil {

@@ -202,7 +202,7 @@ func TestMigrationV74BackfillsConversationTurnCounts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s, err := Open(path, WithPoolSize(1))
+	s, err := openUpgraded(path, WithPoolSize(1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +234,7 @@ func TestMigrationV74BackfillsConversationTurnCounts(t *testing.T) {
 func TestBackfillConversationTurnCountsReportsEntryLessSessions(t *testing.T) {
 	t.Parallel()
 	fixture := loadConversationTurnCountMigrationFixture(t)
-	s, err := Open(filepath.Join(t.TempDir(), "head.db"), WithPoolSize(1))
+	s, err := openUpgraded(filepath.Join(t.TempDir(), "head.db"), WithPoolSize(1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +246,7 @@ func TestBackfillConversationTurnCountsReportsEntryLessSessions(t *testing.T) {
 	seedConversationTurnCountSessions(t, conn, fixture)
 	s.Pool().Put(conn)
 
-	report, err := backfillConversationTurnCounts(s.Pool())
+	report, err := backfillConversationTurnCountsForTest(t, s)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,20 +269,6 @@ func TestBackfillConversationTurnCountsReportsEntryLessSessions(t *testing.T) {
 	}
 }
 
-func TestConversationTurnCountBackfillGate(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct {
-		version int64
-		want    bool
-	}{
-		{0, false}, {1, true}, {62, true}, {70, true}, {71, true}, {72, true}, {73, true}, {74, false}, {75, false},
-	} {
-		if got := shouldBackfillConversationTurnCounts(tc.version); got != tc.want {
-			t.Errorf("shouldBackfillConversationTurnCounts(%d) = %t, want %t", tc.version, got, tc.want)
-		}
-	}
-}
-
 // TestConversationTurnCountBackfillDoesNotReRunAtHead proves the gate is tied
 // to the V74 upgrade, not to every future head version: a store already at V74
 // reopens without re-folding, so a deliberately changed count survives.
@@ -290,7 +276,7 @@ func TestConversationTurnCountBackfillDoesNotReRunAtHead(t *testing.T) {
 	t.Parallel()
 	fixture := loadConversationTurnCountMigrationFixture(t)
 	path := filepath.Join(t.TempDir(), "head.db")
-	s, err := Open(path, WithPoolSize(1))
+	s, err := openUpgraded(path, WithPoolSize(1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +286,7 @@ func TestConversationTurnCountBackfillDoesNotReRunAtHead(t *testing.T) {
 	}
 	seedConversationTurnCountSessions(t, conn, fixture)
 	s.Pool().Put(conn)
-	if _, err := backfillConversationTurnCounts(s.Pool()); err != nil {
+	if _, err := backfillConversationTurnCountsForTest(t, s); err != nil {
 		t.Fatal(err)
 	}
 	conn, err = s.Pool().Take(context.Background())
@@ -315,7 +301,7 @@ func TestConversationTurnCountBackfillDoesNotReRunAtHead(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := Open(path, WithPoolSize(1))
+	reopened, err := openUpgraded(path, WithPoolSize(1))
 	if err != nil {
 		t.Fatal(err)
 	}

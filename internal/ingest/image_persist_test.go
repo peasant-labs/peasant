@@ -36,7 +36,6 @@ func TestImagePersistFollowsActivation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// ast-grep-ignore: no-migrating-store-open-in-tests -- the attachment table is created by the migration this test exercises.
 	database, err := store.Open(filepath.Join(t.TempDir(), "peasant.db"), store.WithIndexFormats(store.V2IndexFormat()), store.WithGenerationArtifacts(artifacts, locker))
 	if err != nil {
 		t.Fatal(err)
@@ -118,7 +117,6 @@ func TestImageHarvestCollapsesIdenticalBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// ast-grep-ignore: no-migrating-store-open-in-tests -- the attachment table is created by the migration this test exercises.
 	database, err := store.Open(filepath.Join(t.TempDir(), "peasant.db"), store.WithIndexFormats(store.V2IndexFormat()), store.WithGenerationArtifacts(artifacts, locker))
 	if err != nil {
 		t.Fatal(err)

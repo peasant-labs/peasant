@@ -1,0 +1,44 @@
+id: no-runtime-caller-in-tests
+language: Go
+severity: error
+message: >
+  runtime.Caller can return a module-relative source path under -trimpath.
+  Read files relative to the package directory, where the test binary runs.
+  For calls that do not locate files, use an ast-grep-ignore with a reason.
+note: >
+  This rule conservatively flags all runtime.Caller calls in test files.
+  Suppress a call only when it does not use the returned path to open files.
+rule:
+  any:
+    - pattern:
+        context: 'func _() { _ = runtime.Caller($$$ARGS) }'
+        selector: call_expression
+    - all:
+        - pattern:
+            context: 'func _() { _ = $ALIAS.Caller($$$ARGS) }'
+            selector: call_expression
+        - inside:
+            kind: source_file
+            stopBy: end
+            has:
+              pattern:
+                context: 'import $ALIAS "runtime"'
+                selector: import_spec
+              stopBy: end
+    - all:
+        - pattern:
+            context: 'func _() { _ = Caller($$$ARGS) }'
+            selector: call_expression
+        - inside:
+            kind: source_file
+            stopBy: end
+            has:
+              pattern:
+                context: 'import . "runtime"'
+                selector: import_spec
+              stopBy: end
+files:
+  - "**/*_test.go"
+ignores:
+  - "vendor/**"
+  - "third_party/**"

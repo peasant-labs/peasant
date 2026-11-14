@@ -45,6 +45,10 @@ volatileColumns:
     - id
     - started_at
     - finished_at
+    # Measured wall time of the attempt's parse and write: a property of the
+    # run. The parsed bytes are not volatile and stay compared.
+    - parse_ms
+    - write_ms
   session_publication_metadata:
     - capture_revision
     - metadata_json
@@ -67,8 +71,11 @@ exemptTables:
     timestamps. Exempt from the whole-table diff; entries naming this run's
     cohort ids are compared under a cohort filter.
   ingest_run_outcomes: >-
-    Append-only run log: AUTOINCREMENT id and the run's reason codes, a
+    Append-only run log: AUTOINCREMENT id and the run's reason ids, a
     property of the run.
+  ingest_run_stages: >-
+    The run's stored profile: one row per stage with measured durations,
+    keyed to the run row, so its rows are a property of the run.
   session_search_fts_data: >-
     FTS5 shadow table for external-content session_search_source; its bytes
     depend on transaction boundaries, not on logical content.

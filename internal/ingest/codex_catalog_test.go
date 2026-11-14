@@ -127,7 +127,7 @@ func TestCodexRolloutCatalogMaintenance(t *testing.T) {
 			walkFS := &codexCatalogWalkFS{MemFS: mfs, unreadable: faults, statDenied: denied}
 
 			dbPath := storetest.CopyGoldenDB(t)
-			db, err := store.Open(dbPath, store.WithSkipMigrations())
+			db, err := store.Open(dbPath)
 			if err != nil {
 				t.Fatalf("open store: %v", err)
 			}
@@ -225,7 +225,7 @@ func TestCodexLocatedBuildWritesNoCatalogRow(t *testing.T) {
 	}
 
 	dbPath := storetest.CopyGoldenDB(t)
-	db, err := store.Open(dbPath, store.WithSkipMigrations())
+	db, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

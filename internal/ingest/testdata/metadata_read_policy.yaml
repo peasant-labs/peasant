@@ -372,7 +372,9 @@ cases:
     database: true
     reconciled: true
     wantExtract: 1
-    wantIndexed: 1
+    # The native read captures the row beside an unchanged transcript, so the
+    # stored index is bound to the new capture without a parse.
+    wantIndexed: 0
   - name: file v9 remains unchanged without a database
     schemaVersion: 9
   - name: db v8 requires native refresh
@@ -400,7 +402,9 @@ cases:
     database: true
     reconciled: true
     wantExtract: 1
-    wantIndexed: 1
+    # The native read captures the row beside an unchanged transcript, so the
+    # stored index is bound to the new capture without a parse.
+    wantIndexed: 0
   - name: retained v9 index does not reread native input
     schemaVersion: 9
     adapterVersion: 4

@@ -75,7 +75,7 @@ func TestMigrationV46UpgradesAStoreFrozenAtV45(t *testing.T) {
 	pool.Close()
 
 	// Open the same file with this build, which is the real upgrade path.
-	upgraded, err := Open(dbPath)
+	upgraded, err := openUpgraded(dbPath)
 	if err != nil {
 		t.Fatalf("open the frozen store with this build: %v", err)
 	}

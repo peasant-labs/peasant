@@ -307,7 +307,6 @@ func testAttachmentPartitionKey(t *testing.T) {
 func openAttachmentFixture(t *testing.T) (*store.Store, *attachments.Store) {
 	t.Helper()
 	dir := t.TempDir()
-	// ast-grep-ignore: no-migrating-store-open-in-tests -- the attachment table is created by the migration this test exercises.
 	db, err := store.Open(filepath.Join(dir, "peasant.db"), store.WithPoolSize(1))
 	if err != nil {
 		t.Fatal(err)

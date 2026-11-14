@@ -1,0 +1,107 @@
+# The outcome kinds and reasons a freshly migrated store must hold, and the
+# cases that pin them to the ingest.OutcomeReason constants. A reason id below
+# 1000000 is fixed and equal in every store; the id set is the contract, so the
+# rows are listed whole instead of counted.
+kinds:
+  - {id: 1, name: worker_error}
+  - {id: 2, name: diagnostic}
+  - {id: 3, name: refresh}
+reasons:
+  - {id: 1, kind: worker_error, code: error, retired: false}
+  - {id: 2, kind: worker_error, code: adapter_capture_failed, retired: false}
+  - {id: 100, kind: diagnostic, code: adapter_refresh_unavailable, retired: false}
+  - {id: 101, kind: diagnostic, code: artifact_cleanup, retired: false}
+  - {id: 102, kind: diagnostic, code: artifact_mirror_pending, retired: false}
+  - {id: 103, kind: diagnostic, code: artifact_relocation, retired: false}
+  - {id: 104, kind: diagnostic, code: codex_checkpoint_metadata_misaligned, retired: false}
+  - {id: 105, kind: diagnostic, code: codex_copied_prefix_incomplete, retired: false}
+  - {id: 106, kind: diagnostic, code: codex_copy_boundary_malformed, retired: false}
+  - {id: 107, kind: diagnostic, code: codex_history_envelope_malformed, retired: false}
+  - {id: 108, kind: diagnostic, code: codex_history_mode_unsupported, retired: false}
+  - {id: 109, kind: diagnostic, code: codex_item_body_malformed, retired: false}
+  - {id: 110, kind: diagnostic, code: codex_item_variant_unknown, retired: false}
+  - {id: 111, kind: diagnostic, code: codex_lifecycle_unbalanced, retired: false}
+  - {id: 112, kind: diagnostic, code: codex_native_pointer_identity_mismatch, retired: false}
+  - {id: 113, kind: diagnostic, code: codex_native_pointer_unreadable, retired: false}
+  - {id: 114, kind: diagnostic, code: codex_ordinal_regression, retired: false}
+  - {id: 115, kind: diagnostic, code: codex_paginated_rollback_anomaly, retired: false}
+  - {id: 116, kind: diagnostic, code: codex_record_malformed, retired: false}
+  - {id: 117, kind: diagnostic, code: codex_reference_ambiguous, retired: false}
+  - {id: 118, kind: diagnostic, code: codex_reference_bounds_invalid, retired: false}
+  - {id: 119, kind: diagnostic, code: codex_reference_byte_boundary_invalid, retired: false}
+  - {id: 120, kind: diagnostic, code: codex_reference_coverage_incomplete, retired: false}
+  - {id: 121, kind: diagnostic, code: codex_reference_cycle, retired: false}
+  - {id: 122, kind: diagnostic, code: codex_reference_depth_exceeded, retired: false}
+  - {id: 123, kind: diagnostic, code: codex_reference_mode_unsupported, retired: false}
+  - {id: 124, kind: diagnostic, code: codex_reference_segments_bounded, retired: false}
+  - {id: 125, kind: diagnostic, code: codex_reference_unavailable, retired: false}
+  - {id: 126, kind: diagnostic, code: codex_reference_unreadable, retired: false}
+  - {id: 127, kind: diagnostic, code: codex_rollback_beyond_history, retired: false}
+  - {id: 128, kind: diagnostic, code: codex_turn_aborted, retired: false}
+  - {id: 129, kind: diagnostic, code: content_capture_incomplete, retired: false}
+  - {id: 130, kind: diagnostic, code: content_recovery_refused, retired: false}
+  - {id: 131, kind: diagnostic, code: content_recovery_unavailable, retired: false}
+  - {id: 132, kind: diagnostic, code: copy_failed, retired: false}
+  - {id: 133, kind: diagnostic, code: derive_identity_error, retired: false}
+  - {id: 134, kind: diagnostic, code: dry_run_unindexed, retired: false}
+  - {id: 135, kind: diagnostic, code: duplicate_session_id, retired: false}
+  - {id: 136, kind: diagnostic, code: event_data_parse_error, retired: false}
+  - {id: 137, kind: diagnostic, code: git_failure, retired: false}
+  - {id: 138, kind: diagnostic, code: git_timeout, retired: false}
+  - {id: 139, kind: diagnostic, code: inactive_dangling_parent, retired: false}
+  - {id: 140, kind: diagnostic, code: incomplete_tail, retired: false}
+  - {id: 141, kind: diagnostic, code: index_coverage_unavailable, retired: false}
+  - {id: 142, kind: diagnostic, code: index_empty_unverified, retired: false}
+  - {id: 143, kind: diagnostic, code: index_refused, retired: false}
+  - {id: 144, kind: diagnostic, code: invalid_model, retired: false}
+  - {id: 145, kind: diagnostic, code: invalid_parent_cycle, retired: false}
+  - {id: 146, kind: diagnostic, code: invalid_parent_session_id, retired: false}
+  - {id: 147, kind: diagnostic, code: metadata_refused, retired: false}
+  - {id: 148, kind: diagnostic, code: metrics_incomplete, retired: false}
+  - {id: 149, kind: diagnostic, code: missing_model, retired: false}
+  - {id: 150, kind: diagnostic, code: missing_project, retired: false}
+  - {id: 151, kind: diagnostic, code: missing_session_meta, retired: false}
+  - {id: 152, kind: diagnostic, code: missing_sidecar, retired: false}
+  - {id: 153, kind: diagnostic, code: missing_user_email, retired: false}
+  - {id: 154, kind: diagnostic, code: native_cursor_unavailable, retired: false}
+  - {id: 155, kind: diagnostic, code: native_discovery_unavailable, retired: false}
+  - {id: 156, kind: diagnostic, code: native_refresh_unavailable, retired: false}
+  - {id: 157, kind: diagnostic, code: opencode_missing_parent, retired: false}
+  - {id: 158, kind: diagnostic, code: opencode_orphan_part_dropped, retired: false}
+  - {id: 159, kind: diagnostic, code: opencode_unknown_part_type, retired: false}
+  - {id: 160, kind: diagnostic, code: oversize_write_advisory, retired: false}
+  - {id: 161, kind: diagnostic, code: pair_repair_unavailable, retired: false}
+  - {id: 162, kind: diagnostic, code: parent_session_mismatch, retired: false}
+  - {id: 163, kind: diagnostic, code: parse_error, retired: false}
+  - {id: 164, kind: diagnostic, code: read_error, retired: false}
+  - {id: 165, kind: diagnostic, code: record_too_large, retired: false}
+  - {id: 166, kind: diagnostic, code: sidecar_parse_error, retired: false}
+  - {id: 167, kind: diagnostic, code: sidecar_session_mismatch, retired: false}
+  - {id: 168, kind: diagnostic, code: stale_index_missing_input, retired: false}
+  - {id: 169, kind: diagnostic, code: stale_index_outside_selection, retired: false}
+  - {id: 170, kind: diagnostic, code: stats-overflow, retired: false}
+  - {id: 171, kind: diagnostic, code: transcript_read_failed, retired: false}
+  - {id: 172, kind: diagnostic, code: transcript_read_timeout, retired: false}
+  - {id: 173, kind: diagnostic, code: unknown_data_retained, retired: false}
+  - {id: 300, kind: refresh, code: new, retired: false}
+  - {id: 301, kind: refresh, code: source_changed, retired: false}
+  - {id: 302, kind: refresh, code: pair_missing, retired: false}
+  - {id: 303, kind: refresh, code: metadata_schema, retired: false}
+  - {id: 304, kind: refresh, code: forced, retired: false}
+  - {id: 305, kind: refresh, code: adapter_behind, retired: false}
+  - {id: 306, kind: refresh, code: adapter_behind_native_only, retired: false}
+  - {id: 307, kind: refresh, code: adapter_stamp_absent, retired: false}
+  - {id: 308, kind: refresh, code: indexer_behind, retired: false}
+  - {id: 309, kind: refresh, code: refusal_reopened, retired: false}
+  - {id: 310, kind: refresh, code: publication_unbound, retired: false}
+cases:
+  - name: go-constants-and-seeded-rows-match-exactly
+  - name: kinds-match-exactly
+  - name: constructor-refuses-an-unknown-code
+  - name: every-code-is-unique-across-kinds
+  - name: capture-failure-is-a-worker-error-named-adapter-capture-failed
+  - name: refresh-unavailable-is-a-diagnostic-and-keeps-its-code
+  - name: retired-code-keeps-its-row-and-its-id
+  - name: outcome-row-cannot-name-a-missing-reason
+  - name: reader-refuses-an-id-this-build-does-not-define
+  - name: reader-skips-and-counts-a-store-local-reason-id

@@ -129,7 +129,7 @@ func TestPublicationOmissions(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
 			path := storetest.CopyGoldenDB(t)
-			db, err := store.Open(path, store.WithSkipMigrations())
+			db, err := store.Open(path)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -156,7 +156,7 @@ type durabilityStore struct {
 // the same path after the first is shut down.
 func newDurabilityStore(t *testing.T, dbPath string) *durabilityStore {
 	t.Helper()
-	s, err := store.Open(dbPath, store.WithSkipMigrations())
+	s, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatalf("open durability store at %s: %v", dbPath, err)
 	}

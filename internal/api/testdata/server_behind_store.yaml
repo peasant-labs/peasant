@@ -1,0 +1,27 @@
+# A server never upgrades the store: there is no terminal watching it. Each
+# case runs one server-side import path over a store the server must not
+# change, and asserts the behind-store refusal (store.SchemaBehindError, which
+# names `peasant migrate --schema-only`), no claimed import, and a database
+# file and sidecars left byte for byte.
+#
+# entry: pipeline is the one constructor every web import runs
+# (newIngestPipeline), which checks at the point it would open the store;
+# kickstart is the claim the local web app's kickstart makes when its setup
+# is saved (reserveIngest with the preflight), which refuses before claiming.
+# store: long is a schema-75 store with stale search results, quick is one
+# without (a quick plan the server still never runs), and owed-recount is at
+# the head schema with the turn count recount still owed.
+requiredNames:
+  - pipeline-refuses-a-long-behind-store
+  - pipeline-refuses-a-quick-behind-store
+  - pipeline-refuses-a-store-that-owes-its-recount
+  - kickstart-refuses-a-long-behind-store-before-claiming
+  - kickstart-refuses-a-quick-behind-store-before-claiming
+  - kickstart-refuses-a-store-that-owes-its-recount-before-claiming
+cases:
+  - {name: pipeline-refuses-a-long-behind-store, entry: pipeline, store: long}
+  - {name: pipeline-refuses-a-quick-behind-store, entry: pipeline, store: quick}
+  - {name: pipeline-refuses-a-store-that-owes-its-recount, entry: pipeline, store: owed-recount}
+  - {name: kickstart-refuses-a-long-behind-store-before-claiming, entry: kickstart, store: long}
+  - {name: kickstart-refuses-a-quick-behind-store-before-claiming, entry: kickstart, store: quick}
+  - {name: kickstart-refuses-a-store-that-owes-its-recount-before-claiming, entry: kickstart, store: owed-recount}

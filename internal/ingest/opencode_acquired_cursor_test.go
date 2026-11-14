@@ -132,7 +132,7 @@ func TestPipelineStoresOnlyAcquiredOpenCodeCursor(t *testing.T) {
 			if !reflect.DeepEqual(legacyMeta, materialized.Metadata) || !bytes.Equal(legacyTranscript, materialized.Transcript) {
 				t.Fatal("cursor acquisition changed frozen materialization output")
 			}
-			database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
+			database, err := store.Open(storetest.CopyGoldenDB(t))
 			if err != nil {
 				t.Fatal(err)
 			}

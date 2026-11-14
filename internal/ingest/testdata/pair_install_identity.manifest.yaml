@@ -1,0 +1,11 @@
+requiredNames:
+  - identical-pair-installs-nothing
+  - metadata-only-change-keeps-the-transcript-file-and-the-index-proof
+  - metadata-change-binds-then-transcript-change-reindexes-then-nothing-is-done
+  - capture-moved-before-the-bind-is-refused-and-the-next-run-binds
+  - changed-transcript-replaces-both-files-and-clears-the-proof
+  - torn-installed-pair-is-replaced-in-full
+  - unchanged-debug-and-marker-files-are-kept
+  - obsolete-owned-file-is-still-pruned
+  - interrupted-metadata-only-install-is-consistent-on-the-next-read
+  - retained-metadata-refresh-reads-the-transcript-once

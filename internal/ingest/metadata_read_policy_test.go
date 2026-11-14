@@ -321,7 +321,7 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 			var beforeMetrics *ingest.SessionMetrics
 			var beforeArtifactState *ingest.SessionIndexState
 			if fixture.Database {
-				database, err = store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
+				database, err = store.Open(storetest.CopyGoldenDB(t))
 				if err != nil {
 					t.Fatal(err)
 				}

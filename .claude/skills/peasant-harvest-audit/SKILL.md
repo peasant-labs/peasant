@@ -22,8 +22,9 @@ DB="${XDG_DATA_HOME:-$HOME/.local/share}/peasant/peasant.db"
 ## Tables
 
 - **`ingest_log`** — one row per harvest run. Columns: `id, started_at, finished_at, sessions_new, sessions_updated, sessions_unchanged, sessions_error, indexed_count, computed_count, error_message, source_path`. `id` is the run id.
-- **`ingest_run_outcomes`** — per-session outcomes for a run (the detailed audit): `id, run_id, session_id, kind, reason_code, created_at`. `kind` is `worker_error` or `diagnostic`. Detail is kept for the latest 100 runs; older detail is pruned while the `ingest_log` row remains.
-- **`index_log`** — index-stage outcomes per session: `id, session_id, provider, outcome, index_version, entries_count, source_path, original_root, reason, started_at, finished_at, error_message, index_format_version`.
+- **`ingest_run_outcomes`** — per-session outcomes for a run (the detailed audit): `id, run_id, session_id, reason_id, created_at`. `reason_id` points at `ingest_outcome_reasons` (`id, kind_id, code, retired`), whose `kind_id` points at `ingest_outcome_kinds` (`worker_error`, `diagnostic`, `refresh`). Every refreshed session has one `refresh` row per run. Detail is kept for the latest 100 runs; older detail is pruned while the `ingest_log` row remains.
+- **`ingest_run_stages`** — the run's profile, one row per stage: `run_id, stage, duration_ms, done, total, bytes, lane_wait_ms`. Kept for the latest 100 runs. Stages overlap, so the rows do not sum to wall time.
+- **`index_log`** — index-stage outcomes per session: `id, session_id, provider, outcome, index_version, entries_count, source_path, original_root, reason, started_at, finished_at, error_message, index_format_version, parse_ms, write_ms, bytes`. The last three are NULL when the attempt was not measured.
 - **`sessions`** — one row per session: `session_id, parent_id, model_harness, session_origin, origin_version, adapter_version, index_version, index_format_version, source_path, ingested_ms, indexed_at, active_generation_id, artifact_hash, root_session_id, …` (check with `PRAGMA table_info(sessions)`).
 - **`session_content_captures`** — content capture status per session: `session_id, status, source_authority, transcript_origin, capture_format, entry_count, content_row_count, full_capture_sha256, captured_at_ms, failure_code, failure_message, publication_capture_revision`.
 
@@ -51,19 +52,32 @@ One run's per-session outcomes, grouped by reason:
 
 ```bash
 sqlite3 -readonly "$DB" "
-SELECT kind, reason_code, COUNT(*) AS n
-FROM ingest_run_outcomes WHERE run_id = <RUN>
+SELECT k.name AS kind, r.code AS reason, COUNT(*) AS n
+FROM ingest_run_outcomes o
+JOIN ingest_outcome_reasons r ON r.id = o.reason_id
+JOIN ingest_outcome_kinds k ON k.id = r.kind_id
+WHERE o.run_id = <RUN>
 GROUP BY 1,2 ORDER BY n DESC;"
+```
+
+Where one run's time went, by stage:
+
+```bash
+sqlite3 -readonly "$DB" "
+SELECT stage, duration_ms, done, total, bytes, lane_wait_ms
+FROM ingest_run_stages WHERE run_id = <RUN> ORDER BY duration_ms DESC;"
 ```
 
 The sessions behind a run's worker errors (harness and origin add context):
 
 ```bash
 sqlite3 -readonly "$DB" "
-SELECT o.session_id, o.reason_code, s.model_harness, s.session_origin,
+SELECT o.session_id, r.code AS reason, s.model_harness, s.session_origin,
        datetime(s.ingested_ms/1000,'unixepoch') AS ingested
-FROM ingest_run_outcomes o JOIN sessions s ON s.session_id = o.session_id
-WHERE o.run_id = <RUN> AND o.kind = 'worker_error' ORDER BY o.id;"
+FROM ingest_run_outcomes o
+JOIN ingest_outcome_reasons r ON r.id = o.reason_id
+JOIN sessions s ON s.session_id = o.session_id
+WHERE o.run_id = <RUN> AND r.kind_id = 1 ORDER BY o.id;"
 ```
 
 One session's index history:
@@ -86,13 +100,13 @@ WHERE session_origin='unknown' AND parent_id IS NOT NULL GROUP BY 1;"
 ## Reading the results
 
 - A completed run with `sessions_error > 0` is still a successful run: per-session failures are recorded, not fatal. Check what they were before calling a run "clean".
-- `worker_error` reasons are pipeline failures (`error`, `adapter_refresh_unavailable`, …). `diagnostic` reasons come from the adapters (`unknown_data_retained`, `missing_model`, `parse_error`, `index_refused`, `content_recovery_unavailable`, `pair_repair_unavailable`, `oversize_write_advisory`, …). The reason set is closed and validated on write — a code you do not recognize means a newer build wrote it.
+- `worker_error` reasons are pipeline failures (`error`, `adapter_capture_failed`). `refresh` reasons say why a session was refreshed (`new`, `source_changed`, `adapter_behind`, `indexer_behind`, `forced`, …). `diagnostic` reasons come from the adapters (`unknown_data_retained`, `missing_model`, `parse_error`, `index_refused`, `content_recovery_unavailable`, `pair_repair_unavailable`, `oversize_write_advisory`, …). The reason set is closed and validated on write — a code you do not recognize means a newer build wrote it.
 - These tables hold identities, kinds, and reason codes only — never transcript text. Do not try to read content here; use the session APIs for that.
 
 ## Triage recipe
 
 1. `SELECT id … FROM ingest_log ORDER BY id DESC LIMIT 5` — which run, how long, how many errors.
-2. Group that run's `ingest_run_outcomes` by `kind, reason_code` — the shape of the failure.
+2. Group that run's `ingest_run_outcomes` by kind and reason code — the shape of the failure.
 3. Join the `worker_error` rows to `sessions` — the failing harnesses, origins, and whether their sources are old (stale refresh) or new.
 4. For one session, `index_log` shows its index-stage history; the `sessions` row shows origin/adapter/index state.
 5. When a session keeps failing every run with the same reason, say so explicitly — a recurring deferral is different from a one-off error.

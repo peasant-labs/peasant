@@ -17,11 +17,14 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing/fstest"
 	"time"
+
+	"github.com/peasant-labs/peasant/internal/defaults"
 )
 
 // --- counting capability ---------------------------------------------------
@@ -269,10 +272,13 @@ func (stubDirInfo) Sys() any           { return nil }
 
 // Observe the existing retained fixture at the filesystem boundary, before any
 // installed file changes, rather than merely checking eventual index success.
+// A transcript may be renamed over only after the index input proof was
+// cleared; a metadata rename beside a kept transcript needs no preparation.
 type preparedRetainedFS struct {
 	*OSFileSystem
-	store *serialIndexStore
-	sid   SessionID
+	store   *serialIndexStore
+	sid     SessionID
+	renamed []string
 }
 
 var _ FileSystem = (*preparedRetainedFS)(nil)
@@ -282,9 +288,10 @@ func (f *preparedRetainedFS) Rename(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	if state.IndexedInputHash != nil {
-		return fmt.Errorf("retained publication renamed a file before preparation")
+	if state.IndexedInputHash != nil && !strings.HasSuffix(dst, defaults.MetadataSuffix) {
+		return fmt.Errorf("retained publication renamed %s before preparation", dst)
 	}
+	f.renamed = append(f.renamed, filepath.Base(dst))
 	return f.OSFileSystem.Rename(src, dst)
 }
 

@@ -253,7 +253,7 @@ func TestSettleUnavailableSourceRereportsForceAndCauseChange(t *testing.T) {
 		// A new pipeline is a later harvest. The same pipeline would still
 		// owe a report it recorded earlier in that run.
 		pipeline := &Pipeline{config: PipelineConfig{Force: step.Force}, metricsStore: store}
-		got := pipeline.settleUnavailableSource(ctx, sid, cause, nil)
+		got := pipeline.settleUnavailableSource(ctx, sid, cause, nil, StageIndex)
 		if got != step.WantReport {
 			t.Fatalf("step %s report = %v, want %v", step.Name, got, step.WantReport)
 		}
@@ -278,7 +278,7 @@ func TestSettleUnavailableSourceUsesCallerWriteLane(t *testing.T) {
 
 	done := make(chan bool, 1)
 	go func() {
-		done <- pipeline.settleUnavailableSource(context.Background(), SessionID("11111111-1111-4111-8111-111111111111"), SourceUnavailableRecordUnusable, lane)
+		done <- pipeline.settleUnavailableSource(context.Background(), SessionID("11111111-1111-4111-8111-111111111111"), SourceUnavailableRecordUnusable, lane, StageIndex)
 	}()
 	// The lane completion is the wake. The deadline is the failure bound: a
 	// write on the caller's lane finishes in-process, and a fallback lock

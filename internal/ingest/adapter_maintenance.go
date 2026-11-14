@@ -317,7 +317,7 @@ func (p *Pipeline) reportPairRepairUnavailable(ctx context.Context, sid SessionI
 		causeClass, shaped = sourceUnavailableCause(cause)
 	}
 	if shaped {
-		if !p.settleUnavailableSource(ctx, sid, causeClass, lane) || p.laneCauseAlreadyReported(sid, causeClass) {
+		if !p.settleUnavailableSource(ctx, sid, causeClass, lane, StageExtract) || p.laneCauseAlreadyReported(sid, causeClass) {
 			// A routine harvest stays quiet once this cause is recorded, and
 			// so does this lane when stored-content recovery already reported
 			// the same cause in this harvest. A store, locator, or write fault
@@ -779,6 +779,9 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry, writeLan
 		refreshed := p.processRetainedSession(ctx, entry.Session, metadataPath, writeLane)
 		var insufficient *InsufficientRetainedInputError
 		if refreshed.result.Error == nil || !errors.As(refreshed.result.Error, &insufficient) {
+			// The adapter stamp is behind and the stored transcript served the
+			// refresh: no native read.
+			p.markRefreshReason(entry.Session.SessionID, OutcomeReasonRefreshAdapterBehind)
 			return refreshed
 		}
 	}

@@ -2075,7 +2075,7 @@ func TestClassifierAnnotator_AnnotateWithProfile_RecordsAnnotationWork(t *testin
 	sid := mustSessionID(t, testutil.TestSessionUUID)
 	ms := &stubMetricsStore{entries: []schema.SessionEntry{buildEntry(sid, 0, ingest.RoleUser, "fuck this bug")}, m: buildMetrics(sid, 5, 4)}
 	as := newFullAnnotationStore()
-	profiler := &ingest.IndexProfiler{}
+	profiler := &ingest.IndexProfiler{AnnotationResultDetail: true}
 
 	ca := metrics.NewClassifierAnnotator(ms, as)
 	if err := ca.AnnotateWithProfile(context.Background(), sid, profiler); err != nil {
@@ -2140,7 +2140,7 @@ func TestClassifierAnnotator_AnnotateWithProfile_RecordsBatchPersistence(t *test
 	sid := mustSessionID(t, testutil.TestSessionUUID)
 	ms := &stubMetricsStore{entries: []schema.SessionEntry{buildEntry(sid, 0, ingest.RoleUser, "fuck this bug")}, m: buildMetrics(sid, 3, 4)}
 	as := &batchAnnotationStore{stubAnnotationStore: newFullAnnotationStore()}
-	profiler := &ingest.IndexProfiler{}
+	profiler := &ingest.IndexProfiler{AnnotationResultDetail: true}
 	ca := metrics.NewClassifierAnnotator(ms, as)
 
 	if err := ca.AnnotateWithProfile(context.Background(), sid, profiler); err != nil {
@@ -2184,7 +2184,7 @@ func TestClassifierAnnotator_PrepareAndFlushAnnotationBatches_UsesOneBufferedSto
 	sidB := mustSessionID(t, testutil.TestSubagentID)
 	ms := &stubMetricsStore{entries: []schema.SessionEntry{buildEntry(sidA, 0, ingest.RoleUser, "fuck this bug")}, m: buildMetrics(sidA, 3, 4)}
 	as := &batchAnnotationStore{stubAnnotationStore: newFullAnnotationStore()}
-	profiler := &ingest.IndexProfiler{}
+	profiler := &ingest.IndexProfiler{AnnotationResultDetail: true}
 	ca := metrics.NewClassifierAnnotator(ms, as)
 
 	batchA, err := ca.PrepareAnnotations(context.Background(), sidA, profiler)
@@ -2224,7 +2224,7 @@ func TestClassifierAnnotator_FlushAnnotationBatches_RecordsBatchLevelError(t *te
 		stubAnnotationStore: newFullAnnotationStore(),
 		sessionBatchErr:     errors.New("state save failed"),
 	}
-	profiler := &ingest.IndexProfiler{}
+	profiler := &ingest.IndexProfiler{AnnotationResultDetail: true}
 	ca := metrics.NewClassifierAnnotator(&stubMetricsStore{}, as)
 	sidString := string(sid)
 	batch := ingest.SessionAnnotationBatch{

@@ -239,7 +239,7 @@ func openV70(t *testing.T, dbPath string) *sqlite.Conn {
 
 func openMigrated(t *testing.T, dbPath string) *Store {
 	t.Helper()
-	database, err := Open(dbPath, WithPoolSize(1))
+	database, err := openUpgraded(dbPath, WithPoolSize(1))
 	if err != nil {
 		t.Fatal(err)
 	}

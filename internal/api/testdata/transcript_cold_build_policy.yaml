@@ -1,0 +1,10 @@
+requiredNames:
+  - production-build-keeps-its-ceiling
+  - race-build-keeps-a-calibrated-ceiling
+cases:
+  - name: production-build-keeps-its-ceiling
+    raceEnabled: false
+    ceilingMillis: 2000
+  - name: race-build-keeps-a-calibrated-ceiling
+    raceEnabled: true
+    ceilingMillis: 24000

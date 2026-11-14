@@ -341,11 +341,9 @@ func openKickstartStoreWithError(cmd *cobra.Command, ownedRoot string) (*store.S
 	if err != nil {
 		return nil, func() {}, err
 	}
-	// A non-interactive caller never runs migration v76's whole-index
-	// rebuild invisibly: refuse on residue instead of opening.
-	if err := refuseStaleSearchIndex(dbPath); err != nil {
-		return nil, func() {}, err
-	}
+	// The mount only reads. Kickstart upgraded the store before discovery,
+	// so this open finds a current store and writes nothing; a store that is
+	// still behind is refused by Open without a change.
 	db, err := store.Open(dbPath, options...)
 	if err != nil {
 		return nil, func() {}, err

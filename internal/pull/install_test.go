@@ -46,7 +46,7 @@ func TestContentInstallProcessLock(t *testing.T) {
 	const rootEnv = "PEASANT_PULL_LOCK_TEST_ROOT"
 	const heldEnv = "PEASANT_PULL_LOCK_TEST_HELD"
 	if root := os.Getenv(rootEnv); root != "" {
-		db, err := store.Open(filepath.Join(root, "index.db"), store.WithSkipMigrations())
+		db, err := store.Open(filepath.Join(root, "index.db"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -69,7 +69,7 @@ func TestContentInstallProcessLock(t *testing.T) {
 	}
 	root := t.TempDir()
 	storetest.CopyGoldenTo(t, filepath.Join(root, "index.db"))
-	db, err := store.Open(filepath.Join(root, "index.db"), store.WithSkipMigrations())
+	db, err := store.Open(filepath.Join(root, "index.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestContentInstallDryRunDoesNotRepairOrWrite(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	storetest.CopyGoldenTo(t, filepath.Join(root, "index.db"))
-	db, err := store.Open(filepath.Join(root, "index.db"), store.WithSkipMigrations())
+	db, err := store.Open(filepath.Join(root, "index.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -399,7 +399,7 @@ func TestContentInstallRestartRecovery(t *testing.T) {
 			root := t.TempDir()
 			dbPath := filepath.Join(root, "index.db")
 			storetest.CopyGoldenTo(t, dbPath)
-			db, err := store.Open(dbPath, store.WithSkipMigrations())
+			db, err := store.Open(dbPath)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -529,7 +529,7 @@ func TestContentInstallRestartRecovery(t *testing.T) {
 			if err := db.Close(); err != nil {
 				t.Fatal(err)
 			}
-			db, err = store.Open(dbPath, store.WithSkipMigrations())
+			db, err = store.Open(dbPath)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -90,7 +90,7 @@ func TestForkStoreClosesAndForksOneSeededStore(t *testing.T) {
 	t.Parallel()
 	source := filepath.Join(t.TempDir(), "seeded.db")
 	CopyGoldenTo(t, source)
-	db, err := store.Open(source, store.WithSkipMigrations(), store.WithPoolSize(1))
+	db, err := store.Open(source, store.WithPoolSize(1))
 	if err != nil {
 		t.Fatalf("open the seeded store: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestForkStoreClosesAndForksOneSeededStore(t *testing.T) {
 	}
 
 	for _, path := range []string{first, second} {
-		fork, err := store.Open(path, store.WithSkipMigrations(), store.WithPoolSize(1))
+		fork, err := store.Open(path, store.WithPoolSize(1))
 		if err != nil {
 			t.Fatalf("open fork %s: %v", path, err)
 		}

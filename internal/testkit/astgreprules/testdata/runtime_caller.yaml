@@ -1,0 +1,91 @@
+requiredNames:
+  - package-source-lookup
+  - nested-package-source-lookup
+  - nonzero-frame
+  - aliased-runtime-source
+  - dot-imported-runtime-source
+  - other-package-caller
+  - non-source-suppressed
+  - package-relative-source
+  - production-caller
+  - different-runtime-function
+cases:
+  - name: package-source-lookup
+    path: source_test.go
+    matches: 1
+    source: |
+      package example
+      import "runtime"
+      func source() { _, file, _, _ := runtime.Caller(0); _ = file }
+  - name: nested-package-source-lookup
+    path: internal/example/source_test.go
+    matches: 1
+    source: |
+      package example
+      import "runtime"
+      func source() { _, file, _, _ := runtime.Caller(0); _ = file }
+  - name: nonzero-frame
+    path: internal/example/parent_test.go
+    matches: 1
+    source: |
+      package example
+      import "runtime"
+      func source() { _, file, _, _ := runtime.Caller(1); _ = file }
+  - name: aliased-runtime-source
+    path: internal/example/alias_test.go
+    matches: 1
+    source: |
+      package example
+      import (
+          rt "runtime"
+      )
+      func source() { _, file, _, _ := rt.Caller(0); _ = file }
+  - name: dot-imported-runtime-source
+    path: internal/example/dot_test.go
+    matches: 1
+    source: |
+      package example
+      import . "runtime"
+      func source() { _, file, _, _ := Caller(0); _ = file }
+  - name: other-package-caller
+    path: internal/example/other_test.go
+    matches: 0
+    source: |
+      package example
+      import (
+          rt "runtime"
+          unrelated "example.com/unrelated"
+      )
+      func source() { unrelated.Caller(0); _ = rt.NumCPU() }
+  - name: non-source-suppressed
+    path: internal/example/log_test.go
+    matches: 0
+    source: |
+      package example
+      import "runtime"
+      func log() {
+          // ast-grep-ignore: no-runtime-caller-in-tests -- reporting a call location, not opening a file.
+          _, file, _, _ := runtime.Caller(0)
+          println(file)
+      }
+  - name: package-relative-source
+    path: internal/example/relative_test.go
+    matches: 0
+    source: |
+      package example
+      import "os"
+      func source() { _, _ = os.ReadFile("source.go") }
+  - name: production-caller
+    path: internal/example/source.go
+    matches: 0
+    source: |
+      package example
+      import "runtime"
+      func source() { _, file, _, _ := runtime.Caller(0); _ = file }
+  - name: different-runtime-function
+    path: internal/example/callers_test.go
+    matches: 0
+    source: |
+      package example
+      import "runtime"
+      func source() { runtime.Callers(0, nil) }

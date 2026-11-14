@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/peasant-labs/schema"
 )
@@ -233,6 +234,12 @@ type IndexLogEntry struct {
 	StartedAt      int64  // Unix millis
 	FinishedAt     *int64 // Unix millis — nil if indexing did not complete
 	ErrorMessage   *string
+	// ParseDuration, WriteDuration and Bytes are the attempt's measured parse
+	// time, write time and parsed bytes. Nil means not measured: the attempt
+	// did not parse. They are stored in index_log only.
+	ParseDuration *time.Duration `json:"-"`
+	WriteDuration *time.Duration `json:"-"`
+	Bytes         *int64         `json:"-"`
 }
 
 // --- PruneFilter ---
@@ -1014,4 +1021,7 @@ type IngestLogEntry struct {
 	ComputedCount     int
 	ErrorMessage      *string // non-nil if Run() returned an error
 	SourcePath        *string // PipelineConfig.SourcePath
+	// Stages is the run's stored profile: one row per stage, written with the
+	// run row in one transaction. Empty when the run had no profiler.
+	Stages []IndexProfileStage
 }

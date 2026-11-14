@@ -67,7 +67,7 @@ func TestPublicationCaptureParentRecoveryPreservesChild(t *testing.T) {
 			if err := os.Chtimes(childSource, old, old); err != nil {
 				t.Fatal(err)
 			}
-			database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations())
+			database, err := store.Open(storetest.CopyGoldenDB(t))
 			if err != nil {
 				t.Fatal(err)
 			}

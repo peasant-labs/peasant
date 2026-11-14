@@ -334,7 +334,7 @@ func TestVillageCommandWholeActionSnapshot(t *testing.T) {
 			closed = true
 			// Reopen the real SQL store and independently select each persisted
 			// account; neither same-ID visibility nor scope changes can mask writes.
-			db, err = store.Open(path, store.WithSkipMigrations())
+			db, err = store.Open(path)
 			if err != nil {
 				t.Fatal(err)
 			}

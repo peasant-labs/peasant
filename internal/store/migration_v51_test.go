@@ -66,7 +66,7 @@ func TestMigrationV51UpgradesLegacyWithoutInventingMetadata(t *testing.T) {
 	if err = conn.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s, err := Open(path, WithPoolSize(1))
+	s, err := openUpgraded(path, WithPoolSize(1))
 	if err != nil {
 		t.Fatal(err)
 	}

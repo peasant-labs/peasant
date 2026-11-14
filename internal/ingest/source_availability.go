@@ -101,7 +101,7 @@ func causeSupersedes(stored, next SourceUnavailabilityReason) bool {
 // later lane: the index lane reports even when stored-content recovery already
 // recorded the same cause. Callers keep doing their work: only the report
 // settles, and the recorded row is never a reason to skip indexing.
-func (p *Pipeline) settleUnavailableSource(ctx context.Context, sid SessionID, cause SourceUnavailabilityReason, lane *storeWriteLane) bool {
+func (p *Pipeline) settleUnavailableSource(ctx context.Context, sid SessionID, cause SourceUnavailabilityReason, lane *storeWriteLane, stage Stage) bool {
 	// A failed read is treated as no stored cause: this harvest still records
 	// what it observed, and a write failure is reported below.
 	stored, _ := p.readUnavailableCause(ctx, sid)
@@ -123,7 +123,7 @@ func (p *Pipeline) settleUnavailableSource(ctx context.Context, sid SessionID, c
 	var err error
 	// Parser workers reach this too, so the write takes the store lane the
 	// other maintenance writes use instead of racing them.
-	p.runStoreWrite(lane, func() {
+	p.runStoreWrite(lane, stage, func() {
 		changed, err = recorder.RecordSourceUnavailable(ctx, sid, cause)
 	})
 	if err != nil {

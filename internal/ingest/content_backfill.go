@@ -238,7 +238,7 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context, budgetBytes in
 					continue
 				}
 				if cause, ok := sourceUnavailableCause(err); ok {
-					if !p.settleUnavailableSource(ctx, id, cause, nil) || p.laneCauseAlreadyReported(id, cause) {
+					if !p.settleUnavailableSource(ctx, id, cause, nil, StageContent) || p.laneCauseAlreadyReported(id, cause) {
 						// An earlier harvest already reported this cause, or the
 						// pair-repair lane already reported it in this harvest.
 						// Recovery already ran above, so repaired bytes are

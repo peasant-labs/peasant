@@ -14,7 +14,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -196,11 +195,8 @@ func TestDeniedStatementFixtureIsNonVacuous(t *testing.T) {
 
 func TestSQLiteSourceFilesContainNoDirectMutationEscape(t *testing.T) {
 	fixture := loadSourceSafetyFixture(t)
-	_, currentFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve source guard location")
-	}
-	directory := filepath.Dir(currentFile)
+	// Go runs tests in the package directory, including with -trimpath.
+	directory := "."
 	sourceBoundary := []string{
 		filepath.Join(directory, "opencode_sqlite_source.go"),
 		filepath.Join(directory, "opencode_sqlite_source_zombiezen.go"),
@@ -549,11 +545,7 @@ func TestCurrentMessageCancellationAfterPendingRowReturnsNoPartialPageAndReusesS
 }
 
 func TestCurrentMessagePendingCheckpointFollowsPageAppend(t *testing.T) {
-	_, currentFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve current reader source position guard")
-	}
-	filename := filepath.Join(filepath.Dir(currentFile), "opencode_sqlite_source_zombiezen.go")
+	filename := "opencode_sqlite_source_zombiezen.go"
 	fileSet := token.NewFileSet()
 	parsed, err := parser.ParseFile(fileSet, filename, nil, parser.AllErrors)
 	if err != nil {

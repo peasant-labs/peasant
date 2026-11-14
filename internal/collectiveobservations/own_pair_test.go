@@ -68,7 +68,7 @@ func TestObserveOwnPairUsesAuthenticatedSourceAndStore(t *testing.T) {
 			ctx := t.Context()
 			home := t.TempDir()
 			dbPath := storetest.CopyGoldenDB(t)
-			local, err := store.Open(dbPath, store.WithSkipMigrations(), store.WithWALAutocheckpointDisabled())
+			local, err := store.Open(dbPath, store.WithWALAutocheckpointDisabled())
 			if err != nil {
 				t.Fatal(err)
 			}

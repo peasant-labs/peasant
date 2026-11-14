@@ -1,6 +1,10 @@
 package ingest
 
-import "sync"
+import (
+	"fmt"
+	"slices"
+	"sync"
+)
 
 // Stage identifies a pipeline stage for progress reporting.
 type Stage string
@@ -53,6 +57,16 @@ var StageOrder = []Stage{
 }
 
 func (s Stage) String() string { return string(s) }
+
+// NewStage validates a raw stage name at a write boundary. It refuses a name
+// this build does not define, so a stored stage row always names a real stage.
+func NewStage(raw string) (Stage, error) {
+	stage := Stage(raw)
+	if stage == StageRecover || slices.Contains(IndexProfileStageOrder, stage) {
+		return stage, nil
+	}
+	return "", fmt.Errorf("ingest: validate pipeline stage %q before storing a run profile: this build defines no such stage; no stage row was written; use one of the stages in ingest.IndexProfileStageOrder", raw)
+}
 
 // EventKind classifies a ProgressEvent.
 type EventKind int
@@ -213,4 +227,41 @@ func emitAdvance(ps *ProgressState, stage Stage, delta, total int) {
 		return
 	}
 	ps.Update(ProgressEvent{Kind: KindAdvance, Stage: stage, Delta: delta, Total: total})
+}
+
+// pipelineDiscoveryProgress accumulates source-file counts across the adapters
+// that can report them. Discovery visits adapters sequentially; each newly
+// enumerated harness raises the known total without restarting the stage or
+// discarding earlier advances.
+type pipelineDiscoveryProgress struct {
+	mu       sync.Mutex
+	state    *ProgressState
+	done     int
+	total    int
+	reported bool
+}
+
+var _ DiscoveryProgress = (*pipelineDiscoveryProgress)(nil)
+
+func (p *pipelineDiscoveryProgress) DiscoveryTotal(_ Harness, total int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.total += total
+	if !p.reported {
+		// The stage began before enumeration, with no known total. Its first
+		// source count starts the measured work before any source advances.
+		p.reported = true
+		emitProgress(p.state, ProgressEvent{Kind: KindStart, Stage: StageDiscover, Total: p.total})
+		return
+	}
+	emitAdvance(p.state, StageDiscover, 0, p.total)
+}
+
+// DiscoveryAdvance counts finished sources. The harvest display shows source
+// counts only, so the step's re-read count is not used here.
+func (p *pipelineDiscoveryProgress) DiscoveryAdvance(_ Harness, step DiscoveryStep) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.done += step.Sources
+	emitAdvance(p.state, StageDiscover, step.Sources, p.total)
 }

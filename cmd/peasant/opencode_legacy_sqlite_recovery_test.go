@@ -260,7 +260,7 @@ func TestLegacyOpenCodeSQLiteCommittedWALUpdateRefreshesMountedState(t *testing.
 	managedPath := findManagedTranscript(t, outputRoot, testCase.TargetSession)
 	initialManaged := mustReadFile(t, managedPath)
 	databasePath := defaults.ResolveDBFilePathWith(commandRoot).String()
-	initialStore, err := store.Open(databasePath, store.WithSkipMigrations(), store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
+	initialStore, err := store.Open(databasePath, store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
 	if err != nil {
 		t.Fatalf("open initial WAL freshness store: %v", err)
 	}
@@ -314,7 +314,7 @@ func TestLegacyOpenCodeSQLiteCommittedWALUpdateRefreshesMountedState(t *testing.
 	if bytes.Equal(updatedManaged, initialManaged) || !bytes.Contains(updatedManaged, []byte(testCase.ExpectedContent)) {
 		t.Fatalf("WAL-only update did not change deterministic managed projection with %q", testCase.ExpectedContent)
 	}
-	updatedStore, err := store.Open(databasePath, store.WithSkipMigrations(), store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
+	updatedStore, err := store.Open(databasePath, store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
 	if err != nil {
 		t.Fatalf("open updated WAL freshness store: %v", err)
 	}
@@ -394,7 +394,7 @@ func TestLegacyOpenCodeSQLiteSelectsAcrossEligibleCandidates(t *testing.T) {
 					t.Fatalf("managed candidate artifact for %s contains evidence from a later candidate", sessionID)
 				}
 			}
-			localStore, err := store.Open(defaults.ResolveDBFilePathWith(commandRoot).String(), store.WithSkipMigrations(), store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
+			localStore, err := store.Open(defaults.ResolveDBFilePathWith(commandRoot).String(), store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
 			if err != nil {
 				t.Fatalf("open candidate-selection store: %v", err)
 			}
@@ -465,7 +465,7 @@ func TestLegacyOpenCodeSQLiteSourceInfoRecoveryValidatesManagedEnvelope(t *testi
 			if idErr != nil {
 				t.Fatalf("validate recovery target session: %v", idErr)
 			}
-			localStore, err := store.Open(databasePath, store.WithSkipMigrations(), store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
+			localStore, err := store.Open(databasePath, store.WithPoolSize(1), store.WithIndexFormats(store.V2IndexFormat()))
 			if err != nil {
 				t.Fatalf("open recovered store: %v", err)
 			}

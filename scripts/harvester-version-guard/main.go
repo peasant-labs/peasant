@@ -100,18 +100,23 @@ func run(base, candidate string) error {
 	if err := os.CopyFS(builder, os.DirFS(filepath.Join(candidateTree, "internal/ingest/testfixture"))); err != nil {
 		return err
 	}
-	// The shared builder returns database paths, never driver Conn/Stmt types.
-	// Older production keeps its original imports and module graph; only the
-	// candidate builder's otherwise-absent package support is supplied.
-	for _, tree := range []string{baseTree, candidateTree} {
-		if err := supplyFixtureDriver(tree, candidateTree); err != nil {
-			return err
-		}
-	}
 	nativeCorpora := make(map[string][]byte)
 	for _, corpus := range []string{baseTree, candidateTree} {
 		nativeCorpora[corpus], err = os.ReadFile(filepath.Join(corpus, "internal/ingest/testfixture/testdata/opencode_sqlite.yaml"))
 		if err != nil {
+			return err
+		}
+	}
+	// Install the same fixture builder before resolving its dependencies in
+	// either tree. Each corpus is saved above before the overlay is applied.
+	for _, tree := range []string{baseTree, candidateTree} {
+		if err := installFixtureBuilder(tree, builder, nativeCorpora[tree]); err != nil {
+			return err
+		}
+		// The shared builder returns paths, never driver Conn/Stmt types. Older
+		// production keeps its driver and module graph; only otherwise-absent
+		// package support is supplied.
+		if err := supplyFixtureDriver(tree, candidateTree); err != nil {
 			return err
 		}
 	}
@@ -179,12 +184,13 @@ func run(base, candidate string) error {
 }
 
 const (
-	fixtureDriverPath = "third_party/zombiezen-sqlite"
-	corpusEnv         = "PEASANT_GUARD_CORPUS"
-	fallbackCorpusEnv = "PEASANT_GUARD_FALLBACK_CORPUS"
-	observedNativeEnv = "PEASANT_GUARD_OBSERVED_NATIVE"
-	outputEnv         = "PEASANT_GUARD_OUTPUT"
-	nativeRootEnv     = "PEASANT_GUARD_NATIVE"
+	fixtureDriverPath       = "third_party/zombiezen-sqlite"
+	fixtureDriverImportPath = "github.com/peasant-labs/peasant/" + fixtureDriverPath
+	corpusEnv               = "PEASANT_GUARD_CORPUS"
+	fallbackCorpusEnv       = "PEASANT_GUARD_FALLBACK_CORPUS"
+	observedNativeEnv       = "PEASANT_GUARD_OBSERVED_NATIVE"
+	outputEnv               = "PEASANT_GUARD_OUTPUT"
+	nativeRootEnv           = "PEASANT_GUARD_NATIVE"
 )
 
 func fixtureDriverFiles(root string) (map[string][]byte, error) {
@@ -216,6 +222,35 @@ func fixtureDriverFiles(root string) (map[string][]byte, error) {
 	return files, err
 }
 
+// fixtureDriverPackages asks Go for the fixture builder's transitive driver
+// dependencies in this tree. The comparison must fail closed if the graph
+// cannot be resolved, rather than assume that an unfamiliar package is unused.
+func fixtureDriverPackages(tree string) (map[string]bool, error) {
+	out, err := command(tree, "go", "list", "-mod=readonly", "-deps", "-f", "{{.ImportPath}}", "./internal/ingest/testfixture")
+	if err != nil {
+		return nil, fmt.Errorf("resolve shared fixture builder dependencies in %s: %w", filepath.Base(tree), err)
+	}
+	packages := make(map[string]bool)
+	for _, path := range strings.Fields(string(out)) {
+		if path == fixtureDriverImportPath {
+			packages["."] = true
+		} else if relative, ok := strings.CutPrefix(path, fixtureDriverImportPath+"/"); ok {
+			packages[relative] = true
+		}
+	}
+	return packages, nil
+}
+
+func fixtureDriverPackageFiles(files map[string][]byte, packages map[string]bool) map[string][]byte {
+	selected := make(map[string][]byte)
+	for name, data := range files {
+		if name == "LICENSE" || packages[filepath.ToSlash(filepath.Dir(name))] {
+			selected[name] = data
+		}
+	}
+	return selected
+}
+
 func supplyFixtureDriver(tree, candidateTree string) error {
 	source := filepath.Join(candidateTree, fixtureDriverPath)
 	if _, err := os.Stat(source); os.IsNotExist(err) {
@@ -230,13 +265,31 @@ func supplyFixtureDriver(tree, candidateTree string) error {
 	if _, ok := files["sqlite.go"]; !ok {
 		return fmt.Errorf("shared fixture driver lacks sqlite.go")
 	}
+	if tree == candidateTree {
+		return nil
+	}
 	destination := filepath.Join(tree, fixtureDriverPath)
 	if _, err := os.Stat(destination); err == nil {
 		existing, err := fixtureDriverFiles(destination)
 		if err != nil {
 			return err
 		}
-		if !reflect.DeepEqual(existing, files) {
+		// The builder is compiled separately with each tree. Compare every
+		// source file of the union of their actual driver dependency packages,
+		// but leave unrelated packages (such as migrations) historical. Never
+		// overwrite any part of an existing production driver.
+		required, err := fixtureDriverPackages(tree)
+		if err != nil {
+			return err
+		}
+		candidateRequired, err := fixtureDriverPackages(candidateTree)
+		if err != nil {
+			return err
+		}
+		for name := range candidateRequired {
+			required[name] = true
+		}
+		if !reflect.DeepEqual(fixtureDriverPackageFiles(existing, required), fixtureDriverPackageFiles(files, required)) {
 			return fmt.Errorf("cannot replace historical production driver with shared fixture support in %s", filepath.Base(tree))
 		}
 		return nil
@@ -273,9 +326,8 @@ func unobservedNative(names, observed []string) []string {
 	return missing
 }
 
-func capture(tree, corpus, fallbackCorpus, temp, builder string, nativeCorpus []byte, observedNames string, nativeRoot string) (snapshot, error) {
-	var result snapshot
-	err := filepath.WalkDir(builder, func(path string, entry fs.DirEntry, walkErr error) error {
+func installFixtureBuilder(tree, builder string, nativeCorpus []byte) error {
+	return filepath.WalkDir(builder, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -299,7 +351,11 @@ func capture(tree, corpus, fallbackCorpus, temp, builder string, nativeCorpus []
 		}
 		return os.WriteFile(target, data, 0600)
 	})
-	if err != nil {
+}
+
+func capture(tree, corpus, fallbackCorpus, temp, builder string, nativeCorpus []byte, observedNames string, nativeRoot string) (snapshot, error) {
+	var result snapshot
+	if err := installFixtureBuilder(tree, builder, nativeCorpus); err != nil {
 		return result, err
 	}
 	probeDir := filepath.Join(tree, "internal", "ingest")

@@ -106,7 +106,7 @@ func TestControlRecordIngestExportAndPublication(t *testing.T) {
 				if fixture.Managed {
 					return nativeRepairStore(t, path, filepath.Join(root, "artifacts")), nil
 				}
-				return store.Open(path, store.WithSkipMigrations())
+				return store.Open(path)
 			}
 			db, err := openStore()
 			if err != nil {
@@ -384,7 +384,7 @@ func TestControlPayloadReindexesOnUpgradeAndPublishes(t *testing.T) {
 	}
 	harvest := func(opts ...ingest.PipelineOption) int {
 		t.Helper()
-		db, err := store.Open(path, store.WithSkipMigrations())
+		db, err := store.Open(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -419,7 +419,7 @@ func TestControlPayloadReindexesOnUpgradeAndPublishes(t *testing.T) {
 		t.Fatalf("a settled session was re-indexed again: %d", indexed)
 	}
 
-	db, err := store.Open(path, store.WithSkipMigrations())
+	db, err := store.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}

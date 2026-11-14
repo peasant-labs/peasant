@@ -399,7 +399,7 @@ func TestCanonicalOpenCodeSelectionMountedMatrix(t *testing.T) {
 		t.Fatal(err)
 	}
 	databasePathStored := storetest.CopyGoldenDB(t)
-	database, err := store.Open(databasePathStored, store.WithSkipMigrations())
+	database, err := store.Open(databasePathStored)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -415,7 +415,7 @@ func TestCanonicalOpenCodeSelectionMountedMatrix(t *testing.T) {
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
-	database, err = store.Open(databasePathStored, store.WithSkipMigrations())
+	database, err = store.Open(databasePathStored)
 	if err != nil {
 		t.Fatal(err)
 	}

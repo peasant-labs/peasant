@@ -137,7 +137,7 @@ func TestPipelineCommitsOnlyItsCapturedIndexInput(t *testing.T) {
 			defer cancel()
 			output := t.TempDir()
 			filesystem := &ingest.OSFileSystem{}
-			database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations(), store.WithPoolSize(1))
+			database, err := store.Open(storetest.CopyGoldenDB(t), store.WithPoolSize(1))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -228,7 +228,7 @@ func TestPipelineRetriesAndSkipsByActualIndexInput(t *testing.T) {
 			defer cancel()
 			output := t.TempDir()
 			filesystem := &ingest.OSFileSystem{}
-			database, err := store.Open(storetest.CopyGoldenDB(t), store.WithSkipMigrations(), store.WithPoolSize(1))
+			database, err := store.Open(storetest.CopyGoldenDB(t), store.WithPoolSize(1))
 			if err != nil {
 				t.Fatal(err)
 			}

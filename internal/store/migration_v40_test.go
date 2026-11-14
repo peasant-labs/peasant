@@ -360,10 +360,7 @@ func TestMigrationV40ReplaysBackfilledAssociations(t *testing.T) {
 	pool.Put(conn)
 	pool.Close()
 
-	preMigrationStore, err := Open(dbPath, WithSkipMigrations())
-	if err != nil {
-		t.Fatalf("open V39 store: %v", err)
-	}
+	preMigrationStore := openBehindStoreForTest(t, dbPath)
 	for _, row := range fixture.Sessions {
 		seedMigrationV39ReplaySession(t, preMigrationStore, row)
 		if row.Pushed {
@@ -388,7 +385,7 @@ func TestMigrationV40ReplaysBackfilledAssociations(t *testing.T) {
 		t.Fatalf("close V39 store: %v", err)
 	}
 
-	migratedStore, err := Open(dbPath)
+	migratedStore, err := openUpgraded(dbPath)
 	if err != nil {
 		t.Fatalf("open and migrate store: %v", err)
 	}

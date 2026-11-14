@@ -71,19 +71,11 @@ func BuildWebCommand() *cobra.Command {
 			if addr, served := api.ServedLoopbackAddr(spawn.port); served {
 				return fmt.Errorf("web start: port %d already answers at %s, so no server was started. %s", spawn.port, addr, api.PortServedHint(spawn.port))
 			}
-			dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
-			// Migrate visibly before forking on a terminal; refuse an
-			// affected store on a non-interactive start instead of forking
-			// a server that could never start.
-			cfgPath := resolveConfigPath(cmd)
-			var preopenOpts []store.OpenOption
-			if cfg, cfgErr := config.LoadForBrowsing(cfgPath, &ingest.OSFileSystem{}, &ingest.ExecGitResolver{}); cfgErr == nil {
-				applyDataDirOverride(cmd, cfg)
-				if genOpts, genErr := generationStoreOptions(cfg.Output.BasePath); genErr == nil {
-					preopenOpts = genOpts
-				}
-			}
-			if err := maybePreopenStoreForWebStart(stdinIsTerminal(), dbPath, preopenOpts...); err != nil {
+			// The parent upgrades a behind store before it forks: the
+			// server child has no terminal and never upgrades. A refusal
+			// ends the start here, before a server that could not open its
+			// store is forked.
+			if err := prepareStoreForWebStart(cmd, webStartStoreTarget(cmd, resolveConfigPath(cmd)), cmd.ErrOrStderr()); err != nil {
 				return err
 			}
 			// A cancelled start is not a usage error: the readiness probe stops
@@ -182,23 +174,19 @@ func runWebForeground(cmd *cobra.Command, cfgPath string, port int, devMode bool
 	var realProvider api.DataProvider
 	var dbCloser func() error
 	var analyticsStore *store.Store
-	dataDir := string(defaults.ResolveDataDirPathWith(dataDirOverride(cmd)))
-	dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
-	generationOptions, generationErr := generationStoreOptions(cfg.Output.BasePath)
-	if generationErr != nil {
-		fmt.Fprintf(os.Stderr, "warning: cannot configure managed generation reads: %v\n", generationErr)
-		generationOptions = nil
+	target := resolveWebStoreTarget(cmd, cfg)
+	dataDir, dbPath := target.dataDir, target.dbPath
+	if target.optionsErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: cannot configure managed generation reads: %v\n", target.optionsErr)
 	}
-	// A foreground run on a terminal opens as usual so the v76 notice and
-	// rebuild happen visibly. The detached background child has no
-	// terminal: it must not pay the whole-index rebuild where nobody
-	// watches, so it refuses instead of starting.
-	if err := refuseStaleSearchIndex(dbPath); err != nil {
+	// A server process never upgrades the store: no terminal would show
+	// it. `peasant web start` upgrades in its parent before it forks this
+	// process; a server started any other way refuses a behind store with
+	// the command that upgrades it.
+	if err := ensureStoreCurrent(cmd, dbPath, storeEntryServer); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dataDir, defaults.PrivateDirPerm); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: cannot create data directory %s: %v\n", dataDir, err)
-	} else if db, err := store.Open(dbPath, generationOptions...); err != nil {
+	if db, err := openWebStore(target); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: cannot open analytics store %s: %v\n", dbPath, err)
 	} else {
 		dbCloser = db.Close

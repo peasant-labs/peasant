@@ -24,7 +24,7 @@ func TestComputeInsights_DailySummaryCreated(t *testing.T) {
 
 	// Open a real SQLite store from the golden (pre-migrated) copy.
 	dbPath := storetest.CopyGoldenDB(t)
-	s, err := store.Open(dbPath, store.WithSkipMigrations())
+	s, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}

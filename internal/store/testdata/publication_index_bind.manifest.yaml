@@ -1,0 +1,7 @@
+requiredNames:
+  - binds-the-index-to-the-current-capture-without-touching-entries
+  - zero-revision-advances-the-index-time-only
+  - mirror-keeps-the-proof-beside-a-kept-transcript
+  - mirror-clears-the-proof-when-the-pair-changed-otherwise
+  - refuses-a-row-that-moved-since-it-was-captured
+  - refuses-an-input-the-stored-proof-does-not-name

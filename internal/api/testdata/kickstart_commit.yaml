@@ -12,7 +12,7 @@ requiredNames:
   - saved-true-with-running
   - saved-true-with-busy
   - saved-true-with-failed
-  - kickstart-save-with-stale-search-index-reports-the-repair
+  - kickstart-save-with-a-behind-store-reports-the-upgrade
   - busy-offers-import-now
   - import-now-after-a-finished-import-pushes-its-end
   - a-later-import-reports-to-every-kept-saved-session
@@ -136,16 +136,17 @@ cases:
       - events:
           - {kind: closed, session: "{full}", json: {reason: committed, committed.saved: true, committed.ingest.state: failed}}
 
-  # The store's search index needs its one-time repair, which only a command in a
-  # terminal runs. The save stands; the import is not claimed and not started, and
-  # the answer says how to repair. "import now" starts a run, which is refused at
-  # the store the same way, and the panel is pushed that end. The store file is
-  # never opened: the case fails if it changes.
-  - name: kickstart-save-with-stale-search-index-reports-the-repair
+  # The store is behind the schema this build needs, and a server never upgrades
+  # it: only `peasant migrate --schema-only` in a terminal does. The save stands;
+  # the import is not claimed and not started, and the answer names that
+  # command. "import now" starts a run, which is refused at the store the same
+  # way, and the panel is pushed that end. The store file is never changed: the
+  # case fails if it changes.
+  - name: kickstart-save-with-a-behind-store-reports-the-upgrade
     world:
       listings: two-projects
       gate: true
-      staleSearchIndex: true
+      behindStore: true
       recordings: [11111111-1111-4111-8111-111111111111]
       config: |
         version: 1
@@ -166,7 +167,7 @@ cases:
       - call: POST /api/v1/kickstart/sessions/{full}/commit
         json: {saved: true, ingest.state: failed}
         contains:
-          ingest.error: "`peasant harvest` in a terminal"
+          ingest.error: "`peasant migrate --schema-only` in a terminal"
         len: {nextSteps: 5}
       - call: GET /api/v1/sync/ingest/status
         json: {status: idle}
@@ -185,7 +186,7 @@ cases:
           - {kind: ingest, session: "{full}", json: {ingest.state: failed}}
       - call: GET /api/v1/sync/ingest/status
         json: {status: error}
-        contains: {error: "`peasant web start` in a terminal"}
+        contains: {error: "`peasant migrate --schema-only` in a terminal"}
 
   - name: busy-offers-import-now
     world:

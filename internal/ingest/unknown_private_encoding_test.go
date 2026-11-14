@@ -168,7 +168,7 @@ func assertCodecStoreRoundTrip(t *testing.T, extra string, want int, payload str
 	ctx := t.Context()
 	sid := schema.SessionID(testutil.TestSessionUUID)
 	path := storetest.CopyGoldenDB(t)
-	db, err := store.Open(path, store.WithSkipMigrations())
+	db, err := store.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +219,7 @@ func assertCodecStoreRoundTrip(t *testing.T, extra string, want int, payload str
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	db, err = store.Open(path, store.WithSkipMigrations())
+	db, err = store.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -51,7 +51,7 @@ func TestDatabasePublicationWithoutSourcesOrSidecars(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			ctx := context.Background()
 			path := storetest.CopyGoldenDB(t)
-			db, err := store.Open(path, store.WithSkipMigrations())
+			db, err := store.Open(path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -93,7 +93,7 @@ func TestDatabasePublicationWithoutSourcesOrSidecars(t *testing.T) {
 			if err := db.Close(); err != nil {
 				t.Fatal(err)
 			}
-			db, err = store.Open(path, store.WithSkipMigrations())
+			db, err = store.Open(path)
 			if err != nil {
 				t.Fatal(err)
 			}

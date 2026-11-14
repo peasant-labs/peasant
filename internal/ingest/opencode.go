@@ -22,6 +22,7 @@ import (
 // OpenCodeAdapter discovers every supported materialized representation and
 // selects one canonical source per raw OpenCode session ID.
 type OpenCodeAdapter struct {
+	discoveryProgressAttachment
 	fs                   FileSystem
 	git                  GitResolver
 	salt                 salt.Salt
@@ -36,6 +37,7 @@ type OpenCodeAdapter struct {
 }
 
 var _ SourceAdapter = (*OpenCodeAdapter)(nil)
+var _ DiscoveryProgressReporting = (*OpenCodeAdapter)(nil)
 var _ TranscriptMaterializer = (*OpenCodeAdapter)(nil)
 var _ BoundedTranscriptMaterializer = (*OpenCodeAdapter)(nil)
 var _ FirstPageTranscriptMaterializer = (*OpenCodeAdapter)(nil)
@@ -172,9 +174,40 @@ func (a *OpenCodeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Dis
 	}
 	evidence := a.inspectCandidates(ctx, cfg.Paths)
 	candidates := make([]openCodeSessionCandidate, 0)
-
+	var jsonSources []openCodeLegacyJSONPath
 	for _, root := range cfg.Paths {
-		candidates = append(candidates, a.enumerateOpenCodeLegacyJSONRoot(ctx, root)...)
+		jsonSources = append(jsonSources, a.enumerateOpenCodeLegacyJSONRoot(ctx, root)...)
+	}
+	total := len(jsonSources)
+	for _, result := range evidence {
+		if result.Candidate.Kind == OpenCodeSourceSQLite && result.Support == OpenCodeSupportSupported {
+			total++
+		}
+	}
+	discoveryTotal(a.progress, HarnessOpenCode, total)
+	// A supported database can contain many sessions, and canonical selection
+	// may retain none of them. Keep the file pending until its selected rows'
+	// freshness has been read, or until selection proves it has no winners.
+	var sqliteComplete func(string)
+	if a.progress != nil {
+		pending := make(map[string]int)
+		for _, result := range evidence {
+			if result.Candidate.Kind == OpenCodeSourceSQLite && result.Support == OpenCodeSupportSupported {
+				pending[filepath.Clean(result.Candidate.Path)]++
+			}
+		}
+		sqliteComplete = func(path string) {
+			if pending[path] > 0 {
+				pending[path]--
+				discoveryAdvance(a.progress, HarnessOpenCode)
+			}
+		}
+	}
+	for _, entry := range jsonSources {
+		if source, ok := a.readOpenCodeLegacyJSONSource(entry.path, entry.root); ok {
+			candidates = append(candidates, buildOpenCodeSession(source))
+		}
+		discoveryAdvance(a.progress, HarnessOpenCode)
 	}
 	// Each supported SQLite candidate is opened once here and the one source is
 	// reused for its enumerations, its session-record read, and freshness
@@ -203,7 +236,15 @@ func (a *OpenCodeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Dis
 	if err != nil {
 		return nil, err
 	}
-	return a.hydrateCanonicalOpenCodeFreshness(ctx, selected, sqliteSources), nil
+	discovered := a.hydrateCanonicalOpenCodeFreshness(ctx, selected, sqliteSources, sqliteComplete)
+	if sqliteComplete != nil {
+		for _, result := range evidence {
+			if result.Candidate.Kind == OpenCodeSourceSQLite && result.Support == OpenCodeSupportSupported {
+				sqliteComplete(filepath.Clean(result.Candidate.Path))
+			}
+		}
+	}
+	return discovered, nil
 }
 
 // openCodeSessionSource is one enumerated OpenCode session before the shared
@@ -260,11 +301,15 @@ func buildOpenCodeSession(source openCodeSessionSource) openCodeSessionCandidate
 	}
 }
 
-// enumerateOpenCodeLegacyJSONRoot lists one configured root's
-// storage/session/{hash}/ directories and builds every session file they hold.
-// A missing or unreadable part of the layout contributes no session; only the
-// files it can read are built.
-func (a *OpenCodeAdapter) enumerateOpenCodeLegacyJSONRoot(ctx context.Context, root ResolvedPath) []openCodeSessionCandidate {
+// openCodeLegacyJSONPath is a named session file that has not been read yet.
+type openCodeLegacyJSONPath struct {
+	root ResolvedPath
+	path string
+}
+
+// enumerateOpenCodeLegacyJSONRoot lists one configured root's session file
+// names without reading their contents. The build reads each named file once.
+func (a *OpenCodeAdapter) enumerateOpenCodeLegacyJSONRoot(ctx context.Context, root ResolvedPath) []openCodeLegacyJSONPath {
 	sessionDir := filepath.Join(root.String(), defaults.OpenCodeDirStorage.String(), defaults.OpenCodeDirSession.String())
 	hashEntries, err := a.fs.ReadDir(sessionDir)
 	if err != nil {
@@ -272,7 +317,7 @@ func (a *OpenCodeAdapter) enumerateOpenCodeLegacyJSONRoot(ctx context.Context, r
 		return nil
 	}
 
-	var candidates []openCodeSessionCandidate
+	var sources []openCodeLegacyJSONPath
 	for _, hashEntry := range hashEntries {
 		if !hashEntry.IsDir() {
 			continue
@@ -289,14 +334,10 @@ func (a *OpenCodeAdapter) enumerateOpenCodeLegacyJSONRoot(ctx context.Context, r
 			if !strings.HasPrefix(name, defaults.OpenCodeSessionPrefix) || !strings.HasSuffix(name, defaults.ExtJSON.String()) {
 				continue
 			}
-			source, ok := a.readOpenCodeLegacyJSONSource(filepath.Join(hashDirPath, name), root)
-			if !ok {
-				continue
-			}
-			candidates = append(candidates, buildOpenCodeSession(source))
+			sources = append(sources, openCodeLegacyJSONPath{root: root, path: filepath.Join(hashDirPath, name)})
 		}
 	}
-	return candidates
+	return sources
 }
 
 // readOpenCodeLegacyJSONSource reads one legacy JSON session file into the
@@ -1144,7 +1185,7 @@ func canonicalOpenCodeCandidatePrecedes(candidate, incumbent openCodeSessionCand
 // clock; only the floor path, used when a session has no usable clock, tracks
 // the file and WAL mtime. A clockless SQLite candidate whose freshness cannot
 // be read is skipped and recorded; other winners stay.
-func (a *OpenCodeAdapter) hydrateCanonicalOpenCodeFreshness(ctx context.Context, selected []openCodeSessionCandidate, sources map[string]OpenCodeSQLiteSource) []DiscoveredSession {
+func (a *OpenCodeAdapter) hydrateCanonicalOpenCodeFreshness(ctx context.Context, selected []openCodeSessionCandidate, sources map[string]OpenCodeSQLiteSource, sqliteComplete func(string)) []DiscoveredSession {
 	bySQLitePath := make(map[string][]int)
 	keep := make([]bool, len(selected))
 	for index := range selected {
@@ -1165,7 +1206,10 @@ func (a *OpenCodeAdapter) hydrateCanonicalOpenCodeFreshness(ctx context.Context,
 		paths = append(paths, path)
 	}
 	sort.Strings(paths)
-	for _, rawPath := range paths {
+	for index, rawPath := range paths {
+		if index > 0 && sqliteComplete != nil {
+			sqliteComplete(paths[index-1])
+		}
 		// The source was opened once during discovery and reused here, so
 		// freshness observes the same snapshot as enumeration and no second open
 		// is needed. The caller closes every source exactly once.
@@ -1262,6 +1306,9 @@ func (a *OpenCodeAdapter) hydrateCanonicalOpenCodeFreshness(ctx context.Context,
 		if len(clocklessSkipped) > 0 {
 			a.recordCandidateFailureAt(evidenceIndex, rawPath, OpenCodeProbeFreshness, fmt.Sprintf("selected SQLite content freshness could not be read, so %d clockless session(s) were skipped: %s", len(clocklessSkipped), strings.Join(clocklessSkipped, ", ")), clocklessCause)
 		}
+	}
+	if len(paths) > 0 && sqliteComplete != nil {
+		sqliteComplete(paths[len(paths)-1])
 	}
 
 	discovered := make([]DiscoveredSession, 0, len(selected))
@@ -2255,7 +2302,7 @@ func (a *OpenCodeAdapter) openCodeDatabaseBuild(ctx context.Context, result Open
 	if err != nil {
 		return openCodeLocatedDatabaseBuild{}, err
 	}
-	hydrated := a.hydrateCanonicalOpenCodeFreshness(ctx, selected, map[string]OpenCodeSQLiteSource{filepath.Clean(result.Candidate.Path): source})
+	hydrated := a.hydrateCanonicalOpenCodeFreshness(ctx, selected, map[string]OpenCodeSQLiteSource{filepath.Clean(result.Candidate.Path): source}, nil)
 
 	kept := make(map[SessionID]struct{}, len(hydrated))
 	for _, session := range hydrated {

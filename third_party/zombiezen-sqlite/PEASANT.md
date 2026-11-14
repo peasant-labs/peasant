@@ -144,3 +144,14 @@ unsafeptr; all its other analyzers run. The source audit additionally requires
 its exact original unsafe.Pointer source lines (including multiplicity) from the
 official v1.4.2 distribution and rejects any new conversions in added fork files.
 No upstream pointer operation is rewritten or new operation exempted.
+
+## Migration after-script callback
+
+`sqlitemigration` gains one optional callback, `MigrateWithAfterScript`. It is
+called once per applied migration, inside that migration's transaction, after
+the migration's script and before its `COMMIT`. A callback error rolls the
+migration back. A nil callback is identical to `Migrate`, and `Migrate` and
+`NewPool` behave as upstream. Peasant uses it so a data fill commits with the
+schema step that needs it, and so the store upgrade can report each step.
+`TestMigrateWithAfterScript` covers the commit, the rollback and the nil case.
+The change is part of `connection-lifetime.patch` and the manifest digests.
