@@ -71,12 +71,22 @@ func (o Outcome) stopped() bool {
 	return o == OutcomeStoppedByUser || o == OutcomeFailedStep
 }
 
+// outcomesByName is the closed set indexed by its reader-facing names. It is
+// built once from AllOutcomes so a name and its typed outcome cannot drift
+// apart, and validation is a typed map lookup rather than a comparison
+// against a rendered string.
+var outcomesByName = func() map[string]Outcome {
+	names := make(map[string]Outcome, len(AllOutcomes))
+	for _, outcome := range AllOutcomes {
+		names[outcome.String()] = outcome
+	}
+	return names
+}()
+
 // NewOutcome validates a raw outcome at an input boundary.
 func NewOutcome(raw string) (Outcome, error) {
-	for _, outcome := range AllOutcomes {
-		if outcome.String() == raw {
-			return outcome, nil
-		}
+	if outcome, ok := outcomesByName[raw]; ok {
+		return outcome, nil
 	}
 	return 0, fmt.Errorf("upgradeprogress.NewOutcome: value %q is outside the closed outcome set; use \"done\", \"stopped by user\", \"refused for low disk\", or \"failed step\"", raw)
 }
