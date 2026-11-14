@@ -75,6 +75,16 @@ func MalformedJSONLRecordLine(message string) (int, bool) {
 	return line, err == nil
 }
 
+// utf8BOM is the byte order mark some editors and tools write at the start of
+// a UTF-8 file.
+var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
+
+// trimLeadingUTF8BOM returns a JSONL source without a byte order mark before
+// its first record. A source without one is returned unchanged.
+func trimLeadingUTF8BOM(data []byte) []byte {
+	return bytes.TrimPrefix(data, utf8BOM)
+}
+
 func completeJSONLPrefix(data []byte) ([]byte, error) {
 	lastComplete := bytes.LastIndexByte(data, '\n')
 	records := bytes.Split(data[:lastComplete+1], []byte{'\n'})

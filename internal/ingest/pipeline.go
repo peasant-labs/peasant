@@ -3451,7 +3451,10 @@ func (p *Pipeline) captureSession(ctx context.Context, session DiscoveredSession
 				doc, err = parsePiDocument(ctx, data)
 				piConsumedBytes = doc.consumedBytes
 			} else {
-				data, err = completeJSONLPrefix(data)
+				// A leading byte order mark is not part of the first record.
+				// Dropping it here, before redaction and parsing, keeps the
+				// first record redacted and indexed like every other one.
+				data, err = completeJSONLPrefix(trimLeadingUTF8BOM(data))
 				if err != nil {
 					// A record that is not complete JSON is a present source
 					// whose bytes cannot be used, distinct from a missing file.
