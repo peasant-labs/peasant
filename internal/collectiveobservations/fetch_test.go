@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -90,10 +91,11 @@ func TestFetchIndependentCompleteDomains(t *testing.T) {
 				}
 			}
 			// These cases deliberately cancel AFTER actual earlier domain commits.
-			// Observe real Store rows with a two-second deadline; no production
-			// hook or SQL replacement can manufacture the committed effect.
+			// Observe real Store rows; no production hook or SQL replacement can
+			// manufacture the committed effect. The 30-second bound only catches a
+			// hang: a commit on a contended runner can take seconds.
 			awaitCommitted := func(request context.Context, catalogToo, historyToo bool) bool {
-				ctx, cancel := context.WithTimeout(request, 2*time.Second)
+				ctx, cancel := context.WithTimeout(request, 30*time.Second)
 				defer cancel()
 				snapshot, err := auth.CaptureCredentials(ctx, home)
 				if err != nil {
@@ -266,7 +268,7 @@ func TestFetchIndependentCompleteDomains(t *testing.T) {
 			at = at.Add(time.Hour)
 			report, err := service.Fetch(operation)
 			if (err != nil) != (c.WantStatus != 200) {
-				t.Fatalf("report error=%v status=%d domains=%#v", err, schema.CollectiveFetchHTTPStatus(report), report.Domains)
+				t.Fatalf("report error=%v status=%d issues=%s domains=%#v", err, schema.CollectiveFetchHTTPStatus(report), fetchIssueText(report), report.Domains)
 			}
 			if validation := report.Validate(); validation != nil {
 				t.Fatalf("invalid typed report: %v %#v", validation, report)
@@ -359,4 +361,30 @@ func TestFetchIndependentCompleteDomains(t *testing.T) {
 			}
 		})
 	}
+}
+
+// fetchIssueText spells out every issue in a report so a failure shows the
+// underlying error text instead of issue pointers.
+func fetchIssueText(report schema.CollectiveFetchReport) string {
+	var b strings.Builder
+	add := func(where string, issue *schema.OperationIssue) {
+		if issue != nil {
+			fmt.Fprintf(&b, "[%s %s: %s]", where, issue.Code, issue.Message)
+		}
+	}
+	for i := range report.Issues {
+		add("report", &report.Issues[i])
+	}
+	for _, domain := range report.Domains {
+		add(string(domain.Domain), domain.Issue)
+		for _, source := range domain.SourceOutcomes {
+			add(string(domain.Domain)+"/"+string(source.Source), source.Issue)
+		}
+		if domain.Associations != nil {
+			for _, scope := range domain.Associations.Scopes {
+				add(string(domain.Domain)+"/"+string(scope.TranscriptID), scope.Issue)
+			}
+		}
+	}
+	return b.String()
 }
