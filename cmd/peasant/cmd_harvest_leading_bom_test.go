@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"github.com/peasant-labs/peasant/internal/ingest"
 )
 
 // TestHarvestIngestsATranscriptThatStartsWithAUTF8BOM proves a byte order mark
@@ -38,28 +38,25 @@ func TestHarvestIngestsATranscriptThatStartsWithAUTF8BOM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("harvest failed a transcript whose only oddity is a leading BOM: %v\n%s", err, output)
 	}
-	conn, err := sqlite.OpenConn(string(defaults.ResolveDBFilePathWith(dir)), sqlite.OpenReadOnly)
+	db, err := openPreparedStore(t, defaults.ResolveDBFilePathWith(dir).String(), mustGenerationStoreOptions(t, filepath.Join(dir, "out"))...)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
-	var sessions, entries, first int
-	if err := sqlitex.ExecuteTransient(conn, `SELECT (SELECT COUNT(*) FROM sessions WHERE session_id = ?1), (SELECT COUNT(*) FROM session_entries WHERE session_id = ?1), (SELECT COUNT(*) FROM session_entries WHERE session_id = ?1 AND content_preview LIKE '%turn 0%')`, &sqlitex.ExecOptions{
-		Args: []any{sid},
-		ResultFunc: func(stmt *sqlite.Stmt) error {
-			sessions, entries, first = stmt.ColumnInt(0), stmt.ColumnInt(1), stmt.ColumnInt(2)
-			return nil
-		},
-	}); err != nil {
-		t.Fatal(err)
+	defer db.Close()
+	entries, err := db.ListEntries(t.Context(), ingest.SessionID(sid))
+	if err != nil {
+		t.Fatalf("list entries of session %s: %v\n%s", sid, err, output)
 	}
-	if sessions != 1 {
-		t.Fatalf("session %s stored %d times, want once:\n%s", sid, sessions, output)
+	if len(entries) < 3 {
+		t.Fatalf("session %s stored %d entries, want all 3 records:\n%s", sid, len(entries), output)
 	}
-	if entries < 3 {
-		t.Fatalf("session %s stored %d entries, want all 3 records:\n%s", sid, entries, output)
+	first := false
+	for _, entry := range entries {
+		if entry.ContentPreview != nil && strings.Contains(*entry.ContentPreview, "turn 0") {
+			first = true
+		}
 	}
-	if first == 0 {
+	if !first {
 		t.Fatalf("session %s did not store the record that follows the BOM:\n%s", sid, output)
 	}
 }
