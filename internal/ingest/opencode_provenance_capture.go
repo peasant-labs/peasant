@@ -253,16 +253,26 @@ func (a *OpenCodeAdapter) SnapshotOpenCodeProvenance(ctx context.Context, candid
 	if err != nil {
 		return OpenCodeHistorySnapshot{}, sanitizeOpenCodeRefusal(sessionID, "open snapshot source", "the read-only native source could not be opened", "verify the native database exists, is readable, and is not blocked by permissions, then retry without modifying it", err)
 	}
+	defer func() {
+		if closeErr := closeDeferredOpenCodeSource(ctx, source, options.queryTimeout); closeErr != nil {
+			snapshot = OpenCodeHistorySnapshot{}
+			err = errors.Join(err, sanitizeOpenCodeRefusal(sessionID, "close snapshot source", "the read-only source could not be released", "retry the snapshot; a bounded close retries the release", closeErr))
+		}
+		// The snapshot boundary sanitizes native failures, but cancellation is
+		// safe to retain as a cause even when a typed read refusal replaced it.
+		if ctxErr := ctx.Err(); ctxErr != nil && !errors.Is(err, ctxErr) {
+			snapshot = OpenCodeHistorySnapshot{}
+			err = errors.Join(err, ctxErr)
+		}
+	}()
 	if opts.Fork == nil {
 		if forkSource, ok := source.(OpenCodeForkEvidenceSource); ok {
 			linkID, linkErr := NewOpenCodeSessionLinkID(sessionID)
 			if linkErr != nil {
-				_ = closeDeferredOpenCodeSource(ctx, source, a.candidateOptions.queryTimeout)
 				return OpenCodeHistorySnapshot{}, sanitizeOpenCodeRefusal(sessionID, "read native fork evidence", "the session identity cannot be used to read the native fork pointer", "repair the session identity and retry; no partial capture is certified", linkErr)
 			}
 			evidence, present, evidenceErr := forkSource.SessionForkEvidence(ctx, linkID)
 			if evidenceErr != nil {
-				_ = closeDeferredOpenCodeSource(ctx, source, a.candidateOptions.queryTimeout)
 				return OpenCodeHistorySnapshot{}, sanitizeOpenCodeRefusal(sessionID, "read native fork evidence", "the native fork pointer could not be read", "verify the native database is readable and retry; no partial capture is certified", evidenceErr)
 			}
 			if present {
@@ -271,12 +281,8 @@ func (a *OpenCodeAdapter) SnapshotOpenCodeProvenance(ctx context.Context, candid
 		}
 	}
 	read, readErr := SnapshotOpenCodeHistory(ctx, source, sessionID, opts)
-	closeErr := source.Close(ctx)
 	if readErr != nil {
 		return OpenCodeHistorySnapshot{}, sanitizeOpenCodeRefusal(sessionID, "read snapshot rows", "the snapshot read failed against the native store", "verify the source remains a supported OpenCode store and retry; no partial capture is certified", readErr)
-	}
-	if closeErr != nil {
-		return OpenCodeHistorySnapshot{}, sanitizeOpenCodeRefusal(sessionID, "close snapshot source", "the read-only source could not be released", "retry the snapshot; a bounded close retries the release", closeErr)
 	}
 	return read, nil
 }
