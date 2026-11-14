@@ -352,8 +352,10 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 				applySourceOverride(cfg, provider, resolved)
 			}
 			// The named harness is the sole discovery source regardless of
-			// whether its path came from config, defaults, or the flag.
+			// whether its path came from config, defaults, or the flag, and the
+			// only harness whose stored sessions this run maintains.
 			isolateSourceHarness(cfg, provider)
+			indexHarness = &provider
 		}
 	}
 
