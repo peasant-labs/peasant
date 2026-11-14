@@ -279,7 +279,10 @@ func assertOwnerOption(t *testing.T, testCase sharedPathCase, owner, reason stri
 	var ownerCommand string
 	switch testCase.Operation {
 	case hookOperationStatus:
-		ownerCommand = githooks.StatusCommand(owner)
+		ownerCommand = githooks.InstallCommand(githooks.EventPostCommit, owner)
+		if testCase.Seed == seedManaged {
+			ownerCommand = githooks.UninstallCommand(githooks.EventPostCommit, owner)
+		}
 	case hookOperationUninstall:
 		ownerCommand = githooks.UninstallCommand(githooks.EventPostCommit, owner)
 	default:

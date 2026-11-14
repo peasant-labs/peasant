@@ -365,7 +365,11 @@ func planFor(slot Slot, repo Repository, binding Binding, op intent, owner strin
 	if !privateHookPath(slot, repo) {
 		plan.Action = ActionRefuse
 		plan.Refusal = RefusalSharedPath
-		plan.Reason = sharedPathReason(slot, repo, binding, op, owner)
+		if op == intentStatus {
+			plan.Reason = sharedStatusReason(slot, binding, owner)
+		} else {
+			plan.Reason = sharedPathReason(slot, repo, binding, op, owner)
+		}
 		return plan, nil
 	}
 	switch slot.Ownership {
@@ -497,12 +501,6 @@ func sharedPathReason(slot Slot, repo Repository, binding Binding, op intent, ow
 			"Where: githooks.planFor, checking the effective hook path git itself reported.\n",
 		slot.Path, slot.Event, repo.Root, sharedHooksDirectory(slot), repo.Root)
 	switch op {
-	case intentStatus:
-		return shared + fmt.Sprintf(
-			"When: while inspecting the current state; nothing was read from or written to that file beyond its contents.\n"+
-				"Impact: %s\n"+
-				"Fix: %s Peasant never sets, unsets, or changes core.hooksPath, so pointing git at a hooks directory inside this worktree is your decision to make; after that, 'peasant village hooks install' can manage it here.",
-			sharedPathState(slot), ownerInspectFix(slot, owner, binding))
 	case intentUninstall:
 		return shared + fmt.Sprintf(
 			"When: while uninstalling, before anything was removed.\n"+
@@ -535,15 +533,34 @@ func ownerInstallOption(slot Slot, owner string, binding Binding) string {
 		InstallCommandWithBinding(slot.Event, owner, binding))
 }
 
-// ownerInspectFix is the status counterpart: inspect the shared file from the
-// repository that runs it, when one exists.
-func ownerInspectFix(slot Slot, owner string, binding Binding) string {
+// sharedStatusReason answers status for a slot git runs from a shared hooks
+// directory. A linked worktree always resolves to its main worktree's hooks, so
+// this is a routine state rather than a failure: status reports what is there and
+// adds one note on where that directory is managed from, leaving the full
+// refusal to the operations that would change the shared file.
+func sharedStatusReason(slot Slot, binding Binding, owner string) string {
+	state := fmt.Sprintf("Git's %s hook path for this repository is %s; %s", slot.Event, slot.Path, sharedPathState(slot))
 	if owner == "" {
-		return fmt.Sprintf(
-			"no repository owns %s - it is a plain directory git was pointed at - so there is nothing to inspect it from; open that file yourself to see what runs.",
-			filepath.Dir(slot.Path))
+		return state + fmt.Sprintf(
+			"\nNote: %s is a hooks directory outside this repository that git was pointed at, shared by every repository configured to use it, so Peasant does not manage hooks there and never changes core.hooksPath.",
+			sharedHooksDirectory(slot))
 	}
-	return fmt.Sprintf("run %s to inspect or change it there.", StatusCommandWithBinding(owner, binding))
+	return state + fmt.Sprintf(
+		"\nNote: %s is shared by every worktree of %s and is managed from there%s",
+		sharedHooksDirectory(slot), owner, ownerManageCommand(slot, owner, binding))
+}
+
+// ownerManageCommand completes the status note with the one command that acts on
+// the shared slot from the repository that owns it.
+func ownerManageCommand(slot Slot, owner string, binding Binding) string {
+	switch slot.Ownership {
+	case OwnershipPeasant:
+		return fmt.Sprintf(": %s removes it.", UninstallCommandWithBinding(slot.Event, owner, binding))
+	case OwnershipForeign:
+		return "."
+	default:
+		return fmt.Sprintf(": %s installs it.", InstallCommandWithBinding(slot.Event, owner, binding))
+	}
 }
 
 // ownerRemoveFix is the uninstall counterpart.
