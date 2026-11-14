@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/discovery"
 	"github.com/peasant-labs/peasant/internal/onboarding"
 	"github.com/peasant-labs/schema"
@@ -47,7 +48,10 @@ func (st *kickstartSessions) previewTarget(id, nodeID string) (kickstartPreviewT
 	defer st.mu.Unlock()
 	sess, err := st.liveLocked(id)
 	if err != nil {
-		return kickstartPreviewTarget{}, err
+		// Unlike other setup routes, a preview's identifiers may contain source
+		// values. Keep its error actionable without echoing those identifiers.
+		return kickstartPreviewTarget{}, newKickstartError(schema.LocalKickstartErrorSessionNotFound,
+			"The setup session for this preview is not available in internal/api.kickstartSessions.previewTarget: it was never opened, was saved, or expired. Nothing was changed. Open a session again with POST %s.", defaults.RouteKickstartSessions)
 	}
 	for _, node := range sess.forest.Nodes {
 		if node.ID != nodeID {
@@ -60,7 +64,7 @@ func (st *kickstartSessions) previewTarget(id, nodeID string) (kickstartPreviewT
 		return target, nil
 	}
 	return kickstartPreviewTarget{}, newKickstartError(schema.LocalKickstartErrorPreviewRowNotFound,
-		"The row %q is not in the forest of setup session %q in internal/api.kickstartSessions.previewTarget, so there is nothing to preview. Nothing was changed. Reload the tree and preview a row it lists.", nodeID, id)
+		"The requested row is not in the setup session's forest in internal/api.kickstartSessions.previewTarget, so there is nothing to preview. Nothing was changed. Reload the tree and preview a row it lists.")
 }
 
 // preview builds the bounded lines of one row.
@@ -100,8 +104,10 @@ func (st *kickstartSessions) sessionPreviewLines(ctx context.Context, target kic
 		return nil
 	}
 	if err != nil {
+		// A reader error may contain source paths or transcript text. It must not
+		// be wrapped, logged, or copied into the response.
 		return newKickstartError(schema.LocalKickstartErrorPreviewUnreadable,
-			"The preview of session %q could not be read in internal/api.kickstartSessions.preview: %v. Nothing was changed. The session still ingests normally; check that its transcript is readable, then preview it again.", sessionID, err)
+			"The session preview could not be read from its source in internal/api.kickstartSessions.preview. Nothing was changed. The session still ingests normally; check that its transcript is readable, then preview it again.")
 	}
 	if len(page.Turns) == 0 {
 		lines.text(discovery.PreviewNoTurnsNote)
