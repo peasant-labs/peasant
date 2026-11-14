@@ -1,0 +1,6 @@
+requiredNames:
+  - changed-session-identity-is-refused
+  - changed-content-hash-is-refused
+  - changed-harness-is-refused
+  - changed-source-format-is-refused
+  - changed-relationship-evidence-is-refused

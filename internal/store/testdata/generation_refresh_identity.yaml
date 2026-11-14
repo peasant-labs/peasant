@@ -1,0 +1,15 @@
+# One mutation per case, applied to the refreshed capture before the refresh.
+# Every case must be refused as an identity change: a metadata-only refresh
+# reuses the stored parse, so content identity and durable graph identity may
+# not move without a parse.
+cases:
+  - name: changed-session-identity-is-refused
+    field: session_id
+  - name: changed-content-hash-is-refused
+    field: content_hash
+  - name: changed-harness-is-refused
+    field: harness
+  - name: changed-source-format-is-refused
+    field: source_format
+  - name: changed-relationship-evidence-is-refused
+    field: relationships
