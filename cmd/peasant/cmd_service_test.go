@@ -511,6 +511,7 @@ func TestServiceUnitsVerifyWithSystemd(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(h.exe), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// A placeholder executable: install names its path in the unit; nothing runs it.
 	if err := os.WriteFile(h.exe, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -550,6 +551,7 @@ func TestServiceExecutablePrefersStablePathEntry(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(versioned), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// Placeholder executables: the unit names a path; nothing runs them.
 	if err := os.WriteFile(versioned, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}

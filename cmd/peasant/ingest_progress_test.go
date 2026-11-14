@@ -1106,23 +1106,20 @@ func TestHarvestInterruptMounted(t *testing.T) {
 					}
 				})
 			}
-			// Only shell builtins: cancellation kills the actual CommandContext
-			// dependency, with no sleep process retaining its output pipes.
-			// Scope the block to this source's project: startup Git probes must
-			// finish before harvest registers its signal handler and renderer.
-			git := "#!/bin/sh\n[ \"$1\" = -C ] && [ \"$2\" = \"$PEASANT_INTERRUPT_PROJECT\" ] || exit 1\nprintf ready > \"$PEASANT_INTERRUPT_READY\"\nread value < \"$PEASANT_INTERRUPT_FIFO\"\n"
+			gitVariant := "blocking"
 			if c.DiffSession != "" {
-				git = "#!/bin/sh\nexit 1\n"
+				gitVariant = "failing"
 			}
-			if err := os.WriteFile(filepath.Join(dir, "git"), []byte(git), 0o700); err != nil {
-				t.Fatal(err)
+			gitDir, absErr := filepath.Abs(filepath.Join("testdata", "interrupt-git", gitVariant))
+			if absErr != nil {
+				t.Fatal(absErr)
 			}
 			args := []string{"harvest", "--source-harness=opencode", "--source-path=" + filepath.Dir(source.Path), "--output=" + filepath.Join(dir, "output"), "--data-dir=" + dir, "--config-dir=" + dir}
 			if c.JSON {
 				args = append(args, "--json")
 			}
 			child := exec.Command(os.Args[0], "-test.run=^TestHarvestInterruptProcess$")
-			child.Env = append(os.Environ(), "PEASANT_INTERRUPT_CHILD=1", "PEASANT_INTERRUPT_ARGS="+strings.Join(args, "\n"), "PEASANT_INTERRUPT_READY="+ready, "PEASANT_INTERRUPT_FIFO="+fifo, "PATH="+dir+":"+os.Getenv("PATH"), "HOME="+dir, defaults.EnvXDGConfigHome.String()+"="+dir, defaults.EnvXDGDataHome.String()+"="+dir, "TERM=xterm-256color")
+			child.Env = append(os.Environ(), "PEASANT_INTERRUPT_CHILD=1", "PEASANT_INTERRUPT_ARGS="+strings.Join(args, "\n"), "PEASANT_INTERRUPT_READY="+ready, "PEASANT_INTERRUPT_FIFO="+fifo, "PATH="+gitDir+":"+os.Getenv("PATH"), "HOME="+dir, defaults.EnvXDGConfigHome.String()+"="+dir, defaults.EnvXDGDataHome.String()+"="+dir, "TERM=xterm-256color")
 			child.SysProcAttr = interruptGroupAttr()
 			child.Env = append(child.Env, "PEASANT_INTERRUPT_PROJECT="+project, defaults.EnvXDGStateHome.String()+"="+dir, "XDG_CACHE_HOME="+dir)
 			stdout := newSignalWriter("")

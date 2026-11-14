@@ -400,7 +400,8 @@ func seedLinkedSlot(t *testing.T, repo, slot string, testCase linkedSlotCase) st
 	return target
 }
 
-// linkedSlotTargetContent renders the bytes of each modelled target. The
+// linkedSlotTargetContent renders the bytes of each modelled target. They are
+// data the lifecycle reads to classify the link, never a program a test runs. The
 // generated hook and the hand-added section come from the production builders,
 // so a change to either marker is caught here rather than by a stale copy.
 func linkedSlotTargetContent(t *testing.T, shape linkTargetShape, repo, slot string) string {

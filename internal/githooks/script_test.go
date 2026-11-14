@@ -1,7 +1,6 @@
 package githooks_test
 
 import (
-	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -201,6 +200,7 @@ func TestIsManaged_OnlyClaimsPeasantGeneratedFiles(t *testing.T) {
 	if !githooks.IsManaged([]byte(script + "\n\n")) {
 		t.Error("trailing blank lines must not break ownership recognition")
 	}
+	// The hook bodies below are data the ownership readers inspect; none is run.
 	if githooks.IsManaged([]byte("#!/bin/sh\nmake lint\n")) {
 		t.Error("an unrelated hook must never be claimed")
 	}
@@ -508,58 +508,29 @@ func TestScript_EmbeddedFactsRoundTrip(t *testing.T) {
 
 // --- helpers ----------------------------------------------------------------
 
-// stubPeasant writes an executable `peasant` that records the arguments it was
-// given and exits with exitCode. It stands in for the real binary so the hook
-// itself, not the upload, is what the test exercises.
-//
-// The stub is then exercised ONCE from the parent, retrying the busy-file
-// condition, before the log is created. That is where the race actually lands:
-// a sibling test forking between this package's write and close of the stub
-// leaves the child holding a write descriptor to it, and the kernel then
-// refuses to exec it. The hook cannot ride that out - it always exits 0 by
-// design, so a stub that would not start is reported as an ordinary failed
-// upload and surfaces only as an empty invocation log. The parent can, so it
-// does it here. The warm-up runs before the log file is created, so its own
-// arguments are never recorded.
+// stubPeasant links an executable `peasant` to testdata/recording-peasant.sh,
+// which records the arguments it was given and exits with exitCode. It stands
+// in for the real binary so the hook itself, not the upload, is what the test
+// exercises. The stub is a committed file reached through a link, so nothing
+// writes it while a sibling test forks and the kernel never reports it busy.
 func stubPeasant(t *testing.T, exitCode int) (binDir, logPath string) {
 	t.Helper()
 	binDir = t.TempDir()
 	logPath = filepath.Join(binDir, "invocations.log")
-	stubPath := filepath.Join(binDir, "peasant")
-	stub := "#!/bin/sh\nprintf '%s\\n' \"$@\" >> " + shellSingleQuote(logPath) + "\nexit " +
-		strconv.Itoa(exitCode) + "\n"
-	if err := os.WriteFile(stubPath, []byte(stub), 0o755); err != nil {
-		t.Fatalf("write peasant stub: %v", err)
+	stub, err := filepath.Abs(filepath.Join("testdata", "recording-peasant.sh"))
+	if err != nil {
+		t.Fatalf("resolve peasant stub: %v", err)
 	}
-	awaitExecutable(t, stubPath)
+	if err := os.Symlink(stub, filepath.Join(binDir, "peasant")); err != nil {
+		t.Fatalf("link peasant stub: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "exit-code"), []byte(strconv.Itoa(exitCode)+"\n"), 0o644); err != nil {
+		t.Fatalf("write stub exit code: %v", err)
+	}
 	if err := os.WriteFile(logPath, nil, 0o644); err != nil {
 		t.Fatalf("create stub log: %v", err)
 	}
 	return binDir, logPath
-}
-
-// awaitExecutable runs path until the kernel stops reporting it as busy, so the
-// caller hands the hook a binary that is known to start. It paces its retry the
-// same way runHook does, and is bounded by the test deadline rather than a fixed
-// attempt count.
-func awaitExecutable(t *testing.T, path string) {
-	t.Helper()
-	ctx := testwait.Context(t)
-	for attempt := 1; ; attempt++ {
-		err := exec.Command(path).Run()
-		var exitErr *exec.ExitError
-		if err == nil || errors.As(err, &exitErr) {
-			// It started. A non-zero status is the stub doing its job.
-			return
-		}
-		if !errors.Is(err, syscall.ETXTBSY) {
-			t.Fatalf("the peasant stub at %s could not be started after %d attempt(s): %v", path, attempt, err)
-		}
-		if cause := context.Cause(ctx); cause != nil {
-			t.Fatalf("the peasant stub at %s was still busy after %d attempt(s); last error: %v; %v", path, attempt, err, cause)
-		}
-		time.Sleep(time.Duration(attempt) * 5 * time.Millisecond)
-	}
 }
 
 func recordedArgs(t *testing.T, path string) []string {
