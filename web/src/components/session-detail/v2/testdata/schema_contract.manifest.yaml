@@ -32,9 +32,9 @@ mutations:
     expectedFailedTestNames:
       - null turns normalize at the mounted boundary
     expectedFailurePattern: data-turn-count
-  - name: nullable quality normalization is executable
-    find: 'adaptQualitySessions(quality?.sessions ?? []).map((session) => {'
-    replace: "adaptQualitySessions(quality?.sessions ?? []).concat([{ id: 'mutated-quality-fallback' }]).map((session) => {"
+  - name: absent personal medians normalization is executable
+    find: 'if (!read) return undefined;'
+    replace: 'if (!read) return { retryShare: 0.5 };'
     expectedTestFile: src/components/session-detail/v2/SessionDetailV2.schemaContract.test.tsx
     expectedFailedTestNames:
       - flat git context reaches the adapter
@@ -42,4 +42,4 @@ mutations:
       - refusal survives canonical transcript adaptation
       - nullable scorecard members reach analytics unchanged
       - legacy working directory never reaches the adapter
-    expectedFailurePattern: 'expected \[ \{.*\} \] to deeply equal \[\]'
+    expectedFailurePattern: 'expected \{ retryShare: 0\.5 \} to be undefined'
