@@ -8,6 +8,12 @@ Release, which holds the signed artifacts and checksums.
 ## [Unreleased]
 
 ### Added
+- `peasant export sessions --session <id> --stdout` writes that one session's
+  transcript JSON document to stdout, followed by a newline and nothing else,
+  instead of a file. A refused, stale, incomplete or missing session writes
+  nothing to stdout and exits 1 with its reason on stderr; only a failed stdout
+  write can leave partial bytes, also with exit 1. File exports and their
+  `--json` summary are unchanged.
 - `harvest --session` and `harvest index --session` process the named sessions
   together with their child sessions and any ancestors that are not recorded
   yet. `--no-related` narrows the run to the named sessions themselves.

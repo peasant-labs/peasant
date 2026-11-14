@@ -27,6 +27,16 @@ one-line summary on stderr: exported, refused, and why.
 The command exits 1 when it refuses any session. The sessions it did export
 stay written.
 
+With --stdout and --session, the one session's transcript is written to stdout
+instead of a file: the same JSON document the file would hold, followed by a
+newline, and nothing else. No file or directory is created. The document is
+built and checked in full before the first byte is written, so a refused,
+stale, incomplete, or missing session writes nothing to stdout; its reason and
+repair go to stderr and the command exits 1. Only a failure to write stdout
+itself, such as a closed pipe, can leave a partial document, and it also exits
+1, so treat stdout as a transcript only when the command exits 0. --stdout
+cannot be combined with --sessions-from, --output-dir, or --json.
+
 ```
 peasant export sessions [flags]
 ```
@@ -40,6 +50,7 @@ peasant export sessions [flags]
       --output-dir string      Directory to write exported session JSON files (default ".")
       --session string         Single session ID to export
       --sessions-from string   Read session ids from a file, or from standard input when the value is -. Accepts one id per line, a JSON array of ids, the JSON array that a --json listing prints, or a sessions review --json document, which gives only its clean sessions
+      --stdout                 Write the one --session transcript JSON document to stdout instead of a file; nothing else is written to stdout
 ```
 
 ### Options inherited from parent commands
