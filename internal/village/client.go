@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptrace"
 	"net/url"
@@ -35,9 +36,6 @@ func traceContext(ctx context.Context) context.Context {
 	}
 	return ctx
 }
-
-// DefaultClientTimeout is the HTTP client timeout for individual upload requests.
-const DefaultClientTimeout = 60 * time.Second
 
 // DefaultPoolSize is the default connection-pool size for a VillageClient built
 // without an injected *http.Client. It mirrors push.DefaultConcurrency (the
@@ -93,6 +91,8 @@ type VillageClient struct {
 	// before every push-side HTTP attempt. The push CLI uses it to distinguish
 	// failures that happened wholly locally from runs that may have reached the village.
 	beforeRequest func()
+	// retry bounds the re-sends of a publish after a transient failure.
+	retry RetryPolicy
 	// pullEnvelope is the pull envelope version NegotiatePull (or the caller
 	// through SetPullEnvelope) settled for this client; the pull GETs decode
 	// exactly that envelope. Nil means not negotiated.
@@ -113,6 +113,7 @@ func NewVillageClient(baseURL, apiKey string, httpClient *http.Client) *VillageC
 		baseURL:    baseURL,
 		apiKey:     apiKey,
 		httpClient: httpClient,
+		retry:      DefaultRetryPolicy(),
 	}
 }
 
@@ -158,14 +159,20 @@ func (c *VillageClient) do(req *http.Request, operation clientOperation) (*http.
 // MaxIdleConnsPerHost = MaxConnsPerHost = concurrency (floored at
 // 1), ForceAttemptHTTP2 for multiplexing, and — preserved from the original
 // behaviour — TLS verification skipped only when the village is on localhost (for
-// local dev against a self-signed cert).
+// local dev against a self-signed cert). It has no whole-exchange timeout:
+// dial, TLS handshake and response headers each have their own deadline, and a
+// request or response body is cancelled only when it stops making progress
+// for TransferIdleTimeout.
 func newPooledHTTPClient(baseURL string, concurrency int) *http.Client {
 	concurrency = max(concurrency, 1)
 	transport := &http.Transport{
-		MaxIdleConns:        concurrency,
-		MaxIdleConnsPerHost: concurrency,
-		MaxConnsPerHost:     concurrency,
-		ForceAttemptHTTP2:   true,
+		MaxIdleConns:          concurrency,
+		MaxIdleConnsPerHost:   concurrency,
+		MaxConnsPerHost:       concurrency,
+		ForceAttemptHTTP2:     true,
+		DialContext:           (&net.Dialer{Timeout: DialTimeout, KeepAlive: 30 * time.Second}).DialContext,
+		TLSHandshakeTimeout:   TLSHandshakeTimeout,
+		ResponseHeaderTimeout: ResponseHeaderTimeout,
 	}
 	// For local development, allow insecure TLS if the village is on localhost.
 	if u, err := url.Parse(baseURL); err == nil {
@@ -173,7 +180,7 @@ func newPooledHTTPClient(baseURL string, concurrency int) *http.Client {
 			transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 		}
 	}
-	return &http.Client{Timeout: DefaultClientTimeout, Transport: transport}
+	return &http.Client{Transport: &stallTransport{base: transport, idle: TransferIdleTimeout}}
 }
 
 // Publish uploads metadataJSON and transcriptBody to the village.
@@ -277,31 +284,61 @@ func (c *VillageClient) PublishAuthoritative(ctx context.Context, request schema
 	if err = mw.Close(); err != nil {
 		return schema.AuthoritativePublishResponse{}, 0, fmt.Errorf("authoritative publish: finalize multipart request: %w", err)
 	}
-	httpReq, err := http.NewRequestWithContext(traceContext(ctx), http.MethodPost, c.baseURL+publishEndpoint, &body)
-	if err != nil {
-		return schema.AuthoritativePublishResponse{}, 0, fmt.Errorf("authoritative publish: create HTTP request: %w", err)
+	payload, contentType := body.Bytes(), mw.FormDataContentType()
+	policy := c.retry
+	for attempt := 1; ; attempt++ {
+		receipt, status, outcome, err := c.publishAuthoritativeOnce(ctx, payload, contentType)
+		if err == nil || attempt >= max(policy.MaxAttempts, 1) || ctx.Err() != nil {
+			return receipt, status, retriedError(err, attempt)
+		}
+		wait, ok := policy.delay(attempt, outcome)
+		if !ok {
+			return receipt, status, retriedError(err, attempt)
+		}
+		perf.RecorderFromContext(ctx).Count(perf.CounterPushHTTPRetries, 1, perf.UnitRequests, perf.Attributes{perf.AttrOperation: string(operationPublish)})
+		if sleepErr := policy.Sleep(ctx, wait); sleepErr != nil {
+			return receipt, status, retriedError(err, attempt)
+		}
 	}
-	httpReq.Header.Set("Content-Type", mw.FormDataContentType())
+}
+
+func retriedError(err error, attempts int) error {
+	if err == nil || attempts == 1 {
+		return err
+	}
+	return fmt.Errorf("authoritative publish: gave up after %d attempts: %w", attempts, err)
+}
+
+// publishAuthoritativeOnce sends one publish attempt from the held request
+// bytes and classifies its failure for the retry loop.
+func (c *VillageClient) publishAuthoritativeOnce(ctx context.Context, payload []byte, contentType string) (schema.AuthoritativePublishResponse, int, attemptOutcome, error) {
+	httpReq, err := http.NewRequestWithContext(traceContext(ctx), http.MethodPost, c.baseURL+publishEndpoint, bytes.NewReader(payload))
+	if err != nil {
+		return schema.AuthoritativePublishResponse{}, 0, attemptOutcome{}, fmt.Errorf("authoritative publish: create HTTP request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", contentType)
 	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 	resp, err := c.do(httpReq, operationPublish)
 	if err != nil {
-		return schema.AuthoritativePublishResponse{}, 0, fmt.Errorf("authoritative publish: execute HTTP request: %w", err)
+		return schema.AuthoritativePublishResponse{}, 0, attemptOutcome{retryable: retryableTransportError(err)}, fmt.Errorf("authoritative publish: execute HTTP request: %w", err)
 	}
 	defer resp.Body.Close()
 	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if readErr != nil {
 		profileResponseFailure(ctx, operationPublish)
-		return schema.AuthoritativePublishResponse{}, resp.StatusCode, fmt.Errorf("authoritative publish: read terminal response: %w", readErr)
+		return schema.AuthoritativePublishResponse{}, resp.StatusCode, attemptOutcome{retryable: retryableTransportError(readErr)}, fmt.Errorf("authoritative publish: read terminal response: %w", readErr)
 	}
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return schema.AuthoritativePublishResponse{}, resp.StatusCode, fmt.Errorf("authoritative publish: peasant online returned %d: %s", resp.StatusCode, string(raw))
+		outcome := attemptOutcome{retryable: retryableStatus(resp.StatusCode)}
+		outcome.retryAfter, outcome.hasRetryAfter = parseRetryAfter(resp.Header, c.retry.Now())
+		return schema.AuthoritativePublishResponse{}, resp.StatusCode, outcome, fmt.Errorf("authoritative publish: peasant online returned %d: %s", resp.StatusCode, string(raw))
 	}
 	receipt, err := schema.DecodePublishResponse(raw)
 	if err != nil {
 		profileResponseFailure(ctx, operationPublish)
-		return schema.AuthoritativePublishResponse{}, resp.StatusCode, &PublicationError{Stage: PublicationStagePublishDecode, StatusCode: resp.StatusCode, Err: fmt.Errorf("authoritative publish: peasant online returned malformed 2xx receipt: %w", err)}
+		return schema.AuthoritativePublishResponse{}, resp.StatusCode, attemptOutcome{}, &PublicationError{Stage: PublicationStagePublishDecode, StatusCode: resp.StatusCode, Err: fmt.Errorf("authoritative publish: peasant online returned malformed 2xx receipt: %w", err)}
 	}
-	return receipt, resp.StatusCode, nil
+	return receipt, resp.StatusCode, attemptOutcome{}, nil
 }
 
 // UpdateOwner applies an owner PATCH and accepts only the complete authoritative response.
