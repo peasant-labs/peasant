@@ -1,0 +1,3 @@
+package ingest
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+func bypass(backup *sqlite.Backup) error { _, err := backup.Step(-1); return err }

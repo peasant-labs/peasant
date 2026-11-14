@@ -1,0 +1,14 @@
+package ingest
+import (
+	"context"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+)
+type transientExecutorPreparer interface { PrepareTransient(string) (*sqlite.Stmt, int, error) }
+type zombiezenOpenCodeSQLiteSource struct { conn *sqlite.Conn }
+func (s *zombiezenOpenCodeSQLiteSource) executeRowsLocked(ctx context.Context, statement string, args []any, result func(*sqlite.Stmt) error) error {
+	var preparer transientExecutorPreparer = s.conn
+	_, _, err := preparer.PrepareTransient(statement)
+	if err != nil { return err }
+	return sqlitex.ExecuteTransient(s.conn, statement, &sqlitex.ExecOptions{Args: args, ResultFunc: result})
+}

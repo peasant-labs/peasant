@@ -1,0 +1,9 @@
+package ingest
+import (
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+)
+func invokeExecute(fn func(*sqlite.Conn, string, *sqlitex.ExecOptions) error, conn *sqlite.Conn) error {
+	return fn(conn, "SELECT * FROM event", nil)
+}
+func bypass(conn *sqlite.Conn) error { return invokeExecute(sqlitex.Execute, conn) }

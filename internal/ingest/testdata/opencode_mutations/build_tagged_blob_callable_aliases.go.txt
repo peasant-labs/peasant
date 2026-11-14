@@ -1,0 +1,11 @@
+package ingest
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+func buildTaggedBlobAliases(conn *sqlite.Conn, buffer []byte) error {
+	open := conn.OpenBlob
+	blob, err := open("main", "event", "data", 1, false)
+	if err != nil { return err }
+	defer blob.Close()
+	read := blob.Read
+	_, err = read(buffer)
+	return err
+}

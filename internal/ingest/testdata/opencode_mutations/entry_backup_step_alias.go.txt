@@ -1,0 +1,4 @@
+package ingest
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+func invokeBackupStep(step func(int) (bool, error)) error { _, err := step(-1); return err }
+func bypass(backup *sqlite.Backup) error { return invokeBackupStep(backup.Step) }

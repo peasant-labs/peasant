@@ -1,0 +1,7 @@
+package ingest
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+func bypass(conn *sqlite.Conn) error {
+	openBlob := conn.OpenBlob
+	_, err := openBlob("main", "event", "data", 1, false)
+	return err
+}

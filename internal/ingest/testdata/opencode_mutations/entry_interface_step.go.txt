@@ -1,0 +1,7 @@
+package ingest
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+type statementStepper interface { Step() (bool, error) }
+func bypass(stmt *sqlite.Stmt) {
+	var stepper statementStepper = stmt
+	_, _ = stepper.Step()
+}

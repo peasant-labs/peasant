@@ -1,0 +1,4 @@
+package ingest
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+func invokeBlobRead(read func([]byte) (int, error), buffer []byte) error { _, err := read(buffer); return err }
+func bypass(blob *sqlite.Blob, buffer []byte) error { return invokeBlobRead(blob.Read, buffer) }
