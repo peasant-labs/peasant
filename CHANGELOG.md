@@ -86,6 +86,13 @@ Release, which holds the signed artifacts and checksums.
   and Claude sessions (closes #959).
 
 ### Fixed
+- `peasant migrate`, `peasant reclaim`, `peasant prune` and
+  `harvest verify --content --repair` now take the harvest lock
+  (`harvest.lock` in the data directory) before they write, so they no longer
+  race a running harvest. While a harvest holds it they print, for example,
+  "prune: waiting: another harvest is running on this data dir; ctrl+c
+  cancels" and wait; Ctrl+C stops the wait with nothing changed. Their
+  `--dry-run` and the check without `--repair` take no lock.
 - Search finds entries again after the 0.16.1 upgrade. The 0.16.1 store
   upgrade pointed the transcript-entry search triggers at a retired index, so
   entries written afterwards were missing from search, and an entry deleted

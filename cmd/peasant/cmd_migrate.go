@@ -105,6 +105,11 @@ func BuildMigrateCommand() *cobra.Command {
 				}
 			}
 
+			release, err := takeHarvestRunLock(cmd, "migrate")
+			if err != nil {
+				return err
+			}
+			defer release()
 			tracker := newMigrateProgressTracker(jsonOutput)
 			result, err := db.Migrate(ctx, store.MigrateOptions{
 				Limit:    limit,

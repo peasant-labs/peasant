@@ -45,6 +45,13 @@ func runVerifyContent(cmd *cobra.Command, repair bool) error {
 	}
 	fmt.Fprintln(cmd.OutOrStdout())
 
+	if repair {
+		release, err := takeHarvestRunLock(cmd, "harvest verify --repair")
+		if err != nil {
+			return err
+		}
+		defer release()
+	}
 	report, err := db.VerifyContent(cmd.Context(), repair)
 	if err != nil {
 		return fmt.Errorf("verify content: %w", err)

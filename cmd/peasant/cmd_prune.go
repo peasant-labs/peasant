@@ -158,6 +158,11 @@ func BuildPruneCommand() *cobra.Command {
 				}
 			}
 
+			release, err := takeHarvestRunLock(cmd, "prune")
+			if err != nil {
+				return err
+			}
+			defer release()
 			// Execute only the immutable set that was previewed and confirmed.
 			result, err := db.PruneSessions(ctx, plan.SessionIDs())
 			if err != nil {
