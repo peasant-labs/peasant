@@ -65,3 +65,66 @@ func TestGenerationBoundComputeRefusedAcrossActivation(t *testing.T) {
 		t.Fatal("a compute captured before the generation replacement saved over the newer generation")
 	}
 }
+
+// TestNativeDerivedDurationReproducesOutputHash proves that a native session's
+// derived duration rereads as the computed value. 60034 ms is a duration whose
+// minutes*60000 lands just below the integer, so a truncating writer stores
+// 60033 ms and the stored output hash can never prove the metrics current.
+func TestNativeDerivedDurationReproducesOutputHash(t *testing.T) {
+	s, _ := openGenerationStore(t)
+	const rawSession = "7b7b7b7b-7777-4777-8777-7b7b7b7b7b7b"
+	seedGenerationSession(t, s, rawSession)
+	sid, err := ingest.NewSessionID(rawSession)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	generation, blobs := buildTestGeneration(t, sid, "gen-duration-1", "text", "in", "out")
+	if err := activateTestGeneration(t, s, generation, blobs); err != nil {
+		t.Fatalf("activate generation: %v", err)
+	}
+	input, err := s.ReadMetricInput(ctx, sid, false)
+	if err != nil {
+		t.Fatalf("capture metric input: %v", err)
+	}
+	const durationMs = 60034
+	minutes := float64(durationMs) / 60000
+	computeVersion := 1
+	computedAt := time.Now().UnixMilli()
+	inputHash := input.DatabaseHash
+	metrics := &ingest.SessionMetrics{
+		SessionID: sid,
+		InputHash: &inputHash,
+		QualityMetrics: schema.QualityMetrics{
+			ComputeVersion:  &computeVersion,
+			ComputedAt:      &computedAt,
+			DurationMinutes: &minutes,
+		},
+	}
+	outputHash, err := ingest.MetricOutputHash(metrics)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metrics.OutputHash = &outputHash
+	if err := s.SaveMetricsForInput(ctx, input, metrics); err != nil {
+		t.Fatalf("save metrics: %v", err)
+	}
+	stats, err := s.ReadCapturedStats(ctx, sid)
+	if err != nil {
+		t.Fatalf("read captured stats: %v", err)
+	}
+	if stats.DurationMs == nil || *stats.DurationMs != durationMs {
+		t.Fatalf("captured duration = %v, want %d ms", stats.DurationMs, durationMs)
+	}
+	stored, err := s.GetMetrics(ctx, sid)
+	if err != nil || stored == nil || stored.OutputHash == nil {
+		t.Fatalf("reread metrics = %+v, %v", stored, err)
+	}
+	reread, err := ingest.MetricOutputHash(stored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reread != *stored.OutputHash {
+		t.Fatalf("reread output hash %s does not reproduce stored %s; duration %v, want %v", reread, *stored.OutputHash, stored.DurationMinutes, minutes)
+	}
+}
