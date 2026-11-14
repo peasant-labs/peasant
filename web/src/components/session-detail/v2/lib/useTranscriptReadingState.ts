@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import type { RefObject } from 'react';
 import { readTranscriptReadingState, transcriptReadingScrollTop, writeTranscriptReadingState } from './transcriptReadingState';
 
 /**
@@ -15,14 +14,16 @@ import { readTranscriptReadingState, transcriptReadingScrollTop, writeTranscript
  *
  * `enabled` is the viewer-ready signal: the scroll effect only touches the DOM
  * after the viewer body exists, and it re-runs on the session change that a Back
- * or a follow performs. `replayScroll` is false when the route itself carries a
- * `?turn=` target: the composite's one-time position owns the initial scroll
+ * or a follow performs. `host` is the mounted host element, not a ref: a
+ * transcript that loads by segment shows a skeleton first, so the host mounts
+ * after the page is otherwise ready and the effect must re-run when it does.
+ * `replayScroll` is false when the route itself carries a `?turn=` target: the composite's one-time position owns the initial scroll
  * there, and a replay on top of it would move the reader the route never asked
  * to move.
  */
 export function useTranscriptReadingState(
   sessionId: string,
-  hostRef: RefObject<HTMLElement | null>,
+  host: HTMLElement | null,
   enabled: boolean,
   replayScroll = true,
 ) {
@@ -69,7 +70,6 @@ export function useTranscriptReadingState(
   // session change, so the replay re-applies until the offset sticks (the
   // stream may still be short on the first frames after the body mounts).
   useEffect(() => {
-    const host = hostRef.current;
     if (!enabled || !host || typeof window === 'undefined') return;
     let frame = 0;
     let stopped = false;
@@ -118,7 +118,7 @@ export function useTranscriptReadingState(
       window.cancelAnimationFrame(frame);
       scroller?.removeEventListener('scroll', captureScrollTop);
     };
-  }, [enabled, hostRef, replayScroll, sessionId]);
+  }, [enabled, host, replayScroll, sessionId]);
 
   return { activeTurn, setActiveTurn, search, setSearch };
 }
