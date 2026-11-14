@@ -92,6 +92,7 @@ type Pipeline struct {
 	lockInstall         func(context.Context, string, schema.TranscriptID) (func() error, error)
 	syncInstall         func(string) error
 	associationObserver AssociationObserver
+	servedBlobCap       int64
 }
 
 // NewPipeline constructs a pull Pipeline from its dependencies. pullsRoot is the
@@ -100,14 +101,15 @@ type Pipeline struct {
 // XDG/--data-dir resolution).
 func NewPipeline(reader VillageReader, fs ingest.FileSystem, st PullStore, clock Clock, creds Credentials, pullsRoot string, options ...PipelineOption) *Pipeline {
 	p := &Pipeline{
-		reader:      reader,
-		fs:          fs,
-		store:       st,
-		clock:       clock,
-		creds:       creds,
-		pullsRoot:   pullsRoot,
-		lockInstall: lockContentInstall,
-		syncInstall: syncContentPath,
+		reader:        reader,
+		fs:            fs,
+		store:         st,
+		clock:         clock,
+		creds:         creds,
+		pullsRoot:     pullsRoot,
+		lockInstall:   lockContentInstall,
+		syncInstall:   syncContentPath,
+		servedBlobCap: int64(defaults.PullServedBlobCapBytes),
 	}
 	if syncing, ok := fs.(interface{ Sync(string) error }); ok {
 		p.syncInstall = syncing.Sync
@@ -142,6 +144,16 @@ func WithInstallLock(lock func(context.Context, string, schema.TranscriptID) (fu
 func WithInstallSync(sync func(string) error) PipelineOption {
 	return func(p *Pipeline) { p.syncInstall = sync }
 }
+
+// WithServedBlobCap replaces the largest served transcript blob the pull reads.
+// Production uses defaults.PullServedBlobCapBytes.
+func WithServedBlobCap(capBytes int64) PipelineOption {
+	return func(p *Pipeline) { p.servedBlobCap = capBytes }
+}
+
+// ErrServedBlobTooLarge reports a served transcript blob larger than the pull's
+// cap. The pull stops reading at the cap, writes nothing, and commits nothing.
+var ErrServedBlobTooLarge = errors.New("served transcript blob exceeds the pull size cap")
 
 // villageHost returns the on-disk namespace key for the village (the URL host).
 // Falls back to the raw VillageURL when it does not parse, so a malformed but
@@ -364,8 +376,13 @@ func (p *Pipeline) PullTranscript(ctx context.Context, ref TranscriptRef, opts P
 		}
 		return &PullResult{Ref: ref, Status: classifyStatus(err), VillageHost: host}, err
 	}
-	blob, readErr := io.ReadAll(body)
+	blob, readErr := io.ReadAll(io.LimitReader(body, p.servedBlobCap+1))
 	closeErr := body.Close()
+	if readErr == nil && int64(len(blob)) > p.servedBlobCap {
+		return &PullResult{Ref: ref, Status: PullStatusError, VillageHost: host}, fmt.Errorf(
+			"peasant village pull: transcript %s @ %s: %w: peasant online served more than %s, the largest transcript Peasant publishes; nothing was written; check that the peasant online address is correct and report the transcript to its operator",
+			ref.ID, host, ErrServedBlobTooLarge, defaults.HumanByteSize(p.servedBlobCap))
+	}
 	if readErr != nil {
 		return &PullResult{Ref: ref, Status: PullStatusError, VillageHost: host}, fmt.Errorf(
 			"peasant village pull: read served blob for transcript %s @ %s: %w", ref.ID, host, readErr)

@@ -187,9 +187,11 @@ type StubVillageReader struct {
 	MetaCalls int
 
 	// ContentBody/ContentETag are returned by GetPullTranscriptContent on success.
+	// ContentStream, when non-nil, is served instead of ContentBody.
 	// ContentErr (e.g. village.ErrNotModified or a sentinel) fails/short-circuits.
 	// LastIfNoneMatch records the conditional-GET header the pipeline sent.
 	ContentBody     []byte
+	ContentStream   io.Reader
 	ContentETag     string
 	ContentErr      error
 	ContentCalls    int
@@ -252,6 +254,9 @@ func (s *StubVillageReader) GetPullTranscriptContent(_ context.Context, _ schema
 	s.LastIfNoneMatch = ifNoneMatch
 	if s.ContentErr != nil {
 		return nil, s.ContentETag, s.ContentErr
+	}
+	if s.ContentStream != nil {
+		return io.NopCloser(s.ContentStream), s.ContentETag, nil
 	}
 	return io.NopCloser(bytes.NewReader(s.ContentBody)), s.ContentETag, nil
 }
