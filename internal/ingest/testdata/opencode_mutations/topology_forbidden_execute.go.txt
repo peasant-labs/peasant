@@ -1,0 +1,8 @@
+package ingest
+import (
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	zx "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+)
+func topologyConjunctionExecution(conn *sqlite.Conn) error {
+	return zx.Execute(conn, "SELECT data FROM event", nil)
+}

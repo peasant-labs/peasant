@@ -1,0 +1,10 @@
+package ingest
+import (
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+)
+type executeHolder struct { execute func(*sqlite.Conn, string, *sqlitex.ExecOptions) error }
+func bypass(conn *sqlite.Conn) error {
+	holder := executeHolder{execute: sqlitex.Execute}
+	return holder.execute(conn, "SELECT * FROM event", nil)
+}

@@ -3,7 +3,7 @@ package ingest_test
 import (
 	"bytes"
 	"context"
-	_ "embed"
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -48,6 +48,9 @@ const (
 
 //go:embed testdata/opencode_candidates.yaml
 var openCodeCandidateFixtureYAML []byte
+
+//go:embed testdata/opencode_mutations/*.go.txt
+var openCodeMutationSources embed.FS
 
 type openCodeCandidateFixture struct {
 	RequiredResolutionCases        []string                          `yaml:"required_resolution_cases"`
@@ -1146,9 +1149,9 @@ func TestOpenCodePrivateExecutionGuardDiscoversFixtureOwnedProductionFiles(t *te
 			filename := filepath.Join(directory, mutation.Filename)
 			source, err := openCodeEntryPathMutationSource(mutation.Kind)
 			if err != nil {
-				t.Fatalf("construct fixture-owned OpenCode production bypass %q: %v", mutation.Filename, err)
+				t.Fatalf("load fixture-owned OpenCode production bypass %q: %v", mutation.Filename, err)
 			}
-			if err := os.WriteFile(filename, []byte(source), 0o600); err != nil {
+			if err := os.WriteFile(filename, source, 0o600); err != nil {
 				t.Fatalf("write fixture-owned compiling OpenCode production bypass %q: %v", mutation.Filename, err)
 			}
 			production, err := ingestProductionFiles(directory)
@@ -1187,12 +1190,8 @@ func TestOpenCodePrivateExecutionGuardRejectsFixtureOwnedBuildTaggedBypasses(t *
 			if !found {
 				t.Fatalf("fixture-owned build-tagged mutation %q requires tags %v, but no production package configuration activates them", mutation.Name, mutation.BuildTags)
 			}
-			source, sourceErr := openCodeBuildTaggedMutationSource(mutation)
-			if sourceErr != nil {
-				t.Fatalf("construct fixture-owned build-tagged SQLite bypass: %v", sourceErr)
-			}
 			filename := filepath.Join(t.TempDir(), mutation.Filename)
-			if writeErr := os.WriteFile(filename, []byte(source), 0o600); writeErr != nil {
+			if writeErr := writeOpenCodeBuildTaggedMutationSource(filename, mutation); writeErr != nil {
 				t.Fatalf("write fixture-owned build-tagged SQLite bypass: %v", writeErr)
 			}
 			typeCheckFiles := append(append([]string(nil), configuration.files...), filename)
@@ -1265,12 +1264,8 @@ func runOpenCodeBuildTopologyCase(t testing.TB, fixture openCodeCandidateFixture
 		return err
 	}
 	for _, source := range fixtureCase.Sources {
-		data, sourceErr := openCodeBuildTopologySourceText(source)
-		if sourceErr != nil {
-			return fmt.Errorf("construct build-topology source %q: %w", source.Name, sourceErr)
-		}
-		if writeErr := os.WriteFile(filepath.Join(directory, source.Filename), []byte(data), 0o600); writeErr != nil {
-			return fmt.Errorf("write build-topology source %q: %w", source.Filename, writeErr)
+		if writeErr := writeOpenCodeBuildTopologySource(filepath.Join(directory, source.Filename), source); writeErr != nil {
+			return fmt.Errorf("write build-topology source %q: %w", source.Name, writeErr)
 		}
 	}
 
@@ -1409,24 +1404,21 @@ func copyGoEmbedAssets(sourceDirectory, directory string, filenames []string) er
 	return nil
 }
 
-func openCodeBuildTopologySourceText(source openCodeBuildTopologySource) (string, error) {
-	prefix := "//go:build " + source.BuildExpression + "\n\n"
+func writeOpenCodeBuildTopologySource(filename string, source openCodeBuildTopologySource) error {
 	switch source.Kind {
-	case openCodeBuildTopologyAnchor:
-		return prefix + "package ingest\n", nil
-	case openCodeBuildTopologyExecution:
-		return prefix + `package ingest
-import (
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-	zx "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
-)
-func topologyConjunctionExecution(conn *sqlite.Conn) error {
-	return zx.Execute(conn, "SELECT data FROM event", nil)
-}
-`, nil
+	case openCodeBuildTopologyAnchor, openCodeBuildTopologyExecution:
 	default:
-		return "", fmt.Errorf("unknown fixture-owned build-topology source kind %q", source.Kind)
+		return fmt.Errorf("unknown fixture-owned build-topology source kind %q", source.Kind)
 	}
+	expression, err := constraint.Parse("//go:build " + source.BuildExpression)
+	if err != nil {
+		return fmt.Errorf("parse fixture-owned build expression %q: %w", source.BuildExpression, err)
+	}
+	body, err := openCodeMutationSource("topology_" + string(source.Kind))
+	if err != nil {
+		return err
+	}
+	return writeOpenCodeConstrainedSource(filename, expression, body)
 }
 
 func openCodeConfigurationContainsFile(configuration openCodePackageConfiguration, basename string) bool {
@@ -1458,88 +1450,48 @@ func openCodeConfigurationWithTags(configurations []openCodePackageConfiguration
 	return openCodePackageConfiguration{}, false
 }
 
-func openCodeBuildTaggedMutationSource(mutation openCodeBuildTaggedMutation) (string, error) {
-	prefix := "//go:build " + strings.Join(mutation.BuildTags, " && ") + "\n\n"
-	var body string
-	switch mutation.Kind {
-	case openCodeBuildTaggedDirect:
-		body = `package ingest
-import (
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-	zx "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
-)
-func buildTaggedDirectBypass(conn *sqlite.Conn) error { return zx.Execute(conn, "SELECT data FROM event", nil) }
-`
-	case openCodeBuildTaggedAlias:
-		body = `package ingest
-import (
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
-)
-func buildTaggedAliasBypass(conn *sqlite.Conn) error {
-	execute := sqlitex.Execute
-	return execute(conn, "SELECT data FROM event", nil)
-}
-`
-	case openCodeBuildTaggedHelper:
-		body = `package ingest
-import (
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
-)
-func buildTaggedInvoke(fn func(*sqlite.Conn, string, *sqlitex.ExecOptions) error, conn *sqlite.Conn) error {
-	return fn(conn, "SELECT data FROM event", nil)
-}
-func buildTaggedHelperBypass(conn *sqlite.Conn) error { return buildTaggedInvoke(sqlitex.Execute, conn) }
-`
-	case openCodeBuildTaggedInterface:
-		body = `package ingest
-import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-type buildTaggedPreparer interface { PrepareTransient(string) (*sqlite.Stmt, int, error) }
-func buildTaggedInterfaceBypass(conn *sqlite.Conn) error {
-	var preparer buildTaggedPreparer = conn
-	_, _, err := preparer.PrepareTransient("SELECT data FROM event")
-	return err
-}
-`
-	case openCodeBuildTaggedField:
-		body = `package ingest
-import (
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
-)
-type buildTaggedHolder struct { execute func(*sqlite.Conn, string, *sqlitex.ExecOptions) error }
-func buildTaggedFieldBypass(conn *sqlite.Conn) error {
-	holder := buildTaggedHolder{execute: sqlitex.Execute}
-	return holder.execute(conn, "SELECT data FROM event", nil)
-}
-`
-	case openCodeBuildTaggedReturn:
-		body = `package ingest
-import (
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
-)
-func buildTaggedReturnedExecute() func(*sqlite.Conn, string, *sqlitex.ExecOptions) error { return sqlitex.Execute }
-func buildTaggedReturnBypass(conn *sqlite.Conn) error { return buildTaggedReturnedExecute()(conn, "SELECT data FROM event", nil) }
-`
-	case openCodeBuildTaggedDirectData:
-		body = `package ingest
-import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-func buildTaggedBlobAliases(conn *sqlite.Conn, buffer []byte) error {
-	open := conn.OpenBlob
-	blob, err := open("main", "event", "data", 1, false)
-	if err != nil { return err }
-	defer blob.Close()
-	read := blob.Read
-	_, err = read(buffer)
-	return err
-}
-`
-	default:
-		return "", fmt.Errorf("unknown fixture-owned build-tagged SQLite mutation kind %q", mutation.Kind)
+func writeOpenCodeBuildTaggedMutationSource(filename string, mutation openCodeBuildTaggedMutation) error {
+	if _, _, _, ok := openCodeBuildTaggedKindContract(mutation.Kind); !ok {
+		return fmt.Errorf("unknown fixture-owned build-tagged SQLite mutation kind %q", mutation.Kind)
 	}
-	return prefix + body, nil
+	if len(mutation.BuildTags) == 0 {
+		return fmt.Errorf("fixture-owned build-tagged SQLite mutation %q declares no build tags", mutation.Name)
+	}
+	var expression constraint.Expr
+	for _, tag := range mutation.BuildTags {
+		var tagExpression constraint.Expr = &constraint.TagExpr{Tag: tag}
+		if expression != nil {
+			tagExpression = &constraint.AndExpr{X: expression, Y: tagExpression}
+		}
+		expression = tagExpression
+	}
+	body, err := openCodeMutationSource("build_tagged_" + string(mutation.Kind))
+	if err != nil {
+		return err
+	}
+	return writeOpenCodeConstrainedSource(filename, expression, body)
+}
+
+// writeOpenCodeConstrainedSource writes the fixture-owned build constraint as
+// the file's first line, then the testdata source unchanged.
+func writeOpenCodeConstrainedSource(filename string, expression constraint.Expr, body []byte) error {
+	file, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	_, writeErr := fmt.Fprintf(file, "//go:build %s\n\n", expression)
+	if writeErr == nil {
+		_, writeErr = file.Write(body)
+	}
+	return errors.Join(writeErr, file.Close())
+}
+
+func openCodeMutationSource(name string) ([]byte, error) {
+	source, err := openCodeMutationSources.ReadFile("testdata/opencode_mutations/" + name + ".go.txt")
+	if err != nil {
+		return nil, fmt.Errorf("load OpenCode mutation source %q: %w", name, err)
+	}
+	return source, nil
 }
 
 func ingestProductionFiles(directory string) ([]string, error) {
@@ -1742,26 +1694,14 @@ func openCodeBuiltInBuildTags() (map[string]bool, error) {
 
 func TestOpenCodePrivateExecutionGuardRejectsUnresolvedSQL(t *testing.T) {
 	filename := filepath.Join(t.TempDir(), "opencode_dynamic_sql.go")
-	source := []byte(`package ingest
-import (
-	"context"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
-)
-type zombiezenOpenCodeSQLiteSource struct{ conn *sqlite.Conn }
-func (s *zombiezenOpenCodeSQLiteSource) executeRowsLocked(ctx context.Context, statement string, args []any, result func(*sqlite.Stmt) error) error {
-	_, _, err := s.conn.PrepareTransient(statement)
-	if err != nil { return err }
-	return sqlitex.ExecuteTransient(s.conn, statement, &sqlitex.ExecOptions{Args: args, ResultFunc: result})
-}
-func forbiddenDynamicSQL(s *zombiezenOpenCodeSQLiteSource, ctx context.Context, statement string) error {
-	return s.executeRowsLocked(ctx, statement, nil, nil)
-}
-`)
+	source, err := openCodeMutationSource("dynamic_sql")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filename, source, 0o600); err != nil {
 		t.Fatalf("write synthetic dynamic-SQL source: %v", err)
 	}
-	_, err := extractOpenCodePrivateExecutionStatements([]string{filename}, []string{filename})
+	_, err = extractOpenCodePrivateExecutionStatements([]string{filename}, []string{filename})
 	if err == nil || !strings.Contains(err.Error(), "dynamic, formatted, concatenated, or unresolved SQL expression") {
 		t.Fatalf("private execution guard dynamic-SQL error = %v, want unresolved-expression rejection", err)
 	}
@@ -1775,9 +1715,9 @@ func TestOpenCodePrivateExecutionGuardRejectsFixtureOwnedEntryPathBypasses(t *te
 			filename := filepath.Join(t.TempDir(), "sqlite_entry_bypass.go")
 			source, err := openCodeEntryPathMutationSource(mutation.Kind)
 			if err != nil {
-				t.Fatalf("construct fixture-owned SQLite entry-path mutation: %v", err)
+				t.Fatalf("load fixture-owned SQLite entry-path mutation: %v", err)
 			}
-			if err := os.WriteFile(filename, []byte(source), 0o600); err != nil {
+			if err := os.WriteFile(filename, source, 0o600); err != nil {
 				t.Fatalf("write fixture-owned SQLite entry-path mutation: %v", err)
 			}
 			_, err = extractOpenCodePrivateExecutionStatements([]string{filename}, []string{filename})
@@ -1788,352 +1728,11 @@ func TestOpenCodePrivateExecutionGuardRejectsFixtureOwnedEntryPathBypasses(t *te
 	}
 }
 
-func openCodeEntryPathMutationSource(kind openCodeEntryPathKind) (string, error) {
-	switch kind {
-	case openCodeEntrySQLitexExecute:
-		return `package ingest
-import (
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
-)
-func bypass(conn *sqlite.Conn) error { return sqlitex.Execute(conn, "SELECT * FROM event", nil) }
-`, nil
-	case openCodeEntryPrepare:
-		return `package ingest
-import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-func bypass(conn *sqlite.Conn) { _, _ = conn.Prepare("SELECT * FROM event") }
-`, nil
-	case openCodeEntryPrepareTransient:
-		return `package ingest
-import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-func bypass(conn *sqlite.Conn) { _, _, _ = conn.PrepareTransient("SELECT * FROM event") }
-`, nil
-	case openCodeEntryExecuteScript:
-		return `package ingest
-import (
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
-)
-func bypass(conn *sqlite.Conn) error { return sqlitex.ExecuteScript(conn, "SELECT * FROM event", nil) }
-`, nil
-	case openCodeEntryStatementStep:
-		return `package ingest
-import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-func bypass(stmt *sqlite.Stmt) { _, _ = stmt.Step() }
-`, nil
-	case openCodeEntrySQLitexExec:
-		return `package ingest
-import (
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
-)
-func bypass(conn *sqlite.Conn) error { return sqlitex.Exec(conn, "SELECT * FROM event", nil) }
-`, nil
-	case openCodeEntryConnPrep:
-		return `package ingest
-import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-func bypass(conn *sqlite.Conn) { _ = conn.Prep("SELECT * FROM event") }
-`, nil
-	case openCodeEntryExecuteFS:
-		return `package ingest
-import (
-	"testing/fstest"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
-)
-func bypass(conn *sqlite.Conn) error {
-	return sqlitex.ExecuteFS(conn, fstest.MapFS{"query.sql": {Data: []byte("SELECT * FROM event")}}, "query.sql", nil)
-}
-`, nil
-	case openCodeEntryImportAlias:
-		return `package ingest
-import (
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-	zx "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
-)
-func bypass(conn *sqlite.Conn) error { return zx.Execute(conn, "SELECT * FROM event", nil) }
-`, nil
-	case openCodeEntryCallableAlias:
-		return `package ingest
-import (
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
-)
-func bypass(conn *sqlite.Conn) error {
-	execute := sqlitex.Execute
-	return execute(conn, "SELECT * FROM event", nil)
-}
-`, nil
-	case openCodeEntryReceiverAlias:
-		return `package ingest
-import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-func bypass(conn *sqlite.Conn) {
-	receiver := conn
-	_ = receiver.Prep("SELECT * FROM event")
-}
-`, nil
-	case openCodeEntryCapturedStep:
-		return `package ingest
-import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-func bypass(stmt *sqlite.Stmt) {
-	step := stmt.Step
-	_, _ = step()
-}
-`, nil
-	case openCodeEntryHelperExecute:
-		return `package ingest
-import (
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
-)
-func invokeExecute(fn func(*sqlite.Conn, string, *sqlitex.ExecOptions) error, conn *sqlite.Conn) error {
-	return fn(conn, "SELECT * FROM event", nil)
-}
-func bypass(conn *sqlite.Conn) error { return invokeExecute(sqlitex.Execute, conn) }
-`, nil
-	case openCodeEntryHelperStep:
-		return `package ingest
-import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-func invokeStep(fn func() (bool, error)) { _, _ = fn() }
-func bypass(stmt *sqlite.Stmt) { invokeStep(stmt.Step) }
-`, nil
-	case openCodeEntryReturnedExecute:
-		return `package ingest
-import (
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
-)
-func returnedExecute() func(*sqlite.Conn, string, *sqlitex.ExecOptions) error { return sqlitex.Execute }
-func bypass(conn *sqlite.Conn) error { return returnedExecute()(conn, "SELECT * FROM event", nil) }
-`, nil
-	case openCodeEntryStructField:
-		return `package ingest
-import (
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
-)
-type executeHolder struct { execute func(*sqlite.Conn, string, *sqlitex.ExecOptions) error }
-func bypass(conn *sqlite.Conn) error {
-	holder := executeHolder{execute: sqlitex.Execute}
-	return holder.execute(conn, "SELECT * FROM event", nil)
-}
-`, nil
-	case openCodeEntryInterfaceField:
-		return `package ingest
-import (
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
-)
-type interfaceExecuteHolder struct { execute any }
-func bypass(conn *sqlite.Conn) error {
-	holder := interfaceExecuteHolder{execute: sqlitex.Execute}
-	return holder.execute.(func(*sqlite.Conn, string, *sqlitex.ExecOptions) error)(conn, "SELECT * FROM event", nil)
-}
-`, nil
-	case openCodeEntryInterfacePrepare:
-		return `package ingest
-import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-type transientPreparer interface { PrepareTransient(string) (*sqlite.Stmt, int, error) }
-func bypass(conn *sqlite.Conn) {
-	var preparer transientPreparer = conn
-	_, _, _ = preparer.PrepareTransient("SELECT * FROM event")
-}
-`, nil
-	case openCodeEntryInterfaceStep:
-		return `package ingest
-import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-type statementStepper interface { Step() (bool, error) }
-func bypass(stmt *sqlite.Stmt) {
-	var stepper statementStepper = stmt
-	_, _ = stepper.Step()
-}
-`, nil
-	case openCodeEntryExecutorHistory, openCodeEntryExecutorPrepare, openCodeEntryPrepareArgument, openCodeEntryExecuteArgument, openCodeEntryExecutorEscape, openCodeEntryExecutorInterface:
-		return openCodeExecutorMutationSource(kind), nil
-	case openCodeEntryInitializerExtra:
-		return `package ingest
-import (
-	"context"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
-)
-type zombiezenOpenCodeSQLiteSource struct { conn *sqlite.Conn }
-func (s *zombiezenOpenCodeSQLiteSource) initialize(context.Context) error {
-	if err := sqlitex.ExecuteTransient(s.conn, "PRAGMA query_only=ON", nil); err != nil { return err }
-	if err := sqlitex.ExecuteTransient(s.conn, "PRAGMA query_only", nil); err != nil { return err }
-	return sqlitex.ExecuteTransient(s.conn, "SELECT id FROM event", nil)
-}
-`, nil
-	case openCodeEntryPackageValue:
-		return `package ingest
-import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
-var escapedOpenCodeExecute = sqlitex.Execute
-`, nil
-	case openCodeEntryCurrentOpenBlob:
-		return `package ingest
-import (
-	"context"
-	"errors"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-)
-type zombiezenOpenCodeSQLiteSource struct { conn *sqlite.Conn }
-type OpenCodeCurrentPageRequest struct{}
-type OpenCodeCurrentPage struct{}
-func (s *zombiezenOpenCodeSQLiteSource) CurrentMessages(context.Context, OpenCodeCurrentPageRequest) (OpenCodeCurrentPage, error) {
-	blob, err := s.conn.OpenBlob("main", "event", "data", 1, false)
-	if err != nil { return OpenCodeCurrentPage{}, err }
-	buffer := make([]byte, blob.Size())
-	_, readErr := blob.Read(buffer)
-	return OpenCodeCurrentPage{}, errors.Join(readErr, blob.Close())
-}
-`, nil
-	case openCodeEntryOpenBlobAlias:
-		return `package ingest
-import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-func bypass(conn *sqlite.Conn) error {
-	openBlob := conn.OpenBlob
-	_, err := openBlob("main", "event", "data", 1, false)
-	return err
-}
-`, nil
-	case openCodeEntrySerialize:
-		return `package ingest
-import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-func bypass(conn *sqlite.Conn) error { _, err := conn.Serialize("main"); return err }
-`, nil
-	case openCodeEntrySerializeInterface:
-		return `package ingest
-import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-type databaseSerializer interface { Serialize(string) ([]byte, error) }
-func bypass(conn *sqlite.Conn) error {
-	var serializer databaseSerializer = conn
-	_, err := serializer.Serialize("main")
-	return err
-}
-`, nil
-	case openCodeEntryDeserialize:
-		return `package ingest
-import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-func bypass(conn *sqlite.Conn, data []byte) error { return conn.Deserialize("main", data) }
-`, nil
-	case openCodeEntryNewBackup:
-		return `package ingest
-import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-func bypass(destination, source *sqlite.Conn) error {
-	_, err := sqlite.NewBackup(destination, "main", source, "main")
-	return err
-}
-`, nil
-	case openCodeEntryBackupStep:
-		return `package ingest
-import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-func bypass(backup *sqlite.Backup) error { _, err := backup.Step(-1); return err }
-`, nil
-	case openCodeEntryBackupStepAlias:
-		return `package ingest
-import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-func invokeBackupStep(step func(int) (bool, error)) error { _, err := step(-1); return err }
-func bypass(backup *sqlite.Backup) error { return invokeBackupStep(backup.Step) }
-`, nil
-	case openCodeEntryBlobRead:
-		return `package ingest
-import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-func bypass(blob *sqlite.Blob, buffer []byte) error { _, err := blob.Read(buffer); return err }
-`, nil
-	case openCodeEntryBlobReadAlias:
-		return `package ingest
-import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-func invokeBlobRead(read func([]byte) (int, error), buffer []byte) error { _, err := read(buffer); return err }
-func bypass(blob *sqlite.Blob, buffer []byte) error { return invokeBlobRead(blob.Read, buffer) }
-`, nil
-	case openCodeEntryBlobWriteTo:
-		return `package ingest
-import (
-	"bytes"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-)
-func bypass(blob *sqlite.Blob) error { var output bytes.Buffer; _, err := blob.WriteTo(&output); return err }
-`, nil
-	case openCodeEntrySessionDiff:
-		return `package ingest
-import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-func bypass(session *sqlite.Session) error { return session.Diff("main", "event") }
-`, nil
-	case openCodeEntrySessionChangeset:
-		return `package ingest
-import (
-	"bytes"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-)
-func bypass(session *sqlite.Session) error { var output bytes.Buffer; return session.WriteChangeset(&output) }
-`, nil
-	case openCodeEntryExecutorPrepareInterface:
-		return `package ingest
-import (
-	"context"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
-)
-type transientExecutorPreparer interface { PrepareTransient(string) (*sqlite.Stmt, int, error) }
-type zombiezenOpenCodeSQLiteSource struct { conn *sqlite.Conn }
-func (s *zombiezenOpenCodeSQLiteSource) executeRowsLocked(ctx context.Context, statement string, args []any, result func(*sqlite.Stmt) error) error {
-	var preparer transientExecutorPreparer = s.conn
-	_, _, err := preparer.PrepareTransient(statement)
-	if err != nil { return err }
-	return sqlitex.ExecuteTransient(s.conn, statement, &sqlitex.ExecOptions{Args: args, ResultFunc: result})
-}
-`, nil
-	default:
-		return "", fmt.Errorf("unknown fixture-owned SQLite entry-path mutation %q", kind)
+func openCodeEntryPathMutationSource(kind openCodeEntryPathKind) ([]byte, error) {
+	if !knownOpenCodeEntryPathKind(kind) {
+		return nil, fmt.Errorf("unknown fixture-owned SQLite entry-path mutation %q", kind)
 	}
-}
-
-func openCodeExecutorMutationSource(kind openCodeEntryPathKind) string {
-	prepareStatement := "statement"
-	executeStatement := "statement"
-	extraParameter := ""
-	extra := ""
-	extraMethod := ""
-	switch kind {
-	case openCodeEntryExecutorHistory:
-		extra = `
-	if err := sqlitex.ExecuteTransient(s.conn, "SELECT id FROM event", nil); err != nil { return err }`
-	case openCodeEntryExecutorPrepare:
-		extra = `
-	if _, _, err := s.conn.PrepareTransient(statement); err != nil { return err }`
-	case openCodeEntryPrepareArgument:
-		extraParameter = ", alternate string"
-		prepareStatement = "alternate"
-	case openCodeEntryExecuteArgument:
-		executeStatement = `statement + ""`
-	case openCodeEntryExecutorEscape:
-		extraMethod = `
-func (s *zombiezenOpenCodeSQLiteSource) escapeExecutor() any { return s.executeRowsLocked }
-`
-	case openCodeEntryExecutorInterface:
-		extraMethod = `
-type boundedOpenCodeExecutor interface {
-	executeRowsLocked(context.Context, string, []any, func(*sqlite.Stmt) error) error
-}
-func dispatchOpenCodeExecutor(s *zombiezenOpenCodeSQLiteSource, ctx context.Context) error {
-	var executor boundedOpenCodeExecutor = s
-	return executor.executeRowsLocked(ctx, "SELECT id FROM event", nil, nil)
-}
-`
-	}
-	return fmt.Sprintf(`package ingest
-import (
-	"context"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
-)
-type zombiezenOpenCodeSQLiteSource struct { conn *sqlite.Conn }
-func (s *zombiezenOpenCodeSQLiteSource) executeRowsLocked(ctx context.Context, statement string%s, args []any, result func(*sqlite.Stmt) error) error {
-	_, _, err := s.conn.PrepareTransient(%s)
-	if err != nil { return err }%s
-	return sqlitex.ExecuteTransient(s.conn, %s, &sqlitex.ExecOptions{Args: args, ResultFunc: result})
-}
-%s`, extraParameter, prepareStatement, extra, executeStatement, extraMethod)
+	return openCodeMutationSource("entry_" + string(kind))
 }
 
 type openCodeTypedSource struct {

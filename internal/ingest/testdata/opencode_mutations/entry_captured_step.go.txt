@@ -1,0 +1,6 @@
+package ingest
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+func bypass(stmt *sqlite.Stmt) {
+	step := stmt.Step
+	_, _ = step()
+}

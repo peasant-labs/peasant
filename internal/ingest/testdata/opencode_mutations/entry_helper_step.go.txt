@@ -1,0 +1,4 @@
+package ingest
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+func invokeStep(fn func() (bool, error)) { _, _ = fn() }
+func bypass(stmt *sqlite.Stmt) { invokeStep(stmt.Step) }
