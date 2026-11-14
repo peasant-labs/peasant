@@ -15,9 +15,11 @@
  *   the end of the gap, so a change made in another window is not missed until
  *   the next focus.
  *
- * A read that fails reports no account, as a failed read always has: nobody
- * guesses who is signed in. It ends like any other read, so it never holds up
- * the next one. A read started for a subscriber who has left is not canceled:
+ * Each read has a deadline that aborts the HTTP request, including consumption
+ * of its body. The guard stays held until the read actually settles, and a
+ * timeout reports no account just like any other failure: nobody guesses who
+ * is signed in. A focus held during the read is retried after the usual gap.
+ * A read started for a subscriber who has left is not canceled on unsubscribe:
  * its answer is told to nobody, but its end releases the in-flight guard and
  * starts the gap for whoever is mounted now, so a remount never overlaps it or
  * silently waits for a focus. The end time survives a period with no
@@ -33,13 +35,16 @@ import { fetchVillageAuth } from './settings';
 /** The least time from the end of one read to the start of the next. */
 export const VILLAGE_AUTH_FOCUS_GAP_MS = 2000;
 
+/** Only focus reads get ten seconds for a slow local server and its response body. */
+export const VILLAGE_AUTH_FOCUS_TIMEOUT_MS = 10_000;
+
 /** What a subscriber is told: the sign-in as read, or null when the read failed. */
 export type VillageAuthReading = SyncAuthResponse | null;
 export type VillageAuthListener = (reading: VillageAuthReading) => void;
 
 export interface VillageAuthFocusDeps {
-  /** Reads the sign-in once. */
-  read: () => Promise<SyncAuthResponse>;
+  /** Reads the sign-in once; abort must stop the request and body consumption. */
+  read: (signal: AbortSignal) => Promise<SyncAuthResponse>;
   /** The current time in milliseconds. */
   now: () => number;
   setTimer: (run: () => void, ms: number) => unknown;
@@ -94,7 +99,15 @@ export function createVillageAuthFocusReader(deps: VillageAuthFocusDeps): Villag
   const start = () => {
     inFlight = true;
     const mine = period;
+    const controller = new AbortController();
+    // Do not release the guard here: wait for the aborted request to settle so
+    // another focus cannot overlap a still-live fetch or response body.
+    const deadline = deps.setTimer(() => controller.abort(), VILLAGE_AUTH_FOCUS_TIMEOUT_MS);
     const end = (reading: VillageAuthReading) => {
+      deps.clearTimer(deadline);
+      // A dependency must not deliver an account after its deadline, even if
+      // it resolves instead of rejecting in response to the abort.
+      if (controller.signal.aborted) reading = null;
       if (mine === period) {
         finish(reading);
         return;
@@ -109,7 +122,7 @@ export function createVillageAuthFocusReader(deps: VillageAuthFocusDeps): Villag
     };
     let reading: Promise<SyncAuthResponse>;
     try {
-      reading = deps.read();
+      reading = deps.read(controller.signal);
     } catch {
       end(null);
       return;
