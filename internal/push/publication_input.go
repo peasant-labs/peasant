@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/transcript"
@@ -66,7 +67,26 @@ const (
 	// model. A publication requires one and a re-index cannot add it, so the
 	// session stays unpublishable.
 	NotReadyNoModelReply NotReadyReason = "no_model_reply"
+	// NotReadyTooLargeToPublish is a session whose entries or transcript
+	// content document is larger than the publication redaction input cap. It
+	// is committed locally but cannot be redacted for publication, and no
+	// re-index makes it smaller, so the session stays unpublishable.
+	NotReadyTooLargeToPublish NotReadyReason = "too_large_to_publish"
 )
+
+// tooLargeToPublish is the refusal of a publication document over its redaction
+// input cap, raised before the document is decoded.
+func tooLargeToPublish(what string, documentBytes, capBytes int) error {
+	return &NotReadyError{Reason: NotReadyTooLargeToPublish, err: fmt.Errorf(
+		"the %s document is too large to publish (%s > %s cap): the document is %d bytes and publication redaction materializes at most %d; "+
+			"nothing uploaded and nothing local changed; re-indexing cannot shrink it, so leave the session out of the push",
+		what, formatMiB(documentBytes), formatMiB(capBytes), documentBytes, capBytes)}
+}
+
+// formatMiB renders a byte count in MiB with one decimal place.
+func formatMiB(n int) string {
+	return strconv.FormatFloat(float64(n)/(1<<20), 'f', 1, 64) + " MiB"
+}
 
 // NotReadyError is the refusal ValidatePublicationInput returns. It carries
 // the reason as a value, so a caller that reports a refusal per session reads

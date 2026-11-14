@@ -481,7 +481,7 @@ func plantMetaSecret(t *testing.T, fs *testutil.MemFS, hostSlug, sessionID, secr
 // TestPipeline_ARedactionThatCannotBeEncodedStopsTheSession pins the OTHER
 // failure branch of the shared round trip: the re-marshal.
 //
-// It is the branch that makes redactJSONDocument worth having. redact's own
+// It is the branch that makes redactJSONDocumentWithInputCap worth having. redact's own
 // RedactJSONDocBytes returns its INPUT UNCHANGED when the re-marshal fails, with
 // no error, so a caller receives well-formed bytes whether the redaction ran or
 // silently did nothing — and the bytes it receives are the unredacted document.
