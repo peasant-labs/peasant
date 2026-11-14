@@ -126,12 +126,14 @@ type kickstartStep struct {
 	Foreign bool   `yaml:"foreign"`
 	Body    any    `yaml:"body"`
 	// Save maps a name to the dotted path in the response it keeps.
-	Save     map[string]string `yaml:"save"`
-	Status   int               `yaml:"status"`
-	JSON     map[string]any    `yaml:"json"`
-	Absent   []string          `yaml:"absent"`
-	Len      map[string]int    `yaml:"len"`
-	Contains map[string]string `yaml:"contains"`
+	Save   map[string]string `yaml:"save"`
+	Status int               `yaml:"status"`
+	// Headers gives the complete values of each named response header.
+	Headers  map[string][]string `yaml:"headers"`
+	JSON     map[string]any      `yaml:"json"`
+	Absent   []string            `yaml:"absent"`
+	Len      map[string]int      `yaml:"len"`
+	Contains map[string]string   `yaml:"contains"`
 	// Same maps a dotted path to the saved name whose value it must equal.
 	Same map[string]string `yaml:"same"`
 	// NoReset requires that no reset control appears anywhere in the body.
@@ -673,6 +675,12 @@ func (w *kickstartWorld) call(index int, step kickstartStep) {
 	}
 	if response.StatusCode != want {
 		w.fail(index, "%s %s: status %d, want %d; body: %s", method, path, response.StatusCode, want, raw)
+	}
+	for name, expected := range step.Headers {
+		got := response.Header.Values(name)
+		if len(got) != len(expected) || (len(got) > 0 && !reflect.DeepEqual(got, expected)) {
+			w.fail(index, "%s %s: header %s = %q, want exactly %q", method, path, name, got, expected)
+		}
 	}
 	// Every answer a kickstart route sends is held to the contract's record of
 	// what that route may answer.

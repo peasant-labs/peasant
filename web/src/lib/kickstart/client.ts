@@ -141,18 +141,22 @@ function refused(method: string, path: string, status: number, text: string): Ki
 }
 
 /** The answer's JSON, or the failure that explains why there is none. */
-async function exchange(method: string, path: string, body?: unknown): Promise<{ status: number; text: string }> {
+async function exchange(method: string, path: string, body?: unknown, options?: Pick<RequestInit, 'cache' | 'signal'>): Promise<{ status: number; text: string }> {
   let response: Response;
   try {
     response = await fetch(`${getApiBaseUrl()}${path}`, {
       method,
       headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
+      ...options,
     });
   } catch (error) {
+    if (options?.signal?.aborted) throw error;
     const detail = error instanceof Error ? error.message : String(error);
     throw new KickstartRequestError(path, 0, `peasant did not answer (${detail}). check that peasant is running, then retry.`);
   }
+  // Fetch binds its signal to the response body too, so it can interrupt text()
+  // after headers have arrived, not only the wait for the initial response.
   return { status: response.status, text: await response.text() };
 }
 
@@ -164,8 +168,8 @@ function jsonOf(path: string, status: number, text: string): unknown {
   }
 }
 
-async function call<T>(method: string, path: string, read: (raw: unknown) => T, body?: unknown): Promise<T> {
-  const { status, text } = await exchange(method, path, body);
+async function call<T>(method: string, path: string, read: (raw: unknown) => T, body?: unknown, options?: Pick<RequestInit, 'cache' | 'signal'>): Promise<T> {
+  const { status, text } = await exchange(method, path, body, options);
   if (status < 200 || status >= 300) throw refused(method, path, status, text);
   return read(jsonOf(path, status, text));
 }
@@ -211,9 +215,9 @@ export function fetchKickstartTree(id: string): Promise<KickstartTree> {
   return call('GET', `${sessionPath(id)}/tree`, parseKickstartTree);
 }
 
-/** The bounded typed preview lines of one forest row. */
-export function fetchKickstartPreview(id: string, nodeId: string): Promise<readonly KickstartLine[]> {
-  return call('GET', `${sessionPath(id)}/tree/${encodeURIComponent(nodeId)}/preview`, parseKickstartPreview);
+/** The bounded typed preview lines of one forest row, never read from or saved to the HTTP cache. */
+export function fetchKickstartPreview(id: string, nodeId: string, signal?: AbortSignal): Promise<readonly KickstartLine[]> {
+  return call('GET', `${sessionPath(id)}/tree/${encodeURIComponent(nodeId)}/preview`, parseKickstartPreview, undefined, { cache: 'no-store', signal });
 }
 
 /** Rescan the filesystem. Progress is pushed on the topic; the answer is the scan at accept. */
