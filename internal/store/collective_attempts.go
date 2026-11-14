@@ -82,25 +82,34 @@ func observationCredentialScope(snapshot auth.CredentialSnapshot) (string, strin
 
 func (s *Store) withObservationTransaction(ctx context.Context, snapshot auth.CredentialSnapshot, write bool, action func(*sqlite.Conn) error) error {
 	return snapshot.WithCurrent(ctx, func() (err error) {
-		if write {
-			var cancel context.CancelFunc
-			ctx, cancel = context.WithTimeout(ctx, s.writeConfig.WithDefaults(1).HoldTarget)
-			defer cancel()
-		}
 		conn, err := s.pool.Take(ctx)
 		if err != nil {
 			return fmt.Errorf("open collective observation transaction: %w; no cache changes committed; retry after restoring local Store access", err)
 		}
 		defer s.pool.Put(conn)
-		if write {
-			end, beginErr := sqlitex.ImmediateTransaction(conn)
-			if beginErr != nil {
-				return beginErr
-			}
-			defer end(&err)
-		} else {
+		if !write {
 			defer sqlitex.Transaction(conn)(&err)
+			err = action(conn)
+			return err
 		}
+		end, beginErr := sqlitex.ImmediateTransaction(conn)
+		if beginErr != nil {
+			return beginErr
+		}
+		// The hold target bounds how long this transaction holds the SQLite
+		// writer, so it starts once BEGIN IMMEDIATE owns the lock. Waiting for a
+		// pooled connection or for the lock stays bounded by the caller's
+		// context and the busy timeout.
+		holdTarget := s.writeConfig.WithDefaults(1).HoldTarget
+		hold, release := context.WithTimeout(ctx, holdTarget)
+		defer func() {
+			if err != nil && ctx.Err() == nil && hold.Err() != nil {
+				err = fmt.Errorf("collective observation write exceeded the %s writer hold target: %w: %w; the transaction was interrupted; retry when the local Store is less busy", holdTarget, context.DeadlineExceeded, err)
+			}
+			release()
+		}()
+		conn.SetInterrupt(hold.Done())
+		defer end(&err)
 		err = action(conn)
 		return err
 	})
