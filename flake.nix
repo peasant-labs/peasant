@@ -198,10 +198,14 @@
               # The SQLite-backed packages are bound by disk sync, so their time
               # varies several-fold between runner VMs of the same class: across
               # two runs of one commit internal/api took 377s and >600s, and
-              # internal/store 118s and 429s. 20 minutes is about three times the
-              # slowest package seen there, and stays under the job's own
-              # 30-minute limit, so a hung test still fails with Go's goroutine
-              # dump naming it instead of the job being killed without one.
+              # internal/store 118s and 429s. 20 minutes leaves headroom above
+              # every run observed so far, so a slow package has room to finish
+              # instead of tripping Go's own deadline. That is not a guarantee
+              # of a Go-level failure, though: the job's 30-minute wall limit
+              # also covers setup and the other packages, so a package can
+              # start too late for -timeout to fire first, and the job can be
+              # killed without a goroutine dump. When the timeout does fire
+              # first, the dump names the hung test.
               #
               # -skip TestStopWebLeavesSameNamedExecutableAtAnotherPathAlone:
               # the test copies the test binary and executes the copy while
