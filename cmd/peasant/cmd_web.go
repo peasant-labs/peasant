@@ -210,7 +210,8 @@ func runWebForeground(cmd *cobra.Command, cfgPath string, port int, devMode bool
 	}
 
 	// Create progressive provider
-	provider := api.NewProgressiveProvider(cfg, defaults.MockComponents.Web, mock.NewProvider(), realProvider)
+	mockProvider := mock.NewProvider()
+	provider := api.NewProgressiveProvider(cfg, defaults.MockComponents.Web, mockProvider, realProvider)
 
 	hub := api.NewHub(provider)
 
@@ -238,7 +239,13 @@ func runWebForeground(cmd *cobra.Command, cfgPath string, port int, devMode bool
 		outputDir = filepath.Join(dataDir, "peasant-sync")
 	}
 
-	srv := api.NewServer(webServerConfig(cmd, cfg, cfgPath, port, devMode, devProxy, experimental, outputDir, provider, hub, webFS, analyticsStore))
+	serverCfg := webServerConfig(cmd, cfg, cfgPath, port, devMode, devProxy, experimental, outputDir, provider, hub, webFS, analyticsStore)
+	// A mocked sessions section serves mock session headers, so the transcript
+	// segment reads must serve those sessions' turns rather than the store's.
+	if provider.Mocked(defaults.MockSections.Sessions) {
+		serverCfg.SegmentReader = mock.NewSegmentReader(mockProvider)
+	}
+	srv := api.NewServer(serverCfg)
 
 	return srv.ListenAndServe(ctx)
 }
