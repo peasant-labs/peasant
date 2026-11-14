@@ -277,6 +277,7 @@ commands:
           - { name: output-dir, type: string, default: "." }
           - { name: last-good, type: bool, default: "false" }
           - { name: json, type: bool, default: "false" }
+          - { name: stdout, type: bool, default: "false" }
       - use: annotations
         flags:
           - { name: session, type: string, default: "" }

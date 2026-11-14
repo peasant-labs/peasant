@@ -281,7 +281,7 @@ resolves the names), or a `--collective` confirmation it cannot ask for. Under
 
 | command | follows |
 |---|---|
-| `export sessions` | `--sessions-from` (the earlier `--session-from-file` still works, unlisted), `--json` with `warnings`, `refused` and `refusal_reasons` counts in the document, and one stderr summary line for a run over more than one session, such as `2 of 3 sessions exported, 1 refused: 1 strict_capture_refused; peasant harvest index re-indexes 1 of them`. It exits 1 when it refuses any session, and the sessions it did export stay written |
+| `export sessions` | `--sessions-from` (the earlier `--session-from-file` still works, unlisted), `--json` with `warnings`, `refused` and `refusal_reasons` counts in the document, and one stderr summary line for a run over more than one session, such as `2 of 3 sessions exported, 1 refused: 1 strict_capture_refused; peasant harvest index re-indexes 1 of them`. It exits 1 when it refuses any session, and the sessions it did export stay written. `--stdout` with `--session` writes that one transcript document to stdout and nothing else, creating no file; a refusal writes nothing to stdout and exits 1, and only a failed stdout write can leave partial bytes, also with exit 1. It refuses `--sessions-from`, `--output-dir` and `--json` as usage errors |
 | `redact` | `--sessions-from` |
 | `sessions prompts` | `--json` with `warnings`, `empty_code` and `empty_reason`; a refused call exits 2 before the store opens |
 | `sessions search` | `--json` preserves the ranked search payload alongside `warnings`, `empty_code` and `empty_reason`; `--sessions-from`; invocation refusals exit 2 before the store opens |
