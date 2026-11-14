@@ -2,7 +2,9 @@
 # played on a fake clock. Each case is a timeline of subscriptions, focus
 # events and unsubscriptions (`at` in milliseconds from the start), the reads
 # the server answers in order (`ms` it takes, then what it says: a username
-# when signed in, `signed out`, or `fail`; the last answer repeats), and what
+# when signed in, `signed out`, `fail`, `throw`, `stall`, `abort-success` (an answer
+# delivered on abort), or `abort-delay-success` (an answer `ms` after abort);
+# the last answer repeats), and what
 # is expected: the times each read started, what each subscriber heard in
 # order (`no account` when the read failed), and whether the reader still
 # listens for focus when the timeline ends (`pendingTimers` checks how many
@@ -19,6 +21,11 @@ requiredNames:
   - unsubscribe-last-during-a-read-remount-waits-for-its-end
   - unsubscribe-after-completion-remount-waits-out-the-gap
   - orphaned-read-ends-unheard-remount-waits-out-the-gap
+  - stalled-read-clears-account-and-retries-held-focus
+  - stalled-orphan-remount-waits-for-abort-and-fresh-read
+  - answer-delivered-after-abort-is-not-an-account
+  - delayed-abort-settlement-keeps-guard-and-remount-fresh
+  - synchronous-failure-clears-deadline-and-allows-retry
 cases:
   # Five focus events inside one second: one read at once, one after the gap.
   - name: one-read-per-focus-burst
@@ -188,4 +195,87 @@ cases:
     until: 8000
     expectReads: [0, 3000]
     expectHeard: {sidebar: [], online: [signed out]}
+    expectListening: false
+
+  # The previous account is no longer reliable. The deadline aborts the slow
+  # read, reports failure, and retries the held focus after the normal gap.
+  - name: stalled-read-clears-account-and-retries-held-focus
+    reads: [{ms: 100, answer: ada}, {ms: 0, answer: stall}, {ms: 100, answer: signed out}]
+    timeline:
+      - {at: 0, subscribe: sidebar}
+      - {at: 3000, focus: true}
+      - {at: 3500, focus: true}
+      - {at: 4000, focus: true}
+      - {at: 13001, pendingTimers: 1}
+      - {at: 16000, unsubscribe: sidebar}
+      - {at: 16001, pendingTimers: 0, listeners: 0}
+    until: 17000
+    expectReads: [0, 3000, 15000]
+    expectAborts: [13000]
+    expectHeard: {sidebar: [ada, no account, signed out]}
+    expectListening: false
+
+  # A remount cannot overlap the orphaned read, hear its result, or wait
+  # indefinitely for it. The timeout remains armed without subscribers.
+  - name: stalled-orphan-remount-waits-for-abort-and-fresh-read
+    reads: [{ms: 0, answer: stall}, {ms: 100, answer: signed out}]
+    timeline:
+      - {at: 0, subscribe: sidebar}
+      - {at: 300, unsubscribe: sidebar}
+      - {at: 301, pendingTimers: 1, listeners: 0}
+      - {at: 600, subscribe: online}
+      - {at: 800, focus: true}
+      - {at: 10001, pendingTimers: 1, listeners: 1}
+      - {at: 12500, unsubscribe: online}
+      - {at: 12501, pendingTimers: 0, listeners: 0}
+    until: 13000
+    expectReads: [0, 12000]
+    expectAborts: [10000]
+    expectHeard: {sidebar: [], online: [signed out]}
+    expectListening: false
+
+  # Even a misbehaving dependency that resolves on abort cannot deliver the
+  # expired account before the queued fresh read.
+  - name: answer-delivered-after-abort-is-not-an-account
+    reads: [{ms: 0, answer: abort-success}, {ms: 100, answer: signed out}]
+    timeline:
+      - {at: 0, subscribe: sidebar}
+      - {at: 500, focus: true}
+      - {at: 12500, unsubscribe: sidebar}
+    until: 13000
+    expectReads: [0, 12000]
+    expectAborts: [10000]
+    expectHeard: {sidebar: [no account, signed out]}
+    expectListening: false
+
+  # An abort may take time to settle. The old answer is unheard by the new
+  # subscriber, and the next read waits for the actual end plus the full gap.
+  - name: delayed-abort-settlement-keeps-guard-and-remount-fresh
+    reads: [{ms: 3000, answer: abort-delay-success}, {ms: 100, answer: signed out}]
+    timeline:
+      - {at: 0, subscribe: sidebar}
+      - {at: 300, unsubscribe: sidebar}
+      - {at: 600, subscribe: online}
+      - {at: 10300, focus: true}
+      - {at: 16000, unsubscribe: online}
+      - {at: 16001, pendingTimers: 0, listeners: 0}
+    until: 17000
+    expectReads: [0, 15000]
+    expectAborts: [10000]
+    expectHeard: {sidebar: [], online: [signed out]}
+    expectListening: false
+
+  # A failure before a promise is returned also cancels the deadline, reports
+  # no account and permits a later focus read.
+  - name: synchronous-failure-clears-deadline-and-allows-retry
+    reads: [{ms: 0, answer: throw}, {ms: 100, answer: signed out}]
+    timeline:
+      - {at: 0, subscribe: sidebar}
+      - {at: 1, pendingTimers: 0}
+      - {at: 2500, focus: true}
+      - {at: 3000, unsubscribe: sidebar}
+      - {at: 3001, pendingTimers: 0, listeners: 0}
+    until: 13000
+    expectReads: [0, 2500]
+    expectHeard: {sidebar: [no account, signed out]}
     expectListening: false

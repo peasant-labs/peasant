@@ -19,6 +19,7 @@ interface Case {
   timeline: TimelineEvent[];
   until: number;
   expectReads: number[];
+  expectAborts?: number[];
   expectHeard: Record<string, string[]>;
   expectListening: boolean;
 }
@@ -73,20 +74,40 @@ describe('the sign-in read on window focus', () => {
       }
       const t0 = Date.now();
       const started: number[] = [];
+      const aborted: number[] = [];
       let inFlight = 0;
       let mostInFlight = 0;
-      const read = () => {
+      const read = (signal: AbortSignal) => {
         const answer = row.reads[Math.min(started.length, row.reads.length - 1)];
         started.push(Date.now() - t0);
         inFlight += 1;
         mostInFlight = Math.max(mostInFlight, inFlight);
+        if (answer.answer === 'throw') {
+          inFlight -= 1;
+          throw new Error('the sign-in could not be read');
+        }
         return new Promise<SyncAuthResponse>((done, fail) => {
-          setTimeout(() => {
+          const waitsForAbort = answer.answer === 'stall' || answer.answer === 'abort-success' || answer.answer === 'abort-delay-success';
+          const timer = waitsForAbort ? null : setTimeout(() => {
             inFlight -= 1;
             if (answer.answer === 'fail') fail(new Error('the sign-in could not be read'));
             else if (answer.answer === 'signed out') done({ authenticated: false } as SyncAuthResponse);
             else done({ authenticated: true, username: answer.answer } as SyncAuthResponse);
           }, answer.ms);
+          signal.addEventListener('abort', () => {
+            if (timer !== null) clearTimeout(timer);
+            aborted.push(Date.now() - t0);
+            if (answer.answer === 'abort-delay-success') {
+              setTimeout(() => {
+                inFlight -= 1;
+                done({ authenticated: true, username: 'stale' } as SyncAuthResponse);
+              }, answer.ms);
+              return;
+            }
+            inFlight -= 1;
+            if (answer.answer === 'abort-success') done({ authenticated: true, username: 'stale' } as SyncAuthResponse);
+            else fail(new DOMException('request aborted', 'AbortError'));
+          }, { once: true });
         });
       };
       const target = new CountingTarget();
@@ -116,6 +137,7 @@ describe('the sign-in read on window focus', () => {
       await vi.advanceTimersByTimeAsync(row.until - clock);
       expect(mostInFlight, `${row.name}: reads in flight at once`).toBe(1);
       expect(started, `${row.name}: when each read started`).toEqual(row.expectReads);
+      expect(aborted, `${row.name}: when requests were aborted`).toEqual(row.expectAborts ?? []);
       expect(said, `${row.name}: what each subscriber heard`).toEqual(row.expectHeard);
       expect(target.listening > 0, `${row.name}: still listening for focus`).toBe(row.expectListening);
       expect(target.listening, `${row.name}: focus listeners held`).toBeLessThanOrEqual(1);

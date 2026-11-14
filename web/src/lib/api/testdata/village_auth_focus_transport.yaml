@@ -1,0 +1,10 @@
+# The real shared reader and settings transport, with an abort-aware fetch at
+# the network boundary. Both a missing response and a stalled body must end.
+requiredNames:
+  - stalled-response-aborts-fetch-and-retries
+  - stalled-body-aborts-consumption-and-retries
+cases:
+  - name: stalled-response-aborts-fetch-and-retries
+    stall: response
+  - name: stalled-body-aborts-consumption-and-retries
+    stall: body
