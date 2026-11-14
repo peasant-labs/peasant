@@ -446,6 +446,30 @@ func (s *Store) refreshManagedGenerationOnConn(ctx context.Context, conn *sqlite
 			Detail: fmt.Sprintf("the refreshed capture names session %q but the source generation belongs to session %q; a metadata-only refresh cannot relabel a generation; rebuild the capture for this session or re-parse the source; nothing changed", refresh.Metadata.SessionID, refresh.SessionID),
 		}
 	}
+	// The refreshed capture owns the measured stats, but two counts are derived
+	// from the stored entries rather than the metadata capture: the distinct
+	// input submissions and the conversation turn count. The pair metadata an
+	// adapter refresh installs carries neither (the builder computes them from
+	// the parsed entries), and the entries are exactly what this refresh reuses.
+	// Preserve the active generation's stored counts when the metadata capture
+	// omits them, so a metadata-only refresh cannot drop an unchanged parse's
+	// count authority. A complete generation still requires the input count, so
+	// a missing source count is a refused refresh rather than a silent zero.
+	if refresh.Metadata.Stats.InputSubmissionCount == nil || refresh.Metadata.Stats.ConversationTurnCount == nil {
+		stats, statsErr := readCapturedStatsOnConn(conn, refresh.SessionID)
+		if statsErr != nil && !errors.Is(statsErr, ErrNoCapturedStats) {
+			return result, fmt.Errorf("store: read the stored counts of session %s before the metadata-only refresh: %w; nothing changed and the active generation is unchanged; restore database access and retry or re-parse the source", refresh.SessionID, statsErr)
+		}
+		if statsErr == nil {
+			if refresh.Metadata.Stats.InputSubmissionCount == nil {
+				refresh.Metadata.Stats.InputSubmissionCount = stats.InputSubmissionCount
+			}
+			if refresh.Metadata.Stats.ConversationTurnCount == nil && stats.ConversationTurnCount != nil {
+				conversation := int64(*stats.ConversationTurnCount)
+				refresh.Metadata.Stats.ConversationTurnCount = &conversation
+			}
+		}
+	}
 	probe := indexformat.Generation{
 		ID:                   refresh.SourceGenerationID,
 		Completeness:         source.record.Completeness,
