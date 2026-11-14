@@ -73,6 +73,12 @@ const SessionDetailDocumentCapBytes int = 128 << 20
 // second literal, so the publication scan cannot drift from the served cap.
 const PushTranscriptDocumentCapBytes int = SessionDetailDocumentCapBytes
 
+// PullServedBlobCapBytes is the largest transcript blob a pull reads from
+// peasant online. A served blob is a published transcript document, so it
+// aliases the publication cap: a larger response is not a transcript Peasant
+// could have published, and the pull refuses it instead of buffering it.
+const PullServedBlobCapBytes int = PushTranscriptDocumentCapBytes
+
 // PushMetadataDocumentCapBytes mirrors schema's authoritative publish metadata
 // raw-document policy across mapping, redaction output and preflight input.
 // Like the transcript publication scan, it aliases the contract document cap
