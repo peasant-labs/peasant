@@ -139,6 +139,11 @@ func (s *Store) RebuildSearchIndex(ctx context.Context, progress func(done, of i
 		progress(0, 0)
 	}
 	err = runSearchRebuildTransaction(ctx, conn, func() error {
+		if seam := s.searchRebuildSeam; seam != nil {
+			if err := seam(conn); err != nil {
+				return err
+			}
+		}
 		return rebuildSearchIndexOnConn(ctx, conn)
 	})
 	if err != nil && ctx.Err() != nil {

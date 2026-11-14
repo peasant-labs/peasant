@@ -290,30 +290,29 @@ func testCancelledRebuildBeforeItStartsChangesNothing(t *testing.T, corpus searc
 	}
 }
 
-// testDeferredCommitFailureIsReturned proves the transaction helper returns a
-// real COMMIT failure instead of dropping it. PRAGMA defer_foreign_keys moves a
-// foreign-key violation to COMMIT, which is the same point SQLite reports a
-// failed commit through the deferred end function.
+// testDeferredCommitFailureIsReturned proves the rebuild returns a real
+// COMMIT failure instead of dropping it. The seam runs inside the rebuild's
+// own transaction and defers a foreign-key violation to COMMIT, which is the
+// same point SQLite reports a failed commit through the deferred end
+// function. A caller that returned a separate nil, as the old pattern did,
+// would report a rolled-back rebuild as success.
 func testDeferredCommitFailureIsReturned(t *testing.T) {
 	t.Helper()
 	s := openFreshStore(t, filepath.Join(t.TempDir(), "commit.db"))
-	conn, err := s.pool.Take(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.pool.Put(conn)
-	if err := sqlitex.ExecuteTransient(conn, `CREATE TABLE zz_search_rebuild_commit_probe (
-		id INTEGER PRIMARY KEY,
-		parent_id TEXT REFERENCES sessions(session_id))`, nil); err != nil {
-		t.Fatalf("create the commit probe table: %v", err)
-	}
-	started := time.Now()
-	err = runSearchRebuildTransaction(context.Background(), conn, func() error {
+	setSearchNeedsRebuild(t, s)
+	s.searchRebuildSeam = func(conn *sqlite.Conn) error {
+		if err := sqlitex.ExecuteTransient(conn, `CREATE TABLE zz_search_rebuild_commit_probe (
+			id INTEGER PRIMARY KEY,
+			parent_id TEXT REFERENCES sessions(session_id))`, nil); err != nil {
+			return err
+		}
 		if err := sqlitex.ExecuteTransient(conn, `PRAGMA defer_foreign_keys = ON`, nil); err != nil {
 			return err
 		}
 		return sqlitex.Execute(conn, `INSERT INTO zz_search_rebuild_commit_probe(parent_id) VALUES ('missing-session')`, nil)
-	})
+	}
+	started := time.Now()
+	err := s.RebuildSearchIndex(context.Background(), nil)
 	if err == nil {
 		t.Fatal("a deferred COMMIT failure was reported as success")
 	}
@@ -323,14 +322,22 @@ func testDeferredCommitFailureIsReturned(t *testing.T) {
 	if time.Since(started) > 5*time.Second {
 		t.Fatalf("the commit failure took %s; the probe is not the deterministic commit path", time.Since(started))
 	}
-	var rows int64
-	if err := sqlitex.ExecuteTransient(conn, `SELECT count(*) FROM zz_search_rebuild_commit_probe`, &sqlitex.ExecOptions{
-		ResultFunc: func(stmt *sqlite.Stmt) error { rows = stmt.ColumnInt64(0); return nil },
+	if !searchNeedsRebuild(t, s) {
+		t.Fatal("a failed COMMIT cleared the rebuild flag, so the transaction was not rolled back")
+	}
+	conn, takeErr := s.pool.Take(context.Background())
+	if takeErr != nil {
+		t.Fatal(takeErr)
+	}
+	defer s.pool.Put(conn)
+	var probeTables int64
+	if err := sqlitex.ExecuteTransient(conn, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'zz_search_rebuild_commit_probe'`, &sqlitex.ExecOptions{
+		ResultFunc: func(stmt *sqlite.Stmt) error { probeTables = stmt.ColumnInt64(0); return nil },
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if rows != 0 {
-		t.Fatalf("a failed COMMIT left %d probe rows, want none", rows)
+	if probeTables != 0 {
+		t.Fatalf("a failed COMMIT left %d probe tables, want the transaction rolled back", probeTables)
 	}
 }
 
