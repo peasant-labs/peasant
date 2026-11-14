@@ -22,6 +22,8 @@ cases:
     expectedPublished: 0
     expectedFailed: 1
     expectedSaved: 0
+    expectedRequests: 5
+    expectedRetries: 3
     retryable: true
     failedStage: push.publish
     stages: [push.publish, push.retry]
