@@ -366,14 +366,16 @@ export function loadNoticePinnedQuery(fixturePath = APP_SHELL_GEOMETRY_FIXTURE) 
  * page (the sidebar is a column beside it); on a narrow one the sidebar's top bar does. The offline
  * notice, while it shows, sits in the page flow directly under that: pinned there (position:sticky)
  * where the screen has room — `pinnedQuery`, the notice-pinned variant (loadNoticePinnedQuery) —
- * and scrolling with the page anywhere else (never fixed, never sticky). <main> starts right after
- * the chrome and the notice, with no top padding of its own. The root's scroll-padding-top keeps
+ * and scrolling with the page anywhere else (never fixed, never sticky). fairtrade's AppSidebarLayout
+ * renders the notice slot (`.asb-notice`) as the first child of <main>, so <main> starts right after
+ * the chrome, with the notice at its top, the page body right after the notice, and no top padding
+ * of its own. The root's scroll-padding-top keeps
  * focused elements clear of what stays on screen: the pinned notice where it is pinned, the top bar
  * (fairtrade's --nav-h) elsewhere. <main> is not focusable at rest (no tabindex): a click in the page
  * must never make it the focus. Returns every failure and the measured fields. Self-contained for
  * page.evaluate.
  * @param {string} pinnedQuery
- * @returns {{ failures: string[], chrome: number, header: number, notice: number, mainTop: number, scrollPaddingTop: number,
+ * @returns {{ failures: string[], chrome: number, header: number, notice: number, mainTop: number, bodyTop: number, scrollPaddingTop: number,
  *   noticeShown: boolean, pinnedViewport: boolean, noticePinned: boolean, noticeTop: number | null, documentTop: number | null }}
  */
 export function chromeClearance(pinnedQuery) {
@@ -381,10 +383,10 @@ export function chromeClearance(pinnedQuery) {
   const chrome = document.querySelector('.asb')
   const main = document.querySelector('main')
   if (typeof pinnedQuery !== 'string' || !pinnedQuery.startsWith('(')) {
-    return { failures: [`chromeClearance needs the notice-pinned media query, got ${JSON.stringify(pinnedQuery)}`], chrome: 0, header: 0, notice: 0, mainTop: 0, scrollPaddingTop: 0, noticeShown: false, pinnedViewport: false, noticePinned: false, noticeTop: null, documentTop: null }
+    return { failures: [`chromeClearance needs the notice-pinned media query, got ${JSON.stringify(pinnedQuery)}`], chrome: 0, header: 0, notice: 0, mainTop: 0, bodyTop: 0, scrollPaddingTop: 0, noticeShown: false, pinnedViewport: false, noticePinned: false, noticeTop: null, documentTop: null }
   }
   const pinnedViewport = window.matchMedia(pinnedQuery).matches
-  const empty = { chrome: 0, header: 0, notice: 0, mainTop: 0, scrollPaddingTop: 0, noticeShown: false, pinnedViewport, noticePinned: false, noticeTop: null, documentTop: null }
+  const empty = { chrome: 0, header: 0, notice: 0, mainTop: 0, bodyTop: 0, scrollPaddingTop: 0, noticeShown: false, pinnedViewport, noticePinned: false, noticeTop: null, documentTop: null }
   if (!chrome || !main) return { failures: ['the sidebar or <main> is not mounted'], ...empty }
   const bar = chrome.querySelector('.asb-bar')
   const barShown = !!bar && getComputedStyle(bar).display !== 'none'
@@ -417,7 +419,15 @@ export function chromeClearance(pinnedQuery) {
   }
   const mainTop = main.getBoundingClientRect().top + window.scrollY
   const expected = headerHeight + noticeHeight
-  if (Math.abs(mainTop - expected) > 1) failures.push(`<main> starts ${mainTop}px down the page, but the chrome${notice ? ' plus the notice' : ''} is ${expected}px`)
+  if (Math.abs(mainTop - headerHeight) > 1) failures.push(`<main> starts ${mainTop}px down the page, not at the ${headerHeight}px chrome bottom`)
+  let bodyTop = mainTop
+  if (notice) {
+    if (!main.contains(notice)) failures.push('the offline notice is not at the top of <main>')
+    const body = [...main.children].find((child) => !child.contains(notice) && getComputedStyle(child).display !== 'none')
+    if (!body) failures.push('<main> holds no page body after the notice')
+    else bodyTop = body.getBoundingClientRect().top + window.scrollY
+    if (body && Math.abs(bodyTop - expected) > 1) failures.push(`the page body starts ${bodyTop}px down the page, but the chrome plus the notice is ${expected}px`)
+  }
   const mainPadding = Number.parseFloat(getComputedStyle(main).paddingTop)
   if (mainPadding > 0.5) failures.push(`<main> pads its top by ${mainPadding}px; nothing fixed sits over it`)
   // What stays on screen while the page scrolls: the pinned notice where pinned, the top bar elsewhere.
@@ -430,5 +440,5 @@ export function chromeClearance(pinnedQuery) {
   if (main.hasAttribute('tabindex') && document.activeElement !== main) {
     failures.push(`<main> carries tabindex="${main.getAttribute('tabindex')}" at rest, so a click in the page would focus it`)
   }
-  return { failures, chrome: expected, header: headerHeight, notice: noticeHeight, mainTop, scrollPaddingTop, noticeShown: !!notice, pinnedViewport, noticePinned, noticeTop, documentTop }
+  return { failures, chrome: expected, header: headerHeight, notice: noticeHeight, mainTop, bodyTop, scrollPaddingTop, noticeShown: !!notice, pinnedViewport, noticePinned, noticeTop, documentTop }
 }
