@@ -189,9 +189,23 @@
                 export HOME=$(mktemp -d)
                 export GIT_CONFIG_NOSYSTEM=1
               '';
+              # -timeout=20m: Go's default per-package timeout is 10m, and the
+              # release runner for this build has 2 vCPUs. internal/api hit it
+              # there (#992); internal/store ran about 7m. 20m is about three
+              # times the slowest remaining package and still fires inside the
+              # nix-build job's 30m limit, so a hang ends in Go's goroutine dump
+              # rather than a silent job cancel.
+              #
+              # -skip TestStopWebLeavesSameNamedExecutableAtAnotherPathAlone:
+              # the known ETXTBSY flake (#967) when a parallel test forks while
+              # the copied test binary is still open for writing. It stays in
+              # the race-enabled suite in `make check` / CI. Remove this skip
+              # when #967 is fixed.
               checkPhase = ''
                 runHook preCheck
-                go test $(go list ./... | grep -vE '/internal/(e2e|ingest)$')
+                go test -timeout=20m \
+                  -skip '^TestStopWebLeavesSameNamedExecutableAtAnotherPathAlone$' \
+                  $(go list ./... | grep -vE '/internal/(e2e|ingest)$')
                 ${extraCheckPhase}
                 runHook postCheck
               '';
