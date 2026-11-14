@@ -37,6 +37,12 @@ import (
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 )
 
+// ingestPackageDirectory locates this package's source files for the OpenCode
+// inventory guards. `go test` runs each test binary in its package directory,
+// so the path survives -trimpath, where runtime.Caller reports a
+// module-relative path that no filesystem resolves.
+const ingestPackageDirectory = "."
+
 // These closed-set coverage counts are the contract itself: the fixture must
 // cover every value of an enum exactly once, so the number equals the enum
 // size rather than a churny row tally.
@@ -1100,12 +1106,7 @@ func replaceOpenCodeExistingFilename(t testing.TB, mutations []openCodeFileInven
 func TestOpenCodePrivateExecutionStatementsMatchFixtureAllowlist(t *testing.T) {
 	t.Parallel()
 	fixture := loadOpenCodeCandidateFixture(t)
-	_, currentFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve OpenCode candidate query guard location")
-	}
-	directory := filepath.Dir(currentFile)
-	configurations, err := openCodePackageProductionConfigurations(directory)
+	configurations, err := openCodePackageProductionConfigurations(ingestPackageDirectory)
 	if err != nil {
 		t.Fatalf("discover every ingest build configuration for type-aware OpenCode inventory: %v", err)
 	}
@@ -1168,11 +1169,7 @@ func TestOpenCodePrivateExecutionGuardDiscoversFixtureOwnedProductionFiles(t *te
 
 func TestOpenCodePrivateExecutionGuardRejectsFixtureOwnedBuildTaggedBypasses(t *testing.T) {
 	fixture := loadOpenCodeCandidateFixture(t)
-	_, currentFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve OpenCode build-tagged query guard location")
-	}
-	configurations, err := openCodePackageProductionConfigurations(filepath.Dir(currentFile))
+	configurations, err := openCodePackageProductionConfigurations(ingestPackageDirectory)
 	if err != nil {
 		t.Fatalf("discover build-tagged ingest package configurations: %v", err)
 	}
@@ -1222,11 +1219,7 @@ func TestOpenCodePrivateExecutionGuardCoversFixtureOwnedBuildTopology(t *testing
 
 func openCodeBuildTopologyProduction(t testing.TB) (string, []string) {
 	t.Helper()
-	_, currentFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve OpenCode build-topology guard location")
-	}
-	sourceDirectory := filepath.Dir(currentFile)
+	sourceDirectory := ingestPackageDirectory
 	production, release, err := prepareOpenCodeBuildTopologyProduction(sourceDirectory)
 	if err != nil {
 		t.Fatalf("discover production files for build-topology copies: %v", err)
@@ -2504,11 +2497,7 @@ var (
 )
 
 func openCodeModuleImporter(fileSet *token.FileSet) types.Importer {
-	_, currentFile, _, ok := runtime.Caller(0)
-	directory := "."
-	if ok {
-		directory = filepath.Dir(currentFile)
-	}
+	directory := ingestPackageDirectory
 	lookup := func(importPath string) (io.ReadCloser, error) {
 		resolved, err, _ := openCodeExportGroup.Do(importPath, func() (any, error) {
 			if cached, ok := openCodeExportPaths.Load(importPath); ok {
