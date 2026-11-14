@@ -60,7 +60,9 @@ func renderSheets(document captureDocument) ([]renderedSheet, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create isolated screenshot workspace: %w", err)
 	}
-	defer os.RemoveAll(workingDirectory)
+	if !keepScreenshotScratch() {
+		defer os.RemoveAll(workingDirectory)
+	}
 
 	guidedCaptures := make(map[string]terminalCapture, len(document.GuidedCaptures))
 	guidedSections := make(map[guidedSection]guidedSectionFixture, len(document.GuidedSections))
@@ -117,11 +119,11 @@ func renderSheets(document captureDocument) ([]renderedSheet, error) {
 		ingestProgressStates[state.Key] = state
 	}
 	for index, capture := range document.IngestProgressCaptures {
-		view, renderErr := renderIngestProgressCapture(workingDirectory, index, capture)
+		view, renderErr := renderIngestProgressCapture(workingDirectory, index, capture, ingestProgressStates[capture.State])
 		if renderErr != nil {
 			return nil, renderErr
 		}
-		if err := validateTerminalCapture(capture.Name, view, capture.Width, capture.Height, ingestProgressStates[capture.State].WantContains, nil); err != nil {
+		if err := validateTerminalCapture(capture.Name, view, capture.Width, capture.Height, ingestProgressStates[capture.State].WantContains, ingestProgressStates[capture.State].WantAbsent); err != nil {
 			return nil, err
 		}
 		ingestProgressCaptures[capture.Name] = terminalCapture{name: capture.Name, view: view}
@@ -218,16 +220,36 @@ func renderDiscoveryProgressCapture(capture discoveryProgressCaptureFixture, sta
 	return canvas.View(), nil
 }
 
-func renderIngestProgressCapture(workingDirectory string, index int, capture ingestProgressCaptureFixture) (string, error) {
-	if capture.State != ingestProgressStateRunning {
-		return renderHarvestInlineCapture(capture)
+type captureIngestProgress struct {
+	*ingest.ProgressState
+	lane *ingest.WriteLaneProgress
+}
+
+func (p *captureIngestProgress) WriteLaneSnapshot() (ingest.WriteLaneProgress, bool) {
+	if p.lane == nil {
+		return ingest.WriteLaneProgress{}, false
+	}
+	return *p.lane, true
+}
+
+func captureProgress(state ingestProgressStateFixture) *captureIngestProgress {
+	progress := &captureIngestProgress{ProgressState: ingest.NewProgressState()}
+	if state.Lane != nil {
+		progress.lane = &ingest.WriteLaneProgress{Queued: state.Lane.Queued, Busy: time.Duration(state.Lane.BusyMs) * time.Millisecond, Elapsed: time.Duration(state.Lane.ElapsedMs) * time.Millisecond}
+	}
+	return progress
+}
+
+func renderIngestProgressCapture(workingDirectory string, index int, capture ingestProgressCaptureFixture, state ingestProgressStateFixture) (string, error) {
+	if capture.State != ingestProgressStateRunning && capture.State != ingestProgressStateCandidates && capture.State != ingestProgressStateUnknownTotal {
+		return renderHarvestInlineCapture(capture, state)
 	}
 	draft, err := newCaptureDraft(workingDirectory, fmt.Sprintf("ingest-progress-%02d", index), true)
 	if err != nil {
 		return "", err
 	}
 	clock := fixedCaptureClock{now: timeDateForCapture()}
-	progress := ingest.NewProgressState()
+	progress := captureProgress(state)
 	var tick func(time.Time) tea.Msg
 	program := kickstart.NewProgram(kickstart.ProgramDeps{
 		Theme:             captureThemeValue(capture.Theme),
@@ -251,22 +273,58 @@ func renderIngestProgressCapture(workingDirectory string, index int, capture ing
 	if program.Phase() != kickstart.PhaseIngest || command == nil || tick == nil {
 		return "", fmt.Errorf("render ingest progress capture %q: phase=%s command=%t tick=%t, want active ingest", capture.Name, program.Phase(), command != nil, tick != nil)
 	}
-	progress.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageDiscover, Total: 4})
+	discoveryTotal := 4
+	if capture.State == ingestProgressStateUnknownTotal {
+		discoveryTotal = 0
+	}
+	progress.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageDiscover, Total: discoveryTotal})
+	if capture.State == ingestProgressStateRunning {
+		progress.Update(ingest.ProgressEvent{Kind: ingest.KindEnd, Stage: ingest.StageDiscover, Done: 4, Total: 4})
+		progress.Update(ingest.ProgressEvent{Kind: ingest.KindEnd, Stage: ingest.StageDiff, Done: 4, Total: 4})
+		progress.Update(ingest.ProgressEvent{Kind: ingest.KindEnd, Stage: ingest.StageFilter, Done: 4, Total: 4})
+		if state.Candidates != nil {
+			progress.Update(ingest.ProgressEvent{Kind: ingest.KindCandidates, Stage: ingest.StageExtract, Total: *state.Candidates})
+		}
+		progress.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageExtract, Total: 4})
+	}
 	program, _ = program.Update(tick(clock.Now()))
 	clock.now = clock.now.Add(2 * time.Second)
-	progress.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiscover, Delta: 1, Total: 4})
+	if capture.State == ingestProgressStateRunning {
+		progress.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageExtract, Delta: 1, Total: 4})
+	} else if capture.State != ingestProgressStateUnknownTotal {
+		progress.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiscover, Delta: 1, Total: discoveryTotal})
+	}
+	if capture.State == ingestProgressStateCandidates {
+		progress.Update(ingest.ProgressEvent{Kind: ingest.KindEnd, Stage: ingest.StageDiscover, Done: 4, Total: 4})
+		progress.Update(ingest.ProgressEvent{Kind: ingest.KindEnd, Stage: ingest.StageDiff, Done: 9, Total: 9})
+		progress.Update(ingest.ProgressEvent{Kind: ingest.KindEnd, Stage: ingest.StageFilter, Done: 9, Total: 9})
+		if state.Candidates != nil {
+			progress.Update(ingest.ProgressEvent{Kind: ingest.KindCandidates, Stage: ingest.StageExtract, Total: *state.Candidates})
+		}
+	}
 	program, _ = program.Update(tick(clock.Now()))
 	return program.View(), nil
 }
 
-func renderHarvestInlineCapture(capture ingestProgressCaptureFixture) (string, error) {
+func renderHarvestInlineCapture(capture ingestProgressCaptureFixture, state ingestProgressStateFixture) (string, error) {
 	started := timeDateForCapture()
-	progress := ingest.NewProgressState()
+	progress := captureProgress(state)
 	progress.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageDiscover, Total: 4})
+	activeStage := ingest.StageDiscover
+	if capture.State == ingestProgressStateHarvestInline {
+		progress.Update(ingest.ProgressEvent{Kind: ingest.KindEnd, Stage: ingest.StageDiscover, Done: 4, Total: 4})
+		progress.Update(ingest.ProgressEvent{Kind: ingest.KindEnd, Stage: ingest.StageDiff, Done: 4, Total: 4})
+		progress.Update(ingest.ProgressEvent{Kind: ingest.KindEnd, Stage: ingest.StageFilter, Done: 4, Total: 4})
+		if state.Candidates != nil {
+			progress.Update(ingest.ProgressEvent{Kind: ingest.KindCandidates, Stage: ingest.StageExtract, Total: *state.Candidates})
+		}
+		activeStage = ingest.StageExtract
+		progress.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: activeStage, Total: 4})
+	}
 	model := harvestprogress.New(harvestprogress.Options{Progress: progress, Animation: animation.IngestAnimation(), Theme: captureThemeValue(capture.Theme), StartedAt: started})
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: capture.Width, Height: capture.Height})
 	model = updated.(harvestprogress.Model)
-	progress.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiscover, Delta: 1, Total: 4})
+	progress.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: activeStage, Delta: 1, Total: 4})
 	updated, _ = model.Update(harvestprogress.TickMsg(started.Add(2 * time.Second)))
 	if capture.State == ingestProgressStateHarvestCanceling || capture.State == ingestProgressStateHarvestCanceled {
 		updated, _ = updated.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})

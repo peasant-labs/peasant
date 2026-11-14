@@ -29,12 +29,12 @@ sheets:
     kind: ingest-progress
     title: "shared local import progress: kickstart and inline harvest"
     theme: dark
-    viewport: {width: 1800, height: 4590}
+    viewport: {width: 1800, height: 7000}
   - name: ingest-completion
     kind: ingest-completion
-    title: "mounted kickstart completion: warning details, scrolling, and successful control"
+    title: "mounted kickstart completion: refresh census, warnings, and scrolling"
     theme: dark
-    viewport: {width: 1800, height: 3420}
+    viewport: {width: 1800, height: 7000}
   - name: pull-progress
     kind: pull-progress
     title: "mounted collective pull progress: running, canceling, and canceled in both themes"
@@ -52,6 +52,9 @@ completion:
   unchanged: 3
   excludedBySelection: 4
   errors: 0
+  censusRows:
+    - {reason: new, sessions: 2, indexedBytes: 2048}
+    - {reason: adapter_behind, sessions: 1, indexedBytes: 0}
   diagnostics:
     - location: /fixtures/managed/session-future/session-future.meta.json
       message: metadata schema version 999 is newer than this Peasant supports; the last-good index is unchanged
@@ -69,12 +72,21 @@ completion:
       remediation: restore read access, then run peasant harvest
   states:
     - key: warnings-top
-      wantContains: [kickstart complete, 2 warnings, 2 new, 1 updated, session-future, upgrade Peasant, PgDn, quit]
+      wantContains: [kickstart complete, 2 warnings, 2 new, 1 updated, "refresh census: 3 sessions", "includes failed attempts", session-future, PgDn, quit]
     - key: warnings-bottom
       wantContains: [2 warnings, restore read access, next steps, peasant config, peasant village push, PgUp, quit]
     - key: no-warnings
       wantContains: [kickstart complete, 2 new, 1 updated, 3 unchanged, 4 excluded by selection, next steps, peasant village push]
       wantAbsent: [warnings]
+    - key: final-census
+      wantContains: [kickstart complete, "refresh census: 3 sessions", "includes failed attempts", "native / new: 2", "indexed bytes measured: 2 KiB", "stored-metadata / adapter_behind: 1", "indexed bytes: unknown", quit]
+      wantAbsent: [warnings]
+    - key: census-bottom
+      wantContains: [next steps, peasant config, peasant village push, PgUp, quit]
+      wantAbsent: [warnings]
+    - key: census-unavailable
+      wantContains: [kickstart complete, refresh census unavailable, PgDn, quit]
+      wantAbsent: ["refresh census: 0 sessions"]
   captures:
     - {name: ingest-completion-warnings-top-dark-80x24, state: warnings-top, theme: dark, width: 80, height: 24}
     - {name: ingest-completion-warnings-top-dark-120x40, state: warnings-top, theme: dark, width: 120, height: 40}
@@ -88,6 +100,18 @@ completion:
     - {name: ingest-completion-no-warnings-dark-120x40, state: no-warnings, theme: dark, width: 120, height: 40}
     - {name: ingest-completion-no-warnings-light-80x24, state: no-warnings, theme: light, width: 80, height: 24}
     - {name: ingest-completion-no-warnings-light-120x40, state: no-warnings, theme: light, width: 120, height: 40}
+    - {name: ingest-completion-final-census-dark-80x24, state: final-census, theme: dark, width: 80, height: 24}
+    - {name: ingest-completion-final-census-dark-120x40, state: final-census, theme: dark, width: 120, height: 40}
+    - {name: ingest-completion-final-census-light-80x24, state: final-census, theme: light, width: 80, height: 24}
+    - {name: ingest-completion-final-census-light-120x40, state: final-census, theme: light, width: 120, height: 40}
+    - {name: ingest-completion-census-bottom-dark-80x24, state: census-bottom, theme: dark, width: 80, height: 24}
+    - {name: ingest-completion-census-bottom-dark-120x40, state: census-bottom, theme: dark, width: 120, height: 40}
+    - {name: ingest-completion-census-bottom-light-80x24, state: census-bottom, theme: light, width: 80, height: 24}
+    - {name: ingest-completion-census-bottom-light-120x40, state: census-bottom, theme: light, width: 120, height: 40}
+    - {name: ingest-completion-census-unavailable-dark-80x24, state: census-unavailable, theme: dark, width: 80, height: 24}
+    - {name: ingest-completion-census-unavailable-dark-120x40, state: census-unavailable, theme: dark, width: 120, height: 40}
+    - {name: ingest-completion-census-unavailable-light-80x24, state: census-unavailable, theme: light, width: 80, height: 24}
+    - {name: ingest-completion-census-unavailable-light-120x40, state: census-unavailable, theme: light, width: 120, height: 40}
 
 guidedSections:
   - key: auto-ingest
@@ -176,13 +200,25 @@ selectionStates:
 
 ingestProgressStates:
   - key: running
-    wantContains: [importing transcripts, local import progress, discover, 1/4, "█", "_|||_", "total elapsed: 2s", "estimate: 6s", ctrl+c to quit]
+    candidates: 4
+    lane: {queued: 3, busyMs: 1000, elapsedMs: 1000}
+    wantContains: [importing transcripts, local import progress, extract+write, 1/4, "█", "_|||_", "extract candidates: 4 sessions (not confirmed refreshes)", "writer lane: 3 waiting", "100% busy", "total elapsed: 2s", "estimate: 6s", ctrl+c to quit]
   - key: harvest-inline
-    wantContains: [local import progress, discover, 1/4, "█", "_|||_", "total elapsed: 2s", "estimate: 6s", ctrl+c to cancel]
+    candidates: 4
+    lane: {queued: 3, busyMs: 1000, elapsedMs: 1000}
+    wantContains: [local import progress, extract+write, 1/4, "█", "_|||_", "extract candidates: 4 sessions (not confirmed refreshes)", "writer lane: 3 waiting", "100% busy", "total elapsed: 2s", "estimate: 6s", ctrl+c to cancel]
   - key: harvest-canceling
     wantContains: [local import progress, "✗ discover", 2/4, "total elapsed: 9s", "estimate: 6s", canceling harvest]
   - key: harvest-canceled
     wantContains: [local import progress, "✗ discover", 2/4, "total elapsed: 12s", "estimate: 6s", harvest canceled]
+  - key: candidates
+    candidates: 7
+    lane: {queued: 0, busyMs: 0, elapsedMs: 1000}
+    wantContains: [local import progress, "extract candidates: 7 sessions (not confirmed refreshes)", "writer lane: 0 waiting", "0% busy", ctrl+c to quit]
+    wantAbsent: ["7 refreshed"]
+  - key: unknown-total
+    wantContains: [local import progress, discover, estimate unavailable, ctrl+c to quit]
+    wantAbsent: ["extract candidates:", "writer lane:", "0/0", "1/4"]
 
 pullProgressStates:
   - key: running
@@ -521,6 +557,14 @@ ingestProgressCaptures:
   - {name: ingest-progress-harvest-canceled-dark-120x40, state: harvest-canceled, theme: dark, width: 120, height: 40}
   - {name: ingest-progress-harvest-canceled-light-80x24, state: harvest-canceled, theme: light, width: 80, height: 24}
   - {name: ingest-progress-harvest-canceled-light-120x40, state: harvest-canceled, theme: light, width: 120, height: 40}
+  - {name: ingest-progress-candidates-dark-80x24, state: candidates, theme: dark, width: 80, height: 24}
+  - {name: ingest-progress-candidates-dark-120x40, state: candidates, theme: dark, width: 120, height: 40}
+  - {name: ingest-progress-candidates-light-80x24, state: candidates, theme: light, width: 80, height: 24}
+  - {name: ingest-progress-candidates-light-120x40, state: candidates, theme: light, width: 120, height: 40}
+  - {name: ingest-progress-unknown-total-dark-80x24, state: unknown-total, theme: dark, width: 80, height: 24}
+  - {name: ingest-progress-unknown-total-dark-120x40, state: unknown-total, theme: dark, width: 120, height: 40}
+  - {name: ingest-progress-unknown-total-light-80x24, state: unknown-total, theme: light, width: 80, height: 24}
+  - {name: ingest-progress-unknown-total-light-120x40, state: unknown-total, theme: light, width: 120, height: 40}
 
 pullProgressCaptures:
   - {name: pull-progress-running-dark-80x24, state: running, theme: dark, width: 80, height: 24}

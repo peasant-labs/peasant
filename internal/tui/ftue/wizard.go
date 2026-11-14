@@ -66,6 +66,9 @@ type IngestResult struct {
 	ProviderCounts []ProviderIngestCount
 	// Diagnostics are nonfatal pipeline warnings, kept separate from errors.
 	Diagnostics []ingest.DiagnosticEntry
+	// Census is present only when the run's outcome and index rows were stored.
+	Census         *ingest.RefreshCensus `json:"-"`
+	CensusReported bool                  `json:"-"`
 }
 
 // IngestRunnerFunc runs the ingestion pipeline given the wizard's collected answers.

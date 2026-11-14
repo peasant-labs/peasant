@@ -959,7 +959,7 @@ func (p Program) observeProgress(at time.Time) Program {
 	if p.deps.Progress == nil {
 		return p
 	}
-	observed := ingestprogress.ObserveMsg{At: at, Snapshot: p.deps.Progress.Snapshot()}
+	observed := ingestprogress.ObserveMsg{At: at, Snapshot: p.deps.Progress.Snapshot(), Lane: ingestprogress.LaneSnapshot(p.deps.Progress)}
 	// A source that can say why the run has not started (another harvest
 	// holds the data dir's lock) shows it instead of a silent, empty list.
 	if waiting, ok := p.deps.Progress.(interface{ Waiting() string }); ok {
@@ -973,7 +973,7 @@ func (p Program) observeProgress(at time.Time) Program {
 // available only after failure and starts local ingest again without touching
 // the already-committed Draft or retention effect.
 func (p Program) updateDone(msg tea.Msg) (Program, tea.Cmd) {
-	if p.hasIngestDiagnostics() {
+	if p.hasScrollableCompletion() {
 		if offset, handled := p.ingestCompletion().Scroll(msg, p.completionOffset); handled {
 			p.completionOffset = offset
 			return p, nil
@@ -1263,7 +1263,7 @@ func (p Program) progressFocusStage() (ingest.Stage, bool) {
 }
 
 func (p Program) viewDone() string {
-	if p.hasIngestDiagnostics() {
+	if p.hasScrollableCompletion() {
 		return p.ingestCompletion().View(p.completionOffset)
 	}
 	content := p.doneContent()
@@ -1278,13 +1278,21 @@ func (p Program) hasIngestDiagnostics() bool {
 	return p.ingestRes != nil && len(p.ingestRes.Diagnostics) > 0
 }
 
+func (p Program) hasScrollableCompletion() bool {
+	return p.hasIngestDiagnostics() || (p.ingestRes != nil && p.ingestRes.CensusReported)
+}
+
 func (p Program) ingestCompletion() ftue.IngestCompletion {
 	actions := programActionAvailability{keymap.ActionPageUp, keymap.ActionPageDown, keymap.ActionQuit}
 	if p.ingestErr != nil {
 		actions = append(actions, keymap.ActionConfirm)
 	}
 	footer := keymap.FooterView(p.deps.Theme, keymap.Default(), actions)
-	return ftue.NewIngestCompletion(p.deps.Theme, fmt.Sprintf("kickstart · %d warnings", len(p.ingestRes.Diagnostics)), p.doneContent(), footer, p.width, p.height)
+	title := "kickstart · import summary"
+	if p.hasIngestDiagnostics() {
+		title = fmt.Sprintf("kickstart · %d warnings", len(p.ingestRes.Diagnostics))
+	}
+	return ftue.NewIngestCompletion(p.deps.Theme, title, p.doneContent(), footer, p.width, p.height)
 }
 
 func (p Program) doneContent() string {
@@ -1337,6 +1345,11 @@ func (p Program) doneContent() string {
 		if p.ingestRes.ExcludedBySelection > 0 {
 			lines = append(lines, styles.Base.Render(fmt.Sprintf("%d excluded by selection", p.ingestRes.ExcludedBySelection)))
 		}
+		if p.ingestRes.CensusReported {
+			for _, line := range ingestprogress.CensusLines(p.ingestRes.Census) {
+				lines = append(lines, styles.Base.Render(line))
+			}
+		}
 	} else {
 		lines = append(lines, styles.Muted.Render("local import was not run"))
 	}
@@ -1373,7 +1386,7 @@ func (p Program) doneContent() string {
 				styles.Muted.Render(step.detail))
 		}
 	}
-	if !p.hasIngestDiagnostics() {
+	if !p.hasScrollableCompletion() {
 		lines = append(lines, "", keymap.FooterView(p.deps.Theme, keymap.Default(),
 			programActionAvailability{keymap.ActionBack, keymap.ActionQuit}))
 	}

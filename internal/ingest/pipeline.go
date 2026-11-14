@@ -99,6 +99,11 @@ type PipelineResult struct {
 	// Census counts the sessions this run refreshed, by reason. It is built
 	// from the same refresh rows the audit stores. Nil on a dry run.
 	Census *RefreshCensus `json:"census,omitempty"`
+	// CensusStored is true only when this invocation wrote both the outcome
+	// rows and every index-log entry used to calculate the census. A failed
+	// audit can leave a partial set of rows, so a terminal must not present the
+	// in-memory census as the stored one in that case.
+	CensusStored bool `json:"-"`
 	// WriteLane is the store-write lane's wait and busy totals for the run.
 	// Nil when the run had no profiler.
 	WriteLane *WriteLaneStats `json:"write_lane,omitempty"`
@@ -809,7 +814,10 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	p.auditWritten = false
 	p.writeLaneStats = nil
 	if p.config.IndexProfiler != nil {
-		p.writeLaneStats = &writeLaneRecorder{}
+		p.writeLaneStats = &writeLaneRecorder{startedAt: start}
+	}
+	if p.config.Progress != nil {
+		p.config.Progress.setWriteLane(p.writeLaneStats)
 	}
 	// A run that ends early still stores the profile it measured. It runs
 	// before the lock is released.
@@ -1252,6 +1260,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		}
 		return result, nil
 	}
+	emitProgress(prog, ProgressEvent{Kind: KindCandidates, Stage: StageExtract, Total: toProcess})
 
 	// Stage 4a: EXTRACT + WRITE — parallel pool, one goroutine per root session.
 	//
@@ -4762,9 +4771,11 @@ func (p *Pipeline) indexComputeAndFinalize(
 
 	// Persist index_log entries (best-effort).
 	indexLogProfileStart := time.Now()
+	indexLogStored := len(indexLogEntries) == 0 || p.indexLogger != nil
 	if p.indexLogger != nil {
 		for _, entry := range indexLogEntries {
 			if err := p.indexLogger.LogIndexEntry(ctx, entry); err != nil {
+				indexLogStored = false
 				slog.Warn(logPrefix+": log index entry", "session_id", entry.SessionID, "error", err)
 			}
 		}
@@ -5007,6 +5018,8 @@ func (p *Pipeline) indexComputeAndFinalize(
 		}
 		if err := p.logger.LogIngestRun(ctx, logEntry); err != nil {
 			slog.Warn(logPrefix+": log ingest run", "error", err)
+		} else {
+			pipelineResult.CensusStored = indexLogStored
 		}
 	}
 	p.recordIndexProfileStage(StageAudit, auditProfileStart, 1, 1)
@@ -5768,6 +5781,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	var drainRefusedKinds []RecordKindRefusal
 	extractTotal := len(entryByID) // all extractable sessions (roots + children)
 
+	emitProgress(prog, ProgressEvent{Kind: KindCandidates, Stage: StageExtract, Total: extractTotal + len(fallbackTargets)})
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageExtract, Total: extractTotal + len(fallbackTargets)})
 	var extractDoneAtomic atomic.Int64
 	workers := parallelWorkers(p.config)

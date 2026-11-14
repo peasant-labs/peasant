@@ -108,7 +108,7 @@ func (m *Model) observe(at time.Time) {
 		m.beginCancel()
 	}
 	m.now = at
-	m.progress, _ = m.progress.Update(ingestprogress.ObserveMsg{At: at, Snapshot: snapshot, CancelRequested: m.canceling})
+	m.progress, _ = m.progress.Update(ingestprogress.ObserveMsg{At: at, Snapshot: snapshot, CancelRequested: m.canceling, Lane: ingestprogress.LaneSnapshot(m.state)})
 }
 
 func (m *Model) beginCancel() {

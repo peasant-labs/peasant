@@ -3,6 +3,7 @@
 package ingestprogress
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -36,6 +37,24 @@ type ObserveMsg struct {
 	// holding the data dir's lock (ingest.ProgressState.Waiting); empty when
 	// it is not waiting.
 	Waiting string
+	// Lane is nil when the pipeline has not exposed an instrumented writer.
+	Lane *ingest.WriteLaneProgress
+}
+
+// LaneSnapshot reads the existing pipeline recorder without requiring every
+// progress source to implement writer-lane reporting.
+func LaneSnapshot(source any) *ingest.WriteLaneProgress {
+	reader, ok := source.(interface {
+		WriteLaneSnapshot() (ingest.WriteLaneProgress, bool)
+	})
+	if !ok {
+		return nil
+	}
+	lane, available := reader.WriteLaneSnapshot()
+	if !available {
+		return nil
+	}
+	return &lane
 }
 
 type CancelRequestedMsg struct{ At time.Time }
@@ -69,7 +88,10 @@ type Model struct {
 	retainedEstimate         estimate
 	retaining                bool
 	// waiting is the latest observed reason the run has not started.
-	waiting string
+	waiting         string
+	lane            *ingest.WriteLaneProgress
+	candidateCount  int
+	candidatesKnown bool
 }
 
 func New(options Options) Model {
@@ -92,10 +114,15 @@ func (m Model) Update(message tea.Msg) (Model, tea.Cmd) {
 			m.retainEstimate()
 		}
 		m.waiting = msg.Waiting
+		m.lane = msg.Lane
+		candidate := msg.Snapshot[ingest.StageExtract]
+		m.candidateCount, m.candidatesKnown = candidate.CandidateCount, candidate.CandidatesKnown
 		m.observe(msg.At, msg.Snapshot)
 	case CancelRequestedMsg:
 		m.retainEstimate()
 	case FinalMsg:
+		candidate := msg.Snapshot[ingest.StageExtract]
+		m.candidateCount, m.candidatesKnown = candidate.CandidateCount, candidate.CandidatesKnown
 		if msg.Outcome == FinalCanceled {
 			m.retainEstimate()
 		} else {
@@ -255,7 +282,19 @@ func (m Model) View() string {
 	if estimate.ok {
 		estimateText = "  estimate: " + displayDuration(estimate.value)
 	}
-	detail := []string{styles.Muted.Render("  total elapsed: " + displayDuration(now.Sub(m.startedAt))), styles.Muted.Render(estimateText)}
+	detail := []string{}
+	if m.candidatesKnown {
+		detail = append(detail, styles.Muted.Render(fmt.Sprintf("%sextract candidates: %d sessions (not confirmed refreshes)", kit.Indent(2), m.candidateCount)))
+	}
+	if m.lane != nil {
+		busy := "busy unknown"
+		if m.lane.Elapsed > 0 {
+			fraction := float64(m.lane.Busy) / float64(m.lane.Elapsed)
+			busy = fmt.Sprintf("%.0f%% busy since run start", min(max(fraction, 0), 1)*100)
+		}
+		detail = append(detail, styles.Muted.Render(fmt.Sprintf("%swriter lane: %d waiting · %s", kit.Indent(2), m.lane.Queued, busy)))
+	}
+	detail = append(detail, styles.Muted.Render("  total elapsed: "+displayDuration(now.Sub(m.startedAt))), styles.Muted.Render(estimateText))
 	if m.waiting != "" {
 		detail = append([]string{styles.Base.Render("  " + m.waiting)}, detail...)
 	}

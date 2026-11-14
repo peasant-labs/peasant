@@ -600,7 +600,7 @@ func buildFTUEIngestRunnerWithProgress(cmd *cobra.Command, configPath string) (f
 // add up.
 func kickstartIngestResult(result *ingest.PipelineResult) *ftue.IngestResult {
 	s := result.Summary
-	return &ftue.IngestResult{
+	view := &ftue.IngestResult{
 		New:                 s.New,
 		Updated:             s.Updated,
 		Unchanged:           s.Unchanged,
@@ -609,7 +609,12 @@ func kickstartIngestResult(result *ingest.PipelineResult) *ftue.IngestResult {
 		Duration:            result.Duration,
 		ProviderCounts:      aggregateProviderCounts(result.Sessions),
 		Diagnostics:         append([]ingest.DiagnosticEntry(nil), result.Diagnostics...),
+		CensusReported:      true,
 	}
+	if result.CensusStored {
+		view.Census = result.Census
+	}
+	return view
 }
 
 // kickstartAllowedSessionIDs preserves the difference between unrestricted
