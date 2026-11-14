@@ -1,0 +1,15 @@
+requiredNames:
+  - known-sessions-read-is-equal-from-floor-to-head
+  - claude-evidence-read-is-equal-from-floor-to-head
+  - store-below-known-sessions-floor-is-not-reused
+  - store-below-claude-evidence-floor-is-not-reused
+  - newer-store-is-not-reused
+  - reuse-open-performs-no-database-or-wal-write
+  - unrequested-surface-is-not-readable
+  - unknown-surface-is-refused
+  - empty-surface-set-is-refused
+  - read-surface-membership-is-exact
+  - write-path-rechecks-schema-and-recount
+  - concurrent-schema-change-keeps-read-snapshot
+  - ended-snapshot-refuses-a-later-read
+  - concurrent-close-and-read-are-safe

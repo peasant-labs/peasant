@@ -1,0 +1,73 @@
+cases:
+  - name: known-sessions-read-is-equal-from-floor-to-head
+    kind: equivalent
+    surface: known_sessions
+  - name: claude-evidence-read-is-equal-from-floor-to-head
+    kind: equivalent
+    surface: claude_evidence
+  - name: store-below-known-sessions-floor-is-not-reused
+    kind: below_floor
+    surface: known_sessions
+  - name: store-below-claude-evidence-floor-is-not-reused
+    kind: below_floor
+    surface: claude_evidence
+  - name: newer-store-is-not-reused
+    kind: newer
+    surface: known_sessions
+  - name: reuse-open-performs-no-database-or-wal-write
+    kind: read_only
+    surface: claude_evidence
+  - name: unrequested-surface-is-not-readable
+    kind: unrequested
+    surface: known_sessions
+  - name: unknown-surface-is-refused
+    kind: unknown
+    surface: unknown
+  - name: empty-surface-set-is-refused
+    kind: empty
+    surface: ''
+  - name: read-surface-membership-is-exact
+    kind: surface_set
+    surface: ''
+  - name: write-path-rechecks-schema-and-recount
+    kind: write_gate
+    surface: claude_evidence
+  - name: concurrent-schema-change-keeps-read-snapshot
+    kind: snapshot
+    surface: claude_evidence
+  - name: ended-snapshot-refuses-a-later-read
+    kind: ended_snapshot
+    surface: claude_evidence
+  - name: concurrent-close-and-read-are-safe
+    kind: concurrent_close
+    surface: claude_evidence
+surface_names:
+  - known_sessions
+  - claude_evidence
+known_sessions:
+  - id: synthetic-recorded
+    harness: claude-code
+    legacy_harness: claude
+    branch: recorded-branch
+    worktree: /synthetic/worktree
+    title: synthetic title
+    has_metrics: true
+  - id: synthetic-without-metrics
+    harness: codex
+    branch: ''
+    worktree: ''
+    title: ''
+    has_metrics: false
+evidence:
+  - path: /synthetic/one.jsonl
+    scope: root
+    title: synthetic root
+    origin: user
+    session_id: 11111111-1111-4111-8111-111111111111
+    spawn_id: worker-one
+  - path: /synthetic/two.jsonl
+    scope: subagent
+    title: synthetic child
+    origin: agent
+    session_id: 22222222-2222-4222-8222-222222222222
+    spawn_id: worker-two
