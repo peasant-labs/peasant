@@ -3,11 +3,15 @@
 #
 # Such a file is shared: every worktree of a repository runs its main worktree's
 # hooks directory, and an outside core.hooksPath is run by every repository
-# configured to use it. Peasant refuses to manage it, and the refusal must not
+# configured to use it. Peasant refuses to change it, and the refusal must not
 # hand back a paste-this-here snippet - that snippet is pinned to one repository,
 # so pasting it into a file all of them run is the leak the refusal exists to
 # prevent. Each operation must also speak in its own terms: telling someone who
 # is removing a hook to add a section by hand is install wording in the wrong place.
+#
+# status is read-only, and a linked worktree resolving to its main worktree's
+# hooks is how git always works, so status answers plainly with one short note
+# instead of the six-dimension refusal install and uninstall give.
 #
 # layout   linked-worktree     -> act from a linked worktree; the hooks directory
 #                                belongs to the main worktree.
@@ -23,7 +27,7 @@
 # way people share one hooks directory across their own repositories - NO
 # repository owns it, and following that line answers "is not inside a Git
 # worktree": a wrong entry standing beside two options that work.
-expectedCaseCount: 6
+expectedCaseCount: 7
 cases:
   - name: linked-worktree-install-refuses-without-offering-a-paste-here-snippet
     layout: linked-worktree
@@ -50,12 +54,33 @@ cases:
     expectManualSnippet: false
     expectOwnerCommand: true
     mustContain:
-      - "while inspecting the current state"
       - "Peasant-generated hook, installed from"
-      - "every worktree and every repository"
+      - "is shared by every worktree of"
+      - "removes it"
     mustNotContain:
+      - "What went wrong"
+      - "Fix:"
       - "before any hook file was created"
       - "add this section"
+      - "# BEGIN peasant village upload"
+
+  - name: linked-worktree-status-without-a-hook-answers-plainly
+    layout: linked-worktree
+    seed: absent
+    operation: status
+    expectedOutcome: refused
+    expectManualSnippet: false
+    expectOwnerCommand: true
+    mustContain:
+      - "no file exists there, so nothing runs for this event"
+      - "is shared by every worktree of"
+      - "installs it"
+    mustNotContain:
+      - "What went wrong"
+      - "Why:"
+      - "Impact:"
+      - "Fix:"
+      - "is outside"
       - "# BEGIN peasant village upload"
 
   - name: linked-worktree-uninstall-speaks-about-removal
@@ -101,10 +126,12 @@ cases:
     expectManualSnippet: false
     expectOwnerCommand: false
     mustContain:
-      - "while inspecting the current state"
       - "no file exists there"
-      - "no repository owns"
+      - "shared by every repository configured to use it"
+      - "core.hooksPath"
     mustNotContain:
+      - "What went wrong"
+      - "Fix:"
       - "before any hook file was created"
       - "# BEGIN peasant village upload"
 
