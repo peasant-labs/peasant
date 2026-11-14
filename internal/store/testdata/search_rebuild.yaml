@@ -21,5 +21,7 @@ cases:
     description: a healthy store rebuilds nothing and emits no events
   - name: cancelled-rebuild-before-it-starts-changes-nothing
     description: a cancelled context returns an error, keeps the flag, and leaves the old index answering
+  - name: cancelled-rebuild-during-the-transaction-rolls-back
+    description: a cancel that arrives inside the rebuild's transaction rolls the whole rebuild back
   - name: deferred-commit-failure-is-returned
     description: a COMMIT failure reaches the caller instead of being reported as success

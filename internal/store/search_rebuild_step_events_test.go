@@ -191,6 +191,8 @@ func TestSearchRebuild(t *testing.T) {
 				testCurrentStoreEmitsNoStepEvents(t)
 			case "cancelled-rebuild-before-it-starts-changes-nothing":
 				testCancelledRebuildBeforeItStartsChangesNothing(t, fixtures.Corpus)
+			case "cancelled-rebuild-during-the-transaction-rolls-back":
+				testCancelledRebuildDuringTransactionRollsBack(t, fixtures.Corpus)
 			case "deferred-commit-failure-is-returned":
 				testDeferredCommitFailureIsReturned(t)
 			default:
@@ -284,6 +286,39 @@ func testCancelledRebuildBeforeItStartsChangesNothing(t *testing.T, corpus searc
 	}
 	if !searchNeedsRebuild(t, source) {
 		t.Fatal("a cancelled rebuild cleared the search rebuild flag")
+	}
+	if got := searchTermRows(t, source, terms[0]); !equalStrings(wantRows, got) {
+		t.Fatalf("after a cancelled rebuild term %q returns %v, want the old index rows %v", terms[0], got, wantRows)
+	}
+}
+
+// testCancelledRebuildDuringTransactionRollsBack cancels from inside the
+// rebuild's transaction, after the statements have run and before the commit.
+// The rebuild must return the cancellation and roll the whole transaction
+// back, leaving the flagged store answering from the old index.
+func testCancelledRebuildDuringTransactionRollsBack(t *testing.T, corpus searchRebuildCorpus) {
+	t.Helper()
+	source := openSyntheticStore(t, filepath.Join(t.TempDir(), "cancel-inside.db"))
+	defer closeSyntheticStore(t, source)
+	terms, _ := seedSearchRebuildCorpus(t, source, corpus)
+	setSearchNeedsRebuild(t, source)
+	wantRows := searchTermRows(t, source, terms[0])
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	source.searchRebuildSeam = func(*sqlite.Conn) error {
+		cancel()
+		return nil
+	}
+	err := source.RebuildSearchIndex(ctx, nil)
+	if err == nil {
+		t.Fatal("a rebuild cancelled inside its transaction reported success")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled rebuild error = %v, want it to wrap context.Canceled", err)
+	}
+	if !searchNeedsRebuild(t, source) {
+		t.Fatal("a cancelled rebuild cleared the search rebuild flag, so it was not rolled back")
 	}
 	if got := searchTermRows(t, source, terms[0]); !equalStrings(wantRows, got) {
 		t.Fatalf("after a cancelled rebuild term %q returns %v, want the old index rows %v", terms[0], got, wantRows)
