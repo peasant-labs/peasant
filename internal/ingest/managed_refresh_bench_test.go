@@ -1,8 +1,10 @@
 //go:build managed_refresh_bench
 
-// Package ingest_test contains an opt-in, synthetic measurement harness for a
-// managed-generation refresh after an adapter revision bump. It is not part of
-// the default test build; build it with -tags managed_refresh_bench.
+// Package ingest_test contains an opt-in, synthetic measurement harness for
+// the parse baseline of a managed-generation refresh after an adapter revision
+// bump. This branch measures the ordinary parse lane; the metadata-only refresh
+// lane runs the same harness on the same prepared base in its own branch. It is
+// not part of the default test build; build it with -tags managed_refresh_bench.
 //
 // The harness has two entry points:
 //
@@ -73,6 +75,12 @@ import (
 const (
 	managedRefreshShapeFile  = "shape.json"
 	managedRefreshSessionFmt = "bec00000-0000-4000-8000-%012d"
+
+	managedRefreshCaseStampOnly = "stamp-only"
+	managedRefreshCaseForced    = "forced"
+
+	managedRefreshPathParse   = "parse"
+	managedRefreshPathRefresh = "refresh"
 )
 
 // managedRefreshShape is the prepared base's description. It carries no
@@ -87,10 +95,14 @@ type managedRefreshShape struct {
 	InitialImportMs    int64 `json:"initialImportMs"`
 	InitialEntries     int   `json:"initialEntries"`
 	InitialGenerations int64 `json:"initialGenerations"`
+	// Case selects the measured workload. "stamp-only" reproduces the common
+	// adapter bump whose projection is identical, so the parse baseline skips
+	// the generation write and the metadata-only refresh reports unchanged.
+	// "forced" also changes the project name in every stored metadata file, so
+	// both paths install a new generation and the clone cost is comparable.
+	Case string `json:"case"`
 	// ProjectName is the metadata-only change the prepare step forces into
-	// every stored metadata file. A stamp-only bump reproduces the active
-	// generation, so it cannot prove the refresh installs a new one; the
-	// forced context change makes the integrated path observable.
+	// every stored metadata file. Empty for the stamp-only case.
 	ProjectName string `json:"projectName"`
 }
 
@@ -126,65 +138,76 @@ type managedRefreshRowCount struct {
 }
 
 type managedRefreshDB struct {
-	DBBytesBefore      int64 `json:"dbBytesBefore"`
-	WALBytesBefore     int64 `json:"walBytesBefore"`
-	DBBytesAfterRun    int64 `json:"dbBytesAfterRun"`
-	WALBytesAfterRun   int64 `json:"walBytesAfterRun"`
-	DBBytesAfterClose  int64 `json:"dbBytesAfterClose"`
-	WALBytesAfterClose int64 `json:"walBytesAfterClose"`
-	PageCountBefore    int64 `json:"pageCountBefore"`
-	PageCountAfter     int64 `json:"pageCountAfter"`
-	PageSize           int64 `json:"pageSize"`
-	FreelistBefore     int64 `json:"freelistBefore"`
-	FreelistAfter      int64 `json:"freelistAfter"`
+	DBBytesBefore       int64 `json:"dbBytesBefore"`
+	WALBytesBefore      int64 `json:"walBytesBefore"`
+	DBBytesAfterRun     int64 `json:"dbBytesAfterRun"`
+	WALBytesAfterRun    int64 `json:"walBytesAfterRun"`
+	DBBytesAfterSweep   int64 `json:"dbBytesAfterSweep"`
+	WALBytesAfterSweep  int64 `json:"walBytesAfterSweep"`
+	DBBytesAfterClose   int64 `json:"dbBytesAfterClose"`
+	WALBytesAfterClose  int64 `json:"walBytesAfterClose"`
+	PageCountBefore     int64 `json:"pageCountBefore"`
+	PageCountAfterRun   int64 `json:"pageCountAfterRun"`
+	PageCountAfterSweep int64 `json:"pageCountAfterSweep"`
+	PageSize            int64 `json:"pageSize"`
+	FreelistBefore      int64 `json:"freelistBefore"`
+	FreelistAfterRun    int64 `json:"freelistAfterRun"`
+	FreelistAfterSweep  int64 `json:"freelistAfterSweep"`
 }
 
 type managedRefreshSample struct {
-	Lane              string                            `json:"lane"`
-	Sessions          int                               `json:"sessions"`
-	EntriesPerSession int                               `json:"entriesPerSession"`
-	CorpusBytes       int64                             `json:"corpusBytes"`
-	WallMs            float64                           `json:"wallMs"`
-	RunMs             float64                           `json:"runMs"`
-	SetupCopyMs       float64                           `json:"setupCopyMs"`
-	SetupOpenMs       float64                           `json:"setupOpenMs"`
-	Summary           managedRefreshSummary             `json:"summary"`
-	Census            []ingest.RefreshCensusRow         `json:"census"`
-	CensusSessions    int                               `json:"censusSessions"`
-	Outcomes          map[string]int                    `json:"outcomes"`
-	OutcomeReasons    map[string]int                    `json:"outcomeReasons"`
-	Stages            []managedRefreshStage             `json:"stages"`
-	Parse             managedRefreshTiming              `json:"parse"`
-	Write             managedRefreshTiming              `json:"write"`
-	Entries           int                               `json:"entries"`
-	ParsedBytes       int64                             `json:"parsedBytes"`
-	ParsedSessions    int                               `json:"parsedSessions"`
-	GenerationWrites  int                               `json:"generationWrites"`
-	GenerationWriteMs float64                           `json:"generationWriteMs"`
-	IndexBatches      int                               `json:"indexBatches"`
-	BatchSessions     int                               `json:"batchSessions"`
-	BatchEntries      int                               `json:"batchEntries"`
-	BatchBytes        int64                             `json:"batchBytes"`
-	BatchParseMs      float64                           `json:"batchParseMs"`
-	BatchWriteMs      float64                           `json:"batchWriteMs"`
-	WriteTxs          int                               `json:"writeTxs"`
-	WriteSavepoints   int                               `json:"writeSavepoints"`
-	WriteSkipped      int                               `json:"writeSkipped"`
-	WriteStats        ingest.SessionEntryWriteStats     `json:"writeStats"`
-	WriteLane         *ingest.WriteLaneStats            `json:"writeLane"`
-	StagedPeakBytes   int64                             `json:"stagedPeakBytes"`
-	FlushWaitCount    int                               `json:"flushWaitCount"`
-	MaxParseWorkers   int                               `json:"maxParseWorkers"`
-	QueueCapacity     int                               `json:"queueCapacity"`
-	GOMAXPROCS        int                               `json:"gomaxprocs"`
-	NumCPU            int                               `json:"numCPU"`
-	DB                managedRefreshDB                  `json:"db"`
-	Rows              map[string]managedRefreshRowCount `json:"rows"`
-	GenerationsAdded  int64                             `json:"generationsAdded"`
-	AdapterSessions   int                               `json:"adapterSessions"`
-	MetadataFiles     int                               `json:"metadataFiles"`
-	MetadataAtTarget  int                               `json:"metadataAtTarget"`
-	Notes             []string                          `json:"notes"`
+	Lane                  string                            `json:"lane"`
+	Sessions              int                               `json:"sessions"`
+	EntriesPerSession     int                               `json:"entriesPerSession"`
+	CorpusBytes           int64                             `json:"corpusBytes"`
+	WallMs                float64                           `json:"wallMs"`
+	RunMs                 float64                           `json:"runMs"`
+	SetupCopyMs           float64                           `json:"setupCopyMs"`
+	SetupOpenMs           float64                           `json:"setupOpenMs"`
+	Summary               managedRefreshSummary             `json:"summary"`
+	Census                []ingest.RefreshCensusRow         `json:"census"`
+	CensusSessions        int                               `json:"censusSessions"`
+	Outcomes              map[string]int                    `json:"outcomes"`
+	OutcomeReasons        map[string]int                    `json:"outcomeReasons"`
+	Stages                []managedRefreshStage             `json:"stages"`
+	Parse                 managedRefreshTiming              `json:"parse"`
+	Write                 managedRefreshTiming              `json:"write"`
+	Entries               int                               `json:"entries"`
+	ParsedBytes           int64                             `json:"parsedBytes"`
+	ParsedSessions        int                               `json:"parsedSessions"`
+	GenerationWrites      int                               `json:"generationWrites"`
+	GenerationWriteMs     float64                           `json:"generationWriteMs"`
+	IndexBatches          int                               `json:"indexBatches"`
+	BatchSessions         int                               `json:"batchSessions"`
+	BatchEntries          int                               `json:"batchEntries"`
+	BatchBytes            int64                             `json:"batchBytes"`
+	BatchParseMs          float64                           `json:"batchParseMs"`
+	BatchWriteMs          float64                           `json:"batchWriteMs"`
+	WriteTxs              int                               `json:"writeTxs"`
+	WriteSavepoints       int                               `json:"writeSavepoints"`
+	WriteSkipped          int                               `json:"writeSkipped"`
+	WriteStats            ingest.SessionEntryWriteStats     `json:"writeStats"`
+	WriteLane             *ingest.WriteLaneStats            `json:"writeLane"`
+	StagedPeakBytes       int64                             `json:"stagedPeakBytes"`
+	FlushWaitCount        int                               `json:"flushWaitCount"`
+	MaxParseWorkers       int                               `json:"maxParseWorkers"`
+	QueueCapacity         int                               `json:"queueCapacity"`
+	GOMAXPROCS            int                               `json:"gomaxprocs"`
+	NumCPU                int                               `json:"numCPU"`
+	DB                    managedRefreshDB                  `json:"db"`
+	Rows                  map[string]managedRefreshRowCount `json:"rows"`
+	RowsAfterSweep        map[string]managedRefreshRowCount `json:"rowsAfterSweep"`
+	StatsUpdatedBefore    int64                             `json:"statsUpdatedBefore"`
+	StatsUpdatedAfter     int64                             `json:"statsUpdatedAfter"`
+	PublicationBound      int                               `json:"publicationBound"`
+	GenerationInstalls    int                               `json:"generationInstalls"`
+	GenerationsAdded      int64                             `json:"generationsAdded"`
+	GenerationsAfterSweep int64                             `json:"generationsAfterSweep"`
+	SweepMs               float64                           `json:"sweepMs"`
+	AdapterSessions       int                               `json:"adapterSessions"`
+	MetadataFiles         int                               `json:"metadataFiles"`
+	MetadataAtTarget      int                               `json:"metadataAtTarget"`
+	Notes                 []string                          `json:"notes"`
 }
 
 type managedRefreshDBStats struct {
@@ -251,7 +274,11 @@ func TestManagedRefreshPrepare(t *testing.T) {
 		t.Fatalf("claude adapter target %d cannot be downgraded to a positive revision", target)
 	}
 	managedRefreshDowngradeAdapter(t, db, stored)
-	projectName := "managed refresh benchmark forced context"
+	caseName := managedRefreshCase(t)
+	projectName := ""
+	if caseName == managedRefreshCaseForced {
+		projectName = "managed refresh benchmark forced context"
+	}
 	metadata := managedRefreshStampMetadata(t, output, stored, projectName)
 	if metadata != sessions {
 		_ = db.Close()
@@ -273,7 +300,7 @@ func TestManagedRefreshPrepare(t *testing.T) {
 		Sessions: sessions, EntriesPerSession: entries, CorpusBytes: corpusBytes,
 		TargetAdapter: target, StoredAdapter: stored,
 		InitialImportMs: importMs, InitialEntries: initialEntries,
-		InitialGenerations: generations, ProjectName: projectName,
+		InitialGenerations: generations, Case: caseName, ProjectName: projectName,
 	}
 	data, err := json.MarshalIndent(shape, "", "  ")
 	if err != nil {
@@ -372,9 +399,11 @@ func runManagedRefreshSample(tb testing.TB, base, lane, out string, classify boo
 	openMs := float64(time.Since(openStart).Microseconds()) / 1000
 	profiler := &ingest.IndexProfiler{}
 	pipeline := newManagedRefreshPipeline(tb, db, source, output, profiler, classify)
+	path := managedRefreshPath(tb)
 
 	rowsBefore := managedRefreshRowCounts(tb, db)
 	pageBefore := managedRefreshPageStats(tb, db)
+	statsUpdatedBefore := managedRefreshQueryInt(tb, db, `SELECT COALESCE(MAX(updated_at_ms), 0) FROM session_captured_stats`)
 	dbBefore, walBefore := managedRefreshFileSizes(tb, dbPath)
 
 	wallStart := time.Now()
@@ -384,12 +413,37 @@ func runManagedRefreshSample(tb testing.TB, base, lane, out string, classify boo
 		_ = db.Close()
 		tb.Fatalf("%s refresh: %v", lane, err)
 	}
-	dbAfter, walAfter := managedRefreshFileSizes(tb, dbPath)
-	pageAfter := managedRefreshPageStats(tb, db)
-	rowsAfter := managedRefreshRowCounts(tb, db)
+	dbAfterRun, walAfterRun := managedRefreshFileSizes(tb, dbPath)
+	pageAfterRun := managedRefreshPageStats(tb, db)
+	rowsAfterRun := managedRefreshRowCounts(tb, db)
 	adapterSessions := managedRefreshQueryInt(tb, db, `SELECT count(*) FROM sessions WHERE adapter_version = ?`, shape.TargetAdapter)
 	metadataFiles, metadataAtTarget := managedRefreshCountMetadata(tb, output)
 	projectNames := managedRefreshActiveProjectNames(tb, db)
+	statsUpdatedAfter := managedRefreshQueryInt(tb, db, `SELECT COALESCE(MAX(updated_at_ms), 0) FROM session_captured_stats`)
+	publicationBound := int(managedRefreshQueryInt(tb, db, `SELECT count(*) FROM sessions s
+JOIN session_publication_metadata p ON p.session_id = s.session_id
+WHERE p.capture_revision > 0
+  AND p.capture_revision = s.publication_capture_revision
+  AND p.capture_revision = s.indexed_publication_capture_revision
+  AND s.cwd_provenance_kind != 'not_recovered'`))
+	// The parse path sweeps a superseded generation inside the run; the refresh
+	// path flags it for the next sweep. Run that sweep here, outside the timed
+	// region, so the post-sweep DB size and row counts compare the same steady
+	// state on both paths. The pre-sweep values are kept separately to show the
+	// transient cost.
+	sweepStart := time.Now()
+	_, sweepWarnings, sweepErr := db.SweepFlaggedSessionsForHarvest(tb.Context(), ingest.AllStoredSessions())
+	sweepMs := float64(time.Since(sweepStart).Microseconds()) / 1000
+	if sweepErr != nil {
+		_ = db.Close()
+		tb.Fatalf("%s post-run sweep: %v", lane, sweepErr)
+	}
+	if len(sweepWarnings) != 0 {
+		tb.Logf("%s post-run sweep warnings: %v", lane, sweepWarnings)
+	}
+	dbAfterSweep, walAfterSweep := managedRefreshFileSizes(tb, dbPath)
+	pageAfterSweep := managedRefreshPageStats(tb, db)
+	rowsAfterSweep := managedRefreshRowCounts(tb, db)
 	_ = db.Close()
 	dbClosed, walClosed := managedRefreshFileSizes(tb, dbPath)
 
@@ -403,26 +457,36 @@ func runManagedRefreshSample(tb testing.TB, base, lane, out string, classify boo
 			New: result.Summary.New, Updated: result.Summary.Updated, Unchanged: result.Summary.Unchanged,
 			Active: result.Summary.Active, Indexed: result.Summary.Indexed, Errors: result.Summary.Errors,
 		},
-		Outcomes:         map[string]int{},
-		OutcomeReasons:   map[string]int{},
-		Rows:             make(map[string]managedRefreshRowCount, len(rowsBefore)),
-		GenerationsAdded: rowsAfter["session_generations"] - rowsBefore["session_generations"],
-		AdapterSessions:  int(adapterSessions),
-		MetadataFiles:    metadataFiles,
-		MetadataAtTarget: metadataAtTarget,
-		GOMAXPROCS:       runtime.GOMAXPROCS(0),
-		NumCPU:           runtime.NumCPU(),
+		Outcomes:              map[string]int{},
+		OutcomeReasons:        map[string]int{},
+		Rows:                  make(map[string]managedRefreshRowCount, len(rowsBefore)),
+		RowsAfterSweep:        make(map[string]managedRefreshRowCount, len(rowsBefore)),
+		StatsUpdatedBefore:    statsUpdatedBefore,
+		StatsUpdatedAfter:     statsUpdatedAfter,
+		PublicationBound:      publicationBound,
+		GenerationInstalls:    0,
+		GenerationsAdded:      rowsAfterRun["session_generations"] - rowsBefore["session_generations"],
+		GenerationsAfterSweep: rowsAfterSweep["session_generations"] - rowsBefore["session_generations"],
+		SweepMs:               sweepMs,
+		AdapterSessions:       int(adapterSessions),
+		MetadataFiles:         metadataFiles,
+		MetadataAtTarget:      metadataAtTarget,
+		GOMAXPROCS:            runtime.GOMAXPROCS(0),
+		NumCPU:                runtime.NumCPU(),
 		DB: managedRefreshDB{
 			DBBytesBefore: dbBefore, WALBytesBefore: walBefore,
-			DBBytesAfterRun: dbAfter, WALBytesAfterRun: walAfter,
+			DBBytesAfterRun: dbAfterRun, WALBytesAfterRun: walAfterRun,
+			DBBytesAfterSweep: dbAfterSweep, WALBytesAfterSweep: walAfterSweep,
 			DBBytesAfterClose: dbClosed, WALBytesAfterClose: walClosed,
-			PageCountBefore: pageBefore.pageCount, PageCountAfter: pageAfter.pageCount,
-			PageSize:       pageAfter.pageSize,
-			FreelistBefore: pageBefore.freelist, FreelistAfter: pageAfter.freelist,
+			PageCountBefore: pageBefore.pageCount, PageCountAfterRun: pageAfterRun.pageCount,
+			PageCountAfterSweep: pageAfterSweep.pageCount, PageSize: pageAfterSweep.pageSize,
+			FreelistBefore: pageBefore.freelist, FreelistAfterRun: pageAfterRun.freelist,
+			FreelistAfterSweep: pageAfterSweep.freelist,
 		},
 	}
 	for table, before := range rowsBefore {
-		sample.Rows[table] = managedRefreshRowCount{Before: before, After: rowsAfter[table]}
+		sample.Rows[table] = managedRefreshRowCount{Before: before, After: rowsAfterRun[table]}
+		sample.RowsAfterSweep[table] = managedRefreshRowCount{Before: before, After: rowsAfterSweep[table]}
 	}
 	if result.Census != nil {
 		sample.Census = append(sample.Census, result.Census.Rows...)
@@ -485,41 +549,30 @@ func runManagedRefreshSample(tb testing.TB, base, lane, out string, classify boo
 		sample.WriteLane = &laneStats
 	}
 
-	// The integrated path must refresh every managed generation without a
-	// transcript parse: a forced metadata change installs a new generation from
-	// the refreshed capture, so the run reports zero parsed entries and zero
-	// indexed sessions, and the generation write timing carries the refresh.
+	// The harness runs the same prepared base through either the ordinary parse
+	// path or the metadata-only refresh path. The assertions differ only by the
+	// path and the prepared case; the measured metrics are identical.
 	if sample.Summary.Errors != 0 || len(result.Diagnostics) != 0 {
 		tb.Fatalf("%s refresh reported %d errors and %d diagnostics", lane, sample.Summary.Errors, len(result.Diagnostics))
 	}
 	if sample.Summary.Updated != shape.Sessions || sample.Summary.Unchanged != 0 || sample.Summary.New != 0 {
 		tb.Fatalf("%s refresh summary = %+v, want %d updated, 0 unchanged, 0 new", lane, sample.Summary, shape.Sessions)
 	}
-	if sample.Summary.Indexed != 0 {
-		tb.Fatalf("%s refresh indexed %d sessions, want 0: the managed generation must not be parsed", lane, sample.Summary.Indexed)
-	}
 	if sample.CensusSessions != shape.Sessions {
 		tb.Fatalf("%s refresh census covers %d sessions, want %d (%+v)", lane, sample.CensusSessions, shape.Sessions, sample.Census)
 	}
-	if len(result.IndexLog) != shape.Sessions || len(writeDurations) != shape.Sessions {
-		tb.Fatalf("%s refresh produced %d index rows and %d generation-write timings for %d sessions", lane, len(result.IndexLog), len(writeDurations), shape.Sessions)
+	for _, row := range sample.Census {
+		if row.Reason != ingest.OutcomeReasonRefreshAdapterBehind || row.Lane != ingest.RefreshLaneStoredMetadata {
+			tb.Fatalf("%s refresh census row = %+v, want adapter_behind on the stored-metadata lane", lane, row)
+		}
 	}
-	if sample.ParsedSessions != 0 || sample.Entries != 0 || sample.ParsedBytes != 0 {
-		tb.Fatalf("%s refresh parsed %d sessions, %d entries and %d bytes; want the metadata-only path to parse nothing", lane, sample.ParsedSessions, sample.Entries, sample.ParsedBytes)
-	}
-	if sample.GenerationWrites != shape.Sessions {
-		tb.Fatalf("%s refresh measured %d generation writes, want %d", lane, sample.GenerationWrites, shape.Sessions)
-	}
-	if sample.GenerationsAdded != int64(shape.Sessions) {
-		tb.Fatalf("%s refresh added %d generation rows, want %d", lane, sample.GenerationsAdded, shape.Sessions)
+	if len(result.IndexLog) != shape.Sessions {
+		tb.Fatalf("%s refresh produced %d index rows, want %d", lane, len(result.IndexLog), shape.Sessions)
 	}
 	for _, entry := range result.IndexLog {
 		if entry.Outcome == ingest.IndexOutcomeError || entry.Outcome == ingest.IndexOutcomeFallback {
 			tb.Fatalf("%s refresh index outcome for session %s is %q (%v)", lane, entry.SessionID, entry.Outcome, entry.ErrorMessage)
 		}
-	}
-	if sample.Outcomes[string(ingest.IndexOutcomeSkipped)] != shape.Sessions {
-		tb.Fatalf("%s refresh skipped outcomes = %d, want %d (%v)", lane, sample.Outcomes[string(ingest.IndexOutcomeSkipped)], shape.Sessions, sample.Outcomes)
 	}
 	if sample.AdapterSessions != shape.Sessions {
 		tb.Fatalf("%s refresh left %d session rows at adapter %d, want %d", lane, sample.AdapterSessions, shape.TargetAdapter, shape.Sessions)
@@ -530,12 +583,109 @@ func runManagedRefreshSample(tb testing.TB, base, lane, out string, classify boo
 	if len(projectNames) != shape.Sessions {
 		tb.Fatalf("%s refresh left %d active managed generations, want %d", lane, len(projectNames), shape.Sessions)
 	}
-	for _, name := range projectNames {
-		if name != shape.ProjectName {
-			tb.Fatalf("%s refreshed generation project = %q, want the forced metadata change %q", lane, name, shape.ProjectName)
+	if sample.PublicationBound != shape.Sessions {
+		tb.Fatalf("%s refresh left %d bound sessions, want %d", lane, sample.PublicationBound, shape.Sessions)
+	}
+	if shape.Case == managedRefreshCaseForced {
+		for _, name := range projectNames {
+			if name != shape.ProjectName {
+				tb.Fatalf("%s refreshed generation project = %q, want the forced metadata change %q", lane, name, shape.ProjectName)
+			}
+		}
+	} else {
+		for _, name := range projectNames {
+			if name == "" {
+				tb.Fatalf("%s refreshed generation carries no project name", lane)
+			}
 		}
 	}
-	sample.Notes = append(sample.Notes, "the integrated metadata-only refresh installed a new generation per session and parsed nothing")
+
+	switch path {
+	case managedRefreshPathParse:
+		if sample.Summary.Indexed != shape.Sessions {
+			tb.Fatalf("%s parse index count = %d, want %d", lane, sample.Summary.Indexed, shape.Sessions)
+		}
+		if sample.ParsedSessions != shape.Sessions {
+			tb.Fatalf("%s parse parsed %d sessions, want %d", lane, sample.ParsedSessions, shape.Sessions)
+		}
+		if sample.Entries <= 0 || sample.ParsedBytes <= 0 || sample.Parse.TotalMs <= 0 {
+			tb.Fatalf("%s parse parsed %d entries, %d bytes and %.0f ms; want parse work for every session", lane, sample.Entries, sample.ParsedBytes, sample.Parse.TotalMs)
+		}
+		switch shape.Case {
+		case managedRefreshCaseStampOnly:
+			sample.GenerationInstalls = 0
+			if sample.GenerationsAdded != 0 {
+				tb.Fatalf("%s parse added %d generation rows, want 0 for an identical stamp-only projection", lane, sample.GenerationsAdded)
+			}
+			if sample.Outcomes[string(ingest.IndexOutcomeSkipped)] != shape.Sessions {
+				tb.Fatalf("%s parse skipped outcomes = %d, want %d (%v)", lane, sample.Outcomes[string(ingest.IndexOutcomeSkipped)], shape.Sessions, sample.Outcomes)
+			}
+		case managedRefreshCaseForced:
+			sample.GenerationInstalls = sample.Summary.Indexed
+			if sample.GenerationInstalls != shape.Sessions {
+				tb.Fatalf("%s parse installed %d generations, want %d", lane, sample.GenerationInstalls, shape.Sessions)
+			}
+			if sample.Outcomes[string(ingest.IndexOutcomeIndexed)] != shape.Sessions {
+				tb.Fatalf("%s parse indexed outcomes = %d, want %d (%v)", lane, sample.Outcomes[string(ingest.IndexOutcomeIndexed)], shape.Sessions, sample.Outcomes)
+			}
+			if sample.GenerationWrites == 0 {
+				sample.Notes = append(sample.Notes, "the parse baseline's generation activation write is included in writer-lane busy but is not separately timed by the index log")
+			}
+			if sample.GenerationsAdded != 0 {
+				sample.Notes = append(sample.Notes, "the parse run installed a generation and swept the superseded one inside the run, so the pre-sweep net generation-row delta is zero")
+			}
+		default:
+			tb.Fatalf("%s prepared case %q is not %s or %s", lane, shape.Case, managedRefreshCaseStampOnly, managedRefreshCaseForced)
+		}
+	case managedRefreshPathRefresh:
+		if sample.Summary.Indexed != 0 {
+			tb.Fatalf("%s refresh indexed %d sessions, want 0", lane, sample.Summary.Indexed)
+		}
+		if sample.ParsedSessions != 0 || sample.Entries != 0 || sample.ParsedBytes != 0 || sample.Parse.TotalMs != 0 {
+			tb.Fatalf("%s refresh parsed %d sessions, %d entries and %d bytes in %.0f ms; want no parse", lane, sample.ParsedSessions, sample.Entries, sample.ParsedBytes, sample.Parse.TotalMs)
+		}
+		if sample.GenerationWrites != shape.Sessions || len(writeDurations) != shape.Sessions {
+			tb.Fatalf("%s refresh measured %d generation writes and %d timings, want %d", lane, sample.GenerationWrites, len(writeDurations), shape.Sessions)
+		}
+		if sample.Outcomes[string(ingest.IndexOutcomeSkipped)] != shape.Sessions {
+			tb.Fatalf("%s refresh skipped outcomes = %d, want %d (%v)", lane, sample.Outcomes[string(ingest.IndexOutcomeSkipped)], shape.Sessions, sample.Outcomes)
+		}
+		disposition := "unchanged"
+		if shape.Case == managedRefreshCaseForced {
+			disposition = "installed"
+		}
+		settles := managedRefreshDispositionCount(sample.OutcomeReasons, disposition)
+		if settles != shape.Sessions {
+			tb.Fatalf("%s refresh disposition %q count = %d, want %d (%v)", lane, disposition, settles, shape.Sessions, sample.OutcomeReasons)
+		}
+		if shape.Case == managedRefreshCaseForced {
+			sample.GenerationInstalls = settles
+		} else {
+			sample.GenerationInstalls = 0
+		}
+		if sample.StatsUpdatedAfter <= sample.StatsUpdatedBefore {
+			tb.Fatalf("%s refresh did not settle captured stats: %d <= %d", lane, sample.StatsUpdatedAfter, sample.StatsUpdatedBefore)
+		}
+		switch shape.Case {
+		case managedRefreshCaseStampOnly:
+			if sample.GenerationsAdded != 0 {
+				tb.Fatalf("%s refresh added %d generation rows, want 0 for the unchanged case", lane, sample.GenerationsAdded)
+			}
+			sample.Notes = append(sample.Notes, "the metadata-only refresh reported unchanged, parsed nothing, installed no generation, and settled stats and binding")
+		case managedRefreshCaseForced:
+			if sample.GenerationsAdded != int64(shape.Sessions) {
+				tb.Fatalf("%s refresh added %d generation rows, want %d", lane, sample.GenerationsAdded, shape.Sessions)
+			}
+			sample.Notes = append(sample.Notes, "the metadata-only refresh installed a new generation per session and parsed nothing")
+		default:
+			tb.Fatalf("%s prepared case %q is not %s or %s", lane, shape.Case, managedRefreshCaseStampOnly, managedRefreshCaseForced)
+		}
+	default:
+		tb.Fatalf("%s measurement path %q is not %s or %s", lane, path, managedRefreshPathParse, managedRefreshPathRefresh)
+	}
+	if sample.GenerationsAfterSweep != 0 {
+		tb.Fatalf("%s post-run sweep left %d net generation rows, want the same one-generation steady state", lane, sample.GenerationsAfterSweep)
+	}
 
 	managedRefreshWriteJSON(tb, out, sample)
 	return sample
@@ -656,7 +806,9 @@ func managedRefreshStampMetadata(tb testing.TB, output string, stored int, proje
 			tb.Fatalf("decode managed metadata: %v", err)
 		}
 		meta.AdapterVersion = &stored
-		meta.Project.Name = projectName
+		if projectName != "" {
+			meta.Project.Name = projectName
+		}
 		meta.MetadataHash = schema.ComputeMetadataHash(&meta)
 		encoded, err := json.Marshal(&meta)
 		if err != nil {
@@ -957,4 +1109,48 @@ func managedRefreshEnvBool(tb testing.TB, name string, fallback bool) bool {
 		tb.Fatalf("%s=%q is not a boolean", name, raw)
 	}
 	return value
+}
+
+// managedRefreshDispositionCount counts index-log reasons that name one
+// metadata-only refresh disposition. The pipeline appends the store's
+// disposition to the reason, so a test can prove the unchanged and installed
+// branches were the ones actually exercised.
+func managedRefreshDispositionCount(reasons map[string]int, disposition string) int {
+	total := 0
+	needle := "(" + disposition + ")"
+	for reason, count := range reasons {
+		if strings.Contains(reason, needle) {
+			total += count
+		}
+	}
+	return total
+}
+
+// managedRefreshCase selects the prepared workload. The default is the common
+// adapter bump whose refreshed projection is identical.
+func managedRefreshCase(tb testing.TB) string {
+	tb.Helper()
+	raw := os.Getenv("PEASANT_MANAGED_REFRESH_CASE")
+	if raw == "" {
+		return managedRefreshCaseStampOnly
+	}
+	if raw != managedRefreshCaseStampOnly && raw != managedRefreshCaseForced {
+		tb.Fatalf("PEASANT_MANAGED_REFRESH_CASE=%q is not %s or %s", raw, managedRefreshCaseStampOnly, managedRefreshCaseForced)
+	}
+	return raw
+}
+
+// managedRefreshPath selects which lane the sample measures: the ordinary parse
+// path or the metadata-only refresh path. It is required so a sample can never
+// silently assert the wrong lane.
+func managedRefreshPath(tb testing.TB) string {
+	tb.Helper()
+	raw := os.Getenv("PEASANT_MANAGED_REFRESH_PATH")
+	if raw == "" {
+		tb.Fatalf("set PEASANT_MANAGED_REFRESH_PATH=%s or %s", managedRefreshPathParse, managedRefreshPathRefresh)
+	}
+	if raw != managedRefreshPathParse && raw != managedRefreshPathRefresh {
+		tb.Fatalf("PEASANT_MANAGED_REFRESH_PATH=%q is not %s or %s", raw, managedRefreshPathParse, managedRefreshPathRefresh)
+	}
+	return raw
 }
