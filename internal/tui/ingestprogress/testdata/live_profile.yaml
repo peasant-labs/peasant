@@ -1,0 +1,50 @@
+requiredLaneCases: [unknown, idle, busy, elapsed-unknown, candidates-before-extract, zero-candidates, candidates-on-cancel]
+laneCases:
+  - name: unknown
+    available: false
+    absent: [writer lane:]
+  - name: idle
+    available: true
+    elapsedMs: 1000
+    contains: ["writer lane: 0 waiting", "0% busy since run start"]
+  - name: busy
+    available: true
+    queued: 3
+    busyMs: 750
+    elapsedMs: 1000
+    contains: ["writer lane: 3 waiting", "75% busy since run start"]
+  - name: elapsed-unknown
+    available: true
+    queued: 1
+    contains: ["writer lane: 1 waiting", "busy unknown"]
+  - name: candidates-before-extract
+    candidatesKnown: true
+    candidates: 7
+    contains: ["extract candidates: 7 sessions (not confirmed refreshes)"]
+    absent: ["7 refreshed"]
+  - name: zero-candidates
+    candidatesKnown: true
+    candidates: 0
+    contains: ["extract candidates: 0 sessions (not confirmed refreshes)"]
+  - name: candidates-on-cancel
+    finalCanceled: true
+    candidatesKnown: true
+    candidates: 7
+    contains: ["extract candidates: 7 sessions (not confirmed refreshes)", harvest canceled]
+    absent: ["7 refreshed"]
+requiredCensusCases: [unavailable, empty, indexed-and-unmeasured]
+censusCases:
+  - name: unavailable
+    available: false
+    contains: [refresh census unavailable]
+    absent: ["0 sessions"]
+  - name: empty
+    available: true
+    contains: ["refresh census: 0 sessions (includes failed attempts)"]
+  - name: indexed-and-unmeasured
+    available: true
+    rows:
+      - {reason: new, sessions: 2, indexedBytes: 2048}
+      - {reason: adapter_behind, sessions: 1, indexedBytes: 0}
+    contains: ["refresh census: 3 sessions (includes failed attempts)", "native / new: 2", "indexed bytes measured: 2 KiB (may be partial)", "stored-metadata / adapter_behind: 1", "indexed bytes: unknown"]
+    absent: ["indexed bytes: 0 B"]

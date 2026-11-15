@@ -68,10 +68,18 @@ const (
 	ingestProgressStateHarvestInline    ingestProgressState = "harvest-inline"
 	ingestProgressStateHarvestCanceling ingestProgressState = "harvest-canceling"
 	ingestProgressStateHarvestCanceled  ingestProgressState = "harvest-canceled"
+	ingestProgressStateCandidates       ingestProgressState = "candidates"
+	ingestProgressStateUnknownTotal     ingestProgressState = "unknown-total"
 )
 
 func (s ingestProgressState) valid() bool {
-	return s == ingestProgressStateRunning || s == ingestProgressStateHarvestInline || s == ingestProgressStateHarvestCanceling || s == ingestProgressStateHarvestCanceled
+	switch s {
+	case ingestProgressStateRunning, ingestProgressStateHarvestInline, ingestProgressStateHarvestCanceling,
+		ingestProgressStateHarvestCanceled, ingestProgressStateCandidates, ingestProgressStateUnknownTotal:
+		return true
+	default:
+		return false
+	}
 }
 
 type discoveryProgressState string
@@ -246,6 +254,13 @@ type pushStateFixture struct {
 type ingestProgressStateFixture struct {
 	Key          ingestProgressState `yaml:"key"`
 	WantContains []string            `yaml:"wantContains"`
+	WantAbsent   []string            `yaml:"wantAbsent"`
+	Candidates   *int                `yaml:"candidates"`
+	Lane         *struct {
+		Queued    int   `yaml:"queued"`
+		BusyMs    int64 `yaml:"busyMs"`
+		ElapsedMs int64 `yaml:"elapsedMs"`
+	} `yaml:"lane"`
 }
 
 type ingestProgressCaptureFixture struct {
@@ -644,7 +659,7 @@ func validateIngestProgressMatrix(states []ingestProgressStateFixture, captures 
 		}
 		stateRows[state.Key] = state
 	}
-	for _, required := range []ingestProgressState{ingestProgressStateRunning, ingestProgressStateHarvestInline, ingestProgressStateHarvestCanceling, ingestProgressStateHarvestCanceled} {
+	for _, required := range []ingestProgressState{ingestProgressStateRunning, ingestProgressStateHarvestInline, ingestProgressStateHarvestCanceling, ingestProgressStateHarvestCanceled, ingestProgressStateCandidates, ingestProgressStateUnknownTotal} {
 		if stateRows[required].Key == "" {
 			return fmt.Errorf("screenshot fixture omits ingest progress state %q", required)
 		}
@@ -893,8 +908,8 @@ func validateSheets(sheets []sheetFixture) error {
 		sheetGuidedLight:     {kind: sheetKindGuided, theme: captureThemeLight, width: 1800, height: 3980},
 		sheetSelection:       {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 11170},
 		sheetPush:            {kind: sheetKindPush, theme: captureThemeDark, width: 1800, height: 7900},
-		sheetIngest:          {kind: sheetKindIngest, theme: captureThemeDark, width: 1800, height: 4590},
-		sheetCompletion:      {kind: sheetKindCompletion, theme: captureThemeDark, width: 1800, height: 3420},
+		sheetIngest:          {kind: sheetKindIngest, theme: captureThemeDark, width: 1800, height: 7000},
+		sheetCompletion:      {kind: sheetKindCompletion, theme: captureThemeDark, width: 1800, height: 7000},
 		sheetDiscovery:       {kind: sheetKindDiscovery, theme: captureThemeDark, width: 1800, height: 3600},
 		sheetPullProgress:    {kind: sheetKindPullProgress, theme: captureThemeDark, width: 1800, height: 3600},
 		sheetUpgradeProgress: {kind: sheetKindUpgradeProgress, theme: captureThemeDark, width: 1800, height: 9600},

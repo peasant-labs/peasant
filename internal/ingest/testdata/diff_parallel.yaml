@@ -14,7 +14,7 @@ required_cases:
   - clock-moved-past-ingest-is-updated
   - schema-behind-current-is-updated
   - current-row-with-a-recorded-adapter-is-unchanged
-  - legacy-row-without-a-recorded-adapter-is-unchanged
+  - legacy-row-without-a-recorded-adapter-refreshes-natively
   - in-place-sequence-advance-is-updated
   - child-session-keeps-its-discovery-position
 required_cancellation_cases:
@@ -53,11 +53,11 @@ sessions:
     ingestedMs: 2000
     modTimeMs: 2000
     schemaVersion: 9
-    adapterVersion: 1
+    adapterVersion: 4
     sourceEvidenceSupported: true
     publicationReadiness: ready
     expected_status: unchanged
-  - name: legacy-row-without-a-recorded-adapter-is-unchanged
+  - name: legacy-row-without-a-recorded-adapter-refreshes-natively
     sessionID: 55555555-5555-5555-5555-555555555555
     stored: true
     ingestedMs: 2000
@@ -65,14 +65,14 @@ sessions:
     schemaVersion: 9
     sourceEvidenceSupported: true
     publicationReadiness: ready
-    expected_status: unchanged
+    expected_status: updated
   - name: in-place-sequence-advance-is-updated
     sessionID: 66666666-6666-6666-6666-666666666666
     stored: true
     ingestedMs: 2000
     modTimeMs: 2000
     schemaVersion: 9
-    adapterVersion: 1
+    adapterVersion: 4
     sourceEvidenceSupported: true
     publicationReadiness: ready
     trackedCursor: true

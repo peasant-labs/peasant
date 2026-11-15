@@ -54,11 +54,18 @@ func TestOpenCodeChangeCursorTriggersReingest(t *testing.T) {
 		testCase := testCase
 		t.Run(testCase.Name, func(t *testing.T) {
 			ingested := testCase.IngestedMs
+			target := HarvesterVersionRegistry[HarnessOpenCode]
+			adapter := target.AdapterVersion
+			proof := "stored-input-proof"
 			pipeline := &Pipeline{
 				fs:     &OSFileSystem{},
 				config: PipelineConfig{StalenessThreshold: 0, OutputDir: ResolvedPath(t.TempDir())},
 				locationCache: map[SessionID]SessionLocation{
-					sessionID: {IngestedMs: &ingested, SchemaVersion: CurrentSchemaVersion},
+					sessionID: {
+						IngestedMs: &ingested, SchemaVersion: CurrentSchemaVersion,
+						AdapterVersion: &adapter, IndexerVersion: target.IndexerVersion,
+						IndexedInputHash: &proof,
+					},
 				},
 			}
 			if testCase.Tracked {

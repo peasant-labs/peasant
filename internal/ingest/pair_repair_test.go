@@ -13,6 +13,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -99,6 +100,19 @@ func loadPairRepairFixtures(t *testing.T) pairRepairDocument {
 		t.Fatal(err)
 	}
 	return document
+}
+
+// pairRepairStoredExtractorAdapter gives the synthetic Claude adapter the
+// stored-transcript extractor the production Claude adapter implements, so the
+// stored-metadata lane is the one under test rather than a native-only stub.
+type pairRepairStoredExtractorAdapter struct {
+	ingest.SourceAdapter
+}
+
+func (a *pairRepairStoredExtractorAdapter) ExtractMetadataFromTranscript(_ context.Context, data []byte, original *ingest.UnifiedMetadata) (*ingest.UnifiedMetadata, error) {
+	copy := *original
+	copy.ContentHash = schema.ComputeTranscriptHash(data)
+	return &copy, nil
 }
 
 // TestPairRepairReingestsFromNative drives the production pipeline over one
@@ -254,10 +268,10 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 			fresh.ContentHash = schema.ComputeTranscriptHash(nativeTranscript)
 			fresh.ParentUUID = parentID
 			adapters := map[ingest.Harness]ingest.AdapterFactory{
-				ingest.HarnessClaudeCode: makeStubAdapter(
-					discoveredSessions,
-					map[ingest.SessionID]*ingest.UnifiedMetadata{id: fresh},
-				),
+				ingest.HarnessClaudeCode: func(fs ingest.FileSystem, git ingest.GitResolver, salt salt.Salt) ingest.SourceAdapter {
+					stub := makeStubAdapter(discoveredSessions, map[ingest.SessionID]*ingest.UnifiedMetadata{id: fresh})(fs, git, salt)
+					return &pairRepairStoredExtractorAdapter{SourceAdapter: stub}
+				},
 			}
 			cfg := makePipelineConfig(testOutputDir)
 			cfg.Reindex = fixture.Reindex

@@ -25,6 +25,10 @@ revision. While developing the harness itself, generate explicitly marked dispos
 go run -tags=guided_screenshots ./cmd/peasant-guided-screenshots --allow-dirty
 ```
 
+Set `PEASANT_GUIDED_KEEP_SCRATCH=1` to retain the synthetic working directories,
+ANSI inputs, and content-fit measurements instead of deleting them. Keep
+`TMPDIR` private; the retained data is local development evidence.
+
 Run the opt-in fixture and mounted-render tests with:
 
 ```bash
@@ -57,8 +61,9 @@ local and gitignored.
 - the start, selection, consent, receipt, and keyboard help screens of the push wizard, in both
   themes at both sizes, over a synthetic candidate inventory that carries every redaction state and one session the
   branch-aware selection withheld;
-- local ingest progress and completion, including multiple nonfatal warnings, scrolled remediation
-  and next steps, and a no-warning control, in both themes and both sizes;
+- local ingest progress and completion, including pre-extract candidates, unknown totals, a busy
+  writer with queued work, cancellation, stored and unavailable census, multiple nonfatal warnings,
+  scrolled next steps, and a no-warning control, in both themes and both sizes;
 - the bulk collective-pull progress bar — running, canceling, and canceled — mounted from the real
   `pullprogress.Model` over scrubbed synthetic counts, in both themes and both sizes;
 - the inline discovery spinner — mid-run and complete file counts with required re-reads, and an adapter

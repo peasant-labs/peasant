@@ -192,6 +192,10 @@ func findFreeze() (string, error) {
 	return path, nil
 }
 
+// keepScreenshotScratch retains synthetic capture inputs and measurement
+// workspaces for environments where temporary data must not be removed.
+func keepScreenshotScratch() bool { return os.Getenv("PEASANT_GUIDED_KEEP_SCRATCH") == "1" }
+
 func rasterizeSheet(freezePath, outputPath string, sheet renderedSheet) error {
 	outputDirectory := filepath.Dir(outputPath)
 	ansiFile, err := os.CreateTemp(outputDirectory, "."+string(sheet.fixture.Name)+"-*.ansi")
@@ -199,7 +203,9 @@ func rasterizeSheet(freezePath, outputPath string, sheet renderedSheet) error {
 		return fmt.Errorf("create temporary ANSI input for %q: %w", sheet.fixture.Name, err)
 	}
 	ansiPath := ansiFile.Name()
-	defer os.Remove(ansiPath)
+	if !keepScreenshotScratch() {
+		defer os.Remove(ansiPath)
+	}
 	if err := ansiFile.Chmod(0o600); err != nil {
 		_ = ansiFile.Close()
 		return fmt.Errorf("restrict temporary ANSI input %q: %w", ansiPath, err)
@@ -220,7 +226,9 @@ func rasterizeSheet(freezePath, outputPath string, sheet renderedSheet) error {
 	if err := pngFile.Close(); err != nil {
 		return fmt.Errorf("close temporary PNG reservation %q: %w", temporaryPNG, err)
 	}
-	defer os.Remove(temporaryPNG)
+	if !keepScreenshotScratch() {
+		defer os.Remove(temporaryPNG)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), screenshotCommandTimeout)
 	defer cancel()

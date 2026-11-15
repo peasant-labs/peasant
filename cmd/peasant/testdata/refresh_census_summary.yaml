@@ -1,0 +1,17 @@
+requiredNames: [stored-census, incomplete-audit, unknown-census]
+cases:
+  - name: stored-census
+    stored: true
+    census: true
+    contains: ["refresh census: 1 sessions (includes failed attempts)", "native / new: 1", "indexed bytes measured: 1 KiB (may be partial)"]
+    absent: ["refresh census unavailable"]
+  - name: incomplete-audit
+    stored: false
+    census: true
+    contains: ["refresh census unavailable"]
+    absent: ["native / new", "indexed bytes measured"]
+  - name: unknown-census
+    stored: false
+    census: false
+    contains: ["refresh census unavailable"]
+    absent: ["refresh census: 0 sessions"]

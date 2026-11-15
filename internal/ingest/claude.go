@@ -447,6 +447,9 @@ func (a *ClaudeAdapter) saveMinedEvidence(
 	if a.evidence == nil {
 		return nil
 	}
+	if readOnly, ok := a.evidence.(ClaudeEvidenceReadOnly); ok && readOnly.ClaudeEvidenceReadOnly() {
+		return nil
+	}
 	var deletes []ResolvedPath
 	for path := range cached {
 		if _, seen := mined[path]; seen {
