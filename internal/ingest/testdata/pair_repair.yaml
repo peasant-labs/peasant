@@ -102,10 +102,10 @@ cases:
     discovered: false
     wantRepaired: true
   # A queued refresh keeps its own authority when the stored pair cannot be
-  # read: the classifier already found the native source change (here the
-  # publication bind needs a readable pair), so the pair-repair selector must
-  # not rewrite the entry to unchanged and discard that work. The native path
-  # reacquires the source, which repairs the unreadable pair.
+  # read: the classifier queued a native source compare for this settled row
+  # (the stored row holds a source fingerprint), so the pair-repair selector
+  # must not rewrite the entry to unchanged and discard that work. The native
+  # path reacquires the source, which repairs the unreadable pair.
   - name: ordinary-queued-refresh-survives-a-pair-read-fault
     pairState: damaged
     discovered: true
