@@ -59,7 +59,7 @@ func TestCaptureFixturePinsTheUpgradeProgressCrossProduct(t *testing.T) {
 }
 
 func TestCaptureFixtureGuardsRequiredUpgradeProgressSheetDeletion(t *testing.T) {
-	old := []byte("  - name: upgrade-progress\n    kind: upgrade-progress\n    title: \"mounted store upgrade progress: plan, running, stopped, refused, failed and done in both themes\"\n    theme: dark\n    viewport: {width: 1800, height: 9600}\n")
+	old := []byte("  - name: upgrade-progress\n    kind: upgrade-progress\n    title: \"mounted store upgrade progress: plan, running, stopped, refused, failed and done in both themes\"\n    theme: dark\n    viewport: {width: 1800, height: 14400}\n")
 	if count := bytes.Count(captureFixtureData, old); count != 1 {
 		t.Fatalf("upgrade progress sheet mutation source occurs %d times, want exactly one", count)
 	}
@@ -94,7 +94,7 @@ func TestCaptureFixtureRendersUpgradeProgressViews(t *testing.T) {
 			t.Fatalf("render upgrade progress capture %q: %v", capture.Name, renderErr)
 		}
 		if err := validateTerminalCapture(capture.Name, view, capture.Width, capture.Height, state.WantContains, state.WantAbsent); err != nil {
-			t.Errorf("%s: %v", capture.Name, err)
+			t.Errorf("%s: %v\n%s", capture.Name, err, ansi.Strip(view))
 		}
 		plain := ansi.Strip(view)
 		if lines := strings.Split(plain, "\n"); len(lines) != capture.Height {

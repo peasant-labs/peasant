@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -329,10 +330,27 @@ func (b *refreshLaneBench) applyMutation(testCase refreshLaneCase) {
 	if testCase.Publication == "unbound" {
 		b.unbindPublication(location)
 	}
-	if testCase.Source == "changed" {
+	if testCase.Publication == "missing" {
+		// Model a row saved with source evidence before publication captures
+		// existed, without disturbing its artifact or indexed-input proof.
+		execSessionSQL(b.t, b.database, `DELETE FROM session_publication_metadata WHERE session_id=?`, string(b.sessionID))
+		execSessionSQL(b.t, b.database, `UPDATE sessions SET publication_capture_revision=0, indexed_publication_capture_revision=0 WHERE session_id=?`, string(b.sessionID))
+		execSessionSQL(b.t, b.database, `UPDATE session_content_captures SET publication_capture_revision=0 WHERE session_id=?`, string(b.sessionID))
+		seeded := b.location()
+		if !seeded.SourceEvidenceSupported || len(seeded.SourceFingerprint) == 0 || seeded.IndexedInputHash == nil {
+			b.t.Fatalf("missing-capture seed lacks fingerprint or index proof: %+v", seeded)
+		}
+		if seeded.CaptureRevision != 0 || seeded.PublicationBound {
+			b.t.Fatalf("missing-capture seed carries capture or binding: %+v", seeded)
+		}
+	}
+	if testCase.Source == "changed" || testCase.Source == "changed_old_clock" {
 		changed := b.sourceTranscript() + b.fixture.AppendRecord + "\n"
 		if err := b.fs.WriteFile(b.sourcePath, []byte(changed), 0o600); err != nil {
 			b.t.Fatal(err)
+		}
+		if testCase.Source == "changed_old_clock" {
+			execSessionSQL(b.t, b.database, `UPDATE sessions SET ingested_ms=? WHERE session_id=?`, time.Now().Add(time.Hour).UnixMilli(), string(b.sessionID))
 		}
 	}
 }
@@ -501,6 +519,47 @@ func (b *refreshLaneBench) unbindPublication(location ingest.SessionLocation) {
 	}
 }
 
+// watchPublicationWrites counts committed writes to the stored capture and
+// index, without counting the ordinary per-run audit or discovery cache.
+func (b *refreshLaneBench) watchPublicationWrites() {
+	b.t.Helper()
+	conn, err := b.database.Pool().Take(b.t.Context())
+	if err != nil {
+		b.t.Fatal(err)
+	}
+	defer b.database.Pool().Put(conn)
+	if err := sqlitex.ExecuteTransient(conn, `CREATE TABLE test_capture_writes (n INTEGER NOT NULL)`, nil); err != nil {
+		b.t.Fatal(err)
+	}
+	for _, table := range []string{"sessions", "session_publication_metadata", "session_content_captures", "session_entries", "session_generations", "session_generation_entries", "session_content"} {
+		for _, operation := range []string{"INSERT", "UPDATE", "DELETE"} {
+			query := fmt.Sprintf(`CREATE TRIGGER test_capture_%s_%s AFTER %s ON %s BEGIN INSERT INTO test_capture_writes VALUES (1); END`, table, operation, operation, table)
+			if err := sqlitex.ExecuteTransient(conn, query, nil); err != nil {
+				b.t.Fatalf("watch %s %s: %v", table, operation, err)
+			}
+		}
+	}
+}
+
+func (b *refreshLaneBench) assertNoPublicationWrites() {
+	b.t.Helper()
+	conn, err := b.database.Pool().Take(b.t.Context())
+	if err != nil {
+		b.t.Fatal(err)
+	}
+	defer b.database.Pool().Put(conn)
+	if err := sqlitex.ExecuteTransient(conn, `SELECT count(*) FROM test_capture_writes`, &sqlitex.ExecOptions{
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			if n := stmt.ColumnInt(0); n != 0 {
+				b.t.Errorf("second run committed %d writes to the stored capture or index", n)
+			}
+			return nil
+		},
+	}); err != nil {
+		b.t.Fatal(err)
+	}
+}
+
 func (b *refreshLaneBench) decision(result *ingest.PipelineResult) ingest.RefreshDecision {
 	b.t.Helper()
 	var found *ingest.SessionResult
@@ -608,13 +667,32 @@ func TestRefreshLaneDecisionsOnTheProductionPipeline(t *testing.T) {
 				if !state.PublicationBound {
 					t.Fatalf("publication stayed unbound: %+v", state)
 				}
+				if testCase.Publication == "missing" {
+					if state.PublicationCaptureRevision <= 0 {
+						t.Fatalf("publication capture revision did not advance: %+v", state)
+					}
+					bundle, err := bench.database.LoadPublicationInput(t.Context(), bench.sessionID)
+					if err != nil {
+						t.Fatalf("publication input after capture: bundle=%+v err=%v", bundle, err)
+					}
+					if bundle.Readiness != ingest.PublicationReady || bundle.CaptureRevision != state.PublicationCaptureRevision || len(bundle.Entries) == 0 {
+						t.Fatalf("publication input after capture: bundle=%+v", bundle)
+					}
+				}
 			}
 
-			// The next stored-only run decides none: no native read, no pair
-			// write, no index write, no refresh row.
+			// Missing-capture cases repeat discovery as well, allowing the
+			// source compare but requiring all publication writes to settle.
 			bench.fs.ResetCounts()
 			secondBefore := bench.lastRun()
-			second := bench.runStoredOnly()
+			previousLocation := bench.location()
+			if testCase.Publication == "missing" {
+				bench.watchPublicationWrites()
+			}
+			second := bench.run(false, testCase.Publication == "missing")
+			if second.Summary.StoreError != nil || second.Summary.Errors != 0 {
+				t.Fatalf("the next run failed: %+v; diagnostics %+v", second.Summary, second.Diagnostics)
+			}
 			if second.Summary.Updated != 0 || second.Summary.Indexed != 0 || second.Summary.New != 0 {
 				t.Fatalf("the next stored-only run still did work: %+v", second.Summary)
 			}
@@ -624,11 +702,24 @@ func TestRefreshLaneDecisionsOnTheProductionPipeline(t *testing.T) {
 			if secondBefore == 0 {
 				t.Fatal("the second run stored no audit row")
 			}
-			if reads := bench.fs.BytesReadUnder(bench.sourceRoot, ""); reads != 0 {
+			if reads := bench.fs.BytesReadUnder(bench.sourceRoot, ""); testCase.Publication != "missing" && reads != 0 {
 				t.Fatalf("the next stored-only run read %d native source bytes", reads)
 			}
 			if bench.fs.Count(testutil.FSOpRename, bench.metadataPath) != 0 || bench.fs.Count(testutil.FSOpRename, bench.transcriptPath) != 0 {
 				t.Fatal("the next stored-only run rewrote the stored pair")
+			}
+			if testCase.Publication == "missing" {
+				bench.assertNoPublicationWrites()
+				if writes := bench.fs.CountUnder(testutil.FSOpWriteFile, bench.outputDir); writes != 0 {
+					t.Fatalf("second run wrote %d managed files", writes)
+				}
+				if renames := bench.fs.CountUnder(testutil.FSOpRename, bench.outputDir); renames != 0 {
+					t.Fatalf("second run renamed %d managed files", renames)
+				}
+				after := bench.location()
+				if !after.PublicationBound || after.CaptureRevision != previousLocation.CaptureRevision {
+					t.Fatalf("second run changed publication binding: before=%+v after=%+v", previousLocation, after)
+				}
 			}
 			nextPipeline := bench.pipeline(false, false)
 			next := ingest.StoredDecisionForTest(nextPipeline, ingest.DiscoveredSession{SessionID: bench.sessionID, Harness: bench.harness}, bench.location())

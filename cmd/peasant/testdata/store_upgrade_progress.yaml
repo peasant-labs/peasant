@@ -21,7 +21,23 @@ outcomeCases:
   - {name: finished-upgrade-is-done, error: none, want: done}
   - {name: cancelled-upgrade-is-stopped-by-user, error: interrupted, want: stopped by user}
   - {name: low-disk-refusal-is-refused-for-low-disk, error: low-disk, want: refused for low disk}
+  - {name: consent-refusal-is-refused-consent, error: consent, want: refused consent}
   - {name: step-error-is-a-failed-step, error: step, want: failed step}
+
+mountedCases:
+  - name: notice-is-inserted-above-the-live-block
+    scenario: done
+    notice: "synthetic warning: search index 100% needs rebuilding"
+    wantContains: ["upgrading the local store", "synthetic warning: search index 100% needs rebuilding", "finished 1 step(s)", "schema 69 → 70"]
+    wantAbsent: ["running step rolled back"]
+  - name: cancelled-while-waiting-for-the-lock
+    scenario: stopped-before-start
+    wantContains: ["upgrading the local store", "stopped before any step ran", "nothing was changed"]
+    wantAbsent: ["running step rolled back"]
+  - name: post-step-failure-preserves-the-committed-schema
+    scenario: failed-after-commit
+    wantContains: ["upgrading the local store", "all 1 step(s) committed", "the store is at schema 70", "the command then failed", "could not close the database"]
+    wantAbsent: ["running step rolled back", "nothing was changed"]
 
 themeCases:
   - name: light-config-uses-the-light-palette

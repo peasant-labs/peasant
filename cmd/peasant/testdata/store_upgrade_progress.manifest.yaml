@@ -3,7 +3,11 @@ requiredNames:
   - finished-upgrade-is-done
   - cancelled-upgrade-is-stopped-by-user
   - low-disk-refusal-is-refused-for-low-disk
+  - consent-refusal-is-refused-consent
   - step-error-is-a-failed-step
+  - notice-is-inserted-above-the-live-block
+  - cancelled-while-waiting-for-the-lock
+  - post-step-failure-preserves-the-committed-schema
   - light-config-uses-the-light-palette
   - dark-config-uses-the-dark-palette
   - absent-config-falls-back-to-dark

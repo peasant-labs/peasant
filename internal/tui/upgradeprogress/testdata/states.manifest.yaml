@@ -1,9 +1,15 @@
 requiredStates:
   - plan-quick-only
-  - plan-with-long-step-awaiting-confirm
+  - plan-with-long-step-before-start
   - running-uncounted-step
   - running-counted-step
   - done
   - stopped-by-user
   - refused-low-disk
   - failed-step
+  - failed-before-start
+  - stopped-before-start
+  - refused-consent-before-start
+  - stopped-between-steps
+  - failed-after-all-steps
+  - failed-after-all-steps-sanitizes-terminal-controls

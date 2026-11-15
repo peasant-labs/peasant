@@ -322,6 +322,32 @@ func TestMaybeRunV33Consent_AlreadyMigrated_NotCalled(t *testing.T) {
 	}
 }
 
+func TestNeedsMigrationConsent(t *testing.T) {
+	t.Parallel()
+	belowPath := filepath.Join(t.TempDir(), "below.db")
+	writeConsentDB(t, belowPath, 32, 2)
+	if got, err := NeedsMigrationConsent(belowPath); err != nil || !got {
+		t.Fatalf("NeedsMigrationConsent(below with sessions) = %v, %v; want true, nil", got, err)
+	}
+
+	emptyPath := filepath.Join(t.TempDir(), "empty.db")
+	writeConsentDB(t, emptyPath, 20, 0)
+	if got, err := NeedsMigrationConsent(emptyPath); err != nil || got {
+		t.Fatalf("NeedsMigrationConsent(below with no sessions) = %v, %v; want false, nil", got, err)
+	}
+
+	atPath := filepath.Join(t.TempDir(), "at.db")
+	writeConsentDB(t, atPath, migrationV33TargetVersion, 3)
+	if got, err := NeedsMigrationConsent(atPath); err != nil || got {
+		t.Fatalf("NeedsMigrationConsent(at target) = %v, %v; want false, nil", got, err)
+	}
+
+	missingPath := filepath.Join(t.TempDir(), "missing.db")
+	if got, err := NeedsMigrationConsent(missingPath); err != nil || got {
+		t.Fatalf("NeedsMigrationConsent(missing file) = %v, %v; want false, nil", got, err)
+	}
+}
+
 func TestMaybeRunV33Consent_NilCallback_Proceeds(t *testing.T) {
 	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "nilcb.db")

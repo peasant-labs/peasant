@@ -98,55 +98,76 @@ func newConsentPrompter(in io.Reader, out io.Writer, interactive bool) Migration
 //
 // Caller invariant: dbPath must be a real on-disk file (not :memory:). Callers
 // that open in-memory stores skip this check entirely.
-func maybeRunV33Consent(dbPath string, consent MigrationConsent) error {
+// inspectV33Consent reads the schema version and session count the consent
+// gate decides from. It opens the database read-only and writes nothing. A
+// missing file is a fresh install; a missing sessions table reads as zero
+// sessions. Both need no consent.
+func inspectV33Consent(dbPath string) (currentVersion, sessionsCount int, err error) {
 	if dbPath == "" || dbPath == ":memory:" {
-		return nil
+		return 0, 0, nil
 	}
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
 		// Fresh install — sqlitemigration will create the DB at the target
 		// version directly. No consent needed.
-		return nil
+		return 0, 0, nil
 	} else if err != nil {
-		return fmt.Errorf("store: stat DB before migration: %w", err)
+		return 0, 0, fmt.Errorf("store: stat DB before migration: %w", err)
 	}
 
 	// Open a read-only connection just to inspect user_version + row counts.
 	conn, err := sqlite.OpenConn(dbPath, sqlite.OpenReadOnly)
 	if err != nil {
-		return fmt.Errorf("store: open DB for migration check: %w", err)
+		return 0, 0, fmt.Errorf("store: open DB for migration check: %w", err)
 	}
 	defer conn.Close()
 
-	var currentVersion int
 	if err := sqlitex.ExecuteTransient(conn, "PRAGMA user_version", &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			currentVersion = int(stmt.ColumnInt64(0))
 			return nil
 		},
 	}); err != nil {
-		return fmt.Errorf("store: read user_version: %w", err)
+		return 0, 0, fmt.Errorf("store: read user_version: %w", err)
 	}
 
 	// Not crossing the V33 boundary → nothing to gate.
 	if currentVersion >= migrationV33TargetVersion {
-		return nil
+		return currentVersion, 0, nil
 	}
 
 	// Count sessions to determine whether this is a fresh DB (just had the
 	// schema created but never used) or a real user DB with data to migrate.
-	var sessionsCount int
-	err = sqlitex.ExecuteTransient(conn, "SELECT COUNT(*) FROM sessions", &sqlitex.ExecOptions{
+	if err := sqlitex.ExecuteTransient(conn, "SELECT COUNT(*) FROM sessions", &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			sessionsCount = int(stmt.ColumnInt64(0))
 			return nil
 		},
-	})
-	if err != nil {
+	}); err != nil {
 		// Sessions table may not exist on very old schemas — treat as empty,
 		// no consent needed.
-		return nil
+		return currentVersion, 0, nil
 	}
-	if sessionsCount == 0 {
+	return currentVersion, sessionsCount, nil
+}
+
+// NeedsMigrationConsent reports whether opening dbPath would ask for the
+// one-time V33 consent: the database is below V33 and already holds session
+// rows. It is a read-only probe. The upgrade gate repeats it under the upgrade
+// lock, so a caller uses this to choose a renderer, not to decide the upgrade.
+func NeedsMigrationConsent(dbPath string) (bool, error) {
+	currentVersion, sessionsCount, err := inspectV33Consent(dbPath)
+	if err != nil {
+		return false, err
+	}
+	return currentVersion < migrationV33TargetVersion && sessionsCount > 0, nil
+}
+
+func maybeRunV33Consent(dbPath string, consent MigrationConsent) error {
+	currentVersion, sessionsCount, err := inspectV33Consent(dbPath)
+	if err != nil {
+		return err
+	}
+	if currentVersion >= migrationV33TargetVersion || sessionsCount == 0 {
 		return nil
 	}
 
@@ -170,11 +191,9 @@ func maybeRunV33Consent(dbPath string, consent MigrationConsent) error {
 		return ErrMigrationRefused
 	}
 
-	// Close the read-only connection before copying so the file is in a
-	// well-defined state. (SQLite WAL mode keeps changes in -wal/-shm files,
-	// but at this point we haven't taken any writes.)
-	_ = conn.Close()
-
+	// The probe connection is already closed, so the copy sees a file with no
+	// open read handle. (SQLite WAL mode keeps changes in -wal/-shm files, but
+	// at this point we haven't taken any writes.)
 	if err := copyFile(dbPath, backupPath); err != nil {
 		return fmt.Errorf("store: backup DB to %s: %w", backupPath, err)
 	}

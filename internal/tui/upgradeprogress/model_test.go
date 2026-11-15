@@ -3,7 +3,9 @@ package upgradeprogress
 import (
 	"bytes"
 	_ "embed"
+	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -58,6 +60,7 @@ type stateFixture struct {
 	Events       []eventFixture        `yaml:"events"`
 	Finished     []finishedStepFixture `yaml:"finished"`
 	Outcome      string                `yaml:"outcome"`
+	Error        string                `yaml:"error"`
 	WantContains []string              `yaml:"wantContains"`
 	WantAbsent   []string              `yaml:"wantAbsent"`
 }
@@ -163,7 +166,11 @@ func (f stateFixture) model(t *testing.T, th theme.Theme) Model {
 				Step: plan.Steps[finished.Step-1], Duration: time.Duration(finished.DurationMs) * time.Millisecond,
 			})
 		}
-		model, _ = model.Update(FinalMsg{Report: report, Outcome: outcome})
+		var finalErr error
+		if f.Error != "" {
+			finalErr = errors.New(f.Error)
+		}
+		model, _ = model.Update(FinalMsg{Report: report, Outcome: outcome, Err: finalErr})
 	}
 	return model
 }
@@ -219,8 +226,9 @@ func assertViewFits(t *testing.T, key, view string, width, height int) {
 }
 
 func TestOutcomeIsAClosedSet(t *testing.T) {
-	if len(AllOutcomes) != 4 {
-		t.Fatalf("AllOutcomes has %d entries, want 4", len(AllOutcomes))
+	expected := []Outcome{OutcomeDone, OutcomeStoppedByUser, OutcomeRefusedLowDisk, OutcomeRefusedConsent, OutcomeFailedStep}
+	if !slices.Equal(AllOutcomes, expected) {
+		t.Fatalf("AllOutcomes = %v, want %v", AllOutcomes, expected)
 	}
 	for _, outcome := range AllOutcomes {
 		parsed, err := NewOutcome(outcome.String())

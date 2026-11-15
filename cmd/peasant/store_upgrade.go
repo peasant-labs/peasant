@@ -415,7 +415,7 @@ func runUpgradeWithProgressMode(cmd *cobra.Command, plan store.UpgradePlan, prog
 		Consent: store.PromptMigrationConsentOnTTY(),
 	}
 	started := time.Now()
-	if progress == storeUpgradeProgressPlain || !isTerminalWriter(stderr) {
+	if !shouldMountUpgradeProgress(progress, isTerminalWriter(stderr), plan.DBPath) {
 		printer := newStoreUpgradeLinePrinter(stderr)
 		options.Progress = printer.event
 		report, err := upgradeStore(ctx, plan.DBPath, options)
@@ -435,6 +435,24 @@ func runUpgradeWithProgressMode(cmd *cobra.Command, plan store.UpgradePlan, prog
 func isTerminalWriter(w io.Writer) bool {
 	file, ok := w.(*os.File)
 	return ok && term.IsTerminal(int(file.Fd()))
+}
+
+// needsMigrationConsent is the read-only gate the terminal progress path runs
+// before it mounts the program. A pending one-time migration prompt writes to
+// the terminal directly, so mounting first would let the next redraw erase the
+// prompt while it is being answered. A variable so a test can exercise both
+// answers without a real store.
+var needsMigrationConsent = store.NeedsMigrationConsent
+
+// shouldMountUpgradeProgress reports whether the inline program can own the
+// terminal for this upgrade. It refuses when the upgrade still has to ask the
+// one-time migration consent on that same terminal.
+func shouldMountUpgradeProgress(progress storeUpgradeProgressMode, terminal bool, dbPath string) bool {
+	if progress == storeUpgradeProgressPlain || !terminal {
+		return false
+	}
+	consentPending, err := needsMigrationConsent(dbPath)
+	return err == nil && !consentPending
 }
 
 // storeUpgradeTheme resolves the palette for the upgrade progress child from
@@ -474,6 +492,7 @@ func runUpgradeProgressProgram(ctx context.Context, out io.Writer, plan store.Up
 		tea.WithFPS(progressProgramFPS),
 		tea.WithoutSignalHandler(),
 	)
+	options.Notices = upgradeProgramNoticeWriter{program: program}
 	options.Progress = func(event store.UpgradeEvent) {
 		program.Send(upgradeprogress.EventMsg{Event: event})
 	}
@@ -486,6 +505,7 @@ func runUpgradeProgressProgram(ctx context.Context, out io.Writer, plan store.Up
 	program.Send(upgradeprogress.FinalMsg{
 		Report:  report,
 		Outcome: storeUpgradeOutcome(report, upgradeErr),
+		Err:     upgradeErr,
 	})
 	renderErr := <-done
 	if renderErr != nil {
@@ -493,6 +513,17 @@ func runUpgradeProgressProgram(ctx context.Context, out io.Writer, plan store.Up
 	}
 	return report, upgradeErr
 }
+
+// upgradeProgramNoticeWriter inserts notices above the live block instead of
+// writing through the terminal while Bubble Tea owns it.
+type upgradeProgramNoticeWriter struct{ program *tea.Program }
+
+func (w upgradeProgramNoticeWriter) Write(p []byte) (int, error) {
+	w.program.Printf("%s", string(p))
+	return len(p), nil
+}
+
+var _ io.Writer = upgradeProgramNoticeWriter{}
 
 // upgradeProgramModel adapts the data-only upgrade progress child to Bubble
 // Tea's top-level model. The child owns all state and rendering; this adapter
@@ -517,8 +548,7 @@ func (m upgradeProgramModel) View() tea.View { return tea.NewView(m.child.View()
 var _ tea.Model = upgradeProgramModel{}
 
 // storeUpgradeOutcome maps an upgrade's result to the progress child's closed
-// outcome set. A stopped context is reported before the generic failure: the
-// interrupted step rolled back and the finished steps stay applied.
+// outcome set. Specific refusals and cancellation precede generic failure.
 func storeUpgradeOutcome(report store.UpgradeReport, err error) upgradeprogress.Outcome {
 	if err == nil {
 		return upgradeprogress.OutcomeDone
@@ -526,6 +556,9 @@ func storeUpgradeOutcome(report store.UpgradeReport, err error) upgradeprogress.
 	var disk *store.UpgradeDiskError
 	if errors.As(err, &disk) {
 		return upgradeprogress.OutcomeRefusedLowDisk
+	}
+	if errors.Is(err, store.ErrMigrationRefused) {
+		return upgradeprogress.OutcomeRefusedConsent
 	}
 	var interrupted *store.UpgradeInterruptedError
 	if errors.As(err, &interrupted) || errors.Is(err, context.Canceled) {
