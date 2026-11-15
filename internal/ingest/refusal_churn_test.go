@@ -12,6 +12,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"gopkg.in/yaml.v3"
 )
@@ -259,6 +260,18 @@ func runSettledRefusalChurnCase(t *testing.T, fixture refusalChurnFixture, name 
 	if indexed != int64(wantIndexed) || second.Summary.Indexed != wantIndexed {
 		t.Fatalf("%s: the second harvest indexed %d session(s), summary %d, want %d; index maintenance is independent of native metadata updates", name, indexed, second.Summary.Indexed, wantIndexed)
 	}
+	if stored == refusalStoredNoPublication {
+		state, err := database.ReadIndexState(ctx, sid)
+		if err != nil || state == nil {
+			t.Fatalf("read refusal state after the measured harvest: state=%+v err=%v", state, err)
+		}
+		if state.PublicationCaptureRevision != 0 || state.PublicationBound {
+			t.Fatalf("measured harvest added or bound a publication capture to the refusal: %+v", state)
+		}
+		if revision := rawSessionPublicationRevision(t, database, sid); revision != 0 {
+			t.Fatalf("measured harvest stored publication revision %d on the refusal, want zero", revision)
+		}
+	}
 }
 
 // countingIndexStore counts the sessions the pipeline asks the real store to
@@ -292,4 +305,31 @@ func execSessionSQL(t *testing.T, database *store.Store, statement string, args 
 	if err := sqlitex.ExecuteTransient(conn, statement, &sqlitex.ExecOptions{Args: args}); err != nil {
 		t.Fatalf("exec %q: %v", statement, err)
 	}
+}
+
+// rawSessionPublicationRevision reads the session counter itself, rather than
+// the public capture projection that masks an absent metadata row.
+func rawSessionPublicationRevision(t *testing.T, database *store.Store, sid ingest.SessionID) int64 {
+	t.Helper()
+	conn, err := database.Pool().Take(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Pool().Put(conn)
+	var revision int64
+	found := false
+	if err := sqlitex.ExecuteTransient(conn, `SELECT publication_capture_revision FROM sessions WHERE session_id=?`, &sqlitex.ExecOptions{
+		Args: []any{sid.String()},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			found = true
+			revision = stmt.ColumnInt64(0)
+			return nil
+		},
+	}); err != nil {
+		t.Fatalf("read session publication revision: %v", err)
+	}
+	if !found {
+		t.Fatalf("session %s was missing while reading its publication revision", sid)
+	}
+	return revision
 }

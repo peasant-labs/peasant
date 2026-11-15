@@ -32,28 +32,30 @@ var refreshLaneManifestYAML []byte
 var refreshLaneStrikeTranscript []byte
 
 type refreshLaneCase struct {
-	Name              string                           `yaml:"name"`
-	Harness           ingest.Harness                   `yaml:"harness"`
-	Source            refreshLaneSource                `yaml:"source"`
-	Discover          bool                             `yaml:"discover"`
-	StoredAdapter     refreshLaneAdapter               `yaml:"stored_adapter"`
-	FileAdapter       refreshLaneFileAdapter           `yaml:"file_adapter"`
-	MetadataSchema    refreshLaneMetadataSchema        `yaml:"metadata_schema"`
-	Pair              refreshLanePair                  `yaml:"pair"`
-	Force             bool                             `yaml:"force"`
-	Indexer           refreshLaneIndexer               `yaml:"indexer"`
-	Refusal           ingest.ContentCaptureFailureCode `yaml:"refusal"`
-	RefusalIndexer    refreshLaneRefusalIndexer        `yaml:"refusal_indexer"`
-	Publication       refreshLanePublication           `yaml:"publication"`
-	NativeSource      fixtureNativeSource              `yaml:"native_source"`
-	MaxNativeReads    int                              `yaml:"max_native_reads"`
-	WantReason        ingest.RefreshReason             `yaml:"want_reason"`
-	WantLane          ingest.RefreshLane               `yaml:"want_lane"`
-	WantNativeRead    bool                             `yaml:"want_native_read"`
-	SecondSourceReads *int                             `yaml:"second_source_reads"`
-	WantPairWrites    []refreshLanePairMember          `yaml:"want_pair_writes"`
-	WantIndexed       bool                             `yaml:"want_indexed"`
-	WantBound         bool                             `yaml:"want_bound"`
+	Name                 string                           `yaml:"name"`
+	Harness              ingest.Harness                   `yaml:"harness"`
+	Source               refreshLaneSource                `yaml:"source"`
+	Discover             bool                             `yaml:"discover"`
+	StoredAdapter        refreshLaneAdapter               `yaml:"stored_adapter"`
+	FileAdapter          refreshLaneFileAdapter           `yaml:"file_adapter"`
+	MetadataSchema       refreshLaneMetadataSchema        `yaml:"metadata_schema"`
+	Pair                 refreshLanePair                  `yaml:"pair"`
+	Force                bool                             `yaml:"force"`
+	Indexer              refreshLaneIndexer               `yaml:"indexer"`
+	Refusal              ingest.ContentCaptureFailureCode `yaml:"refusal"`
+	RefusalIndexer       refreshLaneRefusalIndexer        `yaml:"refusal_indexer"`
+	Publication          refreshLanePublication           `yaml:"publication"`
+	NativeSource         fixtureNativeSource              `yaml:"native_source"`
+	MaxNativeReads       int                              `yaml:"max_native_reads"`
+	WantReason           ingest.RefreshReason             `yaml:"want_reason"`
+	WantLane             ingest.RefreshLane               `yaml:"want_lane"`
+	WantNativeRead       bool                             `yaml:"want_native_read"`
+	SecondSourceReads    *int                             `yaml:"second_source_reads"`
+	WantPairWrites       []refreshLanePairMember          `yaml:"want_pair_writes"`
+	WantIndexed          bool                             `yaml:"want_indexed"`
+	WantBound            bool                             `yaml:"want_bound"`
+	WantCaptureRevision  *int64                           `yaml:"want_capture_revision"`
+	WantPublicationBound *bool                            `yaml:"want_publication_bound"`
 }
 
 type refreshLaneFixture struct {
@@ -594,6 +596,39 @@ func (b *refreshLaneBench) decision(result *ingest.PipelineResult) ingest.Refres
 	return found.Decision
 }
 
+func (b *refreshLaneBench) assertPairWrites(want []refreshLanePairMember) {
+	b.t.Helper()
+	wantWrites := make(map[refreshLanePairMember]bool, len(want))
+	for _, name := range want {
+		wantWrites[name] = true
+	}
+	if got := b.fs.Count(testutil.FSOpRename, b.metadataPath) > 0; got != wantWrites[refreshPairMetadata] {
+		b.t.Fatalf("metadata pair write = %t, want %t", got, wantWrites[refreshPairMetadata])
+	}
+	if got := b.fs.Count(testutil.FSOpRename, b.transcriptPath) > 0; got != wantWrites[refreshPairTranscript] {
+		b.t.Fatalf("transcript pair write = %t, want %t", got, wantWrites[refreshPairTranscript])
+	}
+}
+
+func (b *refreshLaneBench) assertExpectedPublication(testCase refreshLaneCase) {
+	b.t.Helper()
+	if testCase.WantCaptureRevision == nil && testCase.WantPublicationBound == nil {
+		return
+	}
+	location := b.location()
+	if testCase.WantCaptureRevision != nil && location.CaptureRevision != *testCase.WantCaptureRevision {
+		b.t.Fatalf("capture revision = %d, want %d", location.CaptureRevision, *testCase.WantCaptureRevision)
+	}
+	if testCase.WantCaptureRevision != nil {
+		if got := rawSessionPublicationRevision(b.t, b.database, b.sessionID); got != *testCase.WantCaptureRevision {
+			b.t.Fatalf("stored session capture revision = %d, want %d", got, *testCase.WantCaptureRevision)
+		}
+	}
+	if testCase.WantPublicationBound != nil && location.PublicationBound != *testCase.WantPublicationBound {
+		b.t.Fatalf("publication bound = %t, want %t", location.PublicationBound, *testCase.WantPublicationBound)
+	}
+}
+
 func TestRefreshLaneDecisionsOnTheProductionPipeline(t *testing.T) {
 	fixture := loadRefreshLaneFixture(t)
 	for _, testCase := range fixture.Cases {
@@ -661,19 +696,11 @@ func TestRefreshLaneDecisionsOnTheProductionPipeline(t *testing.T) {
 			if testCase.WantNativeRead != (nativeBytes > 0) {
 				t.Fatalf("native source bytes read = %d, want native read %t; summary %+v", nativeBytes, testCase.WantNativeRead, result.Summary)
 			}
-			wantWrites := make(map[refreshLanePairMember]bool, len(testCase.WantPairWrites))
-			for _, name := range testCase.WantPairWrites {
-				wantWrites[name] = true
-			}
-			if got := bench.fs.Count(testutil.FSOpRename, bench.metadataPath) > 0; got != wantWrites[refreshPairMetadata] {
-				t.Fatalf("metadata pair write = %t, want %t", got, wantWrites[refreshPairMetadata])
-			}
-			if got := bench.fs.Count(testutil.FSOpRename, bench.transcriptPath) > 0; got != wantWrites[refreshPairTranscript] {
-				t.Fatalf("transcript pair write = %t, want %t", got, wantWrites[refreshPairTranscript])
-			}
+			bench.assertPairWrites(testCase.WantPairWrites)
 			if got := result.Summary.Indexed == 1; got != testCase.WantIndexed {
 				t.Fatalf("indexed = %t (%+v), want %t", got, result.Summary, testCase.WantIndexed)
 			}
+			bench.assertExpectedPublication(testCase)
 			if testCase.WantBound {
 				state, err := bench.database.ReadIndexState(t.Context(), bench.sessionID)
 				if err != nil || state == nil {
@@ -775,6 +802,17 @@ func TestRefreshLaneMissingCaptureWithUnavailableSource(t *testing.T) {
 				if reads := bench.fs.ReadCount(bench.sourcePath); reads < 1 || reads > testCase.MaxNativeReads {
 					t.Fatalf("attempt %d: source reads = %d, want 1..%d", attempt, reads, testCase.MaxNativeReads)
 				}
+				if got := bench.fs.BytesReadUnder(bench.sourceRoot, "") > 0; got != testCase.WantNativeRead {
+					t.Fatalf("attempt %d: native source read = %t, want %t", attempt, got, testCase.WantNativeRead)
+				}
+				if attempt == 2 && testCase.SecondSourceReads != nil && bench.fs.ReadCount(bench.sourcePath) != *testCase.SecondSourceReads {
+					t.Fatalf("attempt %d: source reads = %d, want %d", attempt, bench.fs.ReadCount(bench.sourcePath), *testCase.SecondSourceReads)
+				}
+				bench.assertPairWrites(testCase.WantPairWrites)
+				bench.assertExpectedPublication(testCase)
+				if got := result.Summary.Indexed == 1; got != testCase.WantIndexed {
+					t.Fatalf("attempt %d: indexed = %t, want %t", attempt, got, testCase.WantIndexed)
+				}
 				if result.Summary.Errors != 0 || result.Summary.StoreError != nil || result.Summary.Indexed != 0 {
 					t.Fatalf("attempt %d: unusable source changed or failed stored work: %+v; diagnostics %+v", attempt, result.Summary, result.Diagnostics)
 				}
@@ -783,7 +821,7 @@ func TestRefreshLaneMissingCaptureWithUnavailableSource(t *testing.T) {
 				}
 				reports := 0
 				for _, diagnostic := range result.Diagnostics {
-					if diagnostic.ErrorType == "adapter_refresh_unavailable" {
+					if diagnostic.ErrorType == ingest.OutcomeReasonAdapterRefreshUnavailable.Code() {
 						reports++
 						if diagnostic.Remediation == "" {
 							t.Fatalf("attempt %d: unavailable diagnostic has no remedy: %+v", attempt, diagnostic)
@@ -827,7 +865,7 @@ func TestRefreshLaneMissingCaptureWithUnavailableSource(t *testing.T) {
 				t.Fatalf("recovered decision = %s/%s", decision.Reason, decision.Lane)
 			}
 			location := bench.location()
-			if location.CaptureRevision <= 0 || !location.PublicationBound {
+			if location.CaptureRevision <= 0 || location.PublicationBound != testCase.WantBound {
 				t.Fatalf("restoring the source did not bind a new capture: %+v; result %+v", location, recovered.Summary)
 			}
 			if cause, err := bench.database.ReadSourceUnavailability(t.Context(), bench.sessionID); err != nil || cause != nil {

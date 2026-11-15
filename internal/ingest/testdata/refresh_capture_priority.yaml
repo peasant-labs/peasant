@@ -15,8 +15,8 @@ requiredNames:
   - capture-recovery
   - source-unproven
   - old-metadata-schema
-  - adapter-behind
-  - indexer-behind
+  - missing-capture-outranks-behind-adapter
+  - missing-capture-outranks-behind-indexer
 cases:
   - {name: missing-capture, mutation: none, want_missing: true, reason: publication_capture_missing, lane: native}
   - {name: unsupported-source-evidence, mutation: unsupported, want_missing: false, reason: none, lane: none}
@@ -34,5 +34,5 @@ cases:
   - {name: capture-recovery, mutation: capture-recovery, want_missing: true, reason: source_changed, lane: native}
   - {name: source-unproven, mutation: source-unproven, want_missing: true, reason: source_compare, lane: native}
   - {name: old-metadata-schema, mutation: old-metadata, want_missing: true, reason: metadata_schema, lane: native}
-  - {name: adapter-behind, mutation: adapter-behind, want_missing: true, reason: publication_capture_missing, lane: native}
-  - {name: indexer-behind, mutation: indexer-behind, want_missing: true, reason: publication_capture_missing, lane: native}
+  - {name: missing-capture-outranks-behind-adapter, mutation: adapter-behind, want_missing: true, reason: publication_capture_missing, lane: native}
+  - {name: missing-capture-outranks-behind-indexer, mutation: indexer-behind, want_missing: true, reason: publication_capture_missing, lane: native}

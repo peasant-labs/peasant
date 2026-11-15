@@ -160,8 +160,26 @@ func (c refreshLaneCase) Validate() error {
 	if _, err := ingest.NewRefreshLane(string(c.WantLane)); err != nil {
 		return fmt.Errorf("want_lane: %w", err)
 	}
+	if c.FileAdapter != refreshFileAdapterUnspecified && c.StoredAdapter != refreshAdapterBehind {
+		return fmt.Errorf("file_adapter %q requires stored_adapter %q; remove the file override or select the behind adapter", c.FileAdapter, refreshAdapterBehind)
+	}
+	if c.Refusal == ingest.ContentCaptureNoFailure && c.RefusalIndexer != refreshRefusalIndexerUnspecified {
+		return fmt.Errorf("refusal_indexer %q requires a refusal; remove the indexer override or name a refusal", c.RefusalIndexer)
+	}
+	if c.Refusal != ingest.ContentCaptureNoFailure && c.RefusalIndexer == refreshRefusalIndexerUnspecified {
+		return fmt.Errorf("refusal %q requires refusal_indexer; name its stored indexer state", c.Refusal)
+	}
 	if c.NativeSource == fixtureNativeSourceMalformed && c.MaxNativeReads <= 0 {
 		return fmt.Errorf("max_native_reads must be positive for %q; set a bound in refresh_lane.yaml", c.NativeSource)
+	}
+	if c.NativeSource != fixtureNativeSourceMalformed && c.MaxNativeReads != 0 {
+		return fmt.Errorf("max_native_reads requires a %q native_source; remove the bound or select that source", fixtureNativeSourceMalformed)
+	}
+	if c.SecondSourceReads != nil && *c.SecondSourceReads < 0 {
+		return fmt.Errorf("second_source_reads cannot be negative; state a nonnegative read count")
+	}
+	if c.WantCaptureRevision != nil && *c.WantCaptureRevision < 0 {
+		return fmt.Errorf("want_capture_revision cannot be negative; state a nonnegative revision")
 	}
 	return nil
 }

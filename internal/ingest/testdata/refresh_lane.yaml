@@ -220,6 +220,8 @@ cases:
     refusal: strict_capture_refused
     refusal_indexer: current
     publication: missing
+    want_capture_revision: 0
+    want_publication_bound: false
     want_reason: none
     want_lane: none
     want_native_read: false

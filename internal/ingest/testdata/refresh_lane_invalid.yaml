@@ -14,6 +14,12 @@ required_names:
   - unknown-pair-member
   - unknown-reason
   - unknown-lane
+  - file-adapter-requires-behind
+  - refusal-indexer-requires-refusal
+  - refusal-requires-indexer
+  - read-bound-requires-malformed-source
+  - negative-second-source-reads
+  - negative-capture-revision
 cases:
   - {name: unknown-harness, patch: {harness: future-harness}, error_contains: harness}
   - {name: unknown-source, patch: {source: typo}, error_contains: source}
@@ -30,3 +36,9 @@ cases:
   - {name: unknown-pair-member, patch: {want_pair_writes: [typo]}, error_contains: want_pair_writes}
   - {name: unknown-reason, patch: {want_reason: typo}, error_contains: want_reason}
   - {name: unknown-lane, patch: {want_lane: typo}, error_contains: want_lane}
+  - {name: file-adapter-requires-behind, patch: {file_adapter: current}, error_contains: file_adapter}
+  - {name: refusal-indexer-requires-refusal, patch: {refusal_indexer: behind}, error_contains: refusal_indexer}
+  - {name: refusal-requires-indexer, patch: {refusal: strict_capture_refused}, error_contains: refusal_indexer}
+  - {name: read-bound-requires-malformed-source, patch: {max_native_reads: 2}, error_contains: max_native_reads}
+  - {name: negative-second-source-reads, patch: {second_source_reads: -1}, error_contains: second_source_reads}
+  - {name: negative-capture-revision, patch: {want_capture_revision: -1}, error_contains: want_capture_revision}

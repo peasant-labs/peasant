@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"testing"
 	"time"
 
@@ -69,7 +70,8 @@ func TestClosedFieldComparisonRule(t *testing.T) {
 	config := filepath.Join(testutil.ModuleRoot(t), "sgconfig.yml")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "ast-grep", "scan", "--config", config, "--json=compact", "--filter", "^no-stringly-typed-field-comparison$", ".")
+	filter := "^" + regexp.QuoteMeta(string(closedFieldComparisonRuleID)) + "$"
+	cmd := exec.CommandContext(ctx, "ast-grep", "scan", "--config", config, "--json=compact", "--filter", filter, ".")
 	cmd.Dir = tempRoot
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
