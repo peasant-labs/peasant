@@ -2,6 +2,7 @@ package ingest
 
 import (
 	_ "embed"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -11,30 +12,98 @@ import (
 //go:embed testdata/refresh_capture_priority.yaml
 var refreshCapturePriorityYAML []byte
 
-// TestRefreshLaneCapturePriority checks the evidence boundary and reason
-// precedence; the production-pipeline fixture checks acquisition and binding.
-func TestRefreshLaneCapturePriority(t *testing.T) {
-	var fixture struct {
-		RequiredNames []string `yaml:"requiredNames"`
-		Cases         []struct {
-			Name        string `yaml:"name"`
-			Mutation    string `yaml:"mutation"`
-			WantMissing bool   `yaml:"want_missing"`
-			Reason      string `yaml:"reason"`
-			Lane        string `yaml:"lane"`
-		} `yaml:"cases"`
+type capturePriorityMutation string
+
+const (
+	capturePriorityNone                 capturePriorityMutation = "none"
+	capturePriorityUnsupported          capturePriorityMutation = "unsupported"
+	capturePriorityNoFingerprint        capturePriorityMutation = "no-fingerprint"
+	capturePriorityCaptured             capturePriorityMutation = "captured"
+	capturePriorityStrictRefusal        capturePriorityMutation = "strict-refusal"
+	capturePriorityRefusalIndexerBehind capturePriorityMutation = "refusal-indexer-behind"
+	capturePriorityOmittedRefusal       capturePriorityMutation = "omitted-refusal"
+	capturePriorityUnknownRefusal       capturePriorityMutation = "unknown-refusal"
+	capturePriorityForced               capturePriorityMutation = "forced"
+	capturePriorityNew                  capturePriorityMutation = "new"
+	capturePriorityPairMissing          capturePriorityMutation = "pair-missing"
+	capturePrioritySourceChanged        capturePriorityMutation = "source-changed"
+	capturePriorityClockMoved           capturePriorityMutation = "clock-moved"
+	capturePriorityRecovery             capturePriorityMutation = "capture-recovery"
+	capturePrioritySourceUnproven       capturePriorityMutation = "source-unproven"
+	capturePriorityOldMetadata          capturePriorityMutation = "old-metadata"
+	capturePriorityAdapterBehind        capturePriorityMutation = "adapter-behind"
+	capturePriorityIndexerBehind        capturePriorityMutation = "indexer-behind"
+)
+
+func (m capturePriorityMutation) Validate() error {
+	switch m {
+	case capturePriorityNone, capturePriorityUnsupported, capturePriorityNoFingerprint, capturePriorityCaptured,
+		capturePriorityStrictRefusal, capturePriorityRefusalIndexerBehind, capturePriorityOmittedRefusal,
+		capturePriorityUnknownRefusal, capturePriorityForced, capturePriorityNew, capturePriorityPairMissing,
+		capturePrioritySourceChanged, capturePriorityClockMoved, capturePriorityRecovery,
+		capturePrioritySourceUnproven, capturePriorityOldMetadata, capturePriorityAdapterBehind,
+		capturePriorityIndexerBehind:
+		return nil
+	default:
+		return fmt.Errorf("unknown mutation %q; use a declared capture-priority mutation in refresh_capture_priority.yaml", m)
 	}
-	decoder := yaml.NewDecoder(strings.NewReader(string(refreshCapturePriorityYAML)))
+}
+
+type capturePriorityCase struct {
+	Name        string                  `yaml:"name"`
+	Mutation    capturePriorityMutation `yaml:"mutation"`
+	WantMissing bool                    `yaml:"want_missing"`
+	Reason      RefreshReason           `yaml:"reason"`
+	Lane        RefreshLane             `yaml:"lane"`
+}
+
+type capturePriorityFixture struct {
+	RequiredNames []string              `yaml:"requiredNames"`
+	Cases         []capturePriorityCase `yaml:"cases"`
+}
+
+func decodeCapturePriorityFixture(data []byte) (capturePriorityFixture, error) {
+	var fixture capturePriorityFixture
+	decoder := yaml.NewDecoder(strings.NewReader(string(data)))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&fixture); err != nil {
-		t.Fatal(err)
+		return capturePriorityFixture{}, fmt.Errorf("decode refresh_capture_priority.yaml: %w", err)
 	}
 	names := make(map[string]bool)
 	for _, c := range fixture.Cases {
 		if c.Name == "" || names[c.Name] {
-			t.Fatalf("empty or repeated fixture name %q", c.Name)
+			return capturePriorityFixture{}, fmt.Errorf("refresh_capture_priority.yaml has an empty or repeated case name %q", c.Name)
 		}
 		names[c.Name] = true
+		if err := c.Mutation.Validate(); err != nil {
+			return capturePriorityFixture{}, fmt.Errorf("refresh_capture_priority.yaml case %s: %w", c.Name, err)
+		}
+		if _, err := NewRefreshReason(string(c.Reason)); err != nil {
+			return capturePriorityFixture{}, fmt.Errorf("refresh_capture_priority.yaml case %s reason: %w", c.Name, err)
+		}
+		if _, err := NewRefreshLane(string(c.Lane)); err != nil {
+			return capturePriorityFixture{}, fmt.Errorf("refresh_capture_priority.yaml case %s lane: %w", c.Name, err)
+		}
+	}
+	if len(fixture.RequiredNames) == 0 {
+		return capturePriorityFixture{}, fmt.Errorf("refresh_capture_priority.yaml must list its required cases")
+	}
+	for _, name := range fixture.RequiredNames {
+		if !names[name] {
+			return capturePriorityFixture{}, fmt.Errorf("refresh_capture_priority.yaml required case %q is missing", name)
+		}
+	}
+	return fixture, nil
+}
+
+// TestRefreshLaneCapturePriority checks the evidence boundary and reason
+// precedence; the production-pipeline fixture checks acquisition and binding.
+func TestRefreshLaneCapturePriority(t *testing.T) {
+	fixture, err := decodeCapturePriorityFixture(refreshCapturePriorityYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range fixture.Cases {
 		t.Run(c.Name, func(t *testing.T) {
 			ingested := int64(1)
 			location := SessionLocation{
@@ -42,12 +111,18 @@ func TestRefreshLaneCapturePriority(t *testing.T) {
 				SourceFingerprint: []byte("fingerprint"), SchemaVersion: CurrentSchemaVersion,
 			}
 			switch c.Mutation {
-			case "unsupported":
+			case capturePriorityUnsupported:
 				location.SourceEvidenceSupported = false
-			case "no-fingerprint":
+			case capturePriorityNoFingerprint:
 				location.SourceFingerprint = nil
-			case "captured":
+			case capturePriorityCaptured:
 				location.CaptureRevision = 1
+			case capturePriorityStrictRefusal, capturePriorityRefusalIndexerBehind:
+				location.ContentFailureCode = ContentCaptureStrictRefused
+			case capturePriorityOmittedRefusal:
+				location.ContentFailureCode = ContentCaptureSourceRecordsOmitted
+			case capturePriorityUnknownRefusal:
+				location.ContentFailureCode = ContentCaptureUnknownDataRetained
 			}
 			pipeline := &Pipeline{}
 			evidence := pipeline.refreshEvidenceForLocation(DiscoveredSession{}, location, nil)
@@ -55,27 +130,30 @@ func TestRefreshLaneCapturePriority(t *testing.T) {
 			evidence.IndexerVersion, evidence.IndexerTarget = 1, 1
 			evidence.IndexProofPresent = true
 			switch c.Mutation {
-			case "none", "unsupported", "no-fingerprint", "captured":
-			case "forced":
+			case capturePriorityNone, capturePriorityUnsupported, capturePriorityNoFingerprint, capturePriorityCaptured,
+				capturePriorityStrictRefusal, capturePriorityOmittedRefusal, capturePriorityUnknownRefusal:
+			case capturePriorityForced:
 				evidence.Forced = true
-			case "new":
+			case capturePriorityNew:
 				evidence.StoredRow = false
-			case "pair-missing":
+			case capturePriorityPairMissing:
 				evidence.PairMissing = true
-			case "source-changed":
+			case capturePrioritySourceChanged:
 				evidence.SourceChanged = true
-			case "clock-moved":
+			case capturePriorityClockMoved:
 				evidence.SourceClockMoved = true
-			case "capture-recovery":
+			case capturePriorityRecovery:
 				evidence.CaptureRecoveryNeeded = true
-			case "source-unproven":
+			case capturePrioritySourceUnproven:
 				evidence.SourceUnproven = true
-			case "old-metadata":
+			case capturePriorityOldMetadata:
 				evidence.MetadataSchemaOld = true
-			case "adapter-behind":
+			case capturePriorityAdapterBehind:
 				evidence.AdapterTarget = 2
 				evidence.AdapterCanExtract = true
-			case "indexer-behind":
+			case capturePriorityIndexerBehind:
+				evidence.IndexerTarget = 2
+			case capturePriorityRefusalIndexerBehind:
 				evidence.IndexerTarget = 2
 			default:
 				t.Fatalf("unknown fixture mutation %q", c.Mutation)
@@ -84,14 +162,9 @@ func TestRefreshLaneCapturePriority(t *testing.T) {
 				t.Fatalf("capture missing = %t, want %t", evidence.PublicationCaptureMissing, c.WantMissing)
 			}
 			decision := decideRefresh(evidence)
-			if string(decision.Reason) != c.Reason || string(decision.Lane) != c.Lane {
+			if decision.Reason != c.Reason || decision.Lane != c.Lane {
 				t.Fatalf("decision = %s/%s, want %s/%s", decision.Reason, decision.Lane, c.Reason, c.Lane)
 			}
 		})
-	}
-	for _, name := range fixture.RequiredNames {
-		if !names[name] {
-			t.Errorf("required fixture case %q is missing", name)
-		}
 	}
 }

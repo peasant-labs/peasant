@@ -13,6 +13,7 @@ transcript:
   - '{"sessionId":"97200000-0000-4000-8000-000000000001","type":"user","uuid":"entry-first","timestamp":"2023-11-14T22:13:20Z","cwd":"/work/project","message":{"role":"user","content":"first synthetic turn"}}'
   - '{"sessionId":"97200000-0000-4000-8000-000000000001","type":"assistant","uuid":"entry-second","timestamp":"2023-11-14T22:13:21Z","cwd":"/work/project","message":{"role":"assistant","model":"claude-synthetic","content":[{"type":"text","text":"second synthetic turn"}]}}'
 append_record: '{"sessionId":"97200000-0000-4000-8000-000000000001","type":"user","uuid":"entry-third","timestamp":"2023-11-14T22:13:22Z","cwd":"/work/project","message":{"role":"user","content":"appended synthetic turn"}}'
+malformed_record: '{not-json}'
 cases:
   - name: source-changed-is-captured-natively
     harness: claude-code
@@ -206,6 +207,26 @@ cases:
     want_pair_writes: []
     want_indexed: false
 
+  # The real store's index writer seeds a synthetic strict-refusal state at
+  # revision zero; this build's parser instead retains unknown data.
+  - name: legacy-strict-refusal-without-publication-does-not-churn
+    harness: claude-code
+    source: current
+    discover: true
+    stored_adapter: current
+    metadata_schema: current
+    pair: present
+    indexer: current
+    refusal: strict_capture_refused
+    refusal_indexer: current
+    publication: missing
+    want_reason: none
+    want_lane: none
+    want_native_read: false
+    second_source_reads: 0
+    want_pair_writes: []
+    want_indexed: false
+
   - name: unbound-publication-binds-without-a-reparse
     harness: claude-code
     source: current
@@ -280,6 +301,23 @@ cases:
     want_native_read: true
     want_pair_writes: [metadata, transcript]
     want_indexed: true
+    want_bound: true
+
+  - name: missing-capture-with-malformed-source-reports-once-and-recovers
+    harness: claude-code
+    source: current
+    native_source: malformed
+    max_native_reads: 2
+    stored_adapter: current
+    metadata_schema: current
+    pair: present
+    indexer: current
+    publication: missing
+    want_reason: publication_capture_missing
+    want_lane: native
+    want_native_read: true
+    want_pair_writes: []
+    want_indexed: false
     want_bound: true
 
   - name: settled-session-is-left-alone

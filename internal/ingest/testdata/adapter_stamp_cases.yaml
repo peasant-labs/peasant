@@ -6,6 +6,8 @@ requiredNames:
   - behind-target-republishes
   - omitted-stamp-republishes
   - current-target-settles
+  - missing-publication-capture-republishes-then-settles
+captureRevision: 1
 targetSets:
   - name: managed-generation
     generationOverlay: true
@@ -20,3 +22,9 @@ cases:
   - name: current-target-settles
     storedRevisionOffset: 0
     want: unchanged
+  - name: missing-publication-capture-republishes-then-settles
+    storedRevisionOffset: 0
+    captureMissing: true
+    want: updated
+    wantReason: publication_capture_missing
+    wantLane: native

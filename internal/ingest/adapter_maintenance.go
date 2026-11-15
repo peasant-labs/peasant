@@ -883,11 +883,29 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry, writeLan
 	if p.config.Reindex && p.config.Force {
 		errorType, location = "native_refresh_unavailable", fmt.Sprintf("%s session %s forced refresh", entry.Session.Harness, entry.Session.SessionID)
 	}
-	p.reportSessionDiagnostic(entry.Session.SessionID, DiagnosticEntry{
-		ErrorType: errorType, Location: location,
-		Message:     acquisition.Error() + "; the previous artifact and adapter stamp were preserved; supported stored indexing may continue",
-		Remediation: "Restore access to the original harness source and discovery context, then retry harvest.",
-	})
+	message := acquisition.Error() + "; the previous artifact and adapter stamp were preserved; supported stored indexing may continue"
+	report := true
+	if decision.Reason == RefreshReasonPublicationCaptureMissing {
+		location = fmt.Sprintf("%s session %s publication capture", entry.Session.Harness, entry.Session.SessionID)
+		message = acquisition.Error() + "; the previous artifact was preserved, but publication still needs a native capture"
+		if cause, sourceFault := sourceUnavailableCause(acquisition); sourceFault {
+			// Keep trying the source so restoration can be observed, but use
+			// the existing durable source-cause ledger to report each stable
+			// source fault only once. Non-source faults keep reporting.
+			report = p.settleUnavailableSource(ctx, entry.Session.SessionID, cause, writeLane, StageExtract) &&
+				!p.laneCauseAlreadyReported(entry.Session.SessionID, cause)
+			if report {
+				p.markLaneCauseReported(entry.Session.SessionID, cause)
+			}
+		}
+	}
+	if report {
+		p.reportSessionDiagnostic(entry.Session.SessionID, DiagnosticEntry{
+			ErrorType: errorType, Location: location,
+			Message:     message,
+			Remediation: "Restore access to the original harness source and discovery context, then retry harvest.",
+		})
+	}
 	result.result.Error = nil
 	result.result.Status = DiffUnchanged
 	retained, err := readArtifactPair(p.fs, string(p.config.OutputDir), metadataPath, entry.Session.SessionID)

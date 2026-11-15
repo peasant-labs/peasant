@@ -12,13 +12,15 @@
 # capture with projected unknown evidence is publishable as partial, so a new
 # indexer or missing index proof can cause retained index maintenance without a
 # native metadata update. Do not infer the index count from the updated count. The
-# first harvest establishes the stored state (a strict refusal, or a complete
-# capture converted to the migrated preview-only shape). The measured run is
-# the harvest after it. The exact read counts ARE the contract: a run that
-# stops warning while still re-reading, or stops working while still looking
-# settled, is each wrong in a way a boolean cannot see.
+# first harvest establishes the stored state (retained unknown data, or a
+# complete capture converted to the migrated preview-only shape). The legacy
+# refusal case additionally removes the publication capture and reindexes the
+# stored input before its measured run. The exact read counts ARE the contract:
+# a run that stops warning while still re-reading, or stops working while still
+# looking settled, is each wrong in a way a boolean cannot see.
 required_names:
   - settled-refusal-does-not-reingest
+  - settled-refusal-without-publication-capture-does-not-reingest
   - legacy-preview-still-reads-native-source
   - changed-bytes-still-read-native-source
   - newer-indexer-still-retries
@@ -37,6 +39,14 @@ cases:
   # read and no index write. This is the churn this change removes.
   - name: settled-refusal-does-not-reingest
     stored: refusal
+    mutate: none
+    second_source_reads: 0
+    second_updated: 0
+    second_unchanged: 1
+    second_indexed: 0
+  # A refused capture need not have a publication snapshot to be settled.
+  - name: settled-refusal-without-publication-capture-does-not-reingest
+    stored: refusal_without_publication
     mutate: none
     second_source_reads: 0
     second_updated: 0
@@ -132,6 +142,8 @@ settled_cases:
     stored_indexer_version: 16
     target_indexer_version: 16
     input_proof: true
+    # This case isolates the no-refusal predicate, not a missing snapshot.
+    capture_revision: 1
     expect: updated
     want_reason: source_compare
     want_lane: native

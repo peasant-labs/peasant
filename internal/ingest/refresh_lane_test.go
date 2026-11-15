@@ -32,63 +32,67 @@ var refreshLaneManifestYAML []byte
 var refreshLaneStrikeTranscript []byte
 
 type refreshLaneCase struct {
-	Name           string   `yaml:"name"`
-	Harness        string   `yaml:"harness"`
-	Source         string   `yaml:"source"`
-	StoredAdapter  string   `yaml:"stored_adapter"`
-	FileAdapter    string   `yaml:"file_adapter"`
-	MetadataSchema string   `yaml:"metadata_schema"`
-	Pair           string   `yaml:"pair"`
-	Force          bool     `yaml:"force"`
-	Indexer        string   `yaml:"indexer"`
-	Refusal        string   `yaml:"refusal"`
-	RefusalIndexer string   `yaml:"refusal_indexer"`
-	Publication    string   `yaml:"publication"`
-	WantReason     string   `yaml:"want_reason"`
-	WantLane       string   `yaml:"want_lane"`
-	WantNativeRead bool     `yaml:"want_native_read"`
-	WantPairWrites []string `yaml:"want_pair_writes"`
-	WantIndexed    bool     `yaml:"want_indexed"`
-	WantBound      bool     `yaml:"want_bound"`
+	Name              string                           `yaml:"name"`
+	Harness           ingest.Harness                   `yaml:"harness"`
+	Source            refreshLaneSource                `yaml:"source"`
+	Discover          bool                             `yaml:"discover"`
+	StoredAdapter     refreshLaneAdapter               `yaml:"stored_adapter"`
+	FileAdapter       refreshLaneFileAdapter           `yaml:"file_adapter"`
+	MetadataSchema    refreshLaneMetadataSchema        `yaml:"metadata_schema"`
+	Pair              refreshLanePair                  `yaml:"pair"`
+	Force             bool                             `yaml:"force"`
+	Indexer           refreshLaneIndexer               `yaml:"indexer"`
+	Refusal           ingest.ContentCaptureFailureCode `yaml:"refusal"`
+	RefusalIndexer    refreshLaneRefusalIndexer        `yaml:"refusal_indexer"`
+	Publication       refreshLanePublication           `yaml:"publication"`
+	NativeSource      fixtureNativeSource              `yaml:"native_source"`
+	MaxNativeReads    int                              `yaml:"max_native_reads"`
+	WantReason        ingest.RefreshReason             `yaml:"want_reason"`
+	WantLane          ingest.RefreshLane               `yaml:"want_lane"`
+	WantNativeRead    bool                             `yaml:"want_native_read"`
+	SecondSourceReads *int                             `yaml:"second_source_reads"`
+	WantPairWrites    []refreshLanePairMember          `yaml:"want_pair_writes"`
+	WantIndexed       bool                             `yaml:"want_indexed"`
+	WantBound         bool                             `yaml:"want_bound"`
 }
 
 type refreshLaneFixture struct {
-	SessionID    string            `yaml:"session_id"`
-	Transcript   []string          `yaml:"transcript"`
-	AppendRecord string            `yaml:"append_record"`
-	Cases        []refreshLaneCase `yaml:"cases"`
+	SessionID       string            `yaml:"session_id"`
+	Transcript      []string          `yaml:"transcript"`
+	AppendRecord    string            `yaml:"append_record"`
+	MalformedRecord string            `yaml:"malformed_record"`
+	Cases           []refreshLaneCase `yaml:"cases"`
 }
 
-func loadRefreshLaneFixture(t *testing.T) refreshLaneFixture {
-	t.Helper()
+func decodeRefreshLaneFixture(data []byte) (refreshLaneFixture, error) {
 	var fixture refreshLaneFixture
-	decoder := yaml.NewDecoder(strings.NewReader(string(refreshLaneYAML)))
+	decoder := yaml.NewDecoder(strings.NewReader(string(data)))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&fixture); err != nil {
-		t.Fatalf("decode refresh_lane.yaml: %v", err)
+		return refreshLaneFixture{}, fmt.Errorf("decode refresh_lane.yaml: %w", err)
 	}
 	present := make(map[string]bool, len(fixture.Cases))
 	for _, testCase := range fixture.Cases {
 		if testCase.Name == "" || present[testCase.Name] {
-			t.Fatalf("refresh_lane.yaml has an empty or repeated case name %q", testCase.Name)
+			return refreshLaneFixture{}, fmt.Errorf("refresh_lane.yaml has an empty or repeated case name %q", testCase.Name)
 		}
 		present[testCase.Name] = true
-		if _, err := ingest.NewRefreshReason(testCase.WantReason); err != nil {
-			t.Fatalf("case %s: %v", testCase.Name, err)
+		if err := testCase.Validate(); err != nil {
+			return refreshLaneFixture{}, fmt.Errorf("refresh_lane.yaml case %s: %w", testCase.Name, err)
 		}
-		if _, err := ingest.NewRefreshLane(testCase.WantLane); err != nil {
-			t.Fatalf("case %s: %v", testCase.Name, err)
-		}
-		if testCase.Harness != string(ingest.HarnessClaudeCode) && testCase.Harness != string(ingest.HarnessStrike) {
-			t.Fatalf("case %s names harness %q; use claude or strike", testCase.Name, testCase.Harness)
-		}
-		if len(testCase.WantPairWrites) > 0 {
-			for _, name := range testCase.WantPairWrites {
-				if name != "metadata" && name != "transcript" {
-					t.Fatalf("case %s names pair write %q; use metadata or transcript", testCase.Name, name)
-				}
-			}
-		}
+	}
+	return fixture, nil
+}
+
+func loadRefreshLaneFixture(t *testing.T) refreshLaneFixture {
+	t.Helper()
+	fixture, err := decodeRefreshLaneFixture(refreshLaneYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	present := make(map[string]bool, len(fixture.Cases))
+	for _, testCase := range fixture.Cases {
+		present[testCase.Name] = true
 	}
 	var manifest struct {
 		RequiredNames []string `yaml:"requiredNames"`
@@ -135,7 +139,7 @@ func newRefreshLaneBench(t *testing.T, fixture refreshLaneFixture, testCase refr
 	sourceRoot := filepath.Join(root, "source")
 	sourcePath := filepath.Join(sourceRoot, "-workspace", fixture.SessionID+".jsonl")
 	transcript := strings.Join(fixture.Transcript, "\n") + "\n"
-	if ingest.Harness(testCase.Harness) == ingest.HarnessStrike {
+	if testCase.Harness == ingest.HarnessStrike {
 		transcript = string(refreshLaneStrikeTranscript)
 	}
 	if err := fs.WriteFile(sourcePath, []byte(transcript), 0o600); err != nil {
@@ -144,7 +148,7 @@ func newRefreshLaneBench(t *testing.T, fixture refreshLaneFixture, testCase refr
 	outputDir := filepath.Join(root, "output")
 	bench := &refreshLaneBench{
 		t: t, fixture: fixture, fs: fs, database: database,
-		harness: ingest.Harness(testCase.Harness), sessionID: sessionID,
+		harness: testCase.Harness, sessionID: sessionID,
 		sourceRoot: sourceRoot, sourcePath: sourcePath, outputDir: outputDir,
 		versions: cloneHarvesterVersions(),
 	}
@@ -275,37 +279,37 @@ func (b *refreshLaneBench) applyMutation(testCase refreshLaneCase) {
 	b.t.Helper()
 	location := b.location()
 
-	if testCase.StoredAdapter == "behind" {
+	if testCase.StoredAdapter == refreshAdapterBehind {
 		target := b.versions[b.harness]
 		target.AdapterVersion++
 		b.versions[b.harness] = target
 	}
-	if testCase.Indexer == "behind" {
+	if testCase.Indexer == refreshIndexerBehind {
 		target := b.versions[b.harness]
 		target.IndexerVersion++
 		b.versions[b.harness] = target
 	}
-	if testCase.MetadataSchema == "native_refresh" {
+	if testCase.MetadataSchema == refreshSchemaNativeRefresh {
 		execSessionSQL(b.t, b.database, `UPDATE sessions SET schema_version=8 WHERE session_id=?`, string(b.sessionID))
 		b.mutateMetadata(func(meta *ingest.UnifiedMetadata) {
 			meta.SchemaVersion = 8
 		})
 	}
 	switch testCase.StoredAdapter {
-	case "behind":
-		if testCase.FileAdapter == "current" {
+	case refreshAdapterBehind:
+		if testCase.FileAdapter == refreshFileAdapterCurrent {
 			// The row is behind while the saved metadata already records this
 			// build's adapter target. The decision must read the row's stamp and
 			// never open the native source.
 			b.setFileAdapterOnly(b.versions[b.harness].AdapterVersion)
 		}
-	case "absent":
+	case refreshAdapterAbsent:
 		execSessionSQL(b.t, b.database, `UPDATE sessions SET adapter_version=NULL WHERE session_id=?`, string(b.sessionID))
 		b.mutateMetadata(func(meta *ingest.UnifiedMetadata) {
 			meta.AdapterVersion = nil
 		})
 	}
-	if testCase.Pair == "missing" {
+	if testCase.Pair == refreshPairMissing {
 		if err := b.fs.Remove(b.metadataPath); err != nil {
 			b.t.Fatal(err)
 		}
@@ -317,20 +321,10 @@ func (b *refreshLaneBench) applyMutation(testCase refreshLaneCase) {
 		// the index. The pair-repair pass then owns the missing pair.
 		execSessionSQL(b.t, b.database, `UPDATE sessions SET indexed_input_hash=NULL WHERE session_id=?`, string(b.sessionID))
 	}
-	if testCase.Refusal != "" {
-		b.seedRefusal(testCase)
-		if testCase.RefusalIndexer == "behind" {
-			// The refusal was recorded by the previous producer; this build
-			// has moved one revision past it.
-			target := b.versions[b.harness]
-			target.IndexerVersion++
-			b.versions[b.harness] = target
-		}
-	}
-	if testCase.Publication == "unbound" {
+	if testCase.Publication == refreshPublicationUnbound {
 		b.unbindPublication(location)
 	}
-	if testCase.Publication == "missing" {
+	if testCase.Publication == refreshPublicationMissing {
 		// Model a row saved with source evidence before publication captures
 		// existed, without disturbing its artifact or indexed-input proof.
 		execSessionSQL(b.t, b.database, `DELETE FROM session_publication_metadata WHERE session_id=?`, string(b.sessionID))
@@ -344,14 +338,41 @@ func (b *refreshLaneBench) applyMutation(testCase refreshLaneCase) {
 			b.t.Fatalf("missing-capture seed carries capture or binding: %+v", seeded)
 		}
 	}
-	if testCase.Source == "changed" || testCase.Source == "changed_old_clock" {
+	if testCase.Refusal != ingest.ContentCaptureNoFailure {
+		// For a legacy refusal, write the refusal only after removing the
+		// publication capture, so the refusal itself starts at revision zero.
+		b.seedRefusal(testCase)
+		if testCase.Publication == refreshPublicationMissing {
+			seeded := b.location()
+			if seeded.CaptureRevision != 0 || seeded.PublicationBound || seeded.ContentFailureCode != testCase.Refusal {
+				b.t.Fatalf("missing-capture seed lost refusal %q or gained a capture: %+v", testCase.Refusal, seeded)
+			}
+		}
+		if testCase.RefusalIndexer == refreshRefusalIndexerBehind {
+			// The refusal was recorded by the previous producer; this build
+			// has moved one revision past it.
+			target := b.versions[b.harness]
+			target.IndexerVersion++
+			b.versions[b.harness] = target
+		}
+	}
+	if testCase.Source == refreshSourceChanged || testCase.Source == refreshSourceChangedOldClock {
 		changed := b.sourceTranscript() + b.fixture.AppendRecord + "\n"
 		if err := b.fs.WriteFile(b.sourcePath, []byte(changed), 0o600); err != nil {
 			b.t.Fatal(err)
 		}
-		if testCase.Source == "changed_old_clock" {
+		if testCase.Source == refreshSourceChangedOldClock {
 			execSessionSQL(b.t, b.database, `UPDATE sessions SET ingested_ms=? WHERE session_id=?`, time.Now().Add(time.Hour).UnixMilli(), string(b.sessionID))
 		}
+	}
+	if testCase.NativeSource == fixtureNativeSourceMalformed {
+		malformed := b.sourceTranscript() + b.fixture.MalformedRecord + "\n"
+		if err := b.fs.WriteFile(b.sourcePath, []byte(malformed), 0o600); err != nil {
+			b.t.Fatal(err)
+		}
+		// The changed bytes keep an older discovery clock, so the missing
+		// publication capture, not the clock hint, queues the native attempt.
+		execSessionSQL(b.t, b.database, `UPDATE sessions SET ingested_ms=? WHERE session_id=?`, time.Now().Add(time.Hour).UnixMilli(), string(b.sessionID))
 	}
 }
 
@@ -450,10 +471,6 @@ func (b *refreshLaneBench) seedRefusal(testCase refreshLaneCase) {
 		b.t.Fatal("refusal seed has no stored input proof to preserve")
 	}
 	indexer := b.versions[b.harness].IndexerVersion
-	code, err := ingest.NewContentCaptureFailureCode(testCase.Refusal)
-	if err != nil {
-		b.t.Fatal(err)
-	}
 	writes := b.database.IndexSessionEntryBatch(b.t.Context(), []ingest.SessionEntryWrite{{
 		CaptureRevision:  state.PublicationCaptureRevision,
 		Mode:             ingest.SessionEntryWriteReplaceAll,
@@ -471,12 +488,15 @@ func (b *refreshLaneBench) seedRefusal(testCase refreshLaneCase) {
 			TranscriptOrigin:           ingest.TranscriptOriginFile,
 			CaptureFormat:              ingest.ContentCaptureFormatPreviewOnly,
 			CapturedAtMs:               time.Now().Add(-time.Hour).UnixMilli(),
-			FailureCode:                code,
+			FailureCode:                testCase.Refusal,
 			FailureMessage:             "synthetic stored refusal",
 		},
 	}})
 	if len(writes) != 1 || writes[0].Err != nil {
 		b.t.Fatalf("seed stored refusal: %+v", writes)
+	}
+	if state.PublicationCaptureRevision == 0 {
+		return
 	}
 	// The refusal's capture is incomplete, so the preview index write above
 	// does not carry the publication binding. Re-state the binding the
@@ -528,12 +548,12 @@ func (b *refreshLaneBench) watchPublicationWrites() {
 		b.t.Fatal(err)
 	}
 	defer b.database.Pool().Put(conn)
-	if err := sqlitex.ExecuteTransient(conn, `CREATE TABLE test_capture_writes (n INTEGER NOT NULL)`, nil); err != nil {
+	if err := sqlitex.ExecuteTransient(conn, `CREATE TABLE test_capture_writes (name TEXT NOT NULL)`, nil); err != nil {
 		b.t.Fatal(err)
 	}
 	for _, table := range []string{"sessions", "session_publication_metadata", "session_content_captures", "session_entries", "session_generations", "session_generation_entries", "session_content"} {
 		for _, operation := range []string{"INSERT", "UPDATE", "DELETE"} {
-			query := fmt.Sprintf(`CREATE TRIGGER test_capture_%s_%s AFTER %s ON %s BEGIN INSERT INTO test_capture_writes VALUES (1); END`, table, operation, operation, table)
+			query := fmt.Sprintf(`CREATE TRIGGER test_capture_%s_%s AFTER %s ON %s BEGIN INSERT INTO test_capture_writes VALUES ('%s %s'); END`, table, operation, operation, table, table, operation)
 			if err := sqlitex.ExecuteTransient(conn, query, nil); err != nil {
 				b.t.Fatalf("watch %s %s: %v", table, operation, err)
 			}
@@ -548,10 +568,10 @@ func (b *refreshLaneBench) assertNoPublicationWrites() {
 		b.t.Fatal(err)
 	}
 	defer b.database.Pool().Put(conn)
-	if err := sqlitex.ExecuteTransient(conn, `SELECT count(*) FROM test_capture_writes`, &sqlitex.ExecOptions{
+	if err := sqlitex.ExecuteTransient(conn, `SELECT count(*), group_concat(name, ', ') FROM test_capture_writes`, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			if n := stmt.ColumnInt(0); n != 0 {
-				b.t.Errorf("second run committed %d writes to the stored capture or index", n)
+				b.t.Errorf("run committed %d writes to the stored capture or index: %s", n, stmt.ColumnText(1))
 			}
 			return nil
 		},
@@ -578,22 +598,17 @@ func TestRefreshLaneDecisionsOnTheProductionPipeline(t *testing.T) {
 	fixture := loadRefreshLaneFixture(t)
 	for _, testCase := range fixture.Cases {
 		testCase := testCase
+		if testCase.NativeSource != fixtureNativeSourceUnspecified {
+			continue
+		}
 		t.Run(testCase.Name, func(t *testing.T) {
 			t.Parallel()
 			bench := newRefreshLaneBench(t, fixture, testCase)
 			bench.applyMutation(testCase)
-			wantReason, err := ingest.NewRefreshReason(testCase.WantReason)
-			if err != nil {
-				t.Fatal(err)
-			}
-			wantLane, err := ingest.NewRefreshLane(testCase.WantLane)
-			if err != nil {
-				t.Fatal(err)
-			}
-			// A settled row needs no native compare, so the case runs the
-			// stored-only maintenance path. Every other case exercises the
-			// discovery path the decision must survive.
-			discover := wantReason != ingest.RefreshReasonNone
+			wantReason, wantLane := testCase.WantReason, testCase.WantLane
+			// A settled row normally runs only stored maintenance. Cases can
+			// also exercise discovery explicitly for a settled refusal.
+			discover := wantReason != ingest.RefreshReasonNone || testCase.Discover
 			var storedDecision ingest.RefreshDecision
 			if !discover {
 				storedDecision = ingest.StoredDecisionForTest(bench.pipeline(false, false), ingest.DiscoveredSession{SessionID: bench.sessionID, Harness: bench.harness}, bench.location())
@@ -646,15 +661,15 @@ func TestRefreshLaneDecisionsOnTheProductionPipeline(t *testing.T) {
 			if testCase.WantNativeRead != (nativeBytes > 0) {
 				t.Fatalf("native source bytes read = %d, want native read %t; summary %+v", nativeBytes, testCase.WantNativeRead, result.Summary)
 			}
-			wantWrites := make(map[string]bool, len(testCase.WantPairWrites))
+			wantWrites := make(map[refreshLanePairMember]bool, len(testCase.WantPairWrites))
 			for _, name := range testCase.WantPairWrites {
 				wantWrites[name] = true
 			}
-			if got := bench.fs.Count(testutil.FSOpRename, bench.metadataPath) > 0; got != wantWrites["metadata"] {
-				t.Fatalf("metadata pair write = %t, want %t", got, wantWrites["metadata"])
+			if got := bench.fs.Count(testutil.FSOpRename, bench.metadataPath) > 0; got != wantWrites[refreshPairMetadata] {
+				t.Fatalf("metadata pair write = %t, want %t", got, wantWrites[refreshPairMetadata])
 			}
-			if got := bench.fs.Count(testutil.FSOpRename, bench.transcriptPath) > 0; got != wantWrites["transcript"] {
-				t.Fatalf("transcript pair write = %t, want %t", got, wantWrites["transcript"])
+			if got := bench.fs.Count(testutil.FSOpRename, bench.transcriptPath) > 0; got != wantWrites[refreshPairTranscript] {
+				t.Fatalf("transcript pair write = %t, want %t", got, wantWrites[refreshPairTranscript])
 			}
 			if got := result.Summary.Indexed == 1; got != testCase.WantIndexed {
 				t.Fatalf("indexed = %t (%+v), want %t", got, result.Summary, testCase.WantIndexed)
@@ -667,7 +682,7 @@ func TestRefreshLaneDecisionsOnTheProductionPipeline(t *testing.T) {
 				if !state.PublicationBound {
 					t.Fatalf("publication stayed unbound: %+v", state)
 				}
-				if testCase.Publication == "missing" {
+				if testCase.Publication == refreshPublicationMissing {
 					if state.PublicationCaptureRevision <= 0 {
 						t.Fatalf("publication capture revision did not advance: %+v", state)
 					}
@@ -686,10 +701,10 @@ func TestRefreshLaneDecisionsOnTheProductionPipeline(t *testing.T) {
 			bench.fs.ResetCounts()
 			secondBefore := bench.lastRun()
 			previousLocation := bench.location()
-			if testCase.Publication == "missing" {
+			if testCase.Publication == refreshPublicationMissing {
 				bench.watchPublicationWrites()
 			}
-			second := bench.run(false, testCase.Publication == "missing")
+			second := bench.run(false, testCase.Publication == refreshPublicationMissing)
 			if second.Summary.StoreError != nil || second.Summary.Errors != 0 {
 				t.Fatalf("the next run failed: %+v; diagnostics %+v", second.Summary, second.Diagnostics)
 			}
@@ -702,13 +717,18 @@ func TestRefreshLaneDecisionsOnTheProductionPipeline(t *testing.T) {
 			if secondBefore == 0 {
 				t.Fatal("the second run stored no audit row")
 			}
-			if reads := bench.fs.BytesReadUnder(bench.sourceRoot, ""); testCase.Publication != "missing" && reads != 0 {
+			if reads := bench.fs.BytesReadUnder(bench.sourceRoot, ""); testCase.Publication != refreshPublicationMissing && reads != 0 {
 				t.Fatalf("the next stored-only run read %d native source bytes", reads)
+			}
+			if testCase.SecondSourceReads != nil {
+				if reads := bench.fs.ReadCount(bench.sourcePath); reads != *testCase.SecondSourceReads {
+					t.Fatalf("the next run read the native source %d times, want %d", reads, *testCase.SecondSourceReads)
+				}
 			}
 			if bench.fs.Count(testutil.FSOpRename, bench.metadataPath) != 0 || bench.fs.Count(testutil.FSOpRename, bench.transcriptPath) != 0 {
 				t.Fatal("the next stored-only run rewrote the stored pair")
 			}
-			if testCase.Publication == "missing" {
+			if testCase.Publication == refreshPublicationMissing {
 				bench.assertNoPublicationWrites()
 				if writes := bench.fs.CountUnder(testutil.FSOpWriteFile, bench.outputDir); writes != 0 {
 					t.Fatalf("second run wrote %d managed files", writes)
@@ -717,7 +737,7 @@ func TestRefreshLaneDecisionsOnTheProductionPipeline(t *testing.T) {
 					t.Fatalf("second run renamed %d managed files", renames)
 				}
 				after := bench.location()
-				if !after.PublicationBound || after.CaptureRevision != previousLocation.CaptureRevision {
+				if after.PublicationBound != previousLocation.PublicationBound || after.CaptureRevision != previousLocation.CaptureRevision {
 					t.Fatalf("second run changed publication binding: before=%+v after=%+v", previousLocation, after)
 				}
 			}
@@ -727,6 +747,109 @@ func TestRefreshLaneDecisionsOnTheProductionPipeline(t *testing.T) {
 				t.Fatalf("the next stored decision = %s/%s, want none/none", next.Reason, next.Lane)
 			}
 		})
+	}
+}
+
+// TestRefreshLaneMissingCaptureWithUnavailableSource bounds reporting of an
+// unusable source while preserving retries, so restoring the source repairs it.
+func TestRefreshLaneMissingCaptureWithUnavailableSource(t *testing.T) {
+	fixture := loadRefreshLaneFixture(t)
+	ran := false
+	for _, testCase := range fixture.Cases {
+		if testCase.NativeSource != fixtureNativeSourceMalformed {
+			continue
+		}
+		ran = true
+		t.Run(testCase.Name, func(t *testing.T) {
+			bench := newRefreshLaneBench(t, fixture, testCase)
+			bench.applyMutation(testCase)
+			bench.watchPublicationWrites()
+			wantReason, wantLane := testCase.WantReason, testCase.WantLane
+			for attempt := 1; attempt <= 2; attempt++ {
+				bench.fs.ResetCounts()
+				result := bench.run(false, true)
+				decision := bench.decision(result)
+				if decision.Reason != wantReason || decision.Lane != wantLane {
+					t.Fatalf("attempt %d: decision = %s/%s, want %s/%s; diagnostics %+v", attempt, decision.Reason, decision.Lane, wantReason, wantLane, result.Diagnostics)
+				}
+				if reads := bench.fs.ReadCount(bench.sourcePath); reads < 1 || reads > testCase.MaxNativeReads {
+					t.Fatalf("attempt %d: source reads = %d, want 1..%d", attempt, reads, testCase.MaxNativeReads)
+				}
+				if result.Summary.Errors != 0 || result.Summary.StoreError != nil || result.Summary.Indexed != 0 {
+					t.Fatalf("attempt %d: unusable source changed or failed stored work: %+v; diagnostics %+v", attempt, result.Summary, result.Diagnostics)
+				}
+				if result.Summary.Updated != 0 || result.Summary.Unchanged != 1 {
+					t.Fatalf("attempt %d: unavailable source did not keep the stored session unchanged: %+v", attempt, result.Summary)
+				}
+				reports := 0
+				for _, diagnostic := range result.Diagnostics {
+					if diagnostic.ErrorType == "adapter_refresh_unavailable" {
+						reports++
+						if diagnostic.Remediation == "" {
+							t.Fatalf("attempt %d: unavailable diagnostic has no remedy: %+v", attempt, diagnostic)
+						}
+					}
+				}
+				wantReports := 0
+				if attempt == 1 {
+					wantReports = 1
+				}
+				if reports != wantReports {
+					t.Fatalf("attempt %d: %d unavailable reports, want %d: %+v", attempt, reports, wantReports, result.Diagnostics)
+				}
+				cause, err := bench.database.ReadSourceUnavailability(t.Context(), bench.sessionID)
+				if err != nil || cause == nil || *cause != ingest.SourceUnavailableRecordUnusable {
+					t.Fatalf("attempt %d: stored unavailable cause = %v, err %v", attempt, cause, err)
+				}
+				if location := bench.location(); location.CaptureRevision != 0 || location.PublicationBound {
+					t.Fatalf("attempt %d: unusable source published a capture: %+v", attempt, location)
+				}
+				if writes := bench.fs.CountUnder(testutil.FSOpWriteFile, bench.outputDir); writes != 0 {
+					t.Fatalf("attempt %d: wrote %d managed files", attempt, writes)
+				}
+				if renames := bench.fs.CountUnder(testutil.FSOpRename, bench.outputDir); renames != 0 {
+					t.Fatalf("attempt %d: renamed %d managed files", attempt, renames)
+				}
+				if attempt == 1 {
+					// The first unavailable report may settle retained
+					// maintenance; only a repeat must perform no writes.
+					execSessionSQL(t, bench.database, `DELETE FROM test_capture_writes`)
+				} else {
+					bench.assertNoPublicationWrites()
+				}
+			}
+
+			if err := bench.fs.WriteFile(bench.sourcePath, []byte(bench.sourceTranscript()), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			recovered := bench.run(false, true)
+			if decision := bench.decision(recovered); decision.Reason != ingest.RefreshReasonPublicationCaptureMissing {
+				t.Fatalf("recovered decision = %s/%s", decision.Reason, decision.Lane)
+			}
+			location := bench.location()
+			if location.CaptureRevision <= 0 || !location.PublicationBound {
+				t.Fatalf("restoring the source did not bind a new capture: %+v; result %+v", location, recovered.Summary)
+			}
+			if cause, err := bench.database.ReadSourceUnavailability(t.Context(), bench.sessionID); err != nil || cause != nil {
+				t.Fatalf("restored source retained unavailability: %v, %v", cause, err)
+			}
+			execSessionSQL(t, bench.database, `DELETE FROM test_capture_writes`)
+			bench.fs.ResetCounts()
+			settled := bench.run(false, true)
+			if settled.Summary.Updated != 0 || settled.Summary.Indexed != 0 || settled.Summary.Errors != 0 {
+				t.Fatalf("restored session did not settle: %+v; diagnostics %+v", settled.Summary, settled.Diagnostics)
+			}
+			if after := bench.location(); after.CaptureRevision != location.CaptureRevision || !after.PublicationBound {
+				t.Fatalf("settled run changed the capture: before %+v, after %+v", location, after)
+			}
+			if writes := bench.fs.CountUnder(testutil.FSOpWriteFile, bench.outputDir); writes != 0 {
+				t.Fatalf("settled run wrote %d managed files", writes)
+			}
+			bench.assertNoPublicationWrites()
+		})
+	}
+	if !ran {
+		t.Fatal("refresh lane fixture has no malformed source case")
 	}
 }
 

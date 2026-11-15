@@ -3,6 +3,10 @@ requiredNames:
   - unsupported-source-evidence
   - absent-fingerprint
   - capture-already-present
+  - strict-refusal-without-capture
+  - omitted-records-without-capture
+  - retained-unknown-without-capture
+  - refused-capture-with-new-indexer
   - forced
   - new
   - pair-missing
@@ -18,6 +22,10 @@ cases:
   - {name: unsupported-source-evidence, mutation: unsupported, want_missing: false, reason: none, lane: none}
   - {name: absent-fingerprint, mutation: no-fingerprint, want_missing: false, reason: none, lane: none}
   - {name: capture-already-present, mutation: captured, want_missing: false, reason: none, lane: none}
+  - {name: strict-refusal-without-capture, mutation: strict-refusal, want_missing: false, reason: none, lane: none}
+  - {name: omitted-records-without-capture, mutation: omitted-refusal, want_missing: false, reason: none, lane: none}
+  - {name: retained-unknown-without-capture, mutation: unknown-refusal, want_missing: false, reason: none, lane: none}
+  - {name: refused-capture-with-new-indexer, mutation: refusal-indexer-behind, want_missing: false, reason: refusal_reopened, lane: stored-index}
   - {name: forced, mutation: forced, want_missing: true, reason: forced, lane: native}
   - {name: new, mutation: new, want_missing: true, reason: new, lane: native}
   - {name: pair-missing, mutation: pair-missing, want_missing: true, reason: pair_missing, lane: native}

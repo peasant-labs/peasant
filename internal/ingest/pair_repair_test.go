@@ -23,6 +23,33 @@ import (
 //go:embed testdata/pair_repair.yaml
 var pairRepairFixtureData []byte
 
+const pairRepairNoCause ingest.SourceUnavailabilityReason = ""
+
+type pairRepairState string
+
+const (
+	pairRepairMissingMetadata         pairRepairState = "missing-metadata"
+	pairRepairMissingTranscript       pairRepairState = "missing-transcript"
+	pairRepairDamaged                 pairRepairState = "damaged"
+	pairRepairMissingMetadataNoSource pairRepairState = "missing-metadata-source-unavailable"
+)
+
+func (v pairRepairState) Validate() error {
+	return validateFixtureChoice("pairState", v, pairRepairMissingMetadata, pairRepairMissingTranscript, pairRepairDamaged, pairRepairMissingMetadataNoSource)
+}
+
+type pairRepairLocatorFault string
+
+const (
+	pairRepairNoLocatorFault  pairRepairLocatorFault = ""
+	pairRepairSourceInfoFault pairRepairLocatorFault = "source-info"
+	pairRepairLocationFault   pairRepairLocatorFault = "location"
+)
+
+func (v pairRepairLocatorFault) Validate() error {
+	return validateFixtureChoice("locatorFault", v, pairRepairNoLocatorFault, pairRepairSourceInfoFault, pairRepairLocationFault)
+}
+
 type pairRepairDocument struct {
 	RequiredNames     []string         `yaml:"required_names"`
 	NativeTranscript  string           `yaml:"native_transcript"`
@@ -32,15 +59,15 @@ type pairRepairDocument struct {
 }
 
 type pairRepairCase struct {
-	Name                string `yaml:"name"`
-	PairState           string `yaml:"pairState"`
-	Discovered          bool   `yaml:"discovered"`
-	Reindex             bool   `yaml:"reindex"`
-	Nested              bool   `yaml:"nested"`
-	TranscriptReadFault bool   `yaml:"transcriptReadFault"`
-	WantRepaired        bool   `yaml:"wantRepaired"`
-	WantSourceReport    bool   `yaml:"wantSourceReport"`
-	LocatorFault        string `yaml:"locatorFault"`
+	Name                string                 `yaml:"name"`
+	PairState           pairRepairState        `yaml:"pairState"`
+	Discovered          bool                   `yaml:"discovered"`
+	Reindex             bool                   `yaml:"reindex"`
+	Nested              bool                   `yaml:"nested"`
+	TranscriptReadFault bool                   `yaml:"transcriptReadFault"`
+	WantRepaired        bool                   `yaml:"wantRepaired"`
+	WantSourceReport    bool                   `yaml:"wantSourceReport"`
+	LocatorFault        pairRepairLocatorFault `yaml:"locatorFault"`
 	// CapturedSeed stores the row with a source-proven publication capture,
 	// the state of every row an ordinary harvest has already captured. Without
 	// it the seed is a pre-capture row, which an ordinary harvest re-reads from
@@ -50,11 +77,11 @@ type pairRepairCase struct {
 	// fixture transcript, "malformed" for bytes that are present but cannot be
 	// used. The second shape is how an acquisition failure reaches the pair
 	// lane, which is the only place the re-ingest template is printed.
-	NativeSource string `yaml:"nativeSource"`
+	NativeSource fixtureNativeSource `yaml:"nativeSource"`
 	// WantCause is the source-unavailability reason the refused repair must
 	// record. It is required with WantSourceReport, because the two causes are
 	// different user situations and a wrong one is a wrong fix.
-	WantCause string `yaml:"wantCause"`
+	WantCause ingest.SourceUnavailabilityReason `yaml:"wantCause"`
 	// WantMessageContains pins wording of the one source report: the template
 	// the reporting lane must print, not only the session it names.
 	WantMessageContains string `yaml:"wantMessageContains"`
@@ -71,27 +98,21 @@ func loadPairRepairFixtures(t *testing.T) pairRepairDocument {
 		if fixture.Name == "" || names[fixture.Name] {
 			t.Fatalf("invalid pair repair fixture %q", fixture.Name)
 		}
-		switch fixture.PairState {
-		case "missing-metadata", "missing-transcript", "damaged", "missing-metadata-source-unavailable":
-		default:
-			t.Fatalf("pair repair fixture %s names unknown pair state %q", fixture.Name, fixture.PairState)
+		if err := fixture.PairState.Validate(); err != nil {
+			t.Fatalf("pair repair fixture %s: %v", fixture.Name, err)
 		}
-		switch fixture.LocatorFault {
-		case "", "source-info", "location":
-		default:
-			t.Fatalf("pair repair fixture %s names unknown locator fault %q", fixture.Name, fixture.LocatorFault)
+		if err := fixture.LocatorFault.Validate(); err != nil {
+			t.Fatalf("pair repair fixture %s: %v", fixture.Name, err)
 		}
-		switch fixture.NativeSource {
-		case "", "malformed":
-		default:
-			t.Fatalf("pair repair fixture %s names unknown native source %q", fixture.Name, fixture.NativeSource)
+		if err := fixture.NativeSource.Validate(); err != nil {
+			t.Fatalf("pair repair fixture %s: %v", fixture.Name, err)
 		}
-		if fixture.WantSourceReport && fixture.WantCause == "" {
+		if fixture.WantSourceReport && fixture.WantCause == pairRepairNoCause {
 			t.Fatalf("pair repair fixture %s reports an unavailable source without naming its cause", fixture.Name)
 		}
-		if fixture.WantCause != "" {
-			if _, err := ingest.NewSourceUnavailabilityReason(fixture.WantCause); err != nil {
-				t.Fatalf("pair repair fixture %s names unknown cause %q", fixture.Name, fixture.WantCause)
+		if fixture.WantCause != pairRepairNoCause {
+			if _, err := ingest.NewSourceUnavailabilityReason(string(fixture.WantCause)); err != nil {
+				t.Fatalf("pair repair fixture %s: %v", fixture.Name, err)
 			}
 		}
 		names[fixture.Name] = true
@@ -139,7 +160,7 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 			nativeTranscript := []byte(document.NativeTranscript)
 			nativePath := "/synthetic/native/" + id.String() + ".jsonl"
 			nativeBytes := nativeTranscript
-			if fixture.NativeSource == "malformed" {
+			if fixture.NativeSource == fixtureNativeSourceMalformed {
 				// Present but unusable: the acquisition fails on a record, which
 				// is a different cause from a source that is not there.
 				nativeBytes = []byte(damagedSourceTranscript)
@@ -151,7 +172,7 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 			meta.ModelHarness = ingest.HarnessClaudeCode
 			meta.ContentHash = schema.ComputeTranscriptHash(nativeTranscript)
 			meta.Source.FilePath = nativePath
-			if fixture.PairState == "missing-metadata-source-unavailable" {
+			if fixture.PairState == pairRepairMissingMetadataNoSource {
 				meta.Source.FilePath = "/synthetic/native/missing-" + id.String() + ".jsonl"
 			}
 			var parentID *ingest.SessionID
@@ -180,15 +201,15 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 			metadataPath := filepath.Join(dir, id.String()+"--metadata.json")
 			transcriptPath := filepath.Join(dir, id.String()+"--transcript.jsonl")
 			switch fixture.PairState {
-			case "missing-metadata", "missing-metadata-source-unavailable":
+			case pairRepairMissingMetadata, pairRepairMissingMetadataNoSource:
 				if err := memfs.WriteFile(transcriptPath, nativeTranscript, 0600); err != nil {
 					t.Fatal(err)
 				}
-			case "missing-transcript":
+			case pairRepairMissingTranscript:
 				if err := memfs.WriteFile(metadataPath, encoded, 0600); err != nil {
 					t.Fatal(err)
 				}
-			case "damaged":
+			case pairRepairDamaged:
 				if err := memfs.WriteFile(metadataPath, encoded, 0600); err != nil {
 					t.Fatal(err)
 				}
@@ -211,7 +232,7 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 			if err := database.InsertSessions(ctx, storeEntries); err != nil {
 				t.Fatal(err)
 			}
-			if fixture.PairState == "damaged" {
+			if fixture.PairState == pairRepairDamaged {
 				// Record the identity of the whole pair, then replace the
 				// transcript: the row now names bytes the pair no longer holds.
 				artifact, err := ingest.NewManagedArtifact(encoded, nativeTranscript)
@@ -227,7 +248,7 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 				}
 			}
 			seedStalePreviewCapture(t, ctx, database, id)
-			if fixture.WantSourceReport || fixture.LocatorFault != "" {
+			if fixture.WantSourceReport || fixture.LocatorFault != pairRepairNoLocatorFault {
 				writes := database.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{
 					SessionID: id, IndexVersion: 1, IndexerVersion: 15, IndexedAtMs: 1700000000000,
 					Result: indexformat.V1{Entries: []schema.SessionEntry{{
@@ -293,7 +314,7 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 			}
 
 			result := run()
-			if fixture.LocatorFault != "" {
+			if fixture.LocatorFault != pairRepairNoLocatorFault {
 				reason, err := database.ReadSourceUnavailability(ctx, id)
 				if err != nil || reason != nil {
 					t.Fatalf("locator failure recorded source unavailability: %v %v", reason, err)
@@ -320,7 +341,7 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 				if result.Summary.Indexed != 0 {
 					t.Fatalf("locator failure indexed %d sessions", result.Summary.Indexed)
 				}
-				locatorStore.fault = ""
+				locatorStore.fault = pairRepairNoLocatorFault
 				result = run()
 			}
 			if !fixture.WantRepaired {
@@ -328,10 +349,7 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 					t.Fatalf("a refused repair indexed %d session(s)", result.Summary.Indexed)
 				}
 				if fixture.WantSourceReport {
-					wantCause, err := ingest.NewSourceUnavailabilityReason(fixture.WantCause)
-					if err != nil {
-						t.Fatal(err)
-					}
+					wantCause := fixture.WantCause
 					reason, err := database.ReadSourceUnavailability(ctx, id)
 					if err != nil || reason == nil || *reason != wantCause {
 						t.Fatalf("unavailable source was not persisted: %v %v, want %s", reason, err, wantCause)
@@ -375,7 +393,7 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 				}
 				// The pair must survive untouched. The fault case seeds a
 				// damaged transcript that must still hold the damaged bytes.
-				if fixture.PairState == "damaged" {
+				if fixture.PairState == pairRepairDamaged {
 					kept, err := memfs.ReadFile(transcriptPath)
 					if err != nil {
 						t.Fatal(err)
@@ -461,20 +479,20 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 type pairRepairLocatorFaultStore struct {
 	*store.Store
 	sessionID ingest.SessionID
-	fault     string
+	fault     pairRepairLocatorFault
 }
 
 var _ ingest.MetricsStore = (*pairRepairLocatorFaultStore)(nil)
 
 func (s *pairRepairLocatorFaultStore) LookupSourceInfo(ctx context.Context, sid ingest.SessionID) (string, ingest.SourceFormat, string, error) {
-	if sid == s.sessionID && s.fault == "source-info" {
+	if sid == s.sessionID && s.fault == pairRepairSourceInfoFault {
 		return "", "", "", fmt.Errorf("synthetic locator lookup failure: source info")
 	}
 	return s.Store.LookupSourceInfo(ctx, sid)
 }
 
 func (s *pairRepairLocatorFaultStore) LookupSessionLocation(ctx context.Context, sid ingest.SessionID) (string, string, error) {
-	if sid == s.sessionID && s.fault == "location" {
+	if sid == s.sessionID && s.fault == pairRepairLocationFault {
 		return "", "", fmt.Errorf("synthetic locator lookup failure: location")
 	}
 	return s.Store.LookupSessionLocation(ctx, sid)

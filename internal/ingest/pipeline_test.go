@@ -5185,8 +5185,12 @@ func TestPipeline_CommitDetection_Idempotent_SecondRun(t *testing.T) {
 		t.Fatal("Run 1: UpsertedCommits not populated after first run")
 	}
 	store.UpsertedCommits = nil // reset to detect second-run calls
-	// Model the production store's successful consumed-source persistence.
+	// The in-memory store records the mirror request but does not implement
+	// publication revisions. Model the capture the real mirror would persist.
 	stored := store.InsertedEntries[0]
+	if stored.CWDProvenance == "" || stored.CWDProvenance == ingest.CWDNotRecovered || len(stored.SourceFingerprint) == 0 {
+		t.Fatalf("Run 1: mirror did not carry a source-inspected capture: %+v", stored)
+	}
 	store.LocationsByID = map[ingest.SessionID]ingest.SessionLocation{
 		session.SessionID: {
 			HostSlug:                string(stored.Metadata.HostSlug),
@@ -5195,6 +5199,9 @@ func TestPipeline_CommitDetection_Idempotent_SecondRun(t *testing.T) {
 			AdapterVersion:          stored.Metadata.AdapterVersion,
 			SourceEvidenceSupported: true,
 			SourceFingerprint:       stored.SourceFingerprint,
+			CaptureRevision:         1,
+			PublicationBound:        true,
+			PublicationReadiness:    ingest.PublicationReady,
 		},
 	}
 

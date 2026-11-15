@@ -1,0 +1,32 @@
+required_names:
+  - unknown-harness
+  - unknown-source
+  - unknown-stored-adapter
+  - unknown-file-adapter
+  - unknown-schema
+  - unknown-pair
+  - unknown-indexer
+  - unknown-refusal
+  - unknown-refusal-indexer
+  - unknown-publication
+  - unknown-native-source
+  - unbounded-malformed-source
+  - unknown-pair-member
+  - unknown-reason
+  - unknown-lane
+cases:
+  - {name: unknown-harness, patch: {harness: future-harness}, error_contains: harness}
+  - {name: unknown-source, patch: {source: typo}, error_contains: source}
+  - {name: unknown-stored-adapter, patch: {stored_adapter: typo}, error_contains: stored_adapter}
+  - {name: unknown-file-adapter, patch: {file_adapter: typo}, error_contains: file_adapter}
+  - {name: unknown-schema, patch: {metadata_schema: typo}, error_contains: metadata_schema}
+  - {name: unknown-pair, patch: {pair: typo}, error_contains: pair}
+  - {name: unknown-indexer, patch: {indexer: typo}, error_contains: indexer}
+  - {name: unknown-refusal, patch: {refusal: typo}, error_contains: refusal}
+  - {name: unknown-refusal-indexer, patch: {refusal_indexer: typo}, error_contains: refusal_indexer}
+  - {name: unknown-publication, patch: {publication: typo}, error_contains: publication}
+  - {name: unknown-native-source, patch: {native_source: typo}, error_contains: native source}
+  - {name: unbounded-malformed-source, patch: {native_source: malformed, max_native_reads: 0}, error_contains: max_native_reads}
+  - {name: unknown-pair-member, patch: {want_pair_writes: [typo]}, error_contains: want_pair_writes}
+  - {name: unknown-reason, patch: {want_reason: typo}, error_contains: want_reason}
+  - {name: unknown-lane, patch: {want_lane: typo}, error_contains: want_lane}
