@@ -9,6 +9,9 @@
     nixpkgs-stable.url = "github:NixOS/nixpkgs/nixos-25.11";
     nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";
     nixpkgs = nixpkgs-unstable;
+    # ast-grep 0.51.2 is newer than both channel pins; keep it on its own input
+    # so an ordinary `nix flake update` does not move the guard's required tool.
+    nixpkgs-ast-grep.url = "github:NixOS/nixpkgs/34209e4f67c988d6a21b19f4ae37672fce52c7da";
     flake-utils.url = "github:numtide/flake-utils";
   };
 
@@ -21,6 +24,7 @@
     , nixpkgs
     , nixpkgs-stable
     , nixpkgs-unstable
+    , nixpkgs-ast-grep
     , flake-utils
     , ...
     }:
@@ -47,7 +51,7 @@
       # Vendor hash for buildGoModule. Recompute when go.mod/go.sum changes:
       # set this to nixpkgs.lib.fakeHash, run `nix build`, copy the reported `got:`
       # hash back here.
-      vendorHash = "sha256-Q59yR2rbgPGZc9Ao/c/iIvwynQXe8ANUGbRxB5KC6dE=";
+      vendorHash = "sha256-tBQ6k+T6Vchh03LBzCRwIZH5cDeYgriLVFnRtWurBZ4=";
 
       # Extra CLI tools available in the dev shell
       devTools = pkgs: with pkgs; [
@@ -55,7 +59,6 @@
         gotools # goimports, godoc, etc.
         go-tools # staticcheck
         delve # debugger
-        ast-grep # structural code search and lint
         golangci-lint # linter suite
         sqlite # CLI for inspecting analytics store
         goreleaser # validate .goreleaser.yml (`goreleaser check`) + local --snapshot builds
@@ -111,6 +114,9 @@
               inherit system;
               config.allowUnfree = true;
             };
+
+            astGrepPkgs = import nixpkgs-ast-grep { inherit system; };
+            ast-grep = astGrepPkgs.ast-grep;
 
             goPackage =
               if goAttr != null
@@ -217,7 +223,7 @@
             devShell = pkgs.mkShell {
               name = "${pname}-dev";
               inputsFrom = [ package ];
-              packages = (devTools pkgs);
+              packages = (devTools pkgs) ++ [ ast-grep ];
 
               shellHook = ''
                 echo "Go $(go version | cut -d' ' -f3) dev shell"

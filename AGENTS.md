@@ -108,6 +108,15 @@ Run the ast-grep rules of the repository when you change Go types or literals:
 ast-grep scan --config sgconfig.yml .
 ```
 
+### Static guard
+
+`make check-unstring` runs `unstring` v0.0.2 over the Go tree and `web/`. It
+needs Go 1.26+ and ast-grep 0.51.2; the dev shell provides both. The generated
+baseline can only shrink; `make unstring-update` lowers it. A deliberate
+exception uses `// unstring-allow: <rule-id> — <reason>` with at least three
+words. `closed-set-literal` and `go-closed-set-literal` accept no marker.
+Generated files are exempt in `.unstring.yaml`.
+
 ### Record-kind vocabulary
 
 - Each harness owns one co-located vocabulary declaration under `internal/ingest/*_vocabulary.go`. Those

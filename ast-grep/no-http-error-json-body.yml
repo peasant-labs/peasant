@@ -18,5 +18,5 @@ constraints:
     regex: '^(fmt\.Sprintf\(\s*)?[`"]\{\\?"error'
 files:
   - "internal/api/**/*.go"
-ignore:
+ignores:
   - "**/*_test.go"

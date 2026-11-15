@@ -13,5 +13,5 @@ rule:
   any:
     - pattern: workflow.GetSignalChannel($CTX, "$SIGNAL")
     - pattern: $_.SignalWorkflow($$$, "$SIGNAL", $_)
-ignore:
+ignores:
   - "**/vendor/**"
