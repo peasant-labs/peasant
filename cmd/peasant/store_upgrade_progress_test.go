@@ -5,13 +5,18 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/testkit/testwait"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 	"github.com/peasant-labs/peasant/internal/tui/upgradeprogress"
@@ -58,10 +63,19 @@ type upgradeProgressThemeCase struct {
 	Want   string `yaml:"want"`
 }
 
+type upgradeProgressMountedCase struct {
+	Name         string   `yaml:"name"`
+	Scenario     string   `yaml:"scenario"`
+	Notice       string   `yaml:"notice"`
+	WantContains []string `yaml:"wantContains"`
+	WantAbsent   []string `yaml:"wantAbsent"`
+}
+
 type upgradeProgressFixtures struct {
 	PlainCases   []upgradeProgressPlainCase   `yaml:"plainCases"`
 	OutcomeCases []upgradeProgressOutcomeCase `yaml:"outcomeCases"`
 	ThemeCases   []upgradeProgressThemeCase   `yaml:"themeCases"`
+	MountedCases []upgradeProgressMountedCase `yaml:"mountedCases"`
 }
 
 func loadUpgradeProgressFixtures(t *testing.T) upgradeProgressFixtures {
@@ -90,10 +104,179 @@ func loadUpgradeProgressFixtures(t *testing.T) upgradeProgressFixtures {
 	for _, c := range fixtures.ThemeCases {
 		present[c.Name] = true
 	}
+	for _, c := range fixtures.MountedCases {
+		present[c.Name] = true
+	}
 	if err := testutil.RequireFixtureNames("store upgrade progress", "case", manifest.RequiredNames, present); err != nil {
 		t.Fatal(err)
 	}
 	return fixtures
+}
+
+// TestRunUpgradeWithProgressMounted exercises the actual terminal path. The
+// store pauses after the initial frame, then (when needed) until its notice
+// appears, so the notice really arrives while the live block owns the PTY.
+func TestRunUpgradeWithProgressMounted(t *testing.T) {
+	previousUpgrade, previousConsent := upgradeStore, needsMigrationConsent
+	t.Cleanup(func() {
+		upgradeStore, needsMigrationConsent = previousUpgrade, previousConsent
+	})
+	needsMigrationConsent = func(string) (bool, error) { return false, nil }
+	for _, c := range loadUpgradeProgressFixtures(t).MountedCases {
+		t.Run(c.Name, func(t *testing.T) {
+			master, terminal := openTestTerminal(t)
+			setTestTerminalSize(t, terminal, 24, 80)
+			header := newSignalWriter("upgrading the local store")
+			notice := newSignalWriter(c.Notice)
+			copied := make(chan error, 1)
+			go func() {
+				_, err := io.Copy(io.MultiWriter(header, notice), master)
+				copied <- err
+			}()
+
+			ctx, cancel := context.WithTimeout(testwait.Context(t), 8*time.Second)
+			defer cancel()
+			start, resume := make(chan struct{}), make(chan struct{})
+			step := store.UpgradeStep{Version: 70, Kind: store.UpgradeStepSchema, Title: "add derived lookups", Cost: store.UpgradeCostQuick}
+			plan := store.UpgradePlan{DBPath: "/synthetic/store.db", From: 69, To: 70, Steps: []store.UpgradeStep{step}}
+			report := store.UpgradeReport{From: 69, To: 70}
+			upgradeStore = func(ctx context.Context, _ string, options store.UpgradeOptions) (store.UpgradeReport, error) {
+				select {
+				case <-start:
+				case <-ctx.Done():
+					return report, ctx.Err()
+				}
+				if c.Scenario == "stopped-before-start" {
+					return report, fmt.Errorf("waiting for the upgrade lock: %w", context.Canceled)
+				}
+				options.Progress(store.UpgradeEvent{Kind: store.UpgradeEventStepStarted, Step: step, Index: 1, Total: 1})
+				if c.Notice != "" {
+					_, _ = fmt.Fprintln(options.Notices, c.Notice)
+					select {
+					case <-resume:
+					case <-ctx.Done():
+						return report, ctx.Err()
+					}
+				}
+				options.Progress(store.UpgradeEvent{Kind: store.UpgradeEventStepFinished, Step: step, Index: 1, Total: 1, Elapsed: time.Second})
+				report.Steps = []store.UpgradeStepResult{{Step: step, Duration: time.Second}}
+				if c.Scenario == "failed-after-commit" {
+					return report, errors.New("could not close the database")
+				}
+				return report, nil
+			}
+			cmd := &cobra.Command{Use: "upgrade-test"}
+			cmd.SetContext(ctx)
+			cmd.SetErr(terminal)
+			cmd.Flags().String("config", filepath.Join(t.TempDir(), "absent.yaml"), "")
+			type result struct {
+				report store.UpgradeReport
+				err    error
+			}
+			done := make(chan result, 1)
+			go func() {
+				report, err := runUpgradeWithProgressMode(cmd, plan, storeUpgradeProgressAuto)
+				done <- result{report, err}
+			}()
+
+			select {
+			case <-header.seen:
+			case <-ctx.Done():
+				t.Fatalf("the mounted upgrade did not render its initial frame: %v", ctx.Err())
+			}
+			beforeNotice := len(header.String())
+			close(start)
+			if c.Notice != "" {
+				select {
+				case <-notice.seen:
+				case <-ctx.Done():
+					t.Fatalf("the mounted upgrade did not display its notice: %v", ctx.Err())
+				}
+				// Bubble Tea inserts two terminal lines for the newline-terminated
+				// notice before writing it. A direct write to the PTY does not.
+				if delta := header.String()[beforeNotice:]; !strings.Contains(delta, ansi.InsertLine(2)) {
+					t.Fatalf("notice was not inserted above the live block: %q", delta)
+				}
+			}
+			close(resume)
+			var got result
+			select {
+			case got = <-done:
+			case <-ctx.Done():
+				t.Fatalf("the mounted upgrade did not return after its final report: %v", ctx.Err())
+			}
+			if (got.err == nil) != (c.Scenario == "done") {
+				t.Fatalf("upgrade error = %v for scenario %q", got.err, c.Scenario)
+			}
+			if c.Scenario != "stopped-before-start" && len(got.report.Steps) != 1 {
+				t.Fatalf("upgrade returned %d committed steps, want one", len(got.report.Steps))
+			}
+			if err := terminal.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := testwait.Receive(t, copied, "the mounted upgrade PTY drained after shutdown"); err != nil && !errors.Is(err, syscall.EIO) {
+				t.Fatalf("read mounted upgrade output: %v", err)
+			}
+			text := ansi.Strip(header.String())
+			for _, marker := range c.WantContains {
+				if !strings.Contains(text, marker) {
+					t.Errorf("mounted output does not contain %q:\n%s", marker, text)
+				}
+			}
+			for _, marker := range c.WantAbsent {
+				if strings.Contains(text, marker) {
+					t.Errorf("mounted output unexpectedly contains %q:\n%s", marker, text)
+				}
+			}
+		})
+	}
+}
+
+func TestRunUpgradeWithProgressConsentPendingUsesPlainLines(t *testing.T) {
+	previousUpgrade, previousConsent := upgradeStore, needsMigrationConsent
+	t.Cleanup(func() {
+		upgradeStore, needsMigrationConsent = previousUpgrade, previousConsent
+	})
+	needsMigrationConsent = func(string) (bool, error) { return true, nil }
+	upgradeStore = func(_ context.Context, _ string, options store.UpgradeOptions) (store.UpgradeReport, error) {
+		_, _ = fmt.Fprintln(options.Notices, "synthetic consent notice")
+		return store.UpgradeReport{}, store.ErrMigrationRefused
+	}
+	master, terminal := openTestTerminal(t)
+	output := newSignalWriter("synthetic consent notice")
+	copied := make(chan error, 1)
+	go func() {
+		_, err := io.Copy(output, master)
+		copied <- err
+	}()
+	ctx, cancel := context.WithTimeout(testwait.Context(t), 8*time.Second)
+	defer cancel()
+	cmd := &cobra.Command{Use: "upgrade-test"}
+	cmd.SetErr(terminal)
+	cmd.SetContext(ctx)
+	done := make(chan error, 1)
+	go func() {
+		_, err := runUpgradeWithProgressMode(cmd, store.UpgradePlan{DBPath: "/synthetic/store.db"}, storeUpgradeProgressAuto)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, store.ErrMigrationRefused) {
+			t.Fatalf("consent refusal = %v, want ErrMigrationRefused", err)
+		}
+	case <-ctx.Done():
+		t.Fatalf("the upgrade did not return after consent was refused: %v", ctx.Err())
+	}
+	if err := terminal.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := testwait.Receive(t, copied, "the plain consent path drained its PTY"); err != nil && !errors.Is(err, syscall.EIO) {
+		t.Fatalf("read consent notice: %v", err)
+	}
+	text := output.String()
+	if !strings.Contains(text, "synthetic consent notice") || strings.Contains(text, "upgrading the local store") || strings.Contains(text, "\x1b[") {
+		t.Fatalf("pending consent must retain plain terminal output without mounting progress:\n%q", text)
+	}
 }
 
 func TestStoreUpgradePlainLines(t *testing.T) {
@@ -161,6 +344,8 @@ func TestStoreUpgradeOutcome(t *testing.T) {
 				err = &store.UpgradeInterruptedError{DBPath: "/synthetic/store.db", Cause: context.Canceled}
 			case "low-disk":
 				err = &store.UpgradeDiskError{DBPath: "/synthetic/store.db", FreeBytes: 1, RequiredBytes: 2}
+			case "consent":
+				err = errors.Join(errors.New("synthetic refusal"), store.ErrMigrationRefused)
 			case "step":
 				err = errors.New("synthetic step failure")
 			default:

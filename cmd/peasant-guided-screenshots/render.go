@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -1039,7 +1040,8 @@ func upgradeProgressPlanForState(state upgradeProgressState) (store.UpgradePlan,
 	switch state {
 	case upgradeProgressStatePlanQuick, upgradeProgressStatePlanLong, upgradeProgressStateRunningPlain,
 		upgradeProgressStateRunningCount, upgradeProgressStateDone, upgradeProgressStateStopped,
-		upgradeProgressStateRefused, upgradeProgressStateFailed:
+		upgradeProgressStateRefused, upgradeProgressStateFailed, upgradeProgressStateFailedEarly,
+		upgradeProgressStateStoppedEarly, upgradeProgressStateBetween, upgradeProgressStateFailedAfter:
 	default:
 		return store.UpgradePlan{}, fmt.Errorf("unknown upgrade progress state %q", state)
 	}
@@ -1123,6 +1125,23 @@ func renderUpgradeProgressCapture(capture upgradeProgressCaptureFixture) (string
 		model, _ = model.Update(upgradeprogress.FinalMsg{Report: finish(1, 2, 3, 4, 5), Outcome: outcome})
 	case upgradeProgressStateRefused:
 		model, _ = model.Update(upgradeprogress.FinalMsg{Report: store.UpgradeReport{From: plan.From, To: plan.To}, Outcome: upgradeprogress.OutcomeRefusedLowDisk})
+	case upgradeProgressStateFailedEarly:
+		model, _ = model.Update(upgradeprogress.FinalMsg{Report: finish(), Outcome: upgradeprogress.OutcomeFailedStep, Err: errors.New("could not open the database")})
+	case upgradeProgressStateStoppedEarly:
+		model, _ = model.Update(upgradeprogress.FinalMsg{Report: finish(), Outcome: upgradeprogress.OutcomeStoppedByUser, Err: context.Canceled})
+	case upgradeProgressStateBetween:
+		for step := 1; step <= 5; step++ {
+			send(store.UpgradeEventStepStarted, step, 0, 0, 0, 0)
+			send(store.UpgradeEventStepFinished, step, time.Duration(step)*time.Second, 0, 0, 0)
+		}
+		model, _ = model.Update(upgradeprogress.FinalMsg{Report: finish(1, 2, 3, 4, 5), Outcome: upgradeprogress.OutcomeStoppedByUser, Err: context.Canceled})
+	case upgradeProgressStateFailedAfter:
+		for step := 1; step <= 7; step++ {
+			send(store.UpgradeEventStepStarted, step, 0, 0, 0, 0)
+			send(store.UpgradeEventStepFinished, step, time.Duration(step)*time.Second, 0, 0, 0)
+		}
+		err := errors.New("store: upgrade /synthetic/store.db: apply the opaque identifier data migration: database is locked; every schema step committed; run `peasant migrate --schema-only` again")
+		model, _ = model.Update(upgradeprogress.FinalMsg{Report: finish(1, 2, 3, 4, 5, 6, 7), Outcome: upgradeprogress.OutcomeFailedStep, Err: err})
 	}
 	model.SetSize(capture.Width, capture.Height)
 	view := model.View()

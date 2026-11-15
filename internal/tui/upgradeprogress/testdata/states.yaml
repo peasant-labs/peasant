@@ -15,7 +15,7 @@ states:
     wantContains: [upgrading the local store, "schema 71 → 74", "43.0 GiB", "step 1 of 3", "add the model reference table", "○"]
     wantAbsent: ["█", "░", "estimate", "finished 7 step(s)"]
 
-  - key: plan-with-long-step-awaiting-confirm
+  - key: plan-with-long-step-before-start
     plan:
       from: 69
       to: 76
@@ -219,3 +219,90 @@ states:
     outcome: failed step
     wantContains: ["failed: the running step rolled back", "5 step(s) finished", "✗", "step 6 of 7"]
     wantAbsent: ["ctrl+c rolls back", "stopped by user", "refused:"]
+
+  - key: failed-before-start
+    plan:
+      from: 69
+      to: 70
+      steps:
+        - {version: 70, kind: schema, title: "add derived lookups", cost: quick}
+    events: []
+    outcome: failed step
+    error: "could not open store"
+    wantContains: ["failed before any step ran", "nothing was changed"]
+    wantAbsent: ["rolled back", "steps before it"]
+
+  - key: stopped-before-start
+    plan:
+      from: 69
+      to: 70
+      steps:
+        - {version: 70, kind: schema, title: "add derived lookups", cost: quick}
+    events: []
+    outcome: stopped by user
+    error: "cancelled while waiting for the upgrade lock"
+    wantContains: ["stopped before any step ran", "nothing was changed"]
+    wantAbsent: ["rolled back", "steps before it"]
+
+  # The consent preflight normally selects plain output. Exercise the model's
+  # defensive interpretation separately, without a screenshot of this state.
+  - key: refused-consent-before-start
+    plan:
+      from: 32
+      to: 33
+      steps:
+        - {version: 33, kind: schema, title: "rename harness identifiers", cost: quick}
+    events: []
+    outcome: refused consent
+    error: "migration refused by consent callback"
+    wantContains: ["consent was declined", "nothing was changed"]
+    wantAbsent: ["rolled back"]
+
+  - key: stopped-between-steps
+    plan:
+      from: 69
+      to: 71
+      steps:
+        - {version: 70, kind: schema, title: "add derived lookups", cost: quick}
+        - {version: 71, kind: schema, title: "add the dispatch index", cost: quick}
+    events:
+      - {kind: step_started, step: 1}
+      - {kind: step_finished, step: 1, elapsedMs: 2000}
+    finished:
+      - {step: 1, durationMs: 2000}
+    outcome: stopped by user
+    error: "cancelled before the next step"
+    wantContains: ["stopped before the next step", "1 step(s) finished"]
+    wantAbsent: ["rolled back", "nothing was changed"]
+
+  - key: failed-after-all-steps
+    plan:
+      from: 69
+      to: 70
+      steps:
+        - {version: 70, kind: schema, title: "add derived lookups", cost: quick}
+    events:
+      - {kind: step_started, step: 1}
+      - {kind: step_finished, step: 1, elapsedMs: 2000}
+    finished:
+      - {step: 1, durationMs: 2000}
+    outcome: failed step
+    error: "could not close the database"
+    wantContains: ["all 1 step(s) committed", "the store is at schema 70", "the command then failed", "could not close the database"]
+    wantAbsent: ["rolled back", "nothing was changed"]
+
+  - key: failed-after-all-steps-sanitizes-terminal-controls
+    plan:
+      from: 69
+      to: 70
+      steps:
+        - {version: 70, kind: schema, title: "add derived lookups", cost: quick}
+    events:
+      - {kind: step_started, step: 1}
+      - {kind: step_finished, step: 1, elapsedMs: 2000}
+    finished:
+      - {step: 1, durationMs: 2000}
+    outcome: failed step
+    error: "could not close the database \x1b]0;malicious terminal title\x07; the committed schema stays intact; inspect the original error and retry the command after checking the disk and filesystem permissions; this extra explanatory text exercises wrapping in narrow terminals without losing the final state"
+    wantContains: ["all 1 step(s) committed", "the store is at schema 70", "the command then failed", "could not close the database"]
+    wantAbsent: ["malicious terminal title", "rolled back", "nothing was changed"]

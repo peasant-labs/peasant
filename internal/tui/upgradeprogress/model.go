@@ -25,6 +25,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
+	"github.com/peasant-labs/peasant/internal/tui/mdrender"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 )
 
@@ -34,19 +35,19 @@ type Outcome uint8
 const (
 	// OutcomeDone means every planned step committed.
 	OutcomeDone Outcome = iota + 1
-	// OutcomeStoppedByUser means the context was cancelled; the step in
-	// progress rolled back and the finished steps stay applied.
+	// OutcomeStoppedByUser means the context was cancelled.
 	OutcomeStoppedByUser
 	// OutcomeRefusedLowDisk means the upgrade refused before its first step
 	// because the filesystem reported too little free space.
 	OutcomeRefusedLowDisk
-	// OutcomeFailedStep means a step failed and rolled back; the steps before
-	// it stay applied.
+	// OutcomeRefusedConsent means the migration consent was declined.
+	OutcomeRefusedConsent
+	// OutcomeFailedStep means the command failed.
 	OutcomeFailedStep
 )
 
 // AllOutcomes is the closed outcome set, in declaration order.
-var AllOutcomes = []Outcome{OutcomeDone, OutcomeStoppedByUser, OutcomeRefusedLowDisk, OutcomeFailedStep}
+var AllOutcomes = []Outcome{OutcomeDone, OutcomeStoppedByUser, OutcomeRefusedLowDisk, OutcomeRefusedConsent, OutcomeFailedStep}
 
 // String returns the reader-facing lowercase name of an outcome.
 func (o Outcome) String() string {
@@ -57,6 +58,8 @@ func (o Outcome) String() string {
 		return "stopped by user"
 	case OutcomeRefusedLowDisk:
 		return "refused for low disk"
+	case OutcomeRefusedConsent:
+		return "refused consent"
 	case OutcomeFailedStep:
 		return "failed step"
 	default:
@@ -64,9 +67,7 @@ func (o Outcome) String() string {
 	}
 }
 
-// stopped reports whether the outcome stopped the upgrade before its last
-// step: cancelled by the user, or a failed step. Both leave the running step
-// rolled back and the earlier steps applied.
+// stopped reports whether a cancellation or failure can mark an active step.
 func (o Outcome) stopped() bool {
 	return o == OutcomeStoppedByUser || o == OutcomeFailedStep
 }
@@ -88,7 +89,7 @@ func NewOutcome(raw string) (Outcome, error) {
 	if outcome, ok := outcomesByName[raw]; ok {
 		return outcome, nil
 	}
-	return 0, fmt.Errorf("upgradeprogress.NewOutcome: value %q is outside the closed outcome set; use \"done\", \"stopped by user\", \"refused for low disk\", or \"failed step\"", raw)
+	return 0, fmt.Errorf("upgradeprogress.NewOutcome: value %q is outside the closed outcome set; use \"done\", \"stopped by user\", \"refused for low disk\", \"refused consent\", or \"failed step\"", raw)
 }
 
 // Options configures a Model. The plan is what the store is about to do; the
@@ -105,6 +106,7 @@ type EventMsg struct{ Event store.UpgradeEvent }
 type FinalMsg struct {
 	Report  store.UpgradeReport
 	Outcome Outcome
+	Err     error
 }
 
 // estimateWindow is the lookback the counted-step estimate uses, matching the
@@ -135,6 +137,7 @@ type Model struct {
 	final            bool
 	outcome          Outcome
 	report           store.UpgradeReport
+	err              error
 	spinner          kit.Spinner
 	spinnerRequested bool
 }
@@ -232,6 +235,7 @@ func (m *Model) applyFinal(msg FinalMsg) {
 	m.final = true
 	m.outcome = msg.Outcome
 	m.report = msg.Report
+	m.err = msg.Err
 	m.spinnerRequested = false
 }
 
@@ -433,18 +437,48 @@ func (m Model) footerLines() []string {
 	styles := m.theme.Styles()
 	total := m.totalElapsed()
 	if m.final {
+		if m.err != nil && len(m.plan.Steps) > 0 && len(m.report.Steps) == len(m.plan.Steps) {
+			// The command returns the full error too. Bound the inline block
+			// so an arbitrarily long error cannot consume the terminal.
+			panel := kit.NewPanel(m.theme)
+			panel.SetSize(m.width, 0)
+			message := strings.Join(strings.Fields(mdrender.Sanitize(m.err.Error())), " ")
+			panel.Wrapped(styles.Danger, "  the command then failed: "+message)
+			errorLines := strings.Split(panel.View(), "\n")
+			if len(errorLines) > 4 {
+				errorLines = append(errorLines[:3], styles.Muted.Render("  … see the full error below"))
+			}
+			return append([]string{styles.Danger.Render(fmt.Sprintf(
+				"  all %d step(s) committed · the store is at schema %d", len(m.report.Steps), m.report.To))}, errorLines...)
+		}
 		switch m.outcome {
 		case OutcomeDone:
 			return []string{styles.Muted.Render(fmt.Sprintf(
 				"  finished %d step(s) in %s · schema %d → %d", len(m.report.Steps), displayDuration(total), m.report.From, m.report.To))}
 		case OutcomeStoppedByUser:
+			if m.stoppedStep() == 0 {
+				if len(m.report.Steps) == 0 {
+					return []string{styles.Danger.Render("  stopped before any step ran · nothing was changed")}
+				}
+				return []string{styles.Danger.Render(fmt.Sprintf(
+					"  stopped before the next step · %d step(s) finished and are kept", len(m.report.Steps)))}
+			}
 			return []string{
 				styles.Danger.Render("  stopped by user · the running step rolled back; finished steps are kept"),
 				styles.Muted.Render(fmt.Sprintf("  %d step(s) finished before the stop · total elapsed %s", len(m.report.Steps), displayDuration(total))),
 			}
 		case OutcomeRefusedLowDisk:
 			return []string{styles.Danger.Render("  refused: not enough free disk · nothing was changed")}
+		case OutcomeRefusedConsent:
+			return []string{styles.Danger.Render("  consent was declined · nothing was changed")}
 		case OutcomeFailedStep:
+			if m.stoppedStep() == 0 {
+				if len(m.report.Steps) == 0 {
+					return []string{styles.Danger.Render("  failed before any step ran · nothing was changed")}
+				}
+				return []string{styles.Danger.Render(fmt.Sprintf(
+					"  failed before the next step · %d step(s) finished and are kept", len(m.report.Steps)))}
+			}
 			return []string{
 				styles.Danger.Render("  failed: the running step rolled back; the steps before it are kept"),
 				styles.Muted.Render(fmt.Sprintf("  %d step(s) finished before the failure · total elapsed %s", len(m.report.Steps), displayDuration(total))),

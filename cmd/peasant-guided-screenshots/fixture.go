@@ -32,8 +32,8 @@ const (
 	// in both themes at both terminal sizes.
 	sheetPullProgress sheetName = "pull-progress"
 	// sheetUpgradeProgress is the explicit store upgrade's terminal progress:
-	// the plan, a running uncounted step, a running counted step, and the four
-	// terminal outcomes, in both themes at both terminal sizes.
+	// the plan, running steps, and their terminal outcomes in both themes at
+	// both terminal sizes.
 	sheetUpgradeProgress sheetName = "upgrade-progress"
 )
 
@@ -319,25 +319,30 @@ type pullProgressCaptureFixture struct {
 // pushCaptureFixture is one push screen at one palette and one region.
 // upgradeProgressState is the closed set of explicit-upgrade progress screens
 // the harness captures: the untouched plan, the long-step plan, a running
-// uncounted step, a running counted step, and the four terminal outcomes.
+// uncounted step, a running counted step, and the reachable terminal outcomes.
 type upgradeProgressState string
 
 const (
 	upgradeProgressStatePlanQuick    upgradeProgressState = "plan-quick-only"
-	upgradeProgressStatePlanLong     upgradeProgressState = "plan-with-long-step-awaiting-confirm"
+	upgradeProgressStatePlanLong     upgradeProgressState = "plan-with-long-step-before-start"
 	upgradeProgressStateRunningPlain upgradeProgressState = "running-uncounted-step"
 	upgradeProgressStateRunningCount upgradeProgressState = "running-counted-step"
 	upgradeProgressStateDone         upgradeProgressState = "done"
 	upgradeProgressStateStopped      upgradeProgressState = "stopped-by-user"
 	upgradeProgressStateRefused      upgradeProgressState = "refused-low-disk"
 	upgradeProgressStateFailed       upgradeProgressState = "failed-step"
+	upgradeProgressStateFailedEarly  upgradeProgressState = "failed-before-start"
+	upgradeProgressStateStoppedEarly upgradeProgressState = "stopped-before-start"
+	upgradeProgressStateBetween      upgradeProgressState = "stopped-between-steps"
+	upgradeProgressStateFailedAfter  upgradeProgressState = "failed-after-all-steps"
 )
 
 func (s upgradeProgressState) valid() bool {
 	switch s {
 	case upgradeProgressStatePlanQuick, upgradeProgressStatePlanLong, upgradeProgressStateRunningPlain,
 		upgradeProgressStateRunningCount, upgradeProgressStateDone, upgradeProgressStateStopped,
-		upgradeProgressStateRefused, upgradeProgressStateFailed:
+		upgradeProgressStateRefused, upgradeProgressStateFailed, upgradeProgressStateFailedEarly,
+		upgradeProgressStateStoppedEarly, upgradeProgressStateBetween, upgradeProgressStateFailedAfter:
 		return true
 	default:
 		return false
@@ -752,7 +757,8 @@ func validateUpgradeProgressMatrix(states []upgradeProgressStateFixture, capture
 	for _, required := range []upgradeProgressState{
 		upgradeProgressStatePlanQuick, upgradeProgressStatePlanLong, upgradeProgressStateRunningPlain,
 		upgradeProgressStateRunningCount, upgradeProgressStateDone, upgradeProgressStateStopped,
-		upgradeProgressStateRefused, upgradeProgressStateFailed,
+		upgradeProgressStateRefused, upgradeProgressStateFailed, upgradeProgressStateFailedEarly,
+		upgradeProgressStateStoppedEarly, upgradeProgressStateBetween, upgradeProgressStateFailedAfter,
 	} {
 		if stateRows[required].Key == "" {
 			return fmt.Errorf("screenshot fixture omits upgrade progress state %q", required)
@@ -912,7 +918,7 @@ func validateSheets(sheets []sheetFixture) error {
 		sheetCompletion:      {kind: sheetKindCompletion, theme: captureThemeDark, width: 1800, height: 7000},
 		sheetDiscovery:       {kind: sheetKindDiscovery, theme: captureThemeDark, width: 1800, height: 3600},
 		sheetPullProgress:    {kind: sheetKindPullProgress, theme: captureThemeDark, width: 1800, height: 3600},
-		sheetUpgradeProgress: {kind: sheetKindUpgradeProgress, theme: captureThemeDark, width: 1800, height: 9600},
+		sheetUpgradeProgress: {kind: sheetKindUpgradeProgress, theme: captureThemeDark, width: 1800, height: 14400},
 	}
 	seen := make(map[sheetName]bool, len(sheets))
 	for _, sheet := range sheets {
