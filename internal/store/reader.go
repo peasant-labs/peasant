@@ -914,6 +914,7 @@ WHERE s.session_id IN (` +
 				OpaqueHostID:            stmt.ColumnText(6),
 				GitRemote:               nullableColumnText(stmt, 7),
 				CaptureRevision:         stmt.ColumnInt64(8),
+				PublicationBound:        stmt.ColumnInt(9) == 1,
 				PublicationReadiness:    readiness,
 				HostSlug:                stmt.ColumnText(1),
 				ParentID:                stmt.ColumnText(2),

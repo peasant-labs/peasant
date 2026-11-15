@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -150,6 +151,11 @@ func buildDiffParallelPipeline(t *testing.T, cases []diffParallelSessionCase, fi
 				adapter := testCase.AdapterVersion
 				location.AdapterVersion = &adapter
 			}
+			// A stored descriptor represents a settled row unless its case
+			// deliberately moves the clock, schema or source sequence.
+			location.IndexerVersion = HarvesterVersionRegistry[HarnessOpenCode].IndexerVersion
+			proof := strings.Repeat("a", 64)
+			location.IndexedInputHash = &proof
 			pipeline.locationCache[sessionID] = location
 		}
 		if testCase.TrackedCursor {

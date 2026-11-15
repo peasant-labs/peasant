@@ -68,9 +68,10 @@ func (p *Pipeline) reconcileOrphanParentCaches(ctx context.Context, discovered, 
 	if len(targets) == 0 {
 		return
 	}
-	// A child written this harvest already had its FK cache decided by the
-	// write path, including the in-batch cycle and unavailable-parent cases.
-	// Only children that were not rewritten are healed from the reverse pass.
+	// A child the write path actually installed this harvest already had its
+	// FK cache decided, including the in-batch cycle and unavailable-parent
+	// cases. A child that was merely queued but settled without a write (a
+	// source compare that matched) is still healed from the reverse pass.
 	rewritten := make(map[SessionID]struct{}, len(written))
 	for i := range written {
 		rewritten[written[i].Session.SessionID] = struct{}{}
