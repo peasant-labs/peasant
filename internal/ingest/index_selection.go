@@ -59,33 +59,22 @@ func (p *Pipeline) repairSessions(ctx context.Context) []SessionID {
 func (p *Pipeline) capturedInputNeedsWork(input *CapturedIndexInput) bool {
 	target := p.sessionVersionTarget(input.session)
 	expected := input.expected
-	// A latest attempt that settled against this session's current pair, the
-	// stored producer revision, and its generation's adapter revision owes no
-	// parser work: the attempt already consumed the current pair under this
-	// build. The pair facet is bound to the work selector's own evidence here,
-	// so an input captured from a different pair is never treated as settled.
-	// A deliberate reindex disables the short-circuit (settled stays false), so
-	// a pending term re-attempts the session once; Force selects outright. The
-	// nil guard is local, so the dereference never depends on the helper's own
-	// nil check.
-	settled := false
-	if pair := expected.LatestAttemptArtifactHash; pair != nil && !p.config.Reindex {
-		settled = latestAttemptPreviewSettles(expected, target) && input.artifactHash == *pair
+	if expected == nil {
+		return true
 	}
-	return p.config.Force ||
-		(expected.IndexerVersion < target.IndexerVersion && !settled) ||
-		(expected.IndexedInputHash == nil || *expected.IndexedInputHash != input.inputHash) && !settled ||
-		// A current metadata capture exists (revision > 0) but the index is not
-		// bound to it: bytes match, publication proof does not. Only an input
-		// the capture can vouch for is pending on that account.
-		(expected.PublicationCaptureRevision > 0 && !expected.PublicationBound && input.bindsPublication()) && !settled ||
-		// The capture is incomplete and this build can certify it: the strict
-		// format-1 parser is the only path that produces complete content, so
-		// a harness on another declared format is at its steady state instead.
-		// A refusal this build already recorded for this producer is a steady
-		// state too, and is excluded below.
-		(expected.ContentStatus != ContentCaptureComplete && p.certifiesContent(input.session.Harness) &&
-			!permanentRefusalIsSettled(expected, target)) && !settled
+	// A missing input proof is index work, not source change: the transcript
+	// the parse just read may be the same bytes the pair always held. A proof
+	// that names different bytes is source change evidence. A pair facet that
+	// disagrees with the captured input never settles either.
+	inputHashMatches := expected.IndexedInputHash == nil || *expected.IndexedInputHash == input.inputHash
+	if pair := expected.LatestAttemptArtifactHash; pair != nil && input.artifactHash != *pair {
+		inputHashMatches = false
+	}
+	decision := p.refreshDecisionForIndexState(expected, target, inputHashMatches, input.bindsPublication())
+	if decision.IsRefresh() {
+		p.markRefreshReason(input.session.SessionID, decision.OutcomeReason())
+	}
+	return decision.Lane != RefreshLaneNone && decision.Lane != RefreshLaneStoredMetadata
 }
 
 // capturedInputBindsWithoutReparse is the rule "bind without a re-parse". It
@@ -291,7 +280,12 @@ func (p *Pipeline) indexTargetNeedsWork(ctx context.Context, target reindexTarge
 	if stateErr != nil {
 		return true
 	}
-	return p.stateNeedsIndexWork(state, p.sessionVersionTarget(target.session))
+	versionTarget := p.sessionVersionTarget(target.session)
+	decision := p.refreshDecisionForIndexState(state, versionTarget, true, true)
+	if decision.IsRefresh() {
+		p.markRefreshReason(target.session.SessionID, decision.OutcomeReason())
+	}
+	return decision.Lane != RefreshLaneNone && decision.Lane != RefreshLaneStoredMetadata
 }
 
 // stateNeedsIndexWork decides from stored SQL state alone whether a session has
@@ -314,21 +308,12 @@ func (p *Pipeline) stateNeedsIndexWork(state *SessionIndexState, target Harveste
 	if p.checkIndexProducer(state) != nil {
 		return true
 	}
-	// A settled latest attempt short-circuits every pending-work term except an
-	// explicit rebuild: the attempt already consumed the current pair under this
-	// build, so re-parsing it would be pure churn. Force selects outright; the
-	// deliberate reindex disables the short-circuit (settled stays false), so
-	// the ordinary terms decide and a pending fact re-attempts the session
-	// once. A reindex is not a full bypass: a session with no pending term
-	// still settles.
-	settled := !p.config.Reindex && latestAttemptPreviewSettles(state, target)
-	return p.config.Force ||
-		(state.IndexerVersion < target.IndexerVersion && !settled) ||
-		(state.IndexedInputHash == nil && !settled) ||
-		(state.PublicationCaptureRevision > 0 && !state.PublicationBound && !settled) ||
-		(state.ContentStatus != ContentCaptureComplete &&
-			p.certifiesContent(state.Harness) &&
-			!permanentRefusalIsSettled(state, target) && !settled)
+	// The decision owns the pending-work terms. The caller selects on the
+	// stored state alone, so an unbound publication capture is selected even
+	// though the pair has not been read yet; the ordinary index path then
+	// refuses a bind the stored tree cannot vouch for.
+	decision := p.refreshDecisionForIndexState(state, target, true, true)
+	return decision.Lane != RefreshLaneNone && decision.Lane != RefreshLaneStoredMetadata
 }
 
 // scanPeasantSyncSessions walks the stored tree and returns one target per

@@ -160,6 +160,13 @@ type ClaudeEvidenceCache interface {
 	LoadClaudeEvidenceFor(ctx context.Context, paths []ResolvedPath) (map[ResolvedPath]ClaudeTranscriptEvidence, error)
 }
 
+// ClaudeEvidenceReadOnly marks a cache whose evidence may be read but cannot
+// be persisted during this discovery. A scoped build still refuses if its
+// deferred writes are applied to such a cache.
+type ClaudeEvidenceReadOnly interface {
+	ClaudeEvidenceReadOnly() bool
+}
+
 // ClaudeIdentityChainReader loads the structural coordinate list for the named
 // transcripts. The whole-table evidence read omits that list: only a lineage
 // proof reads it, and only for the owner and layout parent of a child whose

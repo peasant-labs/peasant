@@ -365,10 +365,8 @@ func removeAllIfExists(path string) error {
 // Errors are silenced — the wizard shows zero counts instead of failing.
 // The optional spinner is updated with progress during discovery and git resolution.
 //
-// dbPath names the local analytics database. When it already carries this
-// build's schema, the sessions it recorded are reused instead of being resolved
-// from git again (see loadKnownSessions); a missing or unusable database simply
-// resolves everything.
+// dbPath names the local analytics database. Compatible stored sessions and
+// evidence are reused; a missing or unusable database resolves everything.
 func ftueDiscover(ctx context.Context, configPath, dbPath string, spinner *discoverySpinner) (ftue.ProviderInventory, []ftue.SessionListing, kickstart.SubagentRelation) {
 	cfg, err := loadConfig(configPath)
 	if err != nil {
@@ -378,12 +376,18 @@ func ftueDiscover(ctx context.Context, configPath, dbPath string, spinner *disco
 	// resolved from git, and what discovery already mined from the transcripts.
 	db := openReusableStore(dbPath)
 	var cache ingest.ClaudeEvidenceCache
+	var known ingest.KnownSessionIndex
 	if db != nil {
 		defer db.Close()
-		cache = db
+		known = loadKnownSessionsFrom(ctx, db)
+		evidence := &scanEvidenceCache{reader: db}
+		if db.IsCurrent() {
+			evidence.writePath = dbPath
+		}
+		cache = evidence
 	}
 	return ftueDiscoverWith(ctx, cfg, &ingest.OSFileSystem{}, &ingest.ExecGitResolver{},
-		loadKnownSessionsFrom(ctx, db), cache, spinner)
+		known, cache, spinner)
 }
 
 // ftueDiscoverWith is the discovery core, with the filesystem, the git resolver,

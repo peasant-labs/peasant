@@ -1,0 +1,4 @@
+requiredNames:
+  - current-store-scan-reuses-and-saves-evidence
+  - behind-store-scan-reuses-without-saving-evidence
+  - current-schema-with-owed-recount-does-not-save-evidence

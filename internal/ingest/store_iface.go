@@ -214,7 +214,11 @@ type SessionLocation struct {
 	OpaqueHostID         string
 	GitRemote            *string
 	PublicationReadiness PublicationReadiness
-	CaptureRevision      int64
+	// PublicationBound is the binding half alone: a current metadata capture
+	// the stored index records. Readiness ANDs content eligibility on top, so
+	// a bound refusal or preview is not ready but is not unbound either.
+	PublicationBound bool
+	CaptureRevision  int64
 	// AdapterVersion is sessions.adapter_version: the newest adapter revision
 	// this row's stored work has been parsed at. A retained latest attempt
 	// advances it without replacing the active generation.

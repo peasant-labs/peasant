@@ -17,9 +17,12 @@ var (
 	_ ingest.RepairSessionLister       = (*Store)(nil)
 )
 
-// buildListStaleAdapterSessionsQuery renders the adapter-refresh work list for
-// the given targets and scope. Production and its query-plan guard call the
-// same builder.
+// buildListStaleAdapterSessionsQuery renders the adapter-refresh CANDIDATE list
+// for the given targets and scope. It is not the refresh decision: it selects
+// rows whose stored adapter stamp is below the target or whose schema this
+// build re-extracts, and ingest's decideRefresh then names the lane with the
+// file and index evidence. Production and its query-plan guard call the same
+// builder.
 func buildListStaleAdapterSessionsQuery(targets map[ingest.Harness]ingest.HarvesterVersions, nativeRefreshVersions []int, scope ingest.StoreScope) (string, []any, error) {
 	if len(targets) == 0 {
 		return "", nil, nil

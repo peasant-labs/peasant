@@ -67,12 +67,13 @@ cases:
   - name: newer-indexer-still-retries
     stored: refusal
     mutate: bump_indexer
-    second_source_reads: 1
+    second_source_reads: 0
     second_updated: 0
     second_unchanged: 1
     second_indexed: 1
   # A refusal with no input proof anchors nothing to the bytes it claims to
-  # describe, so it is not a steady state and must be retried.
+  # describe, so it is not a steady state and must be retried from the stored
+  # transcript.
   - name: no-input-proof-still-retries
     stored: refusal
     mutate: clear_input_proof
@@ -89,8 +90,8 @@ cases:
 # caller asks it.
 settled_required_names:
   - a-settled-refusal-is-not-change-evidence
-  - a-refusal-under-a-newer-target-is-change-evidence
-  - a-refusal-with-no-input-proof-is-change-evidence
+  - a-refusal-under-a-newer-target-is-stored-index-work
+  - a-refusal-with-no-input-proof-is-unproven-and-compared
   - a-migrated-legacy-preview-is-not-settled
   - a-capture-nothing-refused-is-not-settled
 settled_cases:
@@ -100,27 +101,37 @@ settled_cases:
     target_indexer_version: 16
     input_proof: true
     expect: unchanged
-  - name: a-refusal-under-a-newer-target-is-change-evidence
+    want_reason: none
+    want_lane: none
+  - name: a-refusal-under-a-newer-target-is-stored-index-work
     failure_code: strict_capture_refused
     stored_indexer_version: 16
     target_indexer_version: 17
     input_proof: true
-    expect: updated
-  - name: a-refusal-with-no-input-proof-is-change-evidence
+    expect: unchanged
+    want_reason: refusal_reopened
+    want_lane: stored-index
+  - name: a-refusal-with-no-input-proof-is-unproven-and-compared
     failure_code: strict_capture_refused
     stored_indexer_version: 16
     target_indexer_version: 16
     input_proof: false
     expect: updated
+    want_reason: source_compare
+    want_lane: native
   - name: a-migrated-legacy-preview-is-not-settled
     failure_code: legacy_preview_only
     stored_indexer_version: 16
     target_indexer_version: 16
     input_proof: true
     expect: updated
+    want_reason: source_changed
+    want_lane: native
   - name: a-capture-nothing-refused-is-not-settled
     failure_code: ""
     stored_indexer_version: 16
     target_indexer_version: 16
     input_proof: true
     expect: updated
+    want_reason: source_compare
+    want_lane: native

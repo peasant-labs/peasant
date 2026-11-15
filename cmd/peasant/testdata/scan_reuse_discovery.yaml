@@ -1,0 +1,18 @@
+cases:
+  - name: current-store-scan-reuses-and-saves-evidence
+    state: current
+    saves_new_evidence: true
+  - name: behind-store-scan-reuses-without-saving-evidence
+    state: behind
+    saves_new_evidence: false
+  - name: current-schema-with-owed-recount-does-not-save-evidence
+    state: recount_pending
+    saves_new_evidence: false
+cached_session: 11111111-1111-4111-8111-111111111111
+new_session: 22222222-2222-4222-8222-222222222222
+stale_session: 33333333-3333-4333-8333-333333333333
+cached_title: synthetic cached title
+recorded_remote: https://example.invalid/synthetic/project
+recorded_branch: synthetic-recorded-branch
+transcript: |
+  {"type":"user","message":{"role":"user","content":"synthetic native message"}}
