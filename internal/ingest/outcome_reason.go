@@ -145,6 +145,7 @@ const (
 	OutcomeReasonRefreshIndexerBehind               OutcomeReason = 308 // refresh "indexer_behind"
 	OutcomeReasonRefreshRefusalReopened             OutcomeReason = 309 // refresh "refusal_reopened"
 	OutcomeReasonRefreshPublicationUnbound          OutcomeReason = 310 // refresh "publication_unbound"
+	OutcomeReasonRefreshPublicationCaptureMissing   OutcomeReason = 311 // refresh "publication_capture_missing"
 )
 
 // outcomeReasonDefs is the one definition of every reason: id, kind, code and
@@ -238,6 +239,7 @@ var outcomeReasonDefs = [...]outcomeReasonDef{
 	{OutcomeReasonRefreshIndexerBehind, OutcomeKindRefresh, "indexer_behind", false},
 	{OutcomeReasonRefreshRefusalReopened, OutcomeKindRefresh, "refusal_reopened", false},
 	{OutcomeReasonRefreshPublicationUnbound, OutcomeKindRefresh, "publication_unbound", false},
+	{OutcomeReasonRefreshPublicationCaptureMissing, OutcomeKindRefresh, "publication_capture_missing", false},
 }
 
 // AllOutcomeReasons lists every reason this build defines, retired ones
