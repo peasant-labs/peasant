@@ -238,7 +238,7 @@ func openReviewStore(cmd *cobra.Command, cfg *config.Config) (*store.Store, erro
 		}
 		ownedRoot = string(resolved)
 	}
-	db, err := openRunStore(cmd, true, ownedRoot, ingest.WriteConfig{})
+	db, err := openRunStore(cmd, true, ownedRoot, ingest.WriteConfig{}, storeUpgradeProgressAuto)
 	if err != nil {
 		return nil, fmt.Errorf("open analytics store: %w", err)
 	}

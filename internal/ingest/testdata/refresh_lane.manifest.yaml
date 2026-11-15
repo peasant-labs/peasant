@@ -1,0 +1,19 @@
+# Required names for refresh_lane.yaml. A removed or renamed case fails the
+# loader; there is deliberately no bare count.
+requiredNames:
+  - source-changed-is-captured-natively
+  - missing-pair-is-captured-natively
+  - metadata-schema-refresh-is-captured-natively
+  - forced-run-is-captured-natively
+  - adapter-behind-refreshes-metadata-from-the-stored-copy
+  - adapter-behind-without-stored-extractor-is-captured-natively
+  - absent-adapter-stamp-refreshes-metadata-from-the-stored-copy
+  - row-stamp-behind-with-current-file-stamp-reads-no-native-source
+  - indexer-behind-reindexes-the-stored-copy
+  - strict-refusal-reopened-by-indexer-bump-reindexes-the-stored-copy
+  - omitted-records-refusal-reopened-by-indexer-bump-reindexes-the-stored-copy
+  - unknown-data-refusal-reopened-by-indexer-bump-reindexes-the-stored-copy
+  - refusal-at-the-current-indexer-is-left-alone
+  - unbound-publication-binds-without-a-reparse
+  - settled-session-is-left-alone
+  - changed-source-wins-over-a-behind-stamp

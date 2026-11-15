@@ -58,7 +58,9 @@ func validateContentFits(freezePath string, sheet renderedSheet) error {
 	if err != nil {
 		return fmt.Errorf("create content-fit measurement workspace for sheet %q: %w", sheet.fixture.Name, err)
 	}
-	defer os.RemoveAll(workDirectory)
+	if !keepScreenshotScratch() {
+		defer os.RemoveAll(workDirectory)
+	}
 
 	ansiPath := filepath.Join(workDirectory, string(sheet.fixture.Name)+".ansi")
 	if err := os.WriteFile(ansiPath, []byte(sheet.ansi), 0o600); err != nil {

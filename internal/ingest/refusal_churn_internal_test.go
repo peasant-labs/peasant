@@ -22,6 +22,8 @@ type refusalChurnSettledCase struct {
 	TargetIndexerVersion int    `yaml:"target_indexer_version"`
 	InputProof           bool   `yaml:"input_proof"`
 	Expect               string `yaml:"expect"`
+	WantReason           string `yaml:"want_reason"`
+	WantLane             string `yaml:"want_lane"`
 }
 
 // refusalChurnSettledFixture is the predicate-matrix view of the shared fixture
@@ -120,6 +122,18 @@ func TestSettledRefusalIsNotChangeEvidence(t *testing.T) {
 			}
 			if got.String() != testCase.Expect {
 				t.Fatalf("classify %q = %q, want %q; a settled refusal must not be change evidence and every lifting term must be", testCase.Name, got.String(), testCase.Expect)
+			}
+			wantReason, err := NewRefreshReason(testCase.WantReason)
+			if err != nil {
+				t.Fatalf("fixture reason: %v", err)
+			}
+			wantLane, err := NewRefreshLane(testCase.WantLane)
+			if err != nil {
+				t.Fatalf("fixture lane: %v", err)
+			}
+			decision := pipeline.classificationDecision(session, nil)
+			if decision.Reason != wantReason || decision.Lane != wantLane {
+				t.Fatalf("%s: decision = %s/%s, want %s/%s; the class must name the lane the refusal settlement takes", testCase.Name, decision.Reason, decision.Lane, wantReason, wantLane)
 			}
 		})
 	}

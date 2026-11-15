@@ -26,6 +26,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/selectionfilter"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/tui/ingestprogress"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 	"github.com/spf13/cobra"
 )
@@ -534,7 +535,7 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 	// place an already-stored session on the branch the setup tree lists it under.
 	var storedSessions ingest.KnownSessionIndex
 	if !skipDB {
-		db, err := openRunStore(cmd, flags.dryRun, string(resolvedOutput), cfg.Write)
+		db, err := openRunStore(cmd, flags.dryRun, string(resolvedOutput), cfg.Write, storeUpgradeProgressPlain)
 		if err != nil {
 			return fmt.Errorf("open analytics store: %w", err)
 		}
@@ -544,7 +545,12 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 		// keeps the state crash-safe. Skipped on dry runs, which must not
 		// write.
 		if !flags.dryRun {
-			if _, err := db.EnsureSearchIndexHealthy(ctx); err != nil {
+			// A flagged index is rebuilt before any harvest work. The rebuild
+			// reports through the same upgrade step events as the explicit
+			// upgrade, as plain lines because the harvest renderer already owns
+			// the terminal.
+			searchPrinter := newStoreUpgradeLinePrinter(cmd.ErrOrStderr())
+			if _, err := db.EnsureSearchIndexHealthyWithProgress(ctx, searchPrinter.event); err != nil {
 				return fmt.Errorf("heal the flagged search index: %w", err)
 			}
 		}
@@ -1507,6 +1513,13 @@ func printSummary(w io.Writer, result *ingest.PipelineResult, verbose bool, incl
 	fmt.Fprintf(w, "   - %-5d errors\n", s.Errors)
 	fmt.Fprintf(w, "   - %-5d active %s\n", s.Active, activeLabel)
 	fmt.Fprintf(w, "duration: %s\n", result.Duration.Round(100*time.Millisecond))
+	var census *ingest.RefreshCensus
+	if result.CensusStored {
+		census = result.Census
+	}
+	for _, line := range ingestprogress.CensusLines(census) {
+		fmt.Fprintln(w, line)
+	}
 	// The index line is printed whenever there is anything to say, INCLUDING when
 	// nothing was indexed because indexing failed.
 	//

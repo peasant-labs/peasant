@@ -1,0 +1,9 @@
+requiredNames: [stored, failed-refresh-attempt, audit-failed, index-log-failed, no-audit, no-index-logger, empty-index-log]
+cases:
+  - {name: stored, audit: true, index: true, wantStored: true}
+  - {name: failed-refresh-attempt, audit: true, index: true, sessionFails: true, wantStored: true}
+  - {name: audit-failed, audit: true, index: true, auditFails: true, wantStored: false}
+  - {name: index-log-failed, audit: true, index: true, indexFails: true, wantStored: false}
+  - {name: no-audit, audit: false, index: true, wantStored: false}
+  - {name: no-index-logger, audit: true, index: false, wantStored: false}
+  - {name: empty-index-log, audit: true, index: false, emptyIndex: true, wantStored: true}

@@ -1,0 +1,38 @@
+# The explicit upgrade's plain-line renderer and its closed outcome mapping.
+# The events, titles and times are synthetic.
+plainCases:
+  - name: piped-output-has-one-start-and-one-end-line-per-step
+    events:
+      - {kind: step_started, stepIndex: 1, total: 2, title: "add derived lookups", cost: quick, atSeconds: 0}
+      - {kind: step_progress, stepIndex: 1, total: 2, title: "add derived lookups", cost: quick, atSeconds: 4}
+      - {kind: step_finished, stepIndex: 1, total: 2, title: "add derived lookups", cost: quick, atSeconds: 5, elapsedMs: 5000, walBytes: 1024}
+      - {kind: step_started, stepIndex: 2, total: 2, title: "rebuild the search index", cost: scales_with_text, atSeconds: 5}
+      - {kind: step_progress, stepIndex: 2, total: 2, title: "rebuild the search index", cost: scales_with_text, atSeconds: 9}
+      - {kind: step_progress, stepIndex: 2, total: 2, title: "rebuild the search index", cost: scales_with_text, atSeconds: 11}
+      - {kind: step_finished, stepIndex: 2, total: 2, title: "rebuild the search index", cost: scales_with_text, atSeconds: 60, elapsedMs: 55000, walBytes: 1048576}
+    wantStarts: 2
+    wantProgress: 1
+    wantEnds: 2
+    wantContains:
+      - "store upgrade 2/2: rebuild the search index: done in 55s, write-ahead log grew by 1.0 MiB"
+      - "store upgrade 1/2: add derived lookups: started"
+
+outcomeCases:
+  - {name: finished-upgrade-is-done, error: none, want: done}
+  - {name: cancelled-upgrade-is-stopped-by-user, error: interrupted, want: stopped by user}
+  - {name: low-disk-refusal-is-refused-for-low-disk, error: low-disk, want: refused for low disk}
+  - {name: step-error-is-a-failed-step, error: step, want: failed step}
+
+themeCases:
+  - name: light-config-uses-the-light-palette
+    config: "display:\n  theme: light\n"
+    want: light
+  - name: dark-config-uses-the-dark-palette
+    config: "display:\n  theme: dark\n"
+    want: dark
+  - name: absent-config-falls-back-to-dark
+    absent: true
+    want: dark
+  - name: malformed-config-falls-back-to-dark
+    config: "display: [\n"
+    want: dark

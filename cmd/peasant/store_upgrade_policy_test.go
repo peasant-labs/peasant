@@ -553,7 +553,7 @@ func TestStoreUpgradeEntryPoints(t *testing.T) {
 				}
 			case "openRunStore":
 				var db *store.Store
-				db, err = openRunStore(cmd, false, t.TempDir(), ingest.DefaultWriteConfig(1))
+				db, err = openRunStore(cmd, false, t.TempDir(), ingest.DefaultWriteConfig(1), storeUpgradeProgressAuto)
 				if err == nil {
 					_ = db.Close()
 				}

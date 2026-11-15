@@ -19,6 +19,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
+	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/tui/discoveryprogress"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/harvestprogress"
@@ -29,6 +30,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/tui/settings"
 	"github.com/peasant-labs/peasant/internal/tui/settings/scannerfix"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
+	"github.com/peasant-labs/peasant/internal/tui/upgradeprogress"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
 )
@@ -60,7 +62,9 @@ func renderSheets(document captureDocument) ([]renderedSheet, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create isolated screenshot workspace: %w", err)
 	}
-	defer os.RemoveAll(workingDirectory)
+	if !keepScreenshotScratch() {
+		defer os.RemoveAll(workingDirectory)
+	}
 
 	guidedCaptures := make(map[string]terminalCapture, len(document.GuidedCaptures))
 	guidedSections := make(map[guidedSection]guidedSectionFixture, len(document.GuidedSections))
@@ -117,11 +121,11 @@ func renderSheets(document captureDocument) ([]renderedSheet, error) {
 		ingestProgressStates[state.Key] = state
 	}
 	for index, capture := range document.IngestProgressCaptures {
-		view, renderErr := renderIngestProgressCapture(workingDirectory, index, capture)
+		view, renderErr := renderIngestProgressCapture(workingDirectory, index, capture, ingestProgressStates[capture.State])
 		if renderErr != nil {
 			return nil, renderErr
 		}
-		if err := validateTerminalCapture(capture.Name, view, capture.Width, capture.Height, ingestProgressStates[capture.State].WantContains, nil); err != nil {
+		if err := validateTerminalCapture(capture.Name, view, capture.Width, capture.Height, ingestProgressStates[capture.State].WantContains, ingestProgressStates[capture.State].WantAbsent); err != nil {
 			return nil, err
 		}
 		ingestProgressCaptures[capture.Name] = terminalCapture{name: capture.Name, view: view}
@@ -160,6 +164,23 @@ func renderSheets(document captureDocument) ([]renderedSheet, error) {
 		discoveryCaptures[capture.Name] = terminalCapture{name: capture.Name, view: view}
 	}
 
+	upgradeProgressCaptures := make(map[string]terminalCapture, len(document.UpgradeProgressCaptures))
+	upgradeProgressStates := make(map[upgradeProgressState]upgradeProgressStateFixture, len(document.UpgradeProgressStates))
+	for _, state := range document.UpgradeProgressStates {
+		upgradeProgressStates[state.Key] = state
+	}
+	for _, capture := range document.UpgradeProgressCaptures {
+		state := upgradeProgressStates[capture.State]
+		view, renderErr := renderUpgradeProgressCapture(capture)
+		if renderErr != nil {
+			return nil, renderErr
+		}
+		if err := validateTerminalCapture(capture.Name, view, capture.Width, capture.Height, state.WantContains, state.WantAbsent); err != nil {
+			return nil, err
+		}
+		upgradeProgressCaptures[capture.Name] = terminalCapture{name: capture.Name, view: view}
+	}
+
 	sheets := make([]renderedSheet, 0, len(document.Sheets))
 	for _, sheet := range document.Sheets {
 		var content string
@@ -177,6 +198,8 @@ func renderSheets(document captureDocument) ([]renderedSheet, error) {
 			content, rows, err = composePullProgressSheet(sheet, document.PullProgressStates, document.PullProgressCaptures, pullProgressCaptures)
 		case sheetKindDiscovery:
 			content, rows, err = composeDiscoveryProgressSheet(sheet, document.DiscoveryProgressStates, document.DiscoveryProgressCaptures, discoveryCaptures)
+		case sheetKindUpgradeProgress:
+			content, rows, err = composeUpgradeProgressSheet(sheet, document.UpgradeProgressStates, document.UpgradeProgressCaptures, upgradeProgressCaptures)
 		case sheetKindCompletion:
 			content, rows, err = renderCompletionSheet(workingDirectory, sheet, document.Completion)
 		default:
@@ -218,16 +241,36 @@ func renderDiscoveryProgressCapture(capture discoveryProgressCaptureFixture, sta
 	return canvas.View(), nil
 }
 
-func renderIngestProgressCapture(workingDirectory string, index int, capture ingestProgressCaptureFixture) (string, error) {
-	if capture.State != ingestProgressStateRunning {
-		return renderHarvestInlineCapture(capture)
+type captureIngestProgress struct {
+	*ingest.ProgressState
+	lane *ingest.WriteLaneProgress
+}
+
+func (p *captureIngestProgress) WriteLaneSnapshot() (ingest.WriteLaneProgress, bool) {
+	if p.lane == nil {
+		return ingest.WriteLaneProgress{}, false
+	}
+	return *p.lane, true
+}
+
+func captureProgress(state ingestProgressStateFixture) *captureIngestProgress {
+	progress := &captureIngestProgress{ProgressState: ingest.NewProgressState()}
+	if state.Lane != nil {
+		progress.lane = &ingest.WriteLaneProgress{Queued: state.Lane.Queued, Busy: time.Duration(state.Lane.BusyMs) * time.Millisecond, Elapsed: time.Duration(state.Lane.ElapsedMs) * time.Millisecond}
+	}
+	return progress
+}
+
+func renderIngestProgressCapture(workingDirectory string, index int, capture ingestProgressCaptureFixture, state ingestProgressStateFixture) (string, error) {
+	if capture.State != ingestProgressStateRunning && capture.State != ingestProgressStateCandidates && capture.State != ingestProgressStateUnknownTotal {
+		return renderHarvestInlineCapture(capture, state)
 	}
 	draft, err := newCaptureDraft(workingDirectory, fmt.Sprintf("ingest-progress-%02d", index), true)
 	if err != nil {
 		return "", err
 	}
 	clock := fixedCaptureClock{now: timeDateForCapture()}
-	progress := ingest.NewProgressState()
+	progress := captureProgress(state)
 	var tick func(time.Time) tea.Msg
 	program := kickstart.NewProgram(kickstart.ProgramDeps{
 		Theme:             captureThemeValue(capture.Theme),
@@ -251,22 +294,58 @@ func renderIngestProgressCapture(workingDirectory string, index int, capture ing
 	if program.Phase() != kickstart.PhaseIngest || command == nil || tick == nil {
 		return "", fmt.Errorf("render ingest progress capture %q: phase=%s command=%t tick=%t, want active ingest", capture.Name, program.Phase(), command != nil, tick != nil)
 	}
-	progress.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageDiscover, Total: 4})
+	discoveryTotal := 4
+	if capture.State == ingestProgressStateUnknownTotal {
+		discoveryTotal = 0
+	}
+	progress.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageDiscover, Total: discoveryTotal})
+	if capture.State == ingestProgressStateRunning {
+		progress.Update(ingest.ProgressEvent{Kind: ingest.KindEnd, Stage: ingest.StageDiscover, Done: 4, Total: 4})
+		progress.Update(ingest.ProgressEvent{Kind: ingest.KindEnd, Stage: ingest.StageDiff, Done: 4, Total: 4})
+		progress.Update(ingest.ProgressEvent{Kind: ingest.KindEnd, Stage: ingest.StageFilter, Done: 4, Total: 4})
+		if state.Candidates != nil {
+			progress.Update(ingest.ProgressEvent{Kind: ingest.KindCandidates, Stage: ingest.StageExtract, Total: *state.Candidates})
+		}
+		progress.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageExtract, Total: 4})
+	}
 	program, _ = program.Update(tick(clock.Now()))
 	clock.now = clock.now.Add(2 * time.Second)
-	progress.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiscover, Delta: 1, Total: 4})
+	if capture.State == ingestProgressStateRunning {
+		progress.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageExtract, Delta: 1, Total: 4})
+	} else if capture.State != ingestProgressStateUnknownTotal {
+		progress.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiscover, Delta: 1, Total: discoveryTotal})
+	}
+	if capture.State == ingestProgressStateCandidates {
+		progress.Update(ingest.ProgressEvent{Kind: ingest.KindEnd, Stage: ingest.StageDiscover, Done: 4, Total: 4})
+		progress.Update(ingest.ProgressEvent{Kind: ingest.KindEnd, Stage: ingest.StageDiff, Done: 9, Total: 9})
+		progress.Update(ingest.ProgressEvent{Kind: ingest.KindEnd, Stage: ingest.StageFilter, Done: 9, Total: 9})
+		if state.Candidates != nil {
+			progress.Update(ingest.ProgressEvent{Kind: ingest.KindCandidates, Stage: ingest.StageExtract, Total: *state.Candidates})
+		}
+	}
 	program, _ = program.Update(tick(clock.Now()))
 	return program.View(), nil
 }
 
-func renderHarvestInlineCapture(capture ingestProgressCaptureFixture) (string, error) {
+func renderHarvestInlineCapture(capture ingestProgressCaptureFixture, state ingestProgressStateFixture) (string, error) {
 	started := timeDateForCapture()
-	progress := ingest.NewProgressState()
+	progress := captureProgress(state)
 	progress.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageDiscover, Total: 4})
+	activeStage := ingest.StageDiscover
+	if capture.State == ingestProgressStateHarvestInline {
+		progress.Update(ingest.ProgressEvent{Kind: ingest.KindEnd, Stage: ingest.StageDiscover, Done: 4, Total: 4})
+		progress.Update(ingest.ProgressEvent{Kind: ingest.KindEnd, Stage: ingest.StageDiff, Done: 4, Total: 4})
+		progress.Update(ingest.ProgressEvent{Kind: ingest.KindEnd, Stage: ingest.StageFilter, Done: 4, Total: 4})
+		if state.Candidates != nil {
+			progress.Update(ingest.ProgressEvent{Kind: ingest.KindCandidates, Stage: ingest.StageExtract, Total: *state.Candidates})
+		}
+		activeStage = ingest.StageExtract
+		progress.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: activeStage, Total: 4})
+	}
 	model := harvestprogress.New(harvestprogress.Options{Progress: progress, Animation: animation.IngestAnimation(), Theme: captureThemeValue(capture.Theme), StartedAt: started})
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: capture.Width, Height: capture.Height})
 	model = updated.(harvestprogress.Model)
-	progress.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiscover, Delta: 1, Total: 4})
+	progress.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: activeStage, Delta: 1, Total: 4})
 	updated, _ = model.Update(harvestprogress.TickMsg(started.Add(2 * time.Second)))
 	if capture.State == ingestProgressStateHarvestCanceling || capture.State == ingestProgressStateHarvestCanceled {
 		updated, _ = updated.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
@@ -951,6 +1030,160 @@ func composePullProgressSheet(
 		}
 	}
 	return renderContactSheet(sheet.Title, rows), meta, nil
+}
+
+// upgradeProgressPlanForState builds the synthetic plan each captured
+// upgrade-progress state mounts. The plan titles and costs mirror the upgrade
+// catalog's shapes; no real store or migration is read.
+func upgradeProgressPlanForState(state upgradeProgressState) (store.UpgradePlan, error) {
+	switch state {
+	case upgradeProgressStatePlanQuick, upgradeProgressStatePlanLong, upgradeProgressStateRunningPlain,
+		upgradeProgressStateRunningCount, upgradeProgressStateDone, upgradeProgressStateStopped,
+		upgradeProgressStateRefused, upgradeProgressStateFailed:
+	default:
+		return store.UpgradePlan{}, fmt.Errorf("unknown upgrade progress state %q", state)
+	}
+	if state == upgradeProgressStatePlanQuick {
+		return store.UpgradePlan{From: 71, To: 74, StoreBytes: 46170898432, Steps: []store.UpgradeStep{
+			{Version: 72, Kind: store.UpgradeStepSchema, Title: "add the model reference table", Cost: store.UpgradeCostQuick},
+			{Version: 73, Kind: store.UpgradeStepSchema, Title: "widen the stored harness set", Cost: store.UpgradeCostScalesWithRows},
+			{Version: 74, Kind: store.UpgradeStepSchema, Title: "count conversation turns and fill the count", Cost: store.UpgradeCostScalesWithRows, Counts: store.UpgradeUnitSessions},
+		}}, nil
+	}
+	return store.UpgradePlan{From: 69, To: 76, StoreBytes: 46170898432, Steps: []store.UpgradeStep{
+		{Version: 70, Kind: store.UpgradeStepSchema, Title: "add derived lookups", Cost: store.UpgradeCostQuick},
+		{Version: 71, Kind: store.UpgradeStepSchema, Title: "add the dispatch index", Cost: store.UpgradeCostQuick},
+		{Version: 72, Kind: store.UpgradeStepSchema, Title: "add the model reference table", Cost: store.UpgradeCostQuick},
+		{Version: 73, Kind: store.UpgradeStepSchema, Title: "widen the stored harness set", Cost: store.UpgradeCostScalesWithRows},
+		{Version: 74, Kind: store.UpgradeStepSchema, Title: "count conversation turns and fill the count", Cost: store.UpgradeCostScalesWithRows, Counts: store.UpgradeUnitSessions},
+		{Version: 75, Kind: store.UpgradeStepSchema, Title: "widen entry types and rebuild search", Cost: store.UpgradeCostScalesWithText},
+		{Version: 76, Kind: store.UpgradeStepSchema, Title: "repair the search triggers", Cost: store.UpgradeCostQuick},
+	}}, nil
+}
+
+// renderUpgradeProgressCapture mounts the REAL explicit-upgrade progress
+// model — the same child the command runs before its own program starts — over
+// the synthetic plan and events for the state. The final block is shown on the
+// capture canvas, which represents the terminal around the inline surface.
+func renderUpgradeProgressCapture(capture upgradeProgressCaptureFixture) (string, error) {
+	plan, err := upgradeProgressPlanForState(capture.State)
+	if err != nil {
+		return "", err
+	}
+	model := upgradeprogress.New(upgradeprogress.Options{Theme: captureThemeValue(capture.Theme), Plan: plan})
+	send := func(kind store.UpgradeEventKind, step int, elapsed time.Duration, done, of, walBytes int64) {
+		model, _ = model.Update(upgradeprogress.EventMsg{Event: store.UpgradeEvent{
+			Kind: kind, Step: plan.Steps[step-1], Index: step, Total: len(plan.Steps),
+			Done: done, Of: of, Unit: plan.Steps[step-1].Counts, WALBytes: walBytes, Elapsed: elapsed,
+		}})
+	}
+	finish := func(steps ...int) store.UpgradeReport {
+		report := store.UpgradeReport{From: plan.From, To: plan.To}
+		for _, step := range steps {
+			report.Steps = append(report.Steps, store.UpgradeStepResult{Step: plan.Steps[step-1], Duration: time.Second})
+		}
+		return report
+	}
+	switch capture.State {
+	case upgradeProgressStatePlanQuick, upgradeProgressStatePlanLong:
+	case upgradeProgressStateRunningPlain:
+		for step := 1; step <= 5; step++ {
+			send(store.UpgradeEventStepStarted, step, 0, 0, 0, 0)
+			send(store.UpgradeEventStepFinished, step, time.Duration(step)*time.Second, 0, 0, 0)
+		}
+		send(store.UpgradeEventStepStarted, 6, 0, 0, 0, 0)
+		send(store.UpgradeEventStepProgress, 6, 41*time.Second, 0, 0, 13107200)
+	case upgradeProgressStateRunningCount:
+		for step := 1; step <= 4; step++ {
+			send(store.UpgradeEventStepStarted, step, 0, 0, 0, 0)
+			send(store.UpgradeEventStepFinished, step, time.Duration(step)*time.Second, 0, 0, 0)
+		}
+		send(store.UpgradeEventStepStarted, 5, 0, 0, 0, 0)
+		send(store.UpgradeEventStepProgress, 5, 179*time.Second, 12000, 20616, 0)
+		send(store.UpgradeEventStepProgress, 5, 182*time.Second, 13000, 20616, 0)
+		send(store.UpgradeEventStepProgress, 5, 185*time.Second, 13902, 20616, 0)
+	case upgradeProgressStateDone:
+		for step := 1; step <= 7; step++ {
+			send(store.UpgradeEventStepStarted, step, 0, 0, 0, 0)
+			send(store.UpgradeEventStepFinished, step, time.Duration(step)*time.Second, 0, 0, 0)
+		}
+		report := finish(1, 2, 3, 4, 5, 6, 7)
+		model, _ = model.Update(upgradeprogress.FinalMsg{Report: report, Outcome: upgradeprogress.OutcomeDone})
+	case upgradeProgressStateStopped, upgradeProgressStateFailed:
+		for step := 1; step <= 5; step++ {
+			send(store.UpgradeEventStepStarted, step, 0, 0, 0, 0)
+			send(store.UpgradeEventStepFinished, step, time.Duration(step)*time.Second, 0, 0, 0)
+		}
+		send(store.UpgradeEventStepStarted, 6, 0, 0, 0, 0)
+		send(store.UpgradeEventStepProgress, 6, 41*time.Second, 0, 0, 13107200)
+		outcome := upgradeprogress.OutcomeStoppedByUser
+		if capture.State == upgradeProgressStateFailed {
+			outcome = upgradeprogress.OutcomeFailedStep
+		}
+		model, _ = model.Update(upgradeprogress.FinalMsg{Report: finish(1, 2, 3, 4, 5), Outcome: outcome})
+	case upgradeProgressStateRefused:
+		model, _ = model.Update(upgradeprogress.FinalMsg{Report: store.UpgradeReport{From: plan.From, To: plan.To}, Outcome: upgradeprogress.OutcomeRefusedLowDisk})
+	}
+	model.SetSize(capture.Width, capture.Height)
+	view := model.View()
+	if lipgloss.Height(view) > capture.Height || lipgloss.Width(view) > capture.Width {
+		return "", fmt.Errorf("upgrade progress overflows capture %q", capture.Name)
+	}
+	canvas := kit.NewPanel(captureThemeValue(capture.Theme))
+	canvas.SetSize(capture.Width, capture.Height)
+	canvas.Rendered(view)
+	return canvas.View(), nil
+}
+
+func composeUpgradeProgressSheet(
+	sheet sheetFixture,
+	states []upgradeProgressStateFixture,
+	cases []upgradeProgressCaptureFixture,
+	captures map[string]terminalCapture,
+) (string, []sheetRow, error) {
+	rows := make([]string, 0, len(states)*2)
+	meta := make([]sheetRow, 0, len(states)*2)
+	for _, state := range states {
+		themes := []captureTheme{captureThemeDark}
+		if state.Key.requiresBothThemes() {
+			themes = append(themes, captureThemeLight)
+		}
+		for _, name := range themes {
+			left, err := upgradeProgressCaptureFor(cases, captures, state.Key, name, 80, 24)
+			if err != nil {
+				return "", nil, err
+			}
+			right, err := upgradeProgressCaptureFor(cases, captures, state.Key, name, 120, 40)
+			if err != nil {
+				return "", nil, err
+			}
+			row := joinCapturePair(left, right)
+			rows = append(rows, row)
+			meta = append(meta, sheetRow{
+				label: fmt.Sprintf("upgrade progress state %q (%s)", state.Key, name),
+				lines: strings.Count(row, "\n") + 1,
+			})
+		}
+	}
+	return renderContactSheet(sheet.Title, rows), meta, nil
+}
+
+func upgradeProgressCaptureFor(
+	cases []upgradeProgressCaptureFixture,
+	captures map[string]terminalCapture,
+	state upgradeProgressState,
+	name captureTheme,
+	width, height int,
+) (terminalCapture, error) {
+	for _, capture := range cases {
+		if capture.State == state &&
+			capture.Theme == name &&
+			capture.Width == width &&
+			capture.Height == height {
+			return captures[capture.Name], nil
+		}
+	}
+	return terminalCapture{}, fmt.Errorf("compose upgrade progress sheet: no capture for %s/%s/%dx%d", state, name, width, height)
 }
 
 func composeDiscoveryProgressSheet(

@@ -46,7 +46,7 @@ func stageTwoBodiesThroughRunStore(t *testing.T, cfg ingest.WriteConfig) int {
 		t.Fatal(err)
 	}
 	dbPath := defaults.ResolveDBFilePathWith(dataDir).String()
-	db, err := openRunStore(cmd, false, ownedRoot, cfg)
+	db, err := openRunStore(cmd, false, ownedRoot, cfg, storeUpgradeProgressAuto)
 	if err != nil {
 		t.Fatal(err)
 	}

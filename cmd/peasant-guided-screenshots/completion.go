@@ -17,13 +17,22 @@ import (
 type completionState string
 
 const (
-	completionWarningsTop    completionState = "warnings-top"
-	completionWarningsBottom completionState = "warnings-bottom"
-	completionNoWarnings     completionState = "no-warnings"
+	completionWarningsTop       completionState = "warnings-top"
+	completionWarningsBottom    completionState = "warnings-bottom"
+	completionNoWarnings        completionState = "no-warnings"
+	completionFinalCensus       completionState = "final-census"
+	completionCensusBottom      completionState = "census-bottom"
+	completionCensusUnavailable completionState = "census-unavailable"
 )
 
 func (s completionState) valid() bool {
-	return s == completionWarningsTop || s == completionWarningsBottom || s == completionNoWarnings
+	switch s {
+	case completionWarningsTop, completionWarningsBottom, completionNoWarnings,
+		completionFinalCensus, completionCensusBottom, completionCensusUnavailable:
+		return true
+	default:
+		return false
+	}
 }
 
 type completionStateFixture struct {
@@ -41,14 +50,19 @@ type completionCaptureFixture struct {
 }
 
 type completionFixture struct {
-	New         int                        `yaml:"new"`
-	Updated     int                        `yaml:"updated"`
-	Unchanged   int                        `yaml:"unchanged"`
-	Excluded    int                        `yaml:"excludedBySelection"`
-	Errors      int                        `yaml:"errors"`
-	Diagnostics []ingest.DiagnosticEntry   `yaml:"diagnostics"`
-	States      []completionStateFixture   `yaml:"states"`
-	Captures    []completionCaptureFixture `yaml:"captures"`
+	New         int                      `yaml:"new"`
+	Updated     int                      `yaml:"updated"`
+	Unchanged   int                      `yaml:"unchanged"`
+	Excluded    int                      `yaml:"excludedBySelection"`
+	Errors      int                      `yaml:"errors"`
+	Diagnostics []ingest.DiagnosticEntry `yaml:"diagnostics"`
+	CensusRows  []struct {
+		Reason       string `yaml:"reason"`
+		Sessions     int    `yaml:"sessions"`
+		IndexedBytes int64  `yaml:"indexedBytes"`
+	} `yaml:"censusRows"`
+	States   []completionStateFixture   `yaml:"states"`
+	Captures []completionCaptureFixture `yaml:"captures"`
 }
 
 func validateCompletionMatrix(fixture completionFixture) error {
@@ -59,13 +73,25 @@ func validateCompletionMatrix(fixture completionFixture) error {
 		}
 		states[state.Key] = true
 	}
-	for _, required := range []completionState{completionWarningsTop, completionWarningsBottom, completionNoWarnings} {
+	for _, required := range []completionState{completionWarningsTop, completionWarningsBottom, completionNoWarnings, completionFinalCensus, completionCensusBottom, completionCensusUnavailable} {
 		if !states[required] {
 			return fmt.Errorf("screenshot fixture omits completion state %q", required)
 		}
 	}
 	if len(fixture.Diagnostics) == 0 {
 		return fmt.Errorf("completion fixture omits representative warning data")
+	}
+	if len(fixture.CensusRows) == 0 {
+		return fmt.Errorf("completion fixture omits the final census")
+	}
+	for _, row := range fixture.CensusRows {
+		reason, err := ingest.NewOutcomeReason(row.Reason)
+		if err != nil {
+			return fmt.Errorf("completion fixture has invalid census row %q", row.Reason)
+		}
+		if reason.Kind() != ingest.OutcomeKindRefresh || row.Sessions <= 0 || row.IndexedBytes < 0 {
+			return fmt.Errorf("completion fixture has invalid census row %q", row.Reason)
+		}
 	}
 	for _, diagnostic := range fixture.Diagnostics {
 		if diagnostic.Location == "" || diagnostic.Message == "" || diagnostic.Remediation == "" {
@@ -99,8 +125,21 @@ func renderCompletionCapture(directory string, index int, fixture completionFixt
 		return "", err
 	}
 	result := &ftue.IngestResult{New: fixture.New, Updated: fixture.Updated, Unchanged: fixture.Unchanged, ExcludedBySelection: fixture.Excluded, Errors: fixture.Errors}
-	if capture.State != completionNoWarnings {
+	if capture.State == completionWarningsTop || capture.State == completionWarningsBottom {
 		result.Diagnostics = fixture.Diagnostics
+	}
+	if capture.State != completionNoWarnings {
+		result.CensusReported = true
+	}
+	if result.CensusReported && capture.State != completionCensusUnavailable {
+		result.Census = &ingest.RefreshCensus{}
+		for _, row := range fixture.CensusRows {
+			reason, err := ingest.NewOutcomeReason(row.Reason)
+			if err != nil {
+				return "", err
+			}
+			result.Census.Rows = append(result.Census.Rows, ingest.RefreshCensusRow{Reason: reason, Lane: reason.RefreshLane(), Sessions: row.Sessions, SourceBytes: row.IndexedBytes})
+		}
 	}
 	program := kickstart.NewProgram(kickstart.ProgramDeps{
 		Theme: captureThemeValue(capture.Theme), Draft: draft, AlreadyConnected: true,
@@ -117,7 +156,7 @@ func renderCompletionCapture(directory string, index int, fixture completionFixt
 	if program.Phase() != kickstart.PhaseDone || program.IngestErr() != nil || program.IngestResult() != result {
 		return "", fmt.Errorf("completion capture %q did not retain successful local result", capture.Name)
 	}
-	if capture.State == completionWarningsBottom {
+	if capture.State == completionWarningsBottom || capture.State == completionCensusBottom {
 		program = sendProgramMessage(program, tea.KeyPressMsg{Code: 'G', Text: "G"})
 	}
 	return program.View(), nil

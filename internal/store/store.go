@@ -279,6 +279,11 @@ type Store struct {
 	// the reclaim after its row transaction commits and before any generation
 	// directory is removed. It proves the row-first ordering is crash-safe.
 	reclaimSeam func(stage string) error
+	// searchRebuildSeam is a nil production hook a test sets to make the search
+	// rebuild's transaction fail at COMMIT deterministically. It runs inside
+	// that transaction, before the rebuild statements, so a caller that loses
+	// the COMMIT error fails the test instead of reporting success.
+	searchRebuildSeam func(conn *sqlite.Conn) error
 	// writeConfig carries the resolved write.* budgets for the staging and
 	// activation lanes (see WithWriteConfig).
 	writeConfig ingest.WriteConfig

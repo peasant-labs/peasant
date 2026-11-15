@@ -365,10 +365,8 @@ func removeAllIfExists(path string) error {
 // Errors are silenced — the wizard shows zero counts instead of failing.
 // The optional spinner is updated with progress during discovery and git resolution.
 //
-// dbPath names the local analytics database. When it already carries this
-// build's schema, the sessions it recorded are reused instead of being resolved
-// from git again (see loadKnownSessions); a missing or unusable database simply
-// resolves everything.
+// dbPath names the local analytics database. Compatible stored sessions and
+// evidence are reused; a missing or unusable database resolves everything.
 func ftueDiscover(ctx context.Context, configPath, dbPath string, spinner *discoverySpinner) (ftue.ProviderInventory, []ftue.SessionListing, kickstart.SubagentRelation) {
 	cfg, err := loadConfig(configPath)
 	if err != nil {
@@ -378,12 +376,18 @@ func ftueDiscover(ctx context.Context, configPath, dbPath string, spinner *disco
 	// resolved from git, and what discovery already mined from the transcripts.
 	db := openReusableStore(dbPath)
 	var cache ingest.ClaudeEvidenceCache
+	var known ingest.KnownSessionIndex
 	if db != nil {
 		defer db.Close()
-		cache = db
+		known = loadKnownSessionsFrom(ctx, db)
+		evidence := &scanEvidenceCache{reader: db}
+		if db.IsCurrent() {
+			evidence.writePath = dbPath
+		}
+		cache = evidence
 	}
 	return ftueDiscoverWith(ctx, cfg, &ingest.OSFileSystem{}, &ingest.ExecGitResolver{},
-		loadKnownSessionsFrom(ctx, db), cache, spinner)
+		known, cache, spinner)
 }
 
 // ftueDiscoverWith is the discovery core, with the filesystem, the git resolver,
@@ -554,7 +558,7 @@ func buildFTUEIngestRunnerWithProgress(cmd *cobra.Command, configPath string) (f
 		dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
 		// Kickstart upgraded the store before discovery; this check is a
 		// no-op then, and it covers a runner started any other way.
-		if err := ensureStoreCurrent(cmd, dbPath, storeEntryModeFor(cmd)); err != nil {
+		if err := ensureStoreCurrentPlain(cmd, dbPath, storeEntryModeFor(cmd)); err != nil {
 			return nil, err
 		}
 		db, err := store.Open(dbPath, generationOptions...)
@@ -600,7 +604,7 @@ func buildFTUEIngestRunnerWithProgress(cmd *cobra.Command, configPath string) (f
 // add up.
 func kickstartIngestResult(result *ingest.PipelineResult) *ftue.IngestResult {
 	s := result.Summary
-	return &ftue.IngestResult{
+	view := &ftue.IngestResult{
 		New:                 s.New,
 		Updated:             s.Updated,
 		Unchanged:           s.Unchanged,
@@ -609,7 +613,12 @@ func kickstartIngestResult(result *ingest.PipelineResult) *ftue.IngestResult {
 		Duration:            result.Duration,
 		ProviderCounts:      aggregateProviderCounts(result.Sessions),
 		Diagnostics:         append([]ingest.DiagnosticEntry(nil), result.Diagnostics...),
+		CensusReported:      true,
 	}
+	if result.CensusStored {
+		view.Census = result.Census
+	}
+	return view
 }
 
 // kickstartAllowedSessionIDs preserves the difference between unrestricted

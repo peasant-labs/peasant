@@ -1,0 +1,9 @@
+requiredStates:
+  - plan-quick-only
+  - plan-with-long-step-awaiting-confirm
+  - running-uncounted-step
+  - running-counted-step
+  - done
+  - stopped-by-user
+  - refused-low-disk
+  - failed-step
