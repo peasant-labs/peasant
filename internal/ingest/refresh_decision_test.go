@@ -1,54 +1,75 @@
 package ingest_test
 
 import (
+	_ "embed"
+	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"gopkg.in/yaml.v3"
 )
 
-// TestRefreshReasonsUseTheOutcomeVocabulary pins the one-spelling rule: every
-// refreshing decision reason is the code of an OutcomeReason refresh constant,
-// and the closed decision set is those eleven plus source_compare and none.
+//go:embed testdata/refresh_reasons.yaml
+var refreshReasonsYAML []byte
+
+// TestRefreshReasonsUseTheOutcomeVocabulary pins exact membership and lane
+// mapping, including the decisions that do not write an outcome.
 func TestRefreshReasonsUseTheOutcomeVocabulary(t *testing.T) {
-	want := make(map[ingest.RefreshReason]ingest.OutcomeReason)
-	for _, outcome := range ingest.AllOutcomeReasons {
-		if outcome.Kind() != ingest.OutcomeKindRefresh {
-			continue
-		}
-		want[ingest.RefreshReason(outcome.Code())] = outcome
+	var fixture struct {
+		Reasons []struct {
+			Code      string `yaml:"code"`
+			Lane      string `yaml:"lane"`
+			NoOutcome bool   `yaml:"no_outcome"`
+		} `yaml:"reasons"`
 	}
-	if len(want) != 11 {
-		t.Fatalf("outcome vocabulary defines %d refresh reasons, want 11", len(want))
+	decoder := yaml.NewDecoder(strings.NewReader(string(refreshReasonsYAML)))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&fixture); err != nil {
+		t.Fatal(err)
 	}
-	for raw, outcome := range want {
-		reason, err := ingest.NewRefreshReason(string(raw))
+	want := make(map[ingest.RefreshReason]bool)
+	for _, row := range fixture.Reasons {
+		reason, err := ingest.NewRefreshReason(row.Code)
 		if err != nil {
-			t.Fatalf("NewRefreshReason(%q): %v", raw, err)
+			t.Fatal(err)
 		}
-		if reason.OutcomeReason() != outcome {
-			t.Fatalf("decision reason %q maps to outcome %s, want %s", raw, reason.OutcomeReason().Code(), outcome.Code())
+		if want[reason] {
+			t.Fatalf("fixture repeats reason %q", row.Code)
+		}
+		want[reason] = true
+		lane, err := ingest.NewRefreshLane(row.Lane)
+		if err != nil {
+			t.Fatal(err)
+		}
+		outcome := reason.OutcomeReason()
+		if row.NoOutcome {
+			if outcome != 0 {
+				t.Errorf("%q unexpectedly writes outcome %s", reason, outcome.Code())
+			}
+		} else {
+			if !outcome.Defined() || outcome.Code() != row.Code {
+				t.Errorf("%q maps to outcome %s, want its own outcome", reason, outcome.Code())
+			}
+			if outcome.Kind() != ingest.OutcomeKindRefresh || outcome.RefreshLane() != lane {
+				t.Errorf("%q maps to kind %s lane %s, want refresh in lane %s", reason, outcome.Kind(), outcome.RefreshLane(), lane)
+			}
 		}
 	}
-	if got, wantLen := len(ingest.AllRefreshReasons), len(want)+2; got != wantLen {
-		t.Fatalf("AllRefreshReasons has %d entries, want %d (eleven refreshes plus source_compare and none)", got, wantLen)
-	}
-	seen := make(map[ingest.RefreshReason]bool, len(ingest.AllRefreshReasons))
+	seen := make(map[ingest.RefreshReason]bool)
 	for _, reason := range ingest.AllRefreshReasons {
-		if seen[reason] {
-			t.Fatalf("AllRefreshReasons repeats %q", reason)
+		if seen[reason] || !want[reason] {
+			t.Errorf("decision reason %q is repeated or absent from the fixture", reason)
 		}
 		seen[reason] = true
-		if reason == ingest.RefreshReasonSourceCompare || reason == ingest.RefreshReasonNone {
-			if reason.OutcomeReason() != 0 {
-				t.Fatalf("%q writes outcome row %s; it must write none", reason, reason.OutcomeReason().Code())
-			}
-			continue
-		}
-		if want[reason] == 0 {
-			t.Fatalf("decision reason %q is not an OutcomeReason refresh constant", reason)
+	}
+	for reason := range want {
+		if !seen[reason] {
+			t.Errorf("fixture reason %q is absent from AllRefreshReasons", reason)
 		}
 	}
-	if !seen[ingest.RefreshReasonSourceCompare] || !seen[ingest.RefreshReasonNone] {
-		t.Fatal("AllRefreshReasons omits source_compare or none")
+	for _, outcome := range ingest.AllOutcomeReasons {
+		if outcome.Kind() == ingest.OutcomeKindRefresh && !want[ingest.RefreshReason(outcome.Code())] {
+			t.Errorf("refresh outcome %q is absent from the fixture", outcome.Code())
+		}
 	}
 }

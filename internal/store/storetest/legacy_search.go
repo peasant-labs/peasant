@@ -163,7 +163,7 @@ func BuildRecountOwedHeadStore(t *testing.T, path string) {
 
 // BuildQuickV78Store writes a real version-78 store that holds no session:
 // the current schema with what migration v79 adds undone, stamped 78. Its
-// upgrade plan is the one quick step, 79, and a real upgrade finishes it.
+// upgrade plan contains only quick steps, and a real upgrade finishes it.
 // Every store below 78 plans step 78, which copies the session tables and is
 // long, so this is the quick behind store an entry-point policy test needs.
 func BuildQuickV78Store(t *testing.T, path string) {

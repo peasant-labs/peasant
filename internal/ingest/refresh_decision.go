@@ -10,7 +10,7 @@ import (
 
 // RefreshReason is the closed set of reasons a refresh decision can name.
 //
-// The eleven refreshing reasons spell the same codes as the run-outcome
+// The refreshing reasons spell the same codes as the run-outcome
 // refresh reasons in outcome_reason.go; their values are derived from those
 // constants so a code has one spelling. SourceCompare and None are decisions
 // that write no refresh outcome row.
@@ -20,22 +20,23 @@ type RefreshReason string
 // is owned by outcome_reason.go. A switch on them is an ordinary expression
 // switch and stays exhaustive-checkable through AllRefreshReasons.
 var (
-	RefreshReasonNew                                   = RefreshReason(OutcomeReasonRefreshNew.Code())
-	RefreshReasonSourceChanged                         = RefreshReason(OutcomeReasonRefreshSourceChanged.Code())
-	RefreshReasonPairMissing                           = RefreshReason(OutcomeReasonRefreshPairMissing.Code())
-	RefreshReasonMetadataSchema                        = RefreshReason(OutcomeReasonRefreshMetadataSchema.Code())
-	RefreshReasonForced                                = RefreshReason(OutcomeReasonRefreshForced.Code())
-	RefreshReasonAdapterBehind                         = RefreshReason(OutcomeReasonRefreshAdapterBehind.Code())
-	RefreshReasonAdapterBehindNativeOnly               = RefreshReason(OutcomeReasonRefreshAdapterBehindNativeOnly.Code())
-	RefreshReasonAdapterStampAbsent                    = RefreshReason(OutcomeReasonRefreshAdapterStampAbsent.Code())
-	RefreshReasonIndexerBehind                         = RefreshReason(OutcomeReasonRefreshIndexerBehind.Code())
-	RefreshReasonRefusalReopened                       = RefreshReason(OutcomeReasonRefreshRefusalReopened.Code())
-	RefreshReasonPublicationUnbound                    = RefreshReason(OutcomeReasonRefreshPublicationUnbound.Code())
-	RefreshReasonSourceCompare           RefreshReason = "source_compare"
-	RefreshReasonNone                    RefreshReason = "none"
+	RefreshReasonNew                                     = RefreshReason(OutcomeReasonRefreshNew.Code())
+	RefreshReasonSourceChanged                           = RefreshReason(OutcomeReasonRefreshSourceChanged.Code())
+	RefreshReasonPairMissing                             = RefreshReason(OutcomeReasonRefreshPairMissing.Code())
+	RefreshReasonMetadataSchema                          = RefreshReason(OutcomeReasonRefreshMetadataSchema.Code())
+	RefreshReasonForced                                  = RefreshReason(OutcomeReasonRefreshForced.Code())
+	RefreshReasonAdapterBehind                           = RefreshReason(OutcomeReasonRefreshAdapterBehind.Code())
+	RefreshReasonAdapterBehindNativeOnly                 = RefreshReason(OutcomeReasonRefreshAdapterBehindNativeOnly.Code())
+	RefreshReasonAdapterStampAbsent                      = RefreshReason(OutcomeReasonRefreshAdapterStampAbsent.Code())
+	RefreshReasonIndexerBehind                           = RefreshReason(OutcomeReasonRefreshIndexerBehind.Code())
+	RefreshReasonRefusalReopened                         = RefreshReason(OutcomeReasonRefreshRefusalReopened.Code())
+	RefreshReasonPublicationUnbound                      = RefreshReason(OutcomeReasonRefreshPublicationUnbound.Code())
+	RefreshReasonPublicationCaptureMissing               = RefreshReason(OutcomeReasonRefreshPublicationCaptureMissing.Code())
+	RefreshReasonSourceCompare             RefreshReason = "source_compare"
+	RefreshReasonNone                      RefreshReason = "none"
 )
 
-// AllRefreshReasons lists every decision reason in design order: the eleven
+// AllRefreshReasons lists every decision reason in design order: the
 // refreshing reasons, then the two decisions that write no outcome row.
 var AllRefreshReasons = []RefreshReason{
 	RefreshReasonNew,
@@ -49,6 +50,7 @@ var AllRefreshReasons = []RefreshReason{
 	RefreshReasonIndexerBehind,
 	RefreshReasonRefusalReopened,
 	RefreshReasonPublicationUnbound,
+	RefreshReasonPublicationCaptureMissing,
 	RefreshReasonSourceCompare,
 	RefreshReasonNone,
 }
@@ -88,6 +90,8 @@ func (r RefreshReason) OutcomeReason() OutcomeReason {
 		return OutcomeReasonRefreshRefusalReopened
 	case RefreshReasonPublicationUnbound:
 		return OutcomeReasonRefreshPublicationUnbound
+	case RefreshReasonPublicationCaptureMissing:
+		return OutcomeReasonRefreshPublicationCaptureMissing
 	default:
 		return 0
 	}
@@ -120,7 +124,8 @@ func (d RefreshDecision) Status() DiffStatus {
 	case RefreshReasonNew, RefreshReasonForced:
 		return DiffNew
 	case RefreshReasonSourceChanged, RefreshReasonPairMissing, RefreshReasonMetadataSchema,
-		RefreshReasonAdapterBehind, RefreshReasonAdapterBehindNativeOnly, RefreshReasonAdapterStampAbsent:
+		RefreshReasonAdapterBehind, RefreshReasonAdapterBehindNativeOnly, RefreshReasonAdapterStampAbsent,
+		RefreshReasonPublicationCaptureMissing:
 		return DiffUpdated
 	default:
 		return DiffUnchanged
@@ -161,6 +166,9 @@ type refreshEvidence struct {
 	// recorded source evidence. It predates the refusal vocabulary, so only a
 	// native capture can restore its full content.
 	CaptureRecoveryNeeded bool
+	// PublicationCaptureMissing marks a fingerprint-bearing row saved before
+	// publication metadata was captured. Only native acquisition can create it.
+	PublicationCaptureMissing bool
 	// AdapterVersion, AdapterTarget and AdapterStampPresent describe the adapter
 	// producer. An absent stamp reads as revision 1.
 	AdapterVersion      int
@@ -213,6 +221,8 @@ func decideRefresh(in refreshEvidence) RefreshDecision {
 		return RefreshDecision{Reason: RefreshReasonSourceCompare, Lane: RefreshLaneNative}
 	case in.MetadataSchemaOld:
 		return RefreshDecision{Reason: RefreshReasonMetadataSchema, Lane: RefreshLaneNative}
+	case in.PublicationCaptureMissing:
+		return RefreshDecision{Reason: RefreshReasonPublicationCaptureMissing, Lane: RefreshLaneNative}
 	case in.AdapterVersion < in.AdapterTarget:
 		if !in.AdapterCanExtract {
 			return RefreshDecision{Reason: RefreshReasonAdapterBehindNativeOnly, Lane: RefreshLaneNative}
@@ -347,14 +357,16 @@ func (p *Pipeline) refreshEvidenceForLocation(session DiscoveredSession, loc Ses
 		Forced:                p.config.Force,
 		MetadataSchemaOld:     metadataNeedsNativeRefresh(loc.SchemaVersion),
 		CaptureRecoveryNeeded: loc.ContentFailureCode == ContentCaptureLegacyPreviewOnly && len(loc.SourceFingerprint) > 0,
-		AdapterVersion:        version,
-		AdapterTarget:         target.AdapterVersion,
-		AdapterStampPresent:   present,
-		AdapterCanExtract:     p.adapterSupportsStoredExtraction(session.Harness),
-		IndexerVersion:        loc.IndexerVersion,
-		IndexerTarget:         target.IndexerVersion,
-		IndexProofPresent:     loc.IndexedInputHash != nil,
-		PermanentRefusal:      permanentCaptureRefusal(loc.ContentFailureCode),
+		PublicationCaptureMissing: loc.CaptureRevision == 0 && loc.SourceEvidenceSupported &&
+			len(loc.SourceFingerprint) > 0,
+		AdapterVersion:      version,
+		AdapterTarget:       target.AdapterVersion,
+		AdapterStampPresent: present,
+		AdapterCanExtract:   p.adapterSupportsStoredExtraction(session.Harness),
+		IndexerVersion:      loc.IndexerVersion,
+		IndexerTarget:       target.IndexerVersion,
+		IndexProofPresent:   loc.IndexedInputHash != nil,
+		PermanentRefusal:    permanentCaptureRefusal(loc.ContentFailureCode),
 	}
 }
 

@@ -94,6 +94,7 @@ reasons:
   - {id: 308, kind: refresh, code: indexer_behind, retired: false}
   - {id: 309, kind: refresh, code: refusal_reopened, retired: false}
   - {id: 310, kind: refresh, code: publication_unbound, retired: false}
+  - {id: 311, kind: refresh, code: publication_capture_missing, retired: false}
 cases:
   - name: go-constants-and-seeded-rows-match-exactly
   - name: kinds-match-exactly
