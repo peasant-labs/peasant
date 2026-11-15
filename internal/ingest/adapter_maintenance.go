@@ -678,10 +678,13 @@ func (p *Pipeline) pairRepairDecision(ctx context.Context, sid SessionID, entrie
 		}
 		repair, readFault := p.pairNeedsRepairIn(ctx, sid, snap)
 		if !repair {
-			if readFault {
-				// A pair that cannot be read is a fault to report from the
-				// stored-index lane, not a native pair to replace. Take the
-				// queued worker out without claiming damage.
+			if readFault && entries[i].Decision.Lane == RefreshLaneStoredIndex {
+				// A pair that cannot be read is a fault for the stored-index
+				// lane to report, not a native pair to replace; that lane's
+				// inventory still reads the pair and reports the fault. A
+				// queued native or stored-metadata entry owns independent
+				// work, so taking it out would drop a source change or an
+				// adapter refresh the classifier already found.
 				return pairRepairOutcome{kind: pairRepairSkipQueued, queuedIndex: i, damaged: false}
 			}
 			return pairRepairOutcome{}
