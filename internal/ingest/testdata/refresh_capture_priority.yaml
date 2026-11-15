@@ -1,0 +1,30 @@
+requiredNames:
+  - missing-capture
+  - unsupported-source-evidence
+  - absent-fingerprint
+  - capture-already-present
+  - forced
+  - new
+  - pair-missing
+  - source-changed
+  - clock-moved
+  - capture-recovery
+  - source-unproven
+  - old-metadata-schema
+  - adapter-behind
+  - indexer-behind
+cases:
+  - {name: missing-capture, mutation: none, want_missing: true, reason: publication_capture_missing, lane: native}
+  - {name: unsupported-source-evidence, mutation: unsupported, want_missing: false, reason: none, lane: none}
+  - {name: absent-fingerprint, mutation: no-fingerprint, want_missing: false, reason: none, lane: none}
+  - {name: capture-already-present, mutation: captured, want_missing: false, reason: none, lane: none}
+  - {name: forced, mutation: forced, want_missing: true, reason: forced, lane: native}
+  - {name: new, mutation: new, want_missing: true, reason: new, lane: native}
+  - {name: pair-missing, mutation: pair-missing, want_missing: true, reason: pair_missing, lane: native}
+  - {name: source-changed, mutation: source-changed, want_missing: true, reason: source_changed, lane: native}
+  - {name: clock-moved, mutation: clock-moved, want_missing: true, reason: source_compare, lane: native}
+  - {name: capture-recovery, mutation: capture-recovery, want_missing: true, reason: source_changed, lane: native}
+  - {name: source-unproven, mutation: source-unproven, want_missing: true, reason: source_compare, lane: native}
+  - {name: old-metadata-schema, mutation: old-metadata, want_missing: true, reason: metadata_schema, lane: native}
+  - {name: adapter-behind, mutation: adapter-behind, want_missing: true, reason: publication_capture_missing, lane: native}
+  - {name: indexer-behind, mutation: indexer-behind, want_missing: true, reason: publication_capture_missing, lane: native}

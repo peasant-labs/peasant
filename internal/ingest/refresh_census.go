@@ -36,7 +36,8 @@ func NewRefreshLane(raw string) (RefreshLane, error) {
 func (r OutcomeReason) RefreshLane() RefreshLane {
 	switch r {
 	case OutcomeReasonRefreshNew, OutcomeReasonRefreshSourceChanged, OutcomeReasonRefreshPairMissing,
-		OutcomeReasonRefreshMetadataSchema, OutcomeReasonRefreshForced, OutcomeReasonRefreshAdapterBehindNativeOnly:
+		OutcomeReasonRefreshMetadataSchema, OutcomeReasonRefreshForced, OutcomeReasonRefreshAdapterBehindNativeOnly,
+		OutcomeReasonRefreshPublicationCaptureMissing:
 		return RefreshLaneNative
 	case OutcomeReasonRefreshAdapterBehind, OutcomeReasonRefreshAdapterStampAbsent:
 		return RefreshLaneStoredMetadata

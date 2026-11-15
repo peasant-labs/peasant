@@ -619,9 +619,6 @@ func (p *Pipeline) appendPairRepairWork(ctx context.Context, entries []DiffEntry
 			entries[outcome.queuedIndex].Status = DiffUpdated
 		case pairRepairAppend:
 			entries = append(entries, outcome.entry)
-		case pairRepairSkipQueued:
-			entries[outcome.queuedIndex].Status = DiffUnchanged
-			entries[outcome.queuedIndex].Decision = RefreshDecision{Reason: RefreshReasonNone, Lane: RefreshLaneNone}
 		default:
 			continue
 		}
@@ -639,7 +636,6 @@ const (
 	pairRepairNone       pairRepairOutcomeKind = iota // no repair work
 	pairRepairMarkQueued                              // mark the already-queued entry
 	pairRepairAppend                                  // append a new repair entry
-	pairRepairSkipQueued                              // a read fault: leave the queued worker out
 )
 
 // pairRepairOutcome carries one candidate's decision from a parallel worker
@@ -676,17 +672,10 @@ func (p *Pipeline) pairRepairDecision(ctx context.Context, sid SessionID, entrie
 			// does not need.
 			return pairRepairOutcome{}
 		}
-		repair, readFault := p.pairNeedsRepairIn(ctx, sid, snap)
+		repair, _ := p.pairNeedsRepairIn(ctx, sid, snap)
 		if !repair {
-			if readFault && entries[i].Decision.Lane == RefreshLaneStoredIndex {
-				// A pair that cannot be read is a fault for the stored-index
-				// lane to report, not a native pair to replace; that lane's
-				// inventory still reads the pair and reports the fault. A
-				// queued native or stored-metadata entry owns independent
-				// work, so taking it out would drop a source change or an
-				// adapter refresh the classifier already found.
-				return pairRepairOutcome{kind: pairRepairSkipQueued, queuedIndex: i, damaged: false}
-			}
+			// A read fault is not evidence of damage. Preserve work already
+			// queued by the classifier or the stored-adapter selector.
 			return pairRepairOutcome{}
 		}
 		// Queued for a reason that can settle without republishing the
