@@ -415,7 +415,7 @@ func runUpgradeWithProgressMode(cmd *cobra.Command, plan store.UpgradePlan, prog
 		Consent: store.PromptMigrationConsentOnTTY(),
 	}
 	started := time.Now()
-	if progress == storeUpgradeProgressPlain || !isTerminalWriter(stderr) {
+	if !shouldMountUpgradeProgress(progress, isTerminalWriter(stderr), plan.DBPath) {
 		printer := newStoreUpgradeLinePrinter(stderr)
 		options.Progress = printer.event
 		report, err := upgradeStore(ctx, plan.DBPath, options)
@@ -435,6 +435,24 @@ func runUpgradeWithProgressMode(cmd *cobra.Command, plan store.UpgradePlan, prog
 func isTerminalWriter(w io.Writer) bool {
 	file, ok := w.(*os.File)
 	return ok && term.IsTerminal(int(file.Fd()))
+}
+
+// needsMigrationConsent is the read-only gate the terminal progress path runs
+// before it mounts the program. A pending one-time migration prompt writes to
+// the terminal directly, so mounting first would let the next redraw erase the
+// prompt while it is being answered. A variable so a test can exercise both
+// answers without a real store.
+var needsMigrationConsent = store.NeedsMigrationConsent
+
+// shouldMountUpgradeProgress reports whether the inline program can own the
+// terminal for this upgrade. It refuses when the upgrade still has to ask the
+// one-time migration consent on that same terminal.
+func shouldMountUpgradeProgress(progress storeUpgradeProgressMode, terminal bool, dbPath string) bool {
+	if progress == storeUpgradeProgressPlain || !terminal {
+		return false
+	}
+	consentPending, err := needsMigrationConsent(dbPath)
+	return err == nil && !consentPending
 }
 
 // storeUpgradeTheme resolves the palette for the upgrade progress child from

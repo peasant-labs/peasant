@@ -213,6 +213,34 @@ func TestRunUpgradeWithProgressUsesPlainLinesOffTerminal(t *testing.T) {
 	}
 }
 
+func TestShouldMountUpgradeProgress(t *testing.T) {
+	previous := needsMigrationConsent
+	t.Cleanup(func() { needsMigrationConsent = previous })
+
+	needsMigrationConsent = func(string) (bool, error) { return false, nil }
+	if !shouldMountUpgradeProgress(storeUpgradeProgressAuto, true, "/synthetic/store.db") {
+		t.Fatal("a terminal upgrade with no pending consent must mount the inline program")
+	}
+	if shouldMountUpgradeProgress(storeUpgradeProgressPlain, true, "/synthetic/store.db") {
+		t.Fatal("a plain progress mode must never mount the inline program")
+	}
+	if shouldMountUpgradeProgress(storeUpgradeProgressAuto, false, "/synthetic/store.db") {
+		t.Fatal("a non-terminal upgrade must not mount the inline program")
+	}
+
+	needsMigrationConsent = func(string) (bool, error) { return true, nil }
+	if shouldMountUpgradeProgress(storeUpgradeProgressAuto, true, "/synthetic/store.db") {
+		t.Fatal("a pending one-time migration consent must keep the inline program unmounted")
+	}
+
+	needsMigrationConsent = func(string) (bool, error) {
+		return false, errors.New("synthetic consent probe failure")
+	}
+	if shouldMountUpgradeProgress(storeUpgradeProgressAuto, true, "/synthetic/store.db") {
+		t.Fatal("an unreadable consent gate must fall back to plain lines")
+	}
+}
+
 // TestStoreUpgradeThemeFromConfig is the production-wiring test for the
 // inline upgrade child's palette: the same resolveConfigPath/loadConfig/
 // themeModeFor path the rest of the CLI uses picks the theme before the store
