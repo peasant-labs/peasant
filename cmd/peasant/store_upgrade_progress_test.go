@@ -232,6 +232,78 @@ func TestRunUpgradeWithProgressMounted(t *testing.T) {
 	}
 }
 
+// TestRunUpgradeWithProgressRendererExitDoesNotBlockNotices kills the mounted
+// renderer after the upgrade starts, then has the real notice writer and
+// progress callback report more work after the program has exited.
+func TestRunUpgradeWithProgressRendererExitDoesNotBlockNotices(t *testing.T) {
+	previousUpgrade, previousConsent := upgradeStore, needsMigrationConsent
+	t.Cleanup(func() {
+		upgradeStore, needsMigrationConsent = previousUpgrade, previousConsent
+	})
+	needsMigrationConsent = func(string) (bool, error) { return false, nil }
+	master, terminal := openTestTerminal(t)
+	setTestTerminalSize(t, terminal, 24, 80)
+	output := newSignalWriter("upgrading the local store")
+	copied := make(chan error, 1)
+	go func() {
+		_, err := io.Copy(output, master)
+		copied <- err
+	}()
+	ctx, cancel := context.WithTimeout(testwait.Context(t), 8*time.Second)
+	defer cancel()
+	step := store.UpgradeStep{Version: 70, Kind: store.UpgradeStepSchema, Title: "add derived lookups", Cost: store.UpgradeCostQuick}
+	plan := store.UpgradePlan{DBPath: "/synthetic/store.db", From: 69, To: 70, Steps: []store.UpgradeStep{step}}
+	rendererExited := make(chan struct{})
+	upgradeStore = func(_ context.Context, _ string, options store.UpgradeOptions) (store.UpgradeReport, error) {
+		writer, ok := options.Notices.(upgradeProgramNoticeWriter)
+		if !ok {
+			return store.UpgradeReport{}, errors.New("the terminal upgrade installed no program notice writer")
+		}
+		options.Progress(store.UpgradeEvent{Kind: store.UpgradeEventStepStarted, Step: step, Index: 1, Total: 1})
+		writer.program.Kill()
+		writer.program.Wait()
+		close(rendererExited)
+		_, _ = fmt.Fprintln(options.Notices, "synthetic notice after renderer exit")
+		options.Progress(store.UpgradeEvent{Kind: store.UpgradeEventStepFinished, Step: step, Index: 1, Total: 1, Elapsed: time.Second})
+		return store.UpgradeReport{From: 69, To: 70, Steps: []store.UpgradeStepResult{{Step: step, Duration: time.Second}}}, nil
+	}
+	cmd := &cobra.Command{Use: "upgrade-test"}
+	cmd.SetContext(ctx)
+	cmd.SetErr(terminal)
+	cmd.Flags().String("config", filepath.Join(t.TempDir(), "absent.yaml"), "")
+	type result struct {
+		report store.UpgradeReport
+		err    error
+	}
+	done := make(chan result, 1)
+	go func() {
+		report, err := runUpgradeWithProgressMode(cmd, plan, storeUpgradeProgressAuto)
+		done <- result{report, err}
+	}()
+	select {
+	case <-rendererExited:
+	case <-ctx.Done():
+		t.Fatalf("the renderer did not exit during the upgrade: %v", ctx.Err())
+	}
+	select {
+	case got := <-done:
+		if got.err != nil || len(got.report.Steps) != 1 {
+			t.Fatalf("upgrade after renderer exit = %+v, %v; want one committed step and no upgrade error", got.report, got.err)
+		}
+	case <-ctx.Done():
+		t.Fatalf("the upgrade blocked after the renderer exited: %v", ctx.Err())
+	}
+	if err := terminal.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := testwait.Receive(t, copied, "the stopped renderer's PTY drained"); err != nil && !errors.Is(err, syscall.EIO) {
+		t.Fatalf("read stopped renderer output: %v", err)
+	}
+	if text := ansi.Strip(output.String()); !strings.Contains(text, "store upgrade progress renderer failed") {
+		t.Fatalf("the renderer failure was not reported:\n%s", text)
+	}
+}
+
 func TestRunUpgradeWithProgressConsentPendingUsesPlainLines(t *testing.T) {
 	previousUpgrade, previousConsent := upgradeStore, needsMigrationConsent
 	t.Cleanup(func() {

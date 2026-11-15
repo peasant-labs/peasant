@@ -59,7 +59,7 @@ func TestCaptureFixturePinsTheUpgradeProgressCrossProduct(t *testing.T) {
 }
 
 func TestCaptureFixtureGuardsRequiredUpgradeProgressSheetDeletion(t *testing.T) {
-	old := []byte("  - name: upgrade-progress\n    kind: upgrade-progress\n    title: \"mounted store upgrade progress: plan, running, stopped, refused, failed and done in both themes\"\n    theme: dark\n    viewport: {width: 1800, height: 14400}\n")
+	old := []byte("  - name: upgrade-progress\n    kind: upgrade-progress\n    title: \"mounted store upgrade progress: plan, running, stopped, refused, failed and done in both themes\"\n    theme: dark\n    viewport: {width: 1800, height: 15000}\n")
 	if count := bytes.Count(captureFixtureData, old); count != 1 {
 		t.Fatalf("upgrade progress sheet mutation source occurs %d times, want exactly one", count)
 	}
