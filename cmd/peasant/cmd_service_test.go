@@ -546,6 +546,12 @@ func TestServiceUnitsVerifyWithSystemd(t *testing.T) {
 		t.Fatalf("systemd-analyze did not detect the unrelated invalid socket: %v\n%s", poisonedErr, poisoned)
 	}
 	out, err := verify(h.unitDir, filepath.Join(fixtureDir, "private"))
+	// systemd-analyze also binds its own user socket under the synthetic
+	// runtime directory. Some versions report that their own socket path is
+	// too long and exit 0; that message is not about a Peasant unit, so it is
+	// removed before requiring clean output. A Peasant socket failure still
+	// names its unit and stays in the output.
+	out = bytes.ReplaceAll(out, []byte("Can't set path for AF_UNIX socket to bind to: File name too long\n"), nil)
 	if err != nil || len(bytes.TrimSpace(out)) > 0 {
 		t.Fatalf("systemd-analyze verify: %v\n%s", err, out)
 	}
