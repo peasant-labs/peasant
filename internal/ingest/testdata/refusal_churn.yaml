@@ -14,13 +14,13 @@
 # native metadata update. Do not infer the index count from the updated count. The
 # first harvest establishes the stored state (retained unknown data, or a
 # complete capture converted to the migrated preview-only shape). The legacy
-# refusal case additionally removes the publication capture and reindexes the
-# stored input before its measured run. The exact read counts ARE the contract:
+# partial case additionally removes the publication capture before its measured
+# run. The exact read counts ARE the contract:
 # a run that stops warning while still re-reading, or stops working while still
 # looking settled, is each wrong in a way a boolean cannot see.
 required_names:
   - settled-refusal-does-not-reingest
-  - settled-refusal-without-publication-capture-does-not-reingest
+  - publishable-partial-without-publication-capture-reingests-once
   - legacy-preview-still-reads-native-source
   - changed-bytes-still-read-native-source
   - newer-indexer-still-retries
@@ -44,13 +44,13 @@ cases:
     second_updated: 0
     second_unchanged: 1
     second_indexed: 0
-  # A refused capture need not have a publication snapshot to be settled.
-  - name: settled-refusal-without-publication-capture-does-not-reingest
+  # Full retained-unknown content is publishable but needs a metadata snapshot.
+  - name: publishable-partial-without-publication-capture-reingests-once
     stored: refusal_without_publication
     mutate: none
-    second_source_reads: 0
-    second_updated: 0
-    second_unchanged: 1
+    second_source_reads: 1
+    second_updated: 1
+    second_unchanged: 0
     second_indexed: 0
   # A migrated preview-only capture recorded NO refusal: nothing has tried to
   # certify it, so it is pending work and this build owes the native read that

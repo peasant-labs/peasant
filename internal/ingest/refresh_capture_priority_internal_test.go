@@ -23,6 +23,8 @@ const (
 	capturePriorityRefusalIndexerBehind capturePriorityMutation = "refusal-indexer-behind"
 	capturePriorityOmittedRefusal       capturePriorityMutation = "omitted-refusal"
 	capturePriorityUnknownRefusal       capturePriorityMutation = "unknown-refusal"
+	capturePriorityOmittedPublishable   capturePriorityMutation = "omitted-publishable"
+	capturePriorityUnknownPublishable   capturePriorityMutation = "unknown-publishable"
 	capturePriorityForced               capturePriorityMutation = "forced"
 	capturePriorityNew                  capturePriorityMutation = "new"
 	capturePriorityPairMissing          capturePriorityMutation = "pair-missing"
@@ -39,7 +41,8 @@ func (m capturePriorityMutation) Validate() error {
 	switch m {
 	case capturePriorityNone, capturePriorityUnsupported, capturePriorityNoFingerprint, capturePriorityCaptured,
 		capturePriorityStrictRefusal, capturePriorityRefusalIndexerBehind, capturePriorityOmittedRefusal,
-		capturePriorityUnknownRefusal, capturePriorityForced, capturePriorityNew, capturePriorityPairMissing,
+		capturePriorityUnknownRefusal, capturePriorityOmittedPublishable, capturePriorityUnknownPublishable,
+		capturePriorityForced, capturePriorityNew, capturePriorityPairMissing,
 		capturePrioritySourceChanged, capturePriorityClockMoved, capturePriorityRecovery,
 		capturePrioritySourceUnproven, capturePriorityOldMetadata, capturePriorityAdapterBehind,
 		capturePriorityIndexerBehind:
@@ -123,6 +126,12 @@ func TestRefreshLaneCapturePriority(t *testing.T) {
 				location.ContentFailureCode = ContentCaptureSourceRecordsOmitted
 			case capturePriorityUnknownRefusal:
 				location.ContentFailureCode = ContentCaptureUnknownDataRetained
+			case capturePriorityOmittedPublishable:
+				location.ContentFailureCode = ContentCaptureSourceRecordsOmitted
+				location.ContentPublishable = true
+			case capturePriorityUnknownPublishable:
+				location.ContentFailureCode = ContentCaptureUnknownDataRetained
+				location.ContentPublishable = true
 			}
 			pipeline := &Pipeline{}
 			evidence := pipeline.refreshEvidenceForLocation(DiscoveredSession{}, location, nil)
@@ -131,7 +140,8 @@ func TestRefreshLaneCapturePriority(t *testing.T) {
 			evidence.IndexProofPresent = true
 			switch c.Mutation {
 			case capturePriorityNone, capturePriorityUnsupported, capturePriorityNoFingerprint, capturePriorityCaptured,
-				capturePriorityStrictRefusal, capturePriorityOmittedRefusal, capturePriorityUnknownRefusal:
+				capturePriorityStrictRefusal, capturePriorityOmittedRefusal, capturePriorityUnknownRefusal,
+				capturePriorityOmittedPublishable, capturePriorityUnknownPublishable:
 			case capturePriorityForced:
 				evidence.Forced = true
 			case capturePriorityNew:

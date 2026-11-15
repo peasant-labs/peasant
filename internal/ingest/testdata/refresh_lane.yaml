@@ -13,6 +13,8 @@ transcript:
   - '{"sessionId":"97200000-0000-4000-8000-000000000001","type":"user","uuid":"entry-first","timestamp":"2023-11-14T22:13:20Z","cwd":"/work/project","message":{"role":"user","content":"first synthetic turn"}}'
   - '{"sessionId":"97200000-0000-4000-8000-000000000001","type":"assistant","uuid":"entry-second","timestamp":"2023-11-14T22:13:21Z","cwd":"/work/project","message":{"role":"assistant","model":"claude-synthetic","content":[{"type":"text","text":"second synthetic turn"}]}}'
 append_record: '{"sessionId":"97200000-0000-4000-8000-000000000001","type":"user","uuid":"entry-third","timestamp":"2023-11-14T22:13:22Z","cwd":"/work/project","message":{"role":"user","content":"appended synthetic turn"}}'
+retained_unknown_record: '{"sessionId":"97200000-0000-4000-8000-000000000001","type":"future.additive.event","uuid":"entry-fourth","timestamp":"2023-11-14T22:13:23Z","data":{"payload":"synthetic retained evidence"}}'
+oversized_record: '{"sessionId":"97200000-0000-4000-8000-000000000001","type":"assistant","uuid":"entry-fourth","timestamp":"2023-11-14T22:13:23Z","message":{"role":"assistant","model":"claude-synthetic","content":[{"type":"text","text":"%s"}]}}'
 malformed_record: '{not-json}'
 cases:
   - name: source-changed-is-captured-natively
@@ -220,6 +222,7 @@ cases:
     refusal: strict_capture_refused
     refusal_indexer: current
     publication: missing
+    want_seed_publishable: false
     want_capture_revision: 0
     want_publication_bound: false
     want_reason: none
@@ -228,6 +231,68 @@ cases:
     second_source_reads: 0
     want_pair_writes: []
     want_indexed: false
+
+  # A preview with the same failure code is not certified as full content.
+  - name: legacy-unknown-preview-without-publication-does-not-churn
+    harness: claude-code
+    source: current
+    discover: true
+    stored_adapter: current
+    metadata_schema: current
+    pair: present
+    indexer: current
+    refusal: unknown_data_retained
+    refusal_indexer: current
+    publication: missing
+    want_seed_publishable: false
+    want_capture_revision: 0
+    want_publication_bound: false
+    want_reason: none
+    want_lane: none
+    want_native_read: false
+    second_source_reads: 0
+    want_pair_writes: []
+    want_indexed: false
+
+  # The parser actually retains the unknown record in the full stored entries.
+  - name: legacy-full-retained-unknown-acquires-publication
+    harness: claude-code
+    source: current
+    retained_unknown: true
+    stored_adapter: current
+    metadata_schema: current
+    pair: present
+    indexer: current
+    publication: missing
+    want_seed_publishable: true
+    want_reason: publication_capture_missing
+    want_lane: native
+    want_native_read: true
+    second_source_reads: 0
+    want_pair_writes: [metadata]
+    want_indexed: false
+    want_bound: true
+
+  # An oversized record has a stored placeholder, so this full partial
+  # capture also qualifies for missing publication metadata.
+  - name: legacy-full-accounted-omission-acquires-publication
+    harness: claude-code
+    source: current
+    record_limit_bytes: 2048
+    oversized_record_bytes: 4096
+    stored_adapter: current
+    metadata_schema: current
+    pair: present
+    indexer: current
+    publication: missing
+    want_seed_publishable: true
+    want_reason: publication_capture_missing
+    want_lane: native
+    want_native_read: true
+    second_source_reads: 0
+    want_pair_writes: [metadata]
+    want_indexed: false
+    want_bound: true
 
   - name: unbound-publication-binds-without-a-reparse
     harness: claude-code

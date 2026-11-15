@@ -6,6 +6,8 @@ requiredNames:
   - strict-refusal-without-capture
   - omitted-records-without-capture
   - retained-unknown-without-capture
+  - publishable-retained-unknown-without-capture
+  - publishable-omissions-without-capture
   - refused-capture-with-new-indexer
   - forced
   - new
@@ -25,6 +27,8 @@ cases:
   - {name: strict-refusal-without-capture, mutation: strict-refusal, want_missing: false, reason: none, lane: none}
   - {name: omitted-records-without-capture, mutation: omitted-refusal, want_missing: false, reason: none, lane: none}
   - {name: retained-unknown-without-capture, mutation: unknown-refusal, want_missing: false, reason: none, lane: none}
+  - {name: publishable-retained-unknown-without-capture, mutation: unknown-publishable, want_missing: true, reason: publication_capture_missing, lane: native}
+  - {name: publishable-omissions-without-capture, mutation: omitted-publishable, want_missing: true, reason: publication_capture_missing, lane: native}
   - {name: refused-capture-with-new-indexer, mutation: refusal-indexer-behind, want_missing: false, reason: refusal_reopened, lane: stored-index}
   - {name: forced, mutation: forced, want_missing: true, reason: forced, lane: native}
   - {name: new, mutation: new, want_missing: true, reason: new, lane: native}

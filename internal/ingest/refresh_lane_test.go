@@ -46,6 +46,9 @@ type refreshLaneCase struct {
 	RefusalIndexer       refreshLaneRefusalIndexer        `yaml:"refusal_indexer"`
 	Publication          refreshLanePublication           `yaml:"publication"`
 	NativeSource         fixtureNativeSource              `yaml:"native_source"`
+	RetainedUnknown      bool                             `yaml:"retained_unknown"`
+	RecordLimitBytes     int                              `yaml:"record_limit_bytes"`
+	OversizedRecordBytes int                              `yaml:"oversized_record_bytes"`
 	MaxNativeReads       int                              `yaml:"max_native_reads"`
 	WantReason           ingest.RefreshReason             `yaml:"want_reason"`
 	WantLane             ingest.RefreshLane               `yaml:"want_lane"`
@@ -54,16 +57,19 @@ type refreshLaneCase struct {
 	WantPairWrites       []refreshLanePairMember          `yaml:"want_pair_writes"`
 	WantIndexed          bool                             `yaml:"want_indexed"`
 	WantBound            bool                             `yaml:"want_bound"`
+	WantSeedPublishable  *bool                            `yaml:"want_seed_publishable"`
 	WantCaptureRevision  *int64                           `yaml:"want_capture_revision"`
 	WantPublicationBound *bool                            `yaml:"want_publication_bound"`
 }
 
 type refreshLaneFixture struct {
-	SessionID       string            `yaml:"session_id"`
-	Transcript      []string          `yaml:"transcript"`
-	AppendRecord    string            `yaml:"append_record"`
-	MalformedRecord string            `yaml:"malformed_record"`
-	Cases           []refreshLaneCase `yaml:"cases"`
+	SessionID             string            `yaml:"session_id"`
+	Transcript            []string          `yaml:"transcript"`
+	AppendRecord          string            `yaml:"append_record"`
+	RetainedUnknownRecord string            `yaml:"retained_unknown_record"`
+	OversizedRecord       string            `yaml:"oversized_record"`
+	MalformedRecord       string            `yaml:"malformed_record"`
+	Cases                 []refreshLaneCase `yaml:"cases"`
 }
 
 func decodeRefreshLaneFixture(data []byte) (refreshLaneFixture, error) {
@@ -81,6 +87,12 @@ func decodeRefreshLaneFixture(data []byte) (refreshLaneFixture, error) {
 		present[testCase.Name] = true
 		if err := testCase.Validate(); err != nil {
 			return refreshLaneFixture{}, fmt.Errorf("refresh_lane.yaml case %s: %w", testCase.Name, err)
+		}
+		if testCase.RetainedUnknown && fixture.RetainedUnknownRecord == "" {
+			return refreshLaneFixture{}, fmt.Errorf("refresh_lane.yaml case %s: retained_unknown requires retained_unknown_record", testCase.Name)
+		}
+		if testCase.OversizedRecordBytes > 0 && strings.Count(fixture.OversizedRecord, "%s") != 1 {
+			return refreshLaneFixture{}, fmt.Errorf("refresh_lane.yaml case %s: oversized_record requires one %%s placeholder", testCase.Name)
 		}
 	}
 	return fixture, nil
@@ -112,18 +124,20 @@ func loadRefreshLaneFixture(t *testing.T) refreshLaneFixture {
 // production pipeline over them. Every run uses the same session and source
 // paths; each case mutates stored state between runs.
 type refreshLaneBench struct {
-	t              *testing.T
-	fixture        refreshLaneFixture
-	fs             *testutil.CountingFS
-	database       *store.Store
-	harness        ingest.Harness
-	sessionID      ingest.SessionID
-	sourceRoot     string
-	sourcePath     string
-	outputDir      string
-	versions       map[ingest.Harness]ingest.HarvesterVersions
-	metadataPath   string
-	transcriptPath string
+	t                *testing.T
+	fixture          refreshLaneFixture
+	fs               *testutil.CountingFS
+	database         *store.Store
+	harness          ingest.Harness
+	sessionID        ingest.SessionID
+	sourceRoot       string
+	sourcePath       string
+	sourceText       string
+	recordLimitBytes int
+	outputDir        string
+	versions         map[ingest.Harness]ingest.HarvesterVersions
+	metadataPath     string
+	transcriptPath   string
 }
 
 func newRefreshLaneBench(t *testing.T, fixture refreshLaneFixture, testCase refreshLaneCase) *refreshLaneBench {
@@ -140,7 +154,14 @@ func newRefreshLaneBench(t *testing.T, fixture refreshLaneFixture, testCase refr
 	}
 	sourceRoot := filepath.Join(root, "source")
 	sourcePath := filepath.Join(sourceRoot, "-workspace", fixture.SessionID+".jsonl")
-	transcript := strings.Join(fixture.Transcript, "\n") + "\n"
+	records := append([]string(nil), fixture.Transcript...)
+	if testCase.RetainedUnknown {
+		records = append(records, fixture.RetainedUnknownRecord)
+	}
+	if testCase.OversizedRecordBytes > 0 {
+		records = append(records, fmt.Sprintf(fixture.OversizedRecord, strings.Repeat("x", testCase.OversizedRecordBytes)))
+	}
+	transcript := strings.Join(records, "\n") + "\n"
 	if testCase.Harness == ingest.HarnessStrike {
 		transcript = string(refreshLaneStrikeTranscript)
 	}
@@ -151,12 +172,58 @@ func newRefreshLaneBench(t *testing.T, fixture refreshLaneFixture, testCase refr
 	bench := &refreshLaneBench{
 		t: t, fixture: fixture, fs: fs, database: database,
 		harness: testCase.Harness, sessionID: sessionID,
-		sourceRoot: sourceRoot, sourcePath: sourcePath, outputDir: outputDir,
-		versions: cloneHarvesterVersions(),
+		sourceRoot: sourceRoot, sourcePath: sourcePath, sourceText: transcript,
+		recordLimitBytes: testCase.RecordLimitBytes, outputDir: outputDir, versions: cloneHarvesterVersions(),
 	}
 	result := bench.run(true, true)
 	if result.Summary.New != 1 || result.Summary.StoreError != nil {
 		t.Fatalf("%s: baseline harvest did not ingest the synthetic session: %+v; diagnostics %+v", testCase.Name, result.Summary, result.Diagnostics)
+	}
+	if testCase.RetainedUnknown {
+		capture, found, err := database.GetSessionContentCapture(t.Context(), sessionID)
+		if err != nil || !found {
+			t.Fatalf("%s: read native capture: found=%t err=%v", testCase.Name, found, err)
+		}
+		if capture.Status != ingest.ContentCaptureIncomplete || capture.FailureCode != ingest.ContentCaptureUnknownDataRetained ||
+			capture.CaptureFormat != ingest.ContentCaptureFormatFull {
+			t.Fatalf("%s: native harvest did not retain full unknown content: %+v", testCase.Name, capture)
+		}
+		if !store.PublishableWithOmissions(capture) {
+			t.Fatalf("%s: native harvest did not certify publishable full content: %+v", testCase.Name, capture)
+		}
+		entries, err := database.ListEntries(t.Context(), sessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		retained := 0
+		for _, entry := range entries {
+			records, err := ingest.RetainedUnknownOf(entry)
+			if err != nil {
+				t.Fatal(err)
+			}
+			retained += len(records)
+		}
+		if retained == 0 {
+			t.Fatalf("%s: full stored entries contain no retained unknown evidence", testCase.Name)
+		}
+	}
+	if testCase.OversizedRecordBytes > 0 {
+		capture, found, err := database.GetSessionContentCapture(t.Context(), sessionID)
+		if err != nil || !found {
+			t.Fatalf("%s: read native capture: found=%t err=%v", testCase.Name, found, err)
+		}
+		if capture.Status != ingest.ContentCaptureIncomplete || capture.FailureCode != ingest.ContentCaptureSourceRecordsOmitted ||
+			capture.CaptureFormat != ingest.ContentCaptureFormatFull {
+			t.Fatalf("%s: native harvest did not retain accounted omissions: %+v", testCase.Name, capture)
+		}
+		if !store.PublishableWithOmissions(capture) {
+			t.Fatalf("%s: native harvest did not certify accounted omissions: %+v", testCase.Name, capture)
+		}
+		entries, err := database.ListEntries(t.Context(), sessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertRefreshLaneOmission(t, entries, fixture, testCase)
 	}
 	location := bench.location()
 	bench.metadataPath = ingest.SessionMetadataPath(outputDir, location.HostSlug, string(sessionID), location.ParentID)
@@ -178,10 +245,29 @@ func (b *refreshLaneBench) location() ingest.SessionLocation {
 }
 
 func (b *refreshLaneBench) sourceTranscript() string {
-	if b.harness == ingest.HarnessStrike {
-		return string(refreshLaneStrikeTranscript)
+	return b.sourceText
+}
+
+func assertRefreshLaneOmission(t *testing.T, entries []schema.SessionEntry, fixture refreshLaneFixture, testCase refreshLaneCase) {
+	t.Helper()
+	want := ingest.OmittedRecord{
+		Reason:     ingest.OmittedRecordTooLarge,
+		Line:       len(fixture.Transcript) + 1,
+		Bytes:      int64(len(fmt.Sprintf(fixture.OversizedRecord, strings.Repeat("x", testCase.OversizedRecordBytes)))),
+		LimitBytes: int64(testCase.RecordLimitBytes),
 	}
-	return strings.Join(b.fixture.Transcript, "\n") + "\n"
+	found := false
+	for _, entry := range entries {
+		if record, omitted := ingest.OmittedRecordOf(entry); omitted {
+			if found || record != want {
+				t.Fatalf("unexpected omission placeholder %+v; want exactly %+v", record, want)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("stored entries lack omission placeholder %+v", want)
+	}
 }
 
 // pipeline builds one production pipeline over the bench filesystem and store.
@@ -206,7 +292,8 @@ func (b *refreshLaneBench) pipeline(force bool, discover bool) *ingest.Pipeline 
 	pipeline, err := newTestPipeline(b.fs, testutil.DefaultGitResolver(), adapters, cfg,
 		ingest.WithStore(b.database), ingest.WithMetricsStore(b.database),
 		ingest.WithIndexLogger(b.database), ingest.WithLogger(b.database),
-		ingest.WithIndexers(indexers), ingest.WithHarvesterVersions(b.versions))
+		ingest.WithIndexers(indexers), ingest.WithHarvesterVersions(b.versions),
+		ingest.WithMaxJSONLRecordBytes(b.recordLimitBytes))
 	if err != nil {
 		b.t.Fatal(err)
 	}
@@ -232,7 +319,7 @@ func (b *refreshLaneBench) adapterFactory() ingest.AdapterFactory {
 }
 
 func (b *refreshLaneBench) indexer() ingest.TranscriptIndexer {
-	return ingest.NewIndexerRegistry(b.fs, ingest.IndexerRegistryOptions{})[b.harness]
+	return ingest.NewIndexerRegistry(b.fs, ingest.IndexerRegistryOptions{MaxRecordBytes: b.recordLimitBytes})[b.harness]
 }
 
 func (b *refreshLaneBench) run(force bool, discover bool) *ingest.PipelineResult {
@@ -640,6 +727,13 @@ func TestRefreshLaneDecisionsOnTheProductionPipeline(t *testing.T) {
 			t.Parallel()
 			bench := newRefreshLaneBench(t, fixture, testCase)
 			bench.applyMutation(testCase)
+			if testCase.WantSeedPublishable != nil {
+				location := bench.location()
+				if location.ContentPublishable != *testCase.WantSeedPublishable {
+					t.Fatalf("seeded content publishable = %t, want %t; location=%+v",
+						location.ContentPublishable, *testCase.WantSeedPublishable, location)
+				}
+			}
 			wantReason, wantLane := testCase.WantReason, testCase.WantLane
 			// A settled row normally runs only stored maintenance. Cases can
 			// also exercise discovery explicitly for a settled refusal.
@@ -719,6 +813,30 @@ func TestRefreshLaneDecisionsOnTheProductionPipeline(t *testing.T) {
 					}
 					if bundle.Readiness != ingest.PublicationReady || bundle.CaptureRevision != state.PublicationCaptureRevision || len(bundle.Entries) == 0 {
 						t.Fatalf("publication input after capture: bundle=%+v", bundle)
+					}
+					if testCase.RetainedUnknown {
+						if bundle.ContentCapture.FailureCode != ingest.ContentCaptureUnknownDataRetained ||
+							bundle.ContentCapture.CaptureFormat != ingest.ContentCaptureFormatFull {
+							t.Fatalf("publication input lost its full partial capture: %+v", bundle.ContentCapture)
+						}
+						var retained []ingest.RetainedUnknown
+						for _, entry := range bundle.Entries {
+							records, err := ingest.RetainedUnknownOf(entry)
+							if err != nil {
+								t.Fatalf("read retained publication evidence: %v", err)
+							}
+							retained = append(retained, records...)
+						}
+						if len(retained) != 1 || string(retained[0].Payload) != fixture.RetainedUnknownRecord {
+							t.Fatalf("publication input lost or changed the retained unknown record: %+v", retained)
+						}
+					}
+					if testCase.OversizedRecordBytes > 0 {
+						if bundle.ContentCapture.FailureCode != ingest.ContentCaptureSourceRecordsOmitted ||
+							bundle.ContentCapture.CaptureFormat != ingest.ContentCaptureFormatFull {
+							t.Fatalf("publication input lost its accounted omissions: %+v", bundle.ContentCapture)
+						}
+						assertRefreshLaneOmission(t, bundle.Entries, fixture, testCase)
 					}
 				}
 			}

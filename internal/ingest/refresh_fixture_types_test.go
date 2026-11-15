@@ -169,6 +169,20 @@ func (c refreshLaneCase) Validate() error {
 	if c.Refusal != ingest.ContentCaptureNoFailure && c.RefusalIndexer == refreshRefusalIndexerUnspecified {
 		return fmt.Errorf("refusal %q requires refusal_indexer; name its stored indexer state", c.Refusal)
 	}
+	if c.RetainedUnknown {
+		if c.Harness != ingest.HarnessClaudeCode || c.Refusal != ingest.ContentCaptureNoFailure {
+			return fmt.Errorf("retained_unknown requires a Claude source without a synthetic refusal")
+		}
+		if c.RecordLimitBytes != 0 || c.OversizedRecordBytes != 0 {
+			return fmt.Errorf("retained_unknown cannot be combined with an oversized record")
+		}
+	}
+	if c.RecordLimitBytes != 0 || c.OversizedRecordBytes != 0 {
+		if c.Harness != ingest.HarnessClaudeCode || c.Refusal != ingest.ContentCaptureNoFailure ||
+			c.RecordLimitBytes <= 0 || c.OversizedRecordBytes <= c.RecordLimitBytes {
+			return fmt.Errorf("oversized_record_bytes requires a Claude source, no synthetic refusal, and a positive record_limit_bytes below the record size")
+		}
+	}
 	if c.NativeSource == fixtureNativeSourceMalformed && c.MaxNativeReads <= 0 {
 		return fmt.Errorf("max_native_reads must be positive for %q; set a bound in refresh_lane.yaml", c.NativeSource)
 	}

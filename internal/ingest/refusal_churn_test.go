@@ -195,27 +195,8 @@ func runSettledRefusalChurnCase(t *testing.T, fixture refusalChurnFixture, name 
 			if err != nil || !locations[sid].SourceEvidenceSupported || len(locations[sid].SourceFingerprint) == 0 {
 				t.Fatalf("seed refusal without source fingerprint: location=%+v err=%v", locations[sid], err)
 			}
-			// A newer indexer reprocesses the retained pair through the real
-			// store, recreating the permanent refusal while the legacy row
-			// still has no source-inspected publication metadata.
-			target := versions[ingest.HarnessClaudeCode]
-			target.IndexerVersion++
-			versions[ingest.HarnessClaudeCode] = target
-			fs.ResetCounts()
-			reindexed := run(versions)
-			if fs.ReadCount(sourcePath) != 0 || reindexed.Summary.Indexed != 1 {
-				t.Fatalf("legacy refusal did not reindex from the retained pair: reads=%d summary=%+v", fs.ReadCount(sourcePath), reindexed.Summary)
-			}
-			capture, found, err = database.GetSessionContentCapture(ctx, sid)
-			if err != nil || !found || capture.FailureCode != ingest.ContentCaptureUnknownDataRetained {
-				t.Fatalf("retained reindex did not record its refusal: capture=%+v found=%t err=%v", capture, found, err)
-			}
-			state, err = database.ReadIndexState(ctx, sid)
-			if err != nil || state == nil {
-				t.Fatalf("read retained refusal after reindex: state=%+v err=%v", state, err)
-			}
-			if state.PublicationCaptureRevision != 0 || state.IndexerVersion != target.IndexerVersion {
-				t.Fatalf("retained refusal changed publication capture: state=%+v err=%v", state, err)
+			if !store.PublishableWithOmissions(capture) {
+				t.Fatalf("retained unknown evidence is not a full publishable capture: %+v", capture)
 			}
 		}
 	case refusalStoredLegacyPreview:
@@ -265,11 +246,15 @@ func runSettledRefusalChurnCase(t *testing.T, fixture refusalChurnFixture, name 
 		if err != nil || state == nil {
 			t.Fatalf("read refusal state after the measured harvest: state=%+v err=%v", state, err)
 		}
-		if state.PublicationCaptureRevision != 0 || state.PublicationBound {
-			t.Fatalf("measured harvest added or bound a publication capture to the refusal: %+v", state)
+		if state.PublicationCaptureRevision <= 0 || !state.PublicationBound {
+			t.Fatalf("measured harvest did not bind the publishable partial capture: %+v", state)
 		}
-		if revision := rawSessionPublicationRevision(t, database, sid); revision != 0 {
-			t.Fatalf("measured harvest stored publication revision %d on the refusal, want zero", revision)
+		if revision := rawSessionPublicationRevision(t, database, sid); revision <= 0 {
+			t.Fatalf("measured harvest did not create a publication revision for partial content: %d", revision)
+		}
+		input, err := database.LoadPublicationInput(ctx, sid)
+		if err != nil || input.Readiness != ingest.PublicationReady || !store.PublishableWithOmissions(input.ContentCapture) {
+			t.Fatalf("measured harvest did not make partial content publication-ready: input=%+v err=%v", input, err)
 		}
 	}
 }

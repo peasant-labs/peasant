@@ -20,6 +20,10 @@ required_names:
   - read-bound-requires-malformed-source
   - negative-second-source-reads
   - negative-capture-revision
+  - retained-unknown-requires-claude
+  - retained-unknown-conflicts-with-refusal
+  - oversized-record-needs-limit
+  - oversized-record-must-exceed-limit
 cases:
   - {name: unknown-harness, patch: {harness: future-harness}, error_contains: harness}
   - {name: unknown-source, patch: {source: typo}, error_contains: source}
@@ -42,3 +46,7 @@ cases:
   - {name: read-bound-requires-malformed-source, patch: {max_native_reads: 2}, error_contains: max_native_reads}
   - {name: negative-second-source-reads, patch: {second_source_reads: -1}, error_contains: second_source_reads}
   - {name: negative-capture-revision, patch: {want_capture_revision: -1}, error_contains: want_capture_revision}
+  - {name: retained-unknown-requires-claude, patch: {harness: strike, retained_unknown: true}, error_contains: retained_unknown}
+  - {name: retained-unknown-conflicts-with-refusal, patch: {retained_unknown: true, refusal: strict_capture_refused, refusal_indexer: current}, error_contains: retained_unknown}
+  - {name: oversized-record-needs-limit, patch: {oversized_record_bytes: 4096}, error_contains: oversized_record_bytes}
+  - {name: oversized-record-must-exceed-limit, patch: {record_limit_bytes: 2048, oversized_record_bytes: 1024}, error_contains: oversized_record_bytes}

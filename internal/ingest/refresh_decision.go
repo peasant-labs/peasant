@@ -168,8 +168,9 @@ type refreshEvidence struct {
 	CaptureRecoveryNeeded bool
 	// PublicationCaptureMissing marks a fingerprint-bearing row saved before
 	// publication metadata was captured. Only native acquisition can create it.
-	// Permanent refusals are excluded: the same source cannot lift a refusal,
-	// while independent change evidence and indexer work still take their lanes.
+	// A permanent refusal stays settled unless the store has certified its
+	// saved content as publishable partial. In that case a native capture can
+	// supply the missing publication metadata without re-deciding eligibility.
 	PublicationCaptureMissing bool
 	// AdapterVersion, AdapterTarget and AdapterStampPresent describe the adapter
 	// producer. An absent stamp reads as revision 1.
@@ -360,7 +361,7 @@ func (p *Pipeline) refreshEvidenceForLocation(session DiscoveredSession, loc Ses
 		MetadataSchemaOld:     metadataNeedsNativeRefresh(loc.SchemaVersion),
 		CaptureRecoveryNeeded: loc.ContentFailureCode == ContentCaptureLegacyPreviewOnly && len(loc.SourceFingerprint) > 0,
 		PublicationCaptureMissing: loc.CaptureRevision == 0 && loc.SourceEvidenceSupported &&
-			len(loc.SourceFingerprint) > 0 && !permanentCaptureRefusal(loc.ContentFailureCode),
+			len(loc.SourceFingerprint) > 0 && (!permanentCaptureRefusal(loc.ContentFailureCode) || loc.ContentPublishable),
 		AdapterVersion:      version,
 		AdapterTarget:       target.AdapterVersion,
 		AdapterStampPresent: present,
