@@ -290,6 +290,7 @@ var migrationV24 = createSessionCommands + ";\n" +
 // migrationV79 stores the import profile (index_log timing columns and
 // ingest_run_stages) and gives run outcomes stable reason ids through two
 // lookup tables. See schema_v79.go.
+// migrationV80 adds the missing-publication-capture outcome. See schema_v80.go.
 
 // dbSchema is the sqlitemigration schema applied on Open().
 var dbSchema = sqlitemigration.Schema{
@@ -373,6 +374,7 @@ var dbSchema = sqlitemigration.Schema{
 		migrationV77,
 		migrationV78,
 		migrationV79,
+		migrationV80,
 	},
 	// V16 rebuilds annotation tables with new FKs; disable FK checking during
 	// the migration transaction so renamed/recreated tables don't cause violations.
@@ -446,5 +448,6 @@ var dbSchema = sqlitemigration.Schema{
 		nil,                        // V77: turn count recount marker (new table, no data rewrite)
 		{DisableForeignKeys: true}, // V78: widen stored harness checks to the sixteen known values
 		nil,                        // V79: import profile tables and the run-outcome rebuild (the rebuilt table is a leaf; FKs stay on so the copy is checked)
+		nil,                        // V80: add one run-outcome reason
 	},
 }

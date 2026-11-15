@@ -221,6 +221,67 @@ cases:
     want_indexed: false
     want_bound: true
 
+  # A source fingerprint can predate the publication capture revision.
+  - name: missing-publication-capture-is-acquired-natively
+    harness: claude-code
+    source: current
+    stored_adapter: current
+    metadata_schema: current
+    pair: present
+    indexer: current
+    publication: missing
+    want_reason: publication_capture_missing
+    want_lane: native
+    want_native_read: true
+    want_pair_writes: [metadata]
+    want_indexed: false
+    want_bound: true
+
+  - name: missing-publication-capture-outranks-behind-adapter
+    harness: claude-code
+    source: current
+    stored_adapter: behind
+    metadata_schema: current
+    pair: present
+    indexer: current
+    publication: missing
+    want_reason: publication_capture_missing
+    want_lane: native
+    want_native_read: true
+    want_pair_writes: [metadata]
+    want_indexed: false
+    want_bound: true
+
+  - name: missing-publication-capture-outranks-behind-indexer
+    harness: claude-code
+    source: current
+    stored_adapter: current
+    metadata_schema: current
+    pair: present
+    indexer: behind
+    publication: missing
+    want_reason: publication_capture_missing
+    want_lane: native
+    want_native_read: true
+    want_pair_writes: [metadata]
+    want_indexed: true
+    want_bound: true
+
+  - name: changed-source-without-newer-clock-outranks-missing-capture
+    harness: claude-code
+    source: changed_old_clock
+    stored_adapter: current
+    metadata_schema: current
+    pair: present
+    indexer: current
+    publication: missing
+    want_reason: source_changed
+    want_lane: native
+    want_native_read: true
+    want_pair_writes: [metadata, transcript]
+    want_indexed: true
+    want_bound: true
+
   - name: settled-session-is-left-alone
     harness: claude-code
     source: current

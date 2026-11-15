@@ -3379,15 +3379,8 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 			// its stored-first path: its clock, schema, cursor and captured
 			// evidence decide whether native input is read, and the ordinary
 			// index write binds publication once a capture exists.
-			//
-			// That binding needs a capture to bind. A row that never held a
-			// publication capture (a pre-capture legacy row, revision 0) cannot
-			// be settled from its stored pair: the stored metadata is not
-			// a source-proven capture and the index write records no lossy
-			// backfill from it, so the row would stay "needs ingest" on every
-			// harvest while the push error keeps promising that ingest repairs
-			// it. Only the native re-read can capture it, so the readiness
-			// trigger stands for such a row.
+			// Fingerprint-bearing rows with no capture are selected separately
+			// by the native publication-capture decision.
 			settled := loc
 			settled.PublicationReadiness = PublicationReady
 			if ClassifyAgainstStore(session, settled, p.config.StalenessThreshold) == DiffUnchanged {
@@ -3942,11 +3935,12 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry, wr
 		if err != nil {
 			return fail(err)
 		}
-		if !result.Decision.IsRefresh() {
+		if !result.Decision.IsRefresh() || result.Decision.Reason == RefreshReasonPublicationCaptureMissing {
 			// The pre-capture decision named why the worker was queued (a
 			// forced run, a missing pair, an old schema or an adapter bump).
 			// Only a source compare has no refresh reason yet; the captured
-			// bytes now decide that one.
+			// bytes now decide that one. A missing publication capture also
+			// yields to newly proven source changes.
 			if decision := p.classificationDecision(session, captured); decision.Lane != "" {
 				result.Decision = decision
 			}

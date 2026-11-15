@@ -152,6 +152,7 @@ var upgradeStepCatalog = map[int]upgradeCatalogEntry{
 	77: {title: "mark the stored turn counts for a recount", cost: UpgradeCostQuick},
 	78: {title: "widen the stored harness set for the antigravity cli and ide", cost: UpgradeCostScalesWithRows, disk: sessionTablesRebuildDiskNeed},
 	79: {title: "store the import profile and give run outcomes stable ids", cost: UpgradeCostQuick},
+	80: {title: "add the missing publication capture outcome", cost: UpgradeCostQuick},
 }
 
 // upgradeRecountCatalogEntry describes one recount a migration can leave

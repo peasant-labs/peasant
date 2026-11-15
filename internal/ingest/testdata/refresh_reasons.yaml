@@ -1,0 +1,16 @@
+# Exact decision and outcome vocabulary, with the lane owned by each outcome.
+reasons:
+  - {code: new, lane: native}
+  - {code: source_changed, lane: native}
+  - {code: pair_missing, lane: native}
+  - {code: metadata_schema, lane: native}
+  - {code: forced, lane: native}
+  - {code: adapter_behind, lane: stored-metadata}
+  - {code: adapter_behind_native_only, lane: native}
+  - {code: adapter_stamp_absent, lane: stored-metadata}
+  - {code: indexer_behind, lane: stored-index}
+  - {code: refusal_reopened, lane: stored-index}
+  - {code: publication_unbound, lane: stored-index}
+  - {code: publication_capture_missing, lane: native}
+  - {code: source_compare, lane: native, no_outcome: true}
+  - {code: none, lane: none, no_outcome: true}
