@@ -1,0 +1,114 @@
+requiredNames:
+  - publication-literal
+  - refusal-indexer-literal
+  - damaged-pair-literal
+  - inequality-literal
+  - empty-and-escaped-literals
+  - production-field-comparison
+  - all-named-fields
+  - typed-constant
+  - typed-variable
+  - other-field
+  - raw-string-literal
+  - reversed-operands
+  - vendor-excluded
+  - nested-vendor-excluded
+cases:
+  - name: publication-literal
+    path: publication_test.go
+    matches: 1
+    source: |
+      package example
+      func check(testCase Example) bool { return testCase.Publication == "missing" }
+  - name: refusal-indexer-literal
+    path: indexer_test.go
+    matches: 1
+    source: |
+      package example
+      func check(testCase Example) bool { return testCase.RefusalIndexer == "behind" }
+  - name: damaged-pair-literal
+    path: pair_test.go
+    matches: 1
+    source: |
+      package example
+      func check(testCase Example) bool { return testCase.Pair == "damaged" }
+  - name: inequality-literal
+    path: unequal_test.go
+    matches: 2
+    source: |
+      package example
+      func check(testCase Example) bool {
+          return testCase.Source != "changed" && testCase.NativeSource != "malformed"
+      }
+  - name: all-named-fields
+    path: all_fields_test.go
+    matches: 11
+    source: |
+      package example
+      func check(c Example) {
+          _ = c.Publication == "v"
+          _ = c.Pair == "v"
+          _ = c.Source == "v"
+          _ = c.NativeSource == "v"
+          _ = c.RefusalIndexer == "v"
+          _ = c.Refusal == "v"
+          _ = c.Reason == "v"
+          _ = c.Lane == "v"
+          _ = c.Status == "v"
+          _ = c.Outcome == "v"
+          _ = c.Harness == "v"
+      }
+  - name: empty-and-escaped-literals
+    path: string_literals_test.go
+    matches: 2
+    source: |
+      package example
+      func check(c Example) bool { return c.Lane == "" || c.Source != "with \"quotes\"" }
+  - name: production-field-comparison
+    path: internal/example/decision.go
+    matches: 1
+    source: |
+      package example
+      func check(c Example) bool { return c.Status != "ready" }
+  - name: typed-constant
+    path: typed_constant_test.go
+    matches: 0
+    source: |
+      package example
+      func check(testCase Example) bool { return testCase.Publication == refreshPublicationMissing }
+  - name: typed-variable
+    path: typed_value_test.go
+    matches: 0
+    source: |
+      package example
+      func check(testCase Example, expected PairState) bool { return testCase.Pair != expected }
+  - name: other-field
+    path: other_field_test.go
+    matches: 0
+    source: |
+      package example
+      func check(testCase Example) bool { return testCase.Name == "missing" }
+  - name: raw-string-literal
+    path: raw_string_test.go
+    matches: 0
+    source: |
+      package example
+      func check(testCase Example) bool { return testCase.Publication == `missing` }
+  - name: reversed-operands
+    path: reversed_test.go
+    matches: 0
+    source: |
+      package example
+      func check(testCase Example) bool { return "missing" == testCase.Publication }
+  - name: vendor-excluded
+    path: vendor/example/ignored.go
+    matches: 0
+    source: |
+      package example
+      func check(testCase Example) bool { return testCase.Publication == "missing" }
+  - name: nested-vendor-excluded
+    path: internal/example/vendor/dependency/ignored.go
+    matches: 0
+    source: |
+      package example
+      func check(testCase Example) bool { return testCase.Pair != "damaged" }

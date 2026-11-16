@@ -68,10 +68,9 @@ func (e upgradeCatalogEntry) diskNeedFor(cost UpgradeCost) upgradeDiskNeed {
 // cannot ship without saying what it does and what it costs; its free-disk
 // need follows from the cost unless it copies a table (disk).
 //
-// A cost here is the cost on a large store. Two steps depend on the store
-// and are resolved by the plan: the conversation turn count fold reports a
-// session count, and the search trigger repair is long only when the store
-// carries stale search results (see searchRepairStep).
+// A cost here is the cost on a large store. Store-specific planning resolves
+// the search repair and the source-diagnostic rebuild, and the conversation
+// turn count fold reports a session count.
 var upgradeStepCatalog = map[int]upgradeCatalogEntry{
 	1:  {title: "create the first tables", cost: UpgradeCostQuick},
 	2:  {title: "add entry rows and widen session metrics", cost: UpgradeCostScalesWithRows},
@@ -153,6 +152,7 @@ var upgradeStepCatalog = map[int]upgradeCatalogEntry{
 	78: {title: "widen the stored harness set for the antigravity cli and ide", cost: UpgradeCostScalesWithRows, disk: sessionTablesRebuildDiskNeed},
 	79: {title: "store the import profile and give run outcomes stable ids", cost: UpgradeCostQuick},
 	80: {title: "add the missing publication capture outcome", cost: UpgradeCostQuick},
+	81: {title: "separate source diagnostic lanes", cost: UpgradeCostScalesWithRows},
 }
 
 // upgradeRecountCatalogEntry describes one recount a migration can leave

@@ -1,6 +1,6 @@
 # A settled source refusal names its cause. Changing that cause reports once.
-# Two lanes that see the same cause in one harvest index report it once between
-# them. A store fault is not a source cause: it keeps failing and writes no row.
+# Each diagnostic lane reports its own cause once. A store fault is not a
+# source cause: it keeps failing and writes no row.
 required_names:
   - missing-then-malformed
   - harvest-index-same-cause

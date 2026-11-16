@@ -12,45 +12,35 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/publication_full_capture.yaml
 var publicationFullCaptureYAML []byte
 
 type publicationFullCaptureCase struct {
-	Name             string                      `yaml:"name"`
-	SQL              string                      `yaml:"sql"`
-	Readiness        ingest.PublicationReadiness `yaml:"readiness"`
-	IgnoreChecks     bool                        `yaml:"ignore_checks"`
-	ProofError       bool                        `yaml:"proof_error"`
-	BodyError        bool                        `yaml:"body_error"`
-	Backfill         bool                        `yaml:"backfill"`
-	ChangeShape      bool                        `yaml:"change_shape"`
-	WriteError       bool                        `yaml:"write_error"`
-	DisagreeRevision bool                        `yaml:"disagree_revision"`
+	Name               string                      `yaml:"name"`
+	SQL                string                      `yaml:"sql"`
+	Readiness          ingest.PublicationReadiness `yaml:"readiness"`
+	ContentPublishable *bool                       `yaml:"content_publishable"`
+	IgnoreChecks       bool                        `yaml:"ignore_checks"`
+	ProofError         bool                        `yaml:"proof_error"`
+	BodyError          bool                        `yaml:"body_error"`
+	Backfill           bool                        `yaml:"backfill"`
+	ChangeShape        bool                        `yaml:"change_shape"`
+	WriteError         bool                        `yaml:"write_error"`
+	DisagreeRevision   bool                        `yaml:"disagree_revision"`
 }
 
 func loadPublicationFullCaptureFixtures(t *testing.T) []publicationFullCaptureCase {
 	t.Helper()
 	var f struct {
-		Cases []publicationFullCaptureCase `yaml:"cases"`
+		RequiredNames []string                     `yaml:"requiredNames"`
+		Cases         []publicationFullCaptureCase `yaml:"cases"`
 	}
-	if err := yaml.Unmarshal(publicationFullCaptureYAML, &f); err != nil {
+	if err := testutil.DecodeNamedFixtureYAML(publicationFullCaptureYAML, &f); err != nil {
 		t.Fatal(err)
-	}
-	seen := make(map[string]bool)
-	for _, c := range f.Cases {
-		if seen[c.Name] {
-			t.Fatalf("duplicate fixture %s", c.Name)
-		}
-		seen[c.Name] = true
-	}
-	for _, name := range strings.Fields("complete-coherent-pool-one missing-full-capture incomplete-full-capture failed-full-capture unbound-full-capture stale-full-capture stale-index unsupported-metadata malformed-full-hash nonhex-full-hash missing-complete-hash unknown-status later-corrupt-chunk retained-backfill-binds-current-proof retained-backfill-keeps-unpaired-index-unready retained-backfill-refuses-corrupt-proof retained-backfill-refuses-shape-change explicit-full-revision-disagrees") {
-		if !seen[name] {
-			t.Fatalf("required fixture %s missing", name)
-		}
 	}
 	return f.Cases
 }
@@ -142,6 +132,10 @@ func TestPublicationFullCaptureEligibilityAndBundle(t *testing.T) {
 			}
 			if locations[id].PublicationReadiness != want {
 				t.Fatal("bulk eligibility disagrees")
+			}
+			if tc.ContentPublishable != nil && locations[id].ContentPublishable != *tc.ContentPublishable {
+				t.Fatalf("bulk content publishable = %t, want %t; location=%+v",
+					locations[id].ContentPublishable, *tc.ContentPublishable, locations[id])
 			}
 			if payloadReads != 0 {
 				t.Fatal("cheap readers touched payload")

@@ -1,0 +1,21 @@
+id: no-stringly-typed-field-comparison
+language: Go
+severity: warning
+message: >
+  A closed-set field is compared to a string literal. Validate input at its
+  boundary and compare against a named, typed constant instead.
+note: >
+  This name-based warning covers common closed-set fields, including fixture
+  axes. It does not inspect Go types; assess each match in its context.
+rule:
+  any:
+    - pattern: '$OBJ.$FIELD == $VALUE'
+    - pattern: '$OBJ.$FIELD != $VALUE'
+constraints:
+  FIELD:
+    regex: '^(Publication|Pair|Source|NativeSource|RefusalIndexer|Refusal|Reason|Lane|Status|Outcome|Harness)$'
+  VALUE:
+    kind: interpreted_string_literal
+ignores:
+  - "vendor/**"
+  - "**/vendor/**"

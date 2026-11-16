@@ -445,49 +445,60 @@ var readableMetadataSchemaVersions = func() map[int]bool {
 	return set
 }()
 
-// Capture-state columns only: eligibility deliberately does not verify payload.
-//
-// The columns are read back into the typed capture value and judged by the ONE
-// publication rule (PublishableWithOmissions), so readiness cannot drift from
-// what the complete-content readers will actually serve. Both readiness queries
-// select the same five capture columns in the same order from this offset:
+// publicationContentCertificate reads the full-content certificate the writer
+// derived from the stored entries. It does not verify the payload: complete
+// readers still validate the stored content against its proof before serving it.
+// Both readiness queries select the same five capture columns in this order:
 // status, full-capture proof, publication revision, failure code, capture format.
-func publicationContentEligible(stmt *sqlite.Stmt, offset int, revision int64) (bool, error) {
+// Judging that certificate through PublishableWithOmissions keeps the decision
+// identical to the content reader and writer, including accounted omissions.
+func publicationContentCertificate(stmt *sqlite.Stmt, offset int) (bool, int64, error) {
 	if stmt.ColumnType(offset) == sqlite.TypeNull {
-		return false, nil
+		return false, 0, nil
 	}
 	status, err := ingest.NewContentCaptureStatus(stmt.ColumnText(offset))
 	if err != nil {
-		return false, publicationRepairError("invalid full content capture status")
+		return false, 0, publicationRepairError("invalid full content capture status")
 	}
 	hash := stmt.ColumnText(offset + 1)
 	if hash != "" || status == ingest.ContentCaptureComplete {
 		decoded, decodeErr := hex.DecodeString(hash)
 		if decodeErr != nil || len(decoded) != 32 {
-			return false, publicationRepairError("malformed full content SHA-256 proof")
+			return false, 0, publicationRepairError("malformed full content SHA-256 proof")
 		}
 	}
 	contentRevision := stmt.ColumnInt64(offset + 2)
 	if contentRevision < 0 {
-		return false, publicationRepairError("negative full content publication revision")
+		return false, 0, publicationRepairError("negative full content publication revision")
 	}
 	// An unrecognized code or format fails CLOSED: readiness acts on these
 	// values, so a state this build cannot name must never read as publishable.
 	code, err := ingest.NewContentCaptureFailureCode(stmt.ColumnText(offset + 3))
 	if err != nil {
-		return false, publicationRepairError("invalid full content capture failure code")
+		return false, 0, publicationRepairError("invalid full content capture failure code")
 	}
 	format, err := ingest.NewContentCaptureFormat(stmt.ColumnText(offset + 4))
 	if err != nil {
-		return false, publicationRepairError("invalid full content capture format")
+		return false, 0, publicationRepairError("invalid full content capture format")
 	}
 	capture := ingest.SessionContentCapture{Status: status, FailureCode: code, CaptureFormat: format}
 	// A publishable capture that is not complete still needs its full-capture
 	// proof: its entries are read and hashed like any other full capture.
 	if status != ingest.ContentCaptureComplete && hash == "" {
-		return false, nil
+		return false, contentRevision, nil
 	}
-	return PublishableWithOmissions(capture) && revision > 0 && contentRevision == revision, nil
+	return PublishableWithOmissions(capture), contentRevision, nil
+}
+
+// publicationContentEligible adds the publication-revision binding to the
+// independently certified stored content.
+func publicationContentEligible(stmt *sqlite.Stmt, offset int, revision int64) (bool, error) {
+	eligible, contentRevision, err := publicationContentCertificate(stmt, offset)
+	return publicationContentBound(eligible, contentRevision, revision), err
+}
+
+func publicationContentBound(eligible bool, contentRevision, revision int64) bool {
+	return eligible && revision > 0 && contentRevision == revision
 }
 
 // Metadata/index proof is also used to bind content-only retained backfills.

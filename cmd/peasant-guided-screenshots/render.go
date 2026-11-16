@@ -1041,7 +1041,8 @@ func upgradeProgressPlanForState(state upgradeProgressState) (store.UpgradePlan,
 	case upgradeProgressStatePlanQuick, upgradeProgressStatePlanLong, upgradeProgressStateRunningPlain,
 		upgradeProgressStateRunningCount, upgradeProgressStateDone, upgradeProgressStateStopped,
 		upgradeProgressStateRefused, upgradeProgressStateFailed, upgradeProgressStateFailedEarly,
-		upgradeProgressStateStoppedEarly, upgradeProgressStateBetween, upgradeProgressStateFailedAfter:
+		upgradeProgressStateStoppedEarly, upgradeProgressStateBetween, upgradeProgressStateFailedBetween,
+		upgradeProgressStateFailedAfter:
 	default:
 		return store.UpgradePlan{}, fmt.Errorf("unknown upgrade progress state %q", state)
 	}
@@ -1135,6 +1136,10 @@ func renderUpgradeProgressCapture(capture upgradeProgressCaptureFixture) (string
 			send(store.UpgradeEventStepFinished, step, time.Duration(step)*time.Second, 0, 0, 0)
 		}
 		model, _ = model.Update(upgradeprogress.FinalMsg{Report: finish(1, 2, 3, 4, 5), Outcome: upgradeprogress.OutcomeStoppedByUser, Err: context.Canceled})
+	case upgradeProgressStateFailedBetween:
+		send(store.UpgradeEventStepStarted, 1, 0, 0, 0, 0)
+		send(store.UpgradeEventStepFinished, 1, time.Second, 0, 0, 0)
+		model, _ = model.Update(upgradeprogress.FinalMsg{Report: finish(1), Outcome: upgradeprogress.OutcomeFailedStep, Err: errors.New("failed before the next step")})
 	case upgradeProgressStateFailedAfter:
 		for step := 1; step <= 7; step++ {
 			send(store.UpgradeEventStepStarted, step, 0, 0, 0, 0)

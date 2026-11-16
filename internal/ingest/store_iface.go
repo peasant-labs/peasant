@@ -234,6 +234,12 @@ type SessionLocation struct {
 	// with the two fields below to recognize a refusal this build cannot lift
 	// without opening the pair.
 	ContentFailureCode ContentCaptureFailureCode
+	// ContentPublishable reports the store's canonical full-content
+	// eligibility independently of publication metadata binding. A partial
+	// capture is eligible only when its stored entries were certified as full
+	// and carry the required proof. This bulk hint does not verify the payload;
+	// the full-content reader still checks it before returning any content.
+	ContentPublishable bool
 	// IndexerVersion is the stored sessions.index_version: the revision of the
 	// parser that produced the stored index.
 	IndexerVersion int

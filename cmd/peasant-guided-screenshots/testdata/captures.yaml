@@ -49,7 +49,7 @@ sheets:
     kind: upgrade-progress
     title: "mounted store upgrade progress: plan, running, stopped, refused, failed and done in both themes"
     theme: dark
-    viewport: {width: 1800, height: 14400}
+    viewport: {width: 1800, height: 15000}
 
 completion:
   new: 2
@@ -633,6 +633,9 @@ upgradeProgressStates:
   - key: stopped-between-steps
     wantContains: ["stopped before the next step", "5 step(s) finished and are kept", "step 6 of 7"]
     wantAbsent: ["rolled back", "nothing was changed"]
+  - key: failed-between-steps
+    wantContains: ["failed before the next step", "1 step(s) finished and are kept", "step 2 of 7"]
+    wantAbsent: ["rolled back", "nothing was changed"]
   - key: failed-after-all-steps
     wantContains: ["all 7 step(s) committed", "the store is at schema 76", "the command then failed", "opaque", "identifier data migration"]
     wantAbsent: ["rolled back", "nothing was changed"]
@@ -682,6 +685,10 @@ upgradeProgressCaptures:
   - {name: upgrade-progress-stopped-between-steps-dark-120x40, state: stopped-between-steps, theme: dark, width: 120, height: 40}
   - {name: upgrade-progress-stopped-between-steps-light-80x24, state: stopped-between-steps, theme: light, width: 80, height: 24}
   - {name: upgrade-progress-stopped-between-steps-light-120x40, state: stopped-between-steps, theme: light, width: 120, height: 40}
+  - {name: upgrade-progress-failed-between-steps-dark-80x24, state: failed-between-steps, theme: dark, width: 80, height: 24}
+  - {name: upgrade-progress-failed-between-steps-dark-120x40, state: failed-between-steps, theme: dark, width: 120, height: 40}
+  - {name: upgrade-progress-failed-between-steps-light-80x24, state: failed-between-steps, theme: light, width: 80, height: 24}
+  - {name: upgrade-progress-failed-between-steps-light-120x40, state: failed-between-steps, theme: light, width: 120, height: 40}
   - {name: upgrade-progress-failed-after-all-steps-dark-80x24, state: failed-after-all-steps, theme: dark, width: 80, height: 24}
   - {name: upgrade-progress-failed-after-all-steps-dark-120x40, state: failed-after-all-steps, theme: dark, width: 120, height: 40}
   - {name: upgrade-progress-failed-after-all-steps-light-80x24, state: failed-after-all-steps, theme: light, width: 80, height: 24}

@@ -519,7 +519,10 @@ func runUpgradeProgressProgram(ctx context.Context, out io.Writer, plan store.Up
 type upgradeProgramNoticeWriter struct{ program *tea.Program }
 
 func (w upgradeProgramNoticeWriter) Write(p []byte) (int, error) {
-	w.program.Printf("%s", string(p))
+	// Program.Printf sends on an unguarded channel. Send selects on the
+	// program's cancellation as well, so a stopped renderer cannot strand the
+	// upgrade while it still owns the store lock.
+	w.program.Send(tea.Printf("%s", string(p))())
 	return len(p), nil
 }
 

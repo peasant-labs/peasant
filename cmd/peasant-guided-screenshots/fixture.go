@@ -323,18 +323,19 @@ type pullProgressCaptureFixture struct {
 type upgradeProgressState string
 
 const (
-	upgradeProgressStatePlanQuick    upgradeProgressState = "plan-quick-only"
-	upgradeProgressStatePlanLong     upgradeProgressState = "plan-with-long-step-before-start"
-	upgradeProgressStateRunningPlain upgradeProgressState = "running-uncounted-step"
-	upgradeProgressStateRunningCount upgradeProgressState = "running-counted-step"
-	upgradeProgressStateDone         upgradeProgressState = "done"
-	upgradeProgressStateStopped      upgradeProgressState = "stopped-by-user"
-	upgradeProgressStateRefused      upgradeProgressState = "refused-low-disk"
-	upgradeProgressStateFailed       upgradeProgressState = "failed-step"
-	upgradeProgressStateFailedEarly  upgradeProgressState = "failed-before-start"
-	upgradeProgressStateStoppedEarly upgradeProgressState = "stopped-before-start"
-	upgradeProgressStateBetween      upgradeProgressState = "stopped-between-steps"
-	upgradeProgressStateFailedAfter  upgradeProgressState = "failed-after-all-steps"
+	upgradeProgressStatePlanQuick     upgradeProgressState = "plan-quick-only"
+	upgradeProgressStatePlanLong      upgradeProgressState = "plan-with-long-step-before-start"
+	upgradeProgressStateRunningPlain  upgradeProgressState = "running-uncounted-step"
+	upgradeProgressStateRunningCount  upgradeProgressState = "running-counted-step"
+	upgradeProgressStateDone          upgradeProgressState = "done"
+	upgradeProgressStateStopped       upgradeProgressState = "stopped-by-user"
+	upgradeProgressStateRefused       upgradeProgressState = "refused-low-disk"
+	upgradeProgressStateFailed        upgradeProgressState = "failed-step"
+	upgradeProgressStateFailedEarly   upgradeProgressState = "failed-before-start"
+	upgradeProgressStateStoppedEarly  upgradeProgressState = "stopped-before-start"
+	upgradeProgressStateBetween       upgradeProgressState = "stopped-between-steps"
+	upgradeProgressStateFailedBetween upgradeProgressState = "failed-between-steps"
+	upgradeProgressStateFailedAfter   upgradeProgressState = "failed-after-all-steps"
 )
 
 func (s upgradeProgressState) valid() bool {
@@ -342,7 +343,8 @@ func (s upgradeProgressState) valid() bool {
 	case upgradeProgressStatePlanQuick, upgradeProgressStatePlanLong, upgradeProgressStateRunningPlain,
 		upgradeProgressStateRunningCount, upgradeProgressStateDone, upgradeProgressStateStopped,
 		upgradeProgressStateRefused, upgradeProgressStateFailed, upgradeProgressStateFailedEarly,
-		upgradeProgressStateStoppedEarly, upgradeProgressStateBetween, upgradeProgressStateFailedAfter:
+		upgradeProgressStateStoppedEarly, upgradeProgressStateBetween, upgradeProgressStateFailedBetween,
+		upgradeProgressStateFailedAfter:
 		return true
 	default:
 		return false
@@ -758,7 +760,8 @@ func validateUpgradeProgressMatrix(states []upgradeProgressStateFixture, capture
 		upgradeProgressStatePlanQuick, upgradeProgressStatePlanLong, upgradeProgressStateRunningPlain,
 		upgradeProgressStateRunningCount, upgradeProgressStateDone, upgradeProgressStateStopped,
 		upgradeProgressStateRefused, upgradeProgressStateFailed, upgradeProgressStateFailedEarly,
-		upgradeProgressStateStoppedEarly, upgradeProgressStateBetween, upgradeProgressStateFailedAfter,
+		upgradeProgressStateStoppedEarly, upgradeProgressStateBetween, upgradeProgressStateFailedBetween,
+		upgradeProgressStateFailedAfter,
 	} {
 		if stateRows[required].Key == "" {
 			return fmt.Errorf("screenshot fixture omits upgrade progress state %q", required)
@@ -918,7 +921,7 @@ func validateSheets(sheets []sheetFixture) error {
 		sheetCompletion:      {kind: sheetKindCompletion, theme: captureThemeDark, width: 1800, height: 7000},
 		sheetDiscovery:       {kind: sheetKindDiscovery, theme: captureThemeDark, width: 1800, height: 3600},
 		sheetPullProgress:    {kind: sheetKindPullProgress, theme: captureThemeDark, width: 1800, height: 3600},
-		sheetUpgradeProgress: {kind: sheetKindUpgradeProgress, theme: captureThemeDark, width: 1800, height: 14400},
+		sheetUpgradeProgress: {kind: sheetKindUpgradeProgress, theme: captureThemeDark, width: 1800, height: 15000},
 	}
 	seen := make(map[sheetName]bool, len(sheets))
 	for _, sheet := range sheets {

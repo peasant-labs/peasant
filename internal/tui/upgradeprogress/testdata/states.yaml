@@ -275,6 +275,23 @@ states:
     wantContains: ["stopped before the next step", "1 step(s) finished"]
     wantAbsent: ["rolled back", "nothing was changed"]
 
+  - key: failed-between-steps
+    plan:
+      from: 69
+      to: 71
+      steps:
+        - {version: 70, kind: schema, title: "add derived lookups", cost: quick}
+        - {version: 71, kind: schema, title: "add the dispatch index", cost: quick}
+    events:
+      - {kind: step_started, step: 1}
+      - {kind: step_finished, step: 1, elapsedMs: 2000}
+    finished:
+      - {step: 1, durationMs: 2000}
+    outcome: failed step
+    error: "failed before the next step"
+    wantContains: ["failed before the next step", "1 step(s) finished and are kept"]
+    wantAbsent: ["rolled back", "nothing was changed"]
+
   - key: failed-after-all-steps
     plan:
       from: 69

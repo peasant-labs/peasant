@@ -1,9 +1,36 @@
+requiredNames:
+  - complete-coherent-pool-one
+  - missing-full-capture
+  - incomplete-full-capture
+  - failed-full-capture
+  - unbound-full-capture
+  - stale-full-capture
+  - stale-index
+  - unsupported-metadata
+  - malformed-full-hash
+  - nonhex-full-hash
+  - missing-complete-hash
+  - unknown-status
+  - later-corrupt-chunk
+  - partial-full-without-publication
+  - partial-preview-without-publication
+  - omitted-full-without-publication
+  - strict-refusal-with-full-proof
+  - partial-without-full-proof
+  - partial-with-malformed-proof
+  - retained-backfill-binds-current-proof
+  - retained-backfill-keeps-unpaired-index-unready
+  - retained-backfill-refuses-corrupt-proof
+  - retained-backfill-refuses-shape-change
+  - explicit-full-revision-disagrees
 cases:
   - name: complete-coherent-pool-one
     readiness: ready
+    content_publishable: true
   - name: missing-full-capture
     sql: DELETE FROM session_content_captures
     readiness: needs_ingest
+    content_publishable: false
   - name: incomplete-full-capture
     sql: UPDATE session_content_captures SET status='incomplete'
     readiness: needs_ingest
@@ -13,9 +40,11 @@ cases:
   - name: unbound-full-capture
     sql: UPDATE session_content_captures SET publication_capture_revision=0
     readiness: needs_ingest
+    content_publishable: true
   - name: stale-full-capture
     sql: UPDATE session_content_captures SET publication_capture_revision=publication_capture_revision+1
     readiness: needs_ingest
+    content_publishable: true
   - name: stale-index
     sql: UPDATE sessions SET indexed_publication_capture_revision=0
     readiness: needs_ingest
@@ -26,6 +55,7 @@ cases:
     sql: UPDATE session_content_captures SET full_capture_sha256=printf('%064d',0)||'z'
     ignore_checks: true
     proof_error: true
+    content_publishable: false
   - name: nonhex-full-hash
     sql: UPDATE session_content_captures SET full_capture_sha256=replace(printf('%064d',0),'0','z')
     proof_error: true
@@ -33,6 +63,7 @@ cases:
     sql: UPDATE session_content_captures SET full_capture_sha256=NULL
     ignore_checks: true
     proof_error: true
+    content_publishable: false
   - name: unknown-status
     sql: UPDATE session_content_captures SET status='unknown'
     ignore_checks: true
@@ -41,6 +72,45 @@ cases:
     sql: UPDATE session_entry_full_content_chunks SET data=zeroblob(byte_length) WHERE entry_index=1 AND chunk_index=1
     readiness: ready
     body_error: true
+    # Bulk classification uses the stored certificate; the complete reader
+    # detects payload corruption before returning any content.
+    content_publishable: true
+  # These synthetic rows exercise how the bulk reader interprets the existing
+  # writer's certificate. The ingest fixture separately writes real retained
+  # unknown evidence through the production parser and full-content writer.
+  - name: partial-full-without-publication
+    sql: |
+      UPDATE session_content_captures SET status='incomplete', failure_code='unknown_data_retained', publication_capture_revision=0;
+      DELETE FROM session_publication_metadata;
+      UPDATE sessions SET publication_capture_revision=0, indexed_publication_capture_revision=0;
+    readiness: needs_ingest
+    content_publishable: true
+  - name: partial-preview-without-publication
+    sql: |
+      UPDATE session_content_captures SET status='incomplete', failure_code='unknown_data_retained', capture_format='preview_only', publication_capture_revision=0;
+      DELETE FROM session_publication_metadata;
+      UPDATE sessions SET publication_capture_revision=0, indexed_publication_capture_revision=0;
+    readiness: needs_ingest
+    content_publishable: false
+  - name: omitted-full-without-publication
+    sql: |
+      UPDATE session_content_captures SET status='incomplete', failure_code='source_records_omitted', publication_capture_revision=0;
+      DELETE FROM session_publication_metadata;
+      UPDATE sessions SET publication_capture_revision=0, indexed_publication_capture_revision=0;
+    readiness: needs_ingest
+    content_publishable: true
+  - name: strict-refusal-with-full-proof
+    sql: UPDATE session_content_captures SET status='incomplete', failure_code='strict_capture_refused'
+    readiness: needs_ingest
+    content_publishable: false
+  - name: partial-without-full-proof
+    sql: UPDATE session_content_captures SET status='incomplete', failure_code='unknown_data_retained', full_capture_sha256=NULL
+    readiness: needs_ingest
+    content_publishable: false
+  - name: partial-with-malformed-proof
+    sql: UPDATE session_content_captures SET status='incomplete', failure_code='unknown_data_retained', full_capture_sha256=replace(printf('%064d',0),'0','z')
+    proof_error: true
+    content_publishable: false
   - name: retained-backfill-binds-current-proof
     sql: DELETE FROM session_content_captures
     backfill: true

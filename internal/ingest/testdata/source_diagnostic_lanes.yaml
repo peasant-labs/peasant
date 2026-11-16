@@ -1,0 +1,29 @@
+required_names:
+  - both-lanes-report-once
+  - repeated-harvest-is-quiet
+  - changed-cause-reports-in-own-lane
+  - force-reports-each-lane-once
+runs:
+  - name: both-lanes-report-once
+    events:
+      - {lane: pair_repair, cause: original-source-unavailable-no-usable-saved-copy, want_report: true, want_stored: original-source-unavailable-no-usable-saved-copy}
+      - {lane: publication_capture, cause: original-source-unavailable-no-usable-saved-copy, want_report: true, want_stored: original-source-unavailable-no-usable-saved-copy}
+      - {lane: pair_repair, cause: original-source-unavailable-no-usable-saved-copy, want_report: false, want_stored: original-source-unavailable-no-usable-saved-copy}
+      - {lane: publication_capture, cause: original-source-unavailable-no-usable-saved-copy, want_report: false, want_stored: original-source-unavailable-no-usable-saved-copy}
+  - name: repeated-harvest-is-quiet
+    events:
+      - {lane: publication_capture, cause: original-source-unavailable-no-usable-saved-copy, want_report: false, want_stored: original-source-unavailable-no-usable-saved-copy}
+      - {lane: pair_repair, cause: original-source-unavailable-no-usable-saved-copy, want_report: false, want_stored: original-source-unavailable-no-usable-saved-copy}
+  - name: changed-cause-reports-in-own-lane
+    events:
+      - {lane: publication_capture, cause: original-source-present-record-unusable, want_report: true, want_stored: original-source-present-record-unusable}
+      - {lane: pair_repair, cause: original-source-unavailable-no-usable-saved-copy, want_report: false, want_stored: original-source-unavailable-no-usable-saved-copy}
+      - {lane: publication_capture, cause: original-source-unavailable-no-usable-saved-copy, want_report: false, want_stored: original-source-present-record-unusable}
+      - {lane: pair_repair, cause: original-source-present-record-unusable, want_report: true, want_stored: original-source-present-record-unusable}
+  - name: force-reports-each-lane-once
+    force: true
+    events:
+      - {lane: pair_repair, cause: original-source-unavailable-no-usable-saved-copy, want_report: true, want_stored: original-source-present-record-unusable}
+      - {lane: publication_capture, cause: original-source-unavailable-no-usable-saved-copy, want_report: true, want_stored: original-source-present-record-unusable}
+      - {lane: pair_repair, cause: original-source-unavailable-no-usable-saved-copy, want_report: false, want_stored: original-source-present-record-unusable}
+      - {lane: publication_capture, cause: original-source-unavailable-no-usable-saved-copy, want_report: false, want_stored: original-source-present-record-unusable}

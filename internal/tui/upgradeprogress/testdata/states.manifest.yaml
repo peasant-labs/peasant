@@ -11,5 +11,6 @@ requiredStates:
   - stopped-before-start
   - refused-consent-before-start
   - stopped-between-steps
+  - failed-between-steps
   - failed-after-all-steps
   - failed-after-all-steps-sanitizes-terminal-controls
