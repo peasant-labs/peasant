@@ -15,6 +15,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testkit/testwait"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
@@ -119,7 +120,8 @@ func TestContentConcurrency(t *testing.T) {
 }
 
 func runConcurrencySameCandidate(t *testing.T) {
-	s, _ := openGenerationStore(t)
+	s, root := openGenerationStore(t)
+	gateWriterBatchOpen(t, s, filepath.Join(filepath.Dir(root), "generations.db"))
 	ctx, cancel := context.WithCancel(testwait.Context(t))
 	var workers sync.WaitGroup
 	defer func() {
@@ -180,6 +182,53 @@ func runConcurrencySameCandidate(t *testing.T) {
 	if readSweepFlag(t, s, sid) {
 		t.Fatal("same-candidate sweep left its flag set")
 	}
+}
+
+// gateWriterBatchOpen replaces the timing window behind the same-candidate
+// flake with a deterministic gate. When a writer opens its per-session batch
+// savepoint, a probe connection with no busy handler tries to take SQLite's
+// writer lock, standing in for the other harvest's post-commit delete. A
+// writer that already owns the lock refuses the probe and commits. A writer
+// that deferred the lock lets the probe in, and the probe holds the lock until
+// the test ends, so that writer's first write fails with database is locked.
+func gateWriterBatchOpen(t *testing.T, s *Store, dbPath string) {
+	t.Helper()
+	probe, err := sqlite.OpenConn(dbPath, sqlite.OpenReadWrite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe.SetBusyTimeout(0)
+	var mu sync.Mutex
+	holding := false
+	t.Cleanup(func() {
+		mu.Lock()
+		defer mu.Unlock()
+		if holding {
+			_ = sqlitex.ExecuteTransient(probe, "ROLLBACK", nil)
+		}
+		_ = probe.Close()
+	})
+	authorizer := sqlite.AuthorizeFunc(func(action sqlite.Action) sqlite.AuthResult {
+		if action.Type() != sqlite.OpSavepoint || action.Operation() != "BEGIN" || action.Savepoint() != "session_entry_batch_item" {
+			return sqlite.AuthResultOK
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if !holding && sqlitex.ExecuteTransient(probe, "BEGIN IMMEDIATE", nil) == nil {
+			holding = true
+		}
+		return sqlite.AuthResultOK
+	})
+	first := searchTakeConn(t, s)
+	second := searchTakeConn(t, s)
+	if err := first.SetAuthorizer(authorizer); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.SetAuthorizer(authorizer); err != nil {
+		t.Fatal(err)
+	}
+	s.pool.Put(first)
+	s.pool.Put(second)
 }
 
 func runConcurrencyStagedCAS(t *testing.T) {
