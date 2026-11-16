@@ -551,12 +551,13 @@ Rule: `ast-grep/no-migrating-store-open-in-tests.yml`, auto-loaded through
 ignores `internal/store/migrations_test.go`, `internal/store/migration*_test.go`
 (the migration suite) and `internal/store/storetest/**` (the seam implementation).
 
-**Binary version matters.** The pinned devShell binary is ast-grep 0.45.0, which
-honours `// ast-grep-ignore: <rule-id> -- <reason>` (trailing reason text). The
-host's `/run/current-system/sw/bin/ast-grep` 0.42.1 does not: it treats the
-reason as part of the rule id, reports every suppression as unused, and fails
-the scan with one error per suppression. Run the scan inside the devShell
-(`nix develop`), as `make check` and CI do.
+**Binary version matters.** This measurement predates the move to ast-grep
+0.51.2, the current pinned devShell and CI version. It was taken on ast-grep
+0.45.0, which honours `// ast-grep-ignore: <rule-id> -- <reason>` (trailing
+reason text). The host's `/run/current-system/sw/bin/ast-grep` 0.42.1 does not:
+it treats the reason as part of the rule id, reports every suppression as
+unused, and fails the scan with one error per suppression. Run the scan inside
+the devShell (`nix develop`), as `make check` and CI do.
 
 ### Scan counts
 

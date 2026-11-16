@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/peasant-labs/peasant/internal/defaults"
 )
 
 const screenshotCommandTimeout = 90 * time.Second
@@ -194,7 +196,9 @@ func findFreeze() (string, error) {
 
 // keepScreenshotScratch retains synthetic capture inputs and measurement
 // workspaces for environments where temporary data must not be removed.
-func keepScreenshotScratch() bool { return os.Getenv("PEASANT_GUIDED_KEEP_SCRATCH") == "1" }
+func keepScreenshotScratch() bool {
+	return os.Getenv("PEASANT_GUIDED_KEEP_SCRATCH") == defaults.Key1.String()
+}
 
 func rasterizeSheet(freezePath, outputPath string, sheet renderedSheet) error {
 	outputDirectory := filepath.Dir(outputPath)

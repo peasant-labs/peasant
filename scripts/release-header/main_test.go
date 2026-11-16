@@ -158,6 +158,17 @@ func findStep(t *testing.T, workflow workflow, job, name string) (workflowStep, 
 	return workflowStep{}, -1
 }
 
+// releaseHeaderEnv is the GoReleaser template environment. The field name is
+// the template key {{ .Env.PEASANT_RELEASE_HEADER }}; the tag is that same key.
+type releaseHeaderEnv struct {
+	PEASANT_RELEASE_HEADER string `json:"PEASANT_RELEASE_HEADER"`
+}
+
+// releaseHeaderContext is the data the release header template reads.
+type releaseHeaderContext struct {
+	Env releaseHeaderEnv `json:"Env"`
+}
+
 // TestMountedReleaseHeader runs the actual workflow shell steps in isolated
 // synthetic projects. The only stub is GoReleaser, which records its arguments
 // and environment instead of publishing. No Git repository or service is used.
@@ -256,7 +267,8 @@ func TestMountedReleaseHeader(t *testing.T) {
 			}
 			if c.Body != "" {
 				var rendered bytes.Buffer
-				if err := headerTemplate.Execute(&rendered, map[string]any{"Env": map[string]string{"PEASANT_RELEASE_HEADER": string(header)}}); err != nil {
+				context := releaseHeaderContext{Env: releaseHeaderEnv{PEASANT_RELEASE_HEADER: string(header)}}
+				if err := headerTemplate.Execute(&rendered, context); err != nil {
 					t.Fatalf("render GoReleaser header: %v", err)
 				}
 				// GoReleaser v2.17.1 inserts one newline between its rendered

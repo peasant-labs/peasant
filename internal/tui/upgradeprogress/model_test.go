@@ -22,6 +22,10 @@ import (
 //go:embed testdata/states.yaml
 var statesYAML []byte
 
+// upgradeProgressStatesPath is the embedded upgrade-progress state fixture.
+// The embed directive must spell the path; every other use, including errors, uses this name.
+const upgradeProgressStatesPath = "testdata/states.yaml"
+
 //go:embed testdata/states.manifest.yaml
 var statesManifestYAML []byte
 
@@ -75,7 +79,7 @@ func loadStates(t *testing.T) statesFixture {
 	decoder := yaml.NewDecoder(bytes.NewReader(statesYAML))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&fixtures); err != nil {
-		t.Fatalf("decode testdata/states.yaml: %v", err)
+		t.Fatalf("decode %s: %v", upgradeProgressStatesPath, err)
 	}
 	var manifest struct {
 		RequiredStates []string `yaml:"requiredStates"`

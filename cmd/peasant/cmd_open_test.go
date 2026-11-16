@@ -70,18 +70,47 @@ type openFixturePublication struct {
 	ReceiptJSON string `yaml:"receipt_json"`
 }
 
+// openOutputMode is how one open-output case invokes peasant open.
+// It is this fixture's vocabulary, not a store-entry or progress mode.
+type openOutputMode string
+
+const (
+	openOutputHook  openOutputMode = "hook"
+	openOutputPlain openOutputMode = "plain"
+)
+
+// openServerState is the synthetic dashboard the open-output fixture starts from.
+type openServerState string
+
+const (
+	openServerRunning    openServerState = "running"
+	openServerOtherData  openServerState = "other-data"
+	openServerStarts     openServerState = "starts"
+	openServerStartError openServerState = "start-error"
+	openServerNeverReady openServerState = "never-ready"
+)
+
+// openSessionRef is which session argument an open-output case passes.
+type openSessionRef string
+
+const (
+	openSessionKnown   openSessionRef = "known"
+	openSessionUnknown openSessionRef = "unknown"
+	openSessionMissing openSessionRef = "missing"
+)
+
 type openOutputCase struct {
-	Name                    string   `yaml:"name"`
-	Session                 string   `yaml:"session"`
-	Prompt                  string   `yaml:"prompt"`
-	Transcript              string   `yaml:"transcript"`
-	RecordedBefore          bool     `yaml:"recorded_before"`
-	Published               bool     `yaml:"published"`
-	ReattributeAfterPublish bool     `yaml:"reattribute_after_publish"`
-	Config                  string   `yaml:"config"`
-	Server                  string   `yaml:"server"`
-	StartError              string   `yaml:"start_error"`
-	Modes                   []string `yaml:"modes"`
+	Name                    string           `yaml:"name"`
+	Session                 openSessionRef   `yaml:"session"`
+	Prompt                  string           `yaml:"prompt"`
+	Transcript              string           `yaml:"transcript"`
+	RecordedBefore          bool             `yaml:"recorded_before"`
+	Published               bool             `yaml:"published"`
+	ReattributeAfterPublish bool             `yaml:"reattribute_after_publish"`
+	Config                  string           `yaml:"config"`
+	Server                  openServerState  `yaml:"server"`
+	StartError              string           `yaml:"start_error"`
+	Modes                   []openOutputMode `yaml:"modes"`
 	Want                    struct {
 		Failed      bool     `yaml:"failed"`
 		Lines       []string `yaml:"lines"`
@@ -107,9 +136,9 @@ func loadOpenOutputFixture(t *testing.T) openOutputFixture {
 		if len(tc.Modes) == 0 {
 			t.Fatalf("case %q lists no modes, so it would run nothing", tc.Name)
 		}
-		seen := map[string]bool{}
+		seen := map[openOutputMode]bool{}
 		for _, mode := range tc.Modes {
-			if (mode != "hook" && mode != "plain") || seen[mode] {
+			if (mode != openOutputHook && mode != openOutputPlain) || seen[mode] {
 				t.Fatalf("case %q has an unknown or repeated mode %q", tc.Name, mode)
 			}
 			seen[mode] = true
@@ -131,7 +160,7 @@ func TestOpenOutput(t *testing.T) {
 	fixture := loadOpenOutputFixture(t)
 	for _, tc := range fixture.Cases {
 		for _, mode := range tc.Modes {
-			t.Run(tc.Name+"/"+mode, func(t *testing.T) {
+			t.Run(tc.Name+"/"+string(mode), func(t *testing.T) {
 				t.Parallel()
 				runOpenOutputCase(t, fixture, tc, mode)
 			})
@@ -139,7 +168,7 @@ func TestOpenOutput(t *testing.T) {
 	}
 }
 
-func runOpenOutputCase(t *testing.T, fixture openOutputFixture, tc openOutputCase, mode string) {
+func runOpenOutputCase(t *testing.T, fixture openOutputFixture, tc openOutputCase, mode openOutputMode) {
 	world := newOpenWorld(t, tc)
 	if tc.RecordedBefore {
 		world.harvest(t)
@@ -166,7 +195,7 @@ func runOpenOutputCase(t *testing.T, fixture openOutputFixture, tc openOutputCas
 
 	var got []string
 	switch mode {
-	case "hook":
+	case openOutputHook:
 		if err != nil {
 			t.Fatalf("hook mode must exit 0 on every outcome: %v", err)
 		}
@@ -180,7 +209,7 @@ func runOpenOutputCase(t *testing.T, fixture openOutputFixture, tc openOutputCas
 		if err := json.Unmarshal([]byte(stdout), &fields); err != nil {
 			t.Fatalf("hook stdout is not valid JSON: %v: %q", err, stdout)
 		}
-		if len(fields) != 2 || string(fields["continue"]) != "false" || fields["stopReason"] == nil {
+		if len(fields) != 2 || string(fields["continue"]) != strconv.FormatBool(false) || fields["stopReason"] == nil {
 			t.Fatalf("hook response = %s, want exactly continue:false and a stopReason", stdout)
 		}
 		var reason string
@@ -193,7 +222,7 @@ func runOpenOutputCase(t *testing.T, fixture openOutputFixture, tc openOutputCas
 				t.Errorf("hook stdout =\n%s\nwant\n%s", stdout, wantRaw)
 			}
 		}
-	case "plain":
+	case openOutputPlain:
 		if tc.Want.Failed {
 			var failed *openFailedError
 			if !errors.As(err, &failed) || exitCodeFor(err) == defaults.ExitOK {
@@ -286,7 +315,7 @@ func TestOpenMutesAndRestoresTheDefaultLoggers(t *testing.T) {
 	world.duringBrowserOpen = func() {
 		muted = slog.Default() != recorder && log.Writer() != &logged
 	}
-	if _, stderr, err := world.open(t, "plain"); err != nil {
+	if _, stderr, err := world.open(t, openOutputPlain); err != nil {
 		t.Fatalf("open failed: %v; stderr=%q", err, stderr)
 	}
 	if !muted {
@@ -360,12 +389,12 @@ func newOpenWorld(t *testing.T, tc openOutputCase) *openWorld {
 	storetest.CopyGoldenTo(t, dbPath)
 
 	switch tc.Server {
-	case "running":
+	case openServerRunning:
 		w.healthy.Store(true)
 		w.serves.Store(true)
-	case "other-data":
+	case openServerOtherData:
 		w.healthy.Store(true)
-	case "starts", "start-error", "never-ready":
+	case openServerStarts, openServerStartError, openServerNeverReady:
 	default:
 		t.Fatalf("unknown server %q", tc.Server)
 	}
@@ -414,9 +443,9 @@ func (w *openWorld) dependencies(t *testing.T) openDependencies {
 				t.Errorf("the forked server would not read this run's store: %+v", spawn)
 			}
 			switch w.tc.Server {
-			case "running", "other-data":
+			case openServerRunning, openServerOtherData:
 				t.Error("started a server while one was running")
-			case "start-error":
+			case openServerStartError:
 				return "", errors.New(w.tc.StartError)
 			}
 			if err := os.MkdirAll(filepath.Dir(w.pidFile), 0o700); err != nil {
@@ -426,7 +455,7 @@ func (w *openWorld) dependencies(t *testing.T) openDependencies {
 				return "", err
 			}
 			w.started.Store(true)
-			if w.tc.Server == "starts" {
+			if w.tc.Server == openServerStarts {
 				w.serves.Store(true)
 				w.healthy.Store(true)
 			}
@@ -471,21 +500,21 @@ func (w *openWorld) execute(t *testing.T, sub *cobra.Command, args ...string) (s
 func (w *openWorld) sessionID(t *testing.T) string {
 	t.Helper()
 	switch w.tc.Session {
-	case "known":
+	case openSessionKnown:
 		return openTestSessionID
-	case "unknown":
+	case openSessionUnknown:
 		return openTestUnknownSessionID
-	case "missing":
+	case openSessionMissing:
 		return ""
 	}
 	t.Fatalf("unknown session %q", w.tc.Session)
 	return ""
 }
 
-func (w *openWorld) open(t *testing.T, mode string) (string, string, error) {
+func (w *openWorld) open(t *testing.T, mode openOutputMode) (string, string, error) {
 	t.Helper()
 	args := []string{"open", "--session", w.sessionID(t), "--port", strconv.Itoa(w.port)}
-	if mode == "hook" {
+	if mode == openOutputHook {
 		args = append(args, "--hook")
 	}
 	return w.execute(t, buildOpenCommand(w.dependencies(t)), args...)

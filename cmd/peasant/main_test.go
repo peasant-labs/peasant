@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 )
@@ -64,7 +65,7 @@ func TestMain(m *testing.M) {
 	os.Setenv(ingest.EnvArenaSizeBytes, strconv.Itoa(64*1024*1024)) // 64 MiB
 
 	code := m.Run()
-	if os.Getenv("PEASANT_TEST_KEEP_SCRATCH") != "1" {
+	if os.Getenv("PEASANT_TEST_KEEP_SCRATCH") != defaults.Key1.String() {
 		removePeasantMatrixBuildDir()
 		_ = os.RemoveAll(home)
 	}

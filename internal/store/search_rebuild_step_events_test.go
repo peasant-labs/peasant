@@ -22,6 +22,10 @@ import (
 //go:embed testdata/search_rebuild.yaml
 var searchRebuildYAML []byte
 
+// searchRebuildFixturePath is the embedded search-rebuild fixture. The embed
+// directive must spell the path; every other use, including errors, uses this name.
+const searchRebuildFixturePath = "testdata/search_rebuild.yaml"
+
 //go:embed testdata/search_rebuild.manifest.yaml
 var searchRebuildManifestYAML []byte
 
@@ -48,7 +52,7 @@ func loadSearchRebuildFixtures(t *testing.T) searchRebuildFixtures {
 	decoder := yaml.NewDecoder(bytes.NewReader(searchRebuildYAML))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&fixtures); err != nil {
-		t.Fatalf("decode testdata/search_rebuild.yaml: %v", err)
+		t.Fatalf("decode %s: %v", searchRebuildFixturePath, err)
 	}
 	manifest, err := decodeRecoveryRequiredNames(searchRebuildManifestYAML)
 	if err != nil {
