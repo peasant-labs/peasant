@@ -73,6 +73,11 @@ jobs:
         id: title
         run: go run github.com/peasant-labs/schema/cmd/release-guard parse-title "$PR_TITLE"
 
+      - name: Check the release changelog section
+        env:
+          VERSION: ${{ steps.title.outputs.version }}
+        run: go run ./scripts/release-header -tag "$VERSION" > /dev/null
+
       # Maintainer predicate is single-sourced in release-guard
       # (release.IsMaintainer); the workflow just consumes its exit code.
       - name: Assert author is a maintainer (admin/maintain)
@@ -275,6 +280,13 @@ jobs:
           done
           echo "::error::failed to push nix vendor hash commit to develop after ${max_push_attempts} attempts. Check for a protected-branch rejection or repeated concurrent updates, then rerun the release PR."
           exit 1
+
+      # Re-check after the optional hash-fix rebase: the tag must point to a
+      # commit containing exactly one section for the version being released.
+      - name: Check the tagged commit's changelog section
+        env:
+          VERSION: ${{ steps.title.outputs.version }}
+        run: go run ./scripts/release-header -tag "$VERSION" > /dev/null
 
       - name: Push annotated tag (hard-fail if it exists)
         env:

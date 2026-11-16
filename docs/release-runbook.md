@@ -200,6 +200,9 @@ success, so this incident record is not an executable redispatch procedure.
 ### Later release candidates
 
 1. Ensure `develop` is green and contains everything the rc should include.
+   Add exactly one `## [X.Y.Z-rcN]` section to `CHANGELOG.md` for this tag.
+   Final tags need their own exact `## [X.Y.Z]` section; an rc section is not
+   a substitute. The release PR and the pre-tag job both check for the section.
 2. Open a PR into `develop` titled exactly:
    `release(vX.Y.Z-rc1): <summary>` (bump `rcN` for subsequent candidates).
    - `release-pr.yml` (open/edit trigger) validates the title grammar and that **you**
@@ -269,6 +272,7 @@ This section describes finals after the exact initial `v0.1.0` bootstrap.
 1. Open a PR into `develop` titled `release(vX.Y.Z): <summary>`. Same validation as an
    rc, plus `release-validate.yml` skips the macOS cask install (rc-only). The
    delta-gated matrices and the mandatory `full-gate` pass from §3 apply here too.
+   Include exactly one `## [X.Y.Z]` section in `CHANGELOG.md`.
 2. Merge (approval assertion deferred during the single-maintainer period - §2).
    `release-pr.yml` updates the Nix vendor hash if
    needed and mints the annotated final tag on the hash-current commit.
@@ -292,6 +296,12 @@ This section describes finals after the exact initial `v0.1.0` bootstrap.
 
 `release.yml` runs once per tag. When a job fails, re-run **only the failed jobs**;
 do not re-run the whole workflow.
+
+The tag's `CHANGELOG.md` section is the release body header; GoReleaser's
+generated commit list follows it. A missing or duplicate section fails the
+release PR and the pre-tag check. The tag-time publisher checks again against
+the tagged checkout before running GoReleaser. As before, a rerun keeps an
+already existing release body rather than overwriting notes an operator edited.
 
 - The GitHub UI action *Re-run failed jobs*, or `gh run rerun <run-id> --failed`,
   re-runs the failed jobs and their downstream dependents. Successful upstream

@@ -191,9 +191,8 @@ jobs:
           scripts/install-goreleaser "$RUNNER_TEMP/goreleaser-bin"
           echo "$RUNNER_TEMP/goreleaser-bin" >> "$GITHUB_PATH"
       - name: Run goreleaser
-        run: |
-          "$RUNNER_TEMP/goreleaser-bin/goreleaser" release --clean
         env:
+          TAG: ${{ github.ref_name }}
           GITHUB_TOKEN: ${{ github.token }}
           # AUR_KEY is a placeholder: the AUR push stays skip_upload:"true", so it
           # is never used until AUR publishing is separately approved. The tap
@@ -201,6 +200,11 @@ jobs:
           # to the tap on final tags — and is minted from the GitHub App above.
           AUR_KEY: ${{ secrets.AUR_KEY || 'unset-publisher-disabled' }}
           TAP_GITHUB_TOKEN: ${{ steps.tap_tok.outputs.token }}
+        run: |
+          set -euo pipefail
+          PEASANT_RELEASE_HEADER="$(go run ./scripts/release-header -tag "$TAG")"
+          export PEASANT_RELEASE_HEADER
+          "$RUNNER_TEMP/goreleaser-bin/goreleaser" release --clean
 
   # Post-publish smoke: download the released linux archives on NATIVE runners
   # (no QEMU) and assert the binary is static and reports the tag version.

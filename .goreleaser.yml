@@ -83,6 +83,9 @@ snapshot:
 release:
   # rc tags (vX.Y.Z-rcN) publish as GitHub prereleases; finals as full releases.
   prerelease: auto
+  # The release workflow supplies the exact CHANGELOG section for the tag.
+  # GoReleaser's normal generated commit list follows this header.
+  header: "{{ .Env.PEASANT_RELEASE_HEADER }}\n"
   # Re-runs must recover a partial publish: keep the existing release notes and
   # replace assets that a re-run uploads again. See docs/release-runbook.md §5.
   mode: keep-existing

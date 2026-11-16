@@ -1,0 +1,19 @@
+required_names:
+  - release-header-is-the-tag-section
+  - rc-and-final-are-distinct
+  - exact-version-does-not-match-a-prefix
+  - missing-section-fails
+  - duplicate-section-fails
+  - fenced-headings-are-content
+  - commented-heading-does-not-count
+  - final-section-excludes-global-link-definitions
+  - crlf-section-preserves-line-endings
+  - non-tag-input-fails
+  - nul-byte-fails-closed
+required_mounted_names:
+  - release-header-is-the-tag-section
+  - rc-and-final-are-distinct
+  - missing-section-fails
+  - duplicate-section-fails
+required_body_names:
+  - release-header-is-the-tag-section
