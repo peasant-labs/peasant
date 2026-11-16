@@ -876,8 +876,8 @@ The harness publishes eight contact sheets under the commit-derived directory
 | `guided-light.png` | `1800x3980` | The same guided sections and terminal sizes in the light theme. |
 | `selection.png` | `1800x11170` | The mounted selection view, including search, project/branch/session previews, and origin filtering. |
 | `push.png` | `1800x7900` | The mounted publication wizard: start, selection, transcript preview, consent, receipt, and the keyboard help card. |
-| `ingest-progress.png` | `1800x4590` | Local import progress in kickstart and inline harvest. |
-| `ingest-completion.png` | `1800x3420` | Local import completion with multiple actionable warnings at the top and bottom of the scrollable result, plus a no-warning control. Every state includes both themes and both terminal sizes. |
+| `ingest-progress.png` | `1800x7000` | Local import progress in kickstart and inline harvest, including candidates, unknown totals, queued writer work, and cancellation. Every state includes both themes and both terminal sizes. |
+| `ingest-completion.png` | `1800x7000` | Local import completion with the refresh census, unavailable census, actionable warnings, and scrolled next steps. Every state includes both themes and both terminal sizes. |
 | `pull-progress.png` | `1800x3600` | The bulk collective-pull progress bar: running, canceling, and canceled. Every state includes both themes and both terminal sizes. |
 | `discovery-progress.png` | `1800x3600` | The inline kickstart discovery spinner: mid-run and completed file counts with required re-reads, plus a phase-only adapter. Every state includes both themes and both terminal sizes. |
 

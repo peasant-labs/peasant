@@ -64,7 +64,9 @@ func TestMain(m *testing.M) {
 	os.Setenv(ingest.EnvArenaSizeBytes, strconv.Itoa(64*1024*1024)) // 64 MiB
 
 	code := m.Run()
-	removePeasantMatrixBuildDir()
-	_ = os.RemoveAll(home)
+	if os.Getenv("PEASANT_TEST_KEEP_SCRATCH") != "1" {
+		removePeasantMatrixBuildDir()
+		_ = os.RemoveAll(home)
+	}
 	os.Exit(code)
 }

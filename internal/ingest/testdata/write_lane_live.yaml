@@ -1,0 +1,26 @@
+requiredNames:
+  - active-job-counts-before-completion
+  - snapshot-before-start-does-not-invent-busy-time
+  - idle-time-is-not-busy
+cases:
+  - name: active-job-counts-before-completion
+    queuedAt: 1000
+    startedAt: 1010
+    sampleAt: 1030
+    finishedAt: 1050
+    wantBusyMs: 20
+    wantElapsedMs: 30
+  - name: snapshot-before-start-does-not-invent-busy-time
+    queuedAt: 1000
+    startedAt: 1010
+    sampleAt: 1005
+    finishedAt: 1050
+    wantBusyMs: 0
+    wantElapsedMs: 5
+  - name: idle-time-is-not-busy
+    queuedAt: 2000
+    startedAt: 2010
+    sampleAt: 2020
+    finishedAt: 2025
+    wantBusyMs: 10
+    wantElapsedMs: 20

@@ -26,6 +26,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/selectionfilter"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/tui/ingestprogress"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 	"github.com/spf13/cobra"
 )
@@ -1507,6 +1508,13 @@ func printSummary(w io.Writer, result *ingest.PipelineResult, verbose bool, incl
 	fmt.Fprintf(w, "   - %-5d errors\n", s.Errors)
 	fmt.Fprintf(w, "   - %-5d active %s\n", s.Active, activeLabel)
 	fmt.Fprintf(w, "duration: %s\n", result.Duration.Round(100*time.Millisecond))
+	var census *ingest.RefreshCensus
+	if result.CensusStored {
+		census = result.Census
+	}
+	for _, line := range ingestprogress.CensusLines(census) {
+		fmt.Fprintln(w, line)
+	}
 	// The index line is printed whenever there is anything to say, INCLUDING when
 	// nothing was indexed because indexing failed.
 	//

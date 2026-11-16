@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"time"
 )
 
 // Stage identifies a pipeline stage for progress reporting.
@@ -82,6 +83,10 @@ const (
 	// KindEnd marks the completion of a stage. Done equals Total on success;
 	// Err is non-nil if the stage finished with a fatal error.
 	KindEnd
+	// KindCandidates records the extract work list before extraction begins.
+	// Total is a candidate count, not a count of confirmed refreshes; zero is
+	// a known empty list. It is not a total of all later index maintenance.
+	KindCandidates
 )
 
 // ProgressEvent carries a single progress update from the pipeline.
@@ -107,11 +112,21 @@ type ProgressEvent struct {
 
 // StageProgress holds the mutable state for a single pipeline stage.
 type StageProgress struct {
-	Total   int
-	Done    int
-	Started bool
-	Ended   bool
-	HasErr  bool
+	Total           int
+	Done            int
+	Started         bool
+	Ended           bool
+	HasErr          bool
+	CandidateCount  int  `json:"-"`
+	CandidatesKnown bool `json:"-"`
+}
+
+// WriteLaneProgress is a point-in-time view of the instrumented writer lane.
+// Elapsed starts at the pipeline run's start and Busy includes its active job.
+type WriteLaneProgress struct {
+	Queued  int
+	Busy    time.Duration
+	Elapsed time.Duration
 }
 
 // ProgressState is a concurrent-safe aggregation of per-stage progress.
@@ -123,6 +138,25 @@ type ProgressState struct {
 	// waiting is why the run has not started yet, such as waiting for
 	// another harvest's lock; empty when the run is not waiting.
 	waiting string
+	lane    *writeLaneRecorder
+}
+
+func (ps *ProgressState) setWriteLane(lane *writeLaneRecorder) {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	ps.lane = lane
+}
+
+// WriteLaneSnapshot returns false until this run has an instrumented lane.
+// A missing recorder is unknown, not an idle lane.
+func (ps *ProgressState) WriteLaneSnapshot() (WriteLaneProgress, bool) {
+	ps.mu.RLock()
+	lane := ps.lane
+	ps.mu.RUnlock()
+	if lane == nil {
+		return WriteLaneProgress{}, false
+	}
+	return lane.progressAt(time.Now()), true
 }
 
 // SetWaiting records why the run is waiting before its first stage; an empty
@@ -158,6 +192,11 @@ func (ps *ProgressState) Update(ev ProgressEvent) {
 		return
 	}
 	switch ev.Kind {
+	case KindCandidates:
+		if ev.Stage == StageExtract && ev.Total >= 0 {
+			sp.CandidateCount = ev.Total
+			sp.CandidatesKnown = true
+		}
 	case KindStart:
 		sp.Total = ev.Total
 		sp.Done = 0
@@ -196,6 +235,7 @@ func (ps *ProgressState) Reset() {
 		ps.stages[stage] = &StageProgress{}
 	}
 	ps.waiting = ""
+	ps.lane = nil
 }
 
 // Snapshot returns a point-in-time copy of all stage progress. Safe for concurrent callers.
