@@ -55,9 +55,9 @@ func loadSourceCauseSettlingFixtures(t *testing.T) sourceCauseSettlingFixtures {
 	return fixtures
 }
 
-// TestSourceCauseSettling proves a settled refusal names its cause, that two
-// lanes seeing that cause in one harvest index report it once between them,
-// and that a store fault is not recorded as an unavailable source.
+// TestSourceCauseSettling proves each diagnostic lane reports its cause once,
+// that changed causes are reported, and that a store fault is not recorded as
+// an unavailable source.
 func TestSourceCauseSettling(t *testing.T) {
 	fixtures := loadSourceCauseSettlingFixtures(t)
 	for _, fixture := range fixtures.Cases {
@@ -127,8 +127,10 @@ func testHarvestIndexReportsOneCause(t *testing.T, wantReason string) {
 		ingest.HarnessClaudeCode: makeStubAdapter(nil, map[ingest.SessionID]*ingest.UnifiedMetadata{id: fresh}),
 	}
 	result := runCauseHarvest(t, memfs, adapters, true, database)
-	if contentAndPair := len(sourceUnavailableDiagnostics(result, id)); contentAndPair != 1 {
-		t.Fatalf("content and pair lanes reported the same cause %d times, want 1: %+v", contentAndPair, sessionDiagnostics(result, id))
+	pair := typedSessionDiagnostics(result, id, ingest.OutcomeReasonPairRepairUnavailable.Code())
+	content := typedSessionDiagnostics(result, id, ingest.OutcomeReasonContentRecoveryUnavailable.Code())
+	if len(pair) != 1 || len(content) != 1 {
+		t.Fatalf("content and pair lanes did not each report once: %+v", sessionDiagnostics(result, id))
 	}
 	if indexReports := len(typedSessionDiagnostics(result, id, "index_refused")); indexReports != 1 {
 		t.Fatalf("index lane report changed: got %d index_refused, want 1: %+v", indexReports, sessionDiagnostics(result, id))
@@ -248,7 +250,7 @@ func runCauseHarvest(t *testing.T, memfs *testutil.MemFS, adapters map[ingest.Ha
 
 func assertSourceReports(t *testing.T, result *ingest.PipelineResult, id ingest.SessionID, want int, mentions string) {
 	t.Helper()
-	matched := sourceUnavailableDiagnostics(result, id)
+	matched := typedSessionDiagnostics(result, id, ingest.OutcomeReasonPairRepairUnavailable.Code())
 	if len(matched) != want {
 		t.Fatalf("want %d source diagnostic(s), got %+v", want, sessionDiagnostics(result, id))
 	}

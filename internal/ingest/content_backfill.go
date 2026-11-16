@@ -238,14 +238,11 @@ func (p *Pipeline) backfillIncompleteContent(ctx context.Context, budgetBytes in
 					continue
 				}
 				if cause, ok := sourceUnavailableCause(err); ok {
-					if !p.settleUnavailableSource(ctx, id, cause, nil, StageContent) || p.laneCauseAlreadyReported(id, cause) {
-						// An earlier harvest already reported this cause, or the
-						// pair-repair lane already reported it in this harvest.
-						// Recovery already ran above, so repaired bytes are
-						// still seen. A different cause still reports.
+					if !p.settleUnavailableSource(ctx, id, SourceLaneStoredContent, cause, nil, StageContent) {
+						// Only the diagnostic settles. Recovery already ran,
+						// so repaired bytes are still seen.
 						continue
 					}
-					p.markLaneCauseReported(id, cause)
 				}
 				slog.Warn("content backfill failed; existing canonical state unchanged", "session_id", id, "error", err)
 				// Preserving the prior content is only a promise the database can

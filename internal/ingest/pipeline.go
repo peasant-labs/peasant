@@ -445,23 +445,10 @@ type Pipeline struct {
 	// early-exit audit does not write a second one.
 	auditWritten  bool
 	diagnosticSet map[DiagnosticEntry]struct{}
-	// The two maps below record what this harvest has already told the user
-	// about a session's unusable source. They share one mutex because both are
-	// written from the same lanes in the same run.
-	//
-	// unavailableSettledThisRun names sessions whose source-unavailability
-	// transition was recorded during this harvest. A later lane in the same
-	// run still owes its own report; a later harvest sees the stored row and
-	// owes nothing. It is not a selection signal: a recorded failure never
-	// decides whether a stored pair is indexed.
-	//
-	// laneCauseReportedThisRun is written and read only by the stored-content
-	// lane and the pair-repair lane. If one of them already reported a cause
-	// for a session, the other stays quiet for that same cause. A different
-	// cause still reports. The index lane does not use it.
-	sourceRunStateMu          sync.Mutex
-	unavailableSettledThisRun map[SessionID]struct{}
-	laneCauseReportedThisRun  map[laneCauseReport]struct{}
+	// A report claim is scoped to a session, diagnostic lane, and cause.
+	// Different lanes each owe their own report, even in the same harvest.
+	sourceRunStateMu         sync.Mutex
+	laneCauseReportedThisRun map[laneCauseReport]struct{}
 	// unroutedRepairs are forced repairs whose source could not be routed to
 	// native re-ingestion. They are counted once as failed sessions. A session
 	// the process path already failed is not counted again.
@@ -794,7 +781,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		return nil, err
 	}
 	p.resetDiagnostics()
-	p.resetUnavailableSettledThisRun()
+	p.resetUnavailableReportsThisRun()
 	p.resetUnroutedRepairs()
 	p.locationCache = nil
 	p.seqCursorCache = nil
@@ -2459,7 +2446,7 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 		// A refusal about the source bytes is reported once. The audit row still
 		// records every attempt, and the parse still runs every harvest, so a
 		// repaired source is seen; only the user-facing repeat settles.
-		if cause, ok := sourceUnavailableCause(err); !ok || p.settleUnavailableSource(ctx, im.session.SessionID, cause, writeLane, StageIndex) {
+		if cause, ok := sourceUnavailableCause(err); !ok || p.settleUnavailableSource(ctx, im.session.SessionID, SourceLaneIndex, cause, writeLane, StageIndex) {
 			p.reportIndexRefusal(im.session.SessionID, err)
 		}
 		errMsg := err.Error()

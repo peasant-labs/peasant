@@ -326,7 +326,7 @@ cases:
     kind: recount-in-order
     from: 76
   # A 0.17.0 store whose recount finished: schema 77, no marker. Its plan is
-  # 78, 79 and 80, with no recount, and the counts the recount wrote stay.
+  # 78 through 81, with no recount, and the counts the recount wrote stay.
   - name: upgrade-from-0.17.0-with-the-recount-done-runs-78-and-79-in-order
     kind: recount-done-in-order
     from: 77

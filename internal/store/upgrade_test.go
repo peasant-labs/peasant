@@ -282,6 +282,11 @@ func runUpgradePlanCase(t *testing.T, c storeUpgradeCase) {
 	for i, step := range plan.Steps {
 		version := c.From + 1 + i
 		entry := upgradeStepCatalog[version]
+		if version == sourceDiagnosticLanesSchemaVersion {
+			// buildBehindStore seeded no source-unavailability rows, so the
+			// planner resolves the catalog's row-scaled rebuild as quick.
+			entry.cost = UpgradeCostQuick
+		}
 		if step.Version != version || step.Kind != UpgradeStepSchema {
 			t.Errorf("step %d = version %d kind %q, want version %d kind schema", i, step.Version, step.Kind, version)
 		}

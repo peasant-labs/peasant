@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -26,30 +27,61 @@ var allHarvesterVersionKinds = []harvesterVersionKind{
 	harvesterVersionAdapter, harvesterVersionIndexer, harvesterVersionFormat,
 }
 
+func (kind harvesterVersionKind) Validate() error {
+	if slices.Contains(allHarvesterVersionKinds, kind) {
+		return nil
+	}
+	return fmt.Errorf("unknown producer kind %q; use one of %q in harvester_version_ledger.yaml", kind, allHarvesterVersionKinds)
+}
+
 type harvesterVersionLedgerRow struct {
 	ID      string               `yaml:"id"`
-	Harness string               `yaml:"harness"`
+	Harness ingest.Harness       `yaml:"harness"`
 	Kind    harvesterVersionKind `yaml:"kind"`
 	From    int                  `yaml:"from"`
 	To      int                  `yaml:"to"`
-	Reason  string               `yaml:"reason"`
-	Lane    string               `yaml:"lane"`
+	Reason  ingest.RefreshReason `yaml:"reason"`
+	Lane    ingest.RefreshLane   `yaml:"lane"`
 }
 
 type harvesterVersionLedger struct {
 	Rows []harvesterVersionLedgerRow `yaml:"-"`
 }
 
-func loadHarvesterVersionLedger(t *testing.T) harvesterVersionLedger {
-	t.Helper()
+func decodeHarvesterVersionLedger(data []byte) (harvesterVersionLedger, error) {
 	var rows []harvesterVersionLedgerRow
-	if err := yaml.Unmarshal(harvesterVersionLedgerYAML, &rows); err != nil {
-		t.Fatalf("decode harvester_version_ledger.yaml: %v", err)
+	decoder := yaml.NewDecoder(strings.NewReader(string(data)))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&rows); err != nil {
+		return harvesterVersionLedger{}, fmt.Errorf("decode harvester_version_ledger.yaml: %w", err)
 	}
 	if len(rows) == 0 {
-		t.Fatal("harvester_version_ledger.yaml declares no rows")
+		return harvesterVersionLedger{}, fmt.Errorf("harvester_version_ledger.yaml declares no rows; add a version history")
 	}
-	return harvesterVersionLedger{Rows: rows}
+	for _, row := range rows {
+		if !row.Harness.IsKnown() {
+			return harvesterVersionLedger{}, fmt.Errorf("harvester_version_ledger.yaml row %s names unknown harness %q; use a registered harness", row.ID, row.Harness)
+		}
+		if err := row.Kind.Validate(); err != nil {
+			return harvesterVersionLedger{}, fmt.Errorf("harvester_version_ledger.yaml row %s: %w", row.ID, err)
+		}
+		if _, err := ingest.NewRefreshReason(string(row.Reason)); err != nil {
+			return harvesterVersionLedger{}, fmt.Errorf("harvester_version_ledger.yaml row %s reason: %w", row.ID, err)
+		}
+		if _, err := ingest.NewRefreshLane(string(row.Lane)); err != nil {
+			return harvesterVersionLedger{}, fmt.Errorf("harvester_version_ledger.yaml row %s lane: %w", row.ID, err)
+		}
+	}
+	return harvesterVersionLedger{Rows: rows}, nil
+}
+
+func loadHarvesterVersionLedger(t *testing.T) harvesterVersionLedger {
+	t.Helper()
+	ledger, err := decodeHarvesterVersionLedger(harvesterVersionLedgerYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ledger
 }
 
 // ledgerKey names one producer chain. A baseline registry value and the
@@ -112,11 +144,7 @@ func TestHarvesterVersionLedgerMatchesTheRegistry(t *testing.T) {
 			t.Fatalf("ledger has an empty or repeated id %q", row.ID)
 		}
 		seenIDs[row.ID] = true
-		harness := ingest.Harness(row.Harness)
-		if !harness.IsKnown() {
-			t.Fatalf("ledger row %s names unknown harness %q", row.ID, row.Harness)
-		}
-		key := ledgerKey{harness: harness, kind: row.Kind}
+		key := ledgerKey{harness: row.Harness, kind: row.Kind}
 		byKey[key] = append(byKey[key], row)
 	}
 	values := registryValues()
@@ -162,20 +190,10 @@ func TestHarvesterVersionLedgerMatchesTheRegistry(t *testing.T) {
 func TestEveryVersionBumpNamesAReasonAndALane(t *testing.T) {
 	ledger := loadHarvesterVersionLedger(t)
 	for _, row := range ledger.Rows {
-		if !slices.Contains(allHarvesterVersionKinds, row.Kind) {
-			t.Fatalf("ledger row %s names unknown kind %q", row.ID, row.Kind)
-		}
 		if row.To <= row.From {
 			t.Fatalf("ledger row %s is not a bump: %d -> %d", row.ID, row.From, row.To)
 		}
-		reason, err := ingest.NewRefreshReason(row.Reason)
-		if err != nil {
-			t.Fatalf("ledger row %s: %v", row.ID, err)
-		}
-		lane, err := ingest.NewRefreshLane(row.Lane)
-		if err != nil {
-			t.Fatalf("ledger row %s: %v", row.ID, err)
-		}
+		reason, lane := row.Reason, row.Lane
 		if !reason.Refreshing() {
 			t.Fatalf("ledger row %s names %q, which writes no refresh outcome row", row.ID, reason)
 		}
