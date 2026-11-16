@@ -386,6 +386,8 @@ These waits stay real, each for a stated reason:
 - `internal/filelock` (`flock_*.go`, `filelock_test.go`) — the holder is another process, so only a
   real lock poll observes it; the wait is deadline-bounded (`DefaultWait`).
 - `internal/store/session_lock_test.go` — cross-process lock contention.
+- `internal/store/claude_evidence_contention_test.go` — a real SQLite writer
+  lock and a bounded timer exercise the evidence writer's busy wait and release.
 - `internal/githooks/script_test.go` — the kernel reports `ETXTBSY` on a freshly written
   executable, and only a later retry observes it cleared; the pacing is kept, the bound is the
   test deadline.
