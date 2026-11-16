@@ -56,6 +56,13 @@ was tagged but not published links to its tag instead.
 - An import that is cancelled before it finishes records its run row and the
   stages it measured.
 
+### Fixed
+- A publishable partial capture with missing publication metadata is repaired
+  by an ordinary harvest. Unchanged, unpublishable refusals remain settled.
+- Pair-repair and publication-capture failures each report once, even when
+  both concern the same unavailable source. Restoring the source permits a
+  retry; a forced retry reports again.
+
 ### Database
 - A store upgrade estimates the free disk it needs and refuses before the first
   step if available space is below that estimate. Actual usage can differ. If
@@ -85,6 +92,9 @@ was tagged but not published links to its tag instead.
   reason with a stable id. A query that read `kind` or `reason_code` must join
   those tables; `docs/harvest-audit.md` has the new queries. The upgrade
   rebuilds that one small table and keeps every row of the latest 100 runs.
+- Migration 81 separates source-unavailability evidence by diagnostic lane.
+  Existing reasons are retained in the stored-content lane. The rebuild is a
+  long step when that ledger has rows and quick when it is empty.
 
 ## [0.17.0] - 2026-11-12
 

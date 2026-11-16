@@ -23,7 +23,7 @@ required_names:
   - ordinary-source-unavailable-reports
   - reindex-source-unavailable-reports
   - ordinary-reconstructed-source-repairs
-  - ordinary-transcript-read-fault-not-repaired
+  - ordinary-queued-refresh-survives-a-pair-read-fault
   - reindex-missing-metadata-repairs
   - reindex-damaged-pair-repairs
   - reindex-nested-missing-metadata-repairs
@@ -63,7 +63,8 @@ cases:
     wantRepaired: false
     wantSourceReport: true
     wantCause: original-source-unavailable-no-usable-saved-copy
-    wantMessageContains: "complete content was not stored"
+    wantPairMessageContains: "has no usable saved copy"
+    wantContentMessageContains: "complete content was not stored"
   - name: ordinary-missing-metadata-repairs
     pairState: missing-metadata
     discovered: true
@@ -82,7 +83,8 @@ cases:
     wantRepaired: false
     wantSourceReport: true
     wantCause: original-source-unavailable-no-usable-saved-copy
-    wantMessageContains: "has no usable saved copy"
+    wantPairMessageContains: "has no usable saved copy"
+    wantContentMessageContains: "complete content was not stored"
   # A pair that needs repair beside a native source that is PRESENT but cannot
   # be used. The pair lane is the one that reports here, and this is the only
   # shape that prints the re-ingest template with its cause, so the template and
@@ -94,23 +96,24 @@ cases:
     wantRepaired: false
     wantSourceReport: true
     wantCause: original-source-present-record-unusable
-    wantMessageContains: "could not be re-ingested from its original source"
+    wantPairMessageContains: "could not be re-ingested from its original source"
   # The stored source locator alone is enough to repair a session native
   # discovery did not offer.
   - name: ordinary-reconstructed-source-repairs
     pairState: missing-metadata
     discovered: false
     wantRepaired: true
-  # A transcript that cannot be READ is a fault to restore, not damage to
-  # overwrite: the pair and the stale state must survive untouched. The row is
-  # seeded captured: a pre-capture row is read from native input regardless,
-  # because only that read can capture it.
-  - name: ordinary-transcript-read-fault-not-repaired
+  # A queued refresh keeps its own authority when the stored pair cannot be
+  # read: the classifier already queued native work for this row, so the
+  # pair-repair selector must not rewrite the entry to unchanged and discard
+  # that work. The native path reacquires the source, which repairs the
+  # unreadable pair.
+  - name: ordinary-queued-refresh-survives-a-pair-read-fault
     pairState: damaged
     discovered: true
     transcriptReadFault: true
     capturedSeed: true
-    wantRepaired: false
+    wantRepaired: true
   - name: reindex-missing-metadata-repairs
     pairState: missing-metadata
     discovered: true

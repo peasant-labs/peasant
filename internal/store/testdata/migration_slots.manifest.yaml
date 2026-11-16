@@ -78,6 +78,8 @@ requiredNames:
   - v73-harness-check-widening
   - v76-search-trigger-repair
   - v79-import-profile-and-outcome-reasons
+  - v80-publication-capture-outcome
+  - v81-source-diagnostic-lanes
 requiredGuardNames:
   - deleted-required-slot
   - shared-needle

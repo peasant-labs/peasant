@@ -16,12 +16,15 @@ import (
 var refusalChurnInternalYAML []byte
 
 type refusalChurnSettledCase struct {
-	Name                 string `yaml:"name"`
-	FailureCode          string `yaml:"failure_code"`
-	StoredIndexerVersion int    `yaml:"stored_indexer_version"`
-	TargetIndexerVersion int    `yaml:"target_indexer_version"`
-	InputProof           bool   `yaml:"input_proof"`
-	Expect               string `yaml:"expect"`
+	Name                 string                    `yaml:"name"`
+	FailureCode          ContentCaptureFailureCode `yaml:"failure_code"`
+	StoredIndexerVersion int                       `yaml:"stored_indexer_version"`
+	TargetIndexerVersion int                       `yaml:"target_indexer_version"`
+	InputProof           bool                      `yaml:"input_proof"`
+	Expect               fixtureDiffStatus         `yaml:"expect"`
+	WantReason           RefreshReason             `yaml:"want_reason"`
+	WantLane             RefreshLane               `yaml:"want_lane"`
+	CaptureRevision      int64                     `yaml:"capture_revision"`
 }
 
 // refusalChurnSettledFixture is the predicate-matrix view of the shared fixture
@@ -60,6 +63,18 @@ func loadRefusalChurnSettledFixture(t *testing.T) refusalChurnSettledFixture {
 			t.Fatalf("the refusal churn fixture has an empty or repeated settled case name %q", testCase.Name)
 		}
 		present[testCase.Name] = true
+		if _, err := NewContentCaptureFailureCode(string(testCase.FailureCode)); err != nil {
+			t.Fatalf("refusal churn fixture case %s: %v", testCase.Name, err)
+		}
+		if _, err := testCase.Expect.Status(); err != nil {
+			t.Fatalf("refusal churn fixture case %s: %v", testCase.Name, err)
+		}
+		if _, err := NewRefreshReason(string(testCase.WantReason)); err != nil {
+			t.Fatalf("refusal churn fixture case %s reason: %v", testCase.Name, err)
+		}
+		if _, err := NewRefreshLane(string(testCase.WantLane)); err != nil {
+			t.Fatalf("refusal churn fixture case %s lane: %v", testCase.Name, err)
+		}
 	}
 	for _, name := range fixture.Required {
 		if !present[name] {
@@ -100,7 +115,9 @@ func TestSettledRefusalIsNotChangeEvidence(t *testing.T) {
 				SourceEvidenceSupported: true,
 				SourceFingerprint:       []byte("captured-source-fingerprint"),
 				PublicationReadiness:    PublicationNeedsIngest,
-				ContentFailureCode:      ContentCaptureFailureCode(testCase.FailureCode),
+				CaptureRevision:         testCase.CaptureRevision,
+				PublicationBound:        testCase.CaptureRevision > 0,
+				ContentFailureCode:      testCase.FailureCode,
 				IndexerVersion:          testCase.StoredIndexerVersion,
 				IndexedInputHash:        proof,
 			}
@@ -118,8 +135,13 @@ func TestSettledRefusalIsNotChangeEvidence(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got.String() != testCase.Expect {
-				t.Fatalf("classify %q = %q, want %q; a settled refusal must not be change evidence and every lifting term must be", testCase.Name, got.String(), testCase.Expect)
+			wantStatus, _ := testCase.Expect.Status() // validated by the fixture loader
+			if got != wantStatus {
+				t.Fatalf("classify %q = %q, want %q; a settled refusal must not be change evidence and every lifting term must be", testCase.Name, got, wantStatus)
+			}
+			decision := pipeline.classificationDecision(session, nil)
+			if decision.Reason != testCase.WantReason || decision.Lane != testCase.WantLane {
+				t.Fatalf("%s: decision = %s/%s, want %s/%s; the class must name the lane the refusal settlement takes", testCase.Name, decision.Reason, decision.Lane, testCase.WantReason, testCase.WantLane)
 			}
 		})
 	}

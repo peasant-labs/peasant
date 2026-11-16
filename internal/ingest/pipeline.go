@@ -73,6 +73,7 @@ type DiffResult struct {
 type DiffEntry struct {
 	Session      DiscoveredSession
 	Status       DiffStatus
+	Decision     RefreshDecision
 	retainedOnly bool // No current native discovery context accompanies this stored session.
 	// pairRepair marks a session whose saved pair is missing or damaged. It is
 	// re-ingested from its native source regardless of the database-first
@@ -166,8 +167,11 @@ type SessionResult struct {
 	Harness    Harness
 	ParentUUID *SessionID // non-nil for subagent sessions
 	Status     DiffStatus // Classified status from diff phase; does NOT change on processing error.
-	OutputPath string     // Final output directory (empty for dry-run, skipped, or error).
-	Error      error      // non-nil if processing failed; check Error before trusting Status.
+	// Decision names why this session was refreshed and which lane carried it.
+	// None and source_compare write no refresh outcome row.
+	Decision   RefreshDecision
+	OutputPath string // Final output directory (empty for dry-run, skipped, or error).
+	Error      error  // non-nil if processing failed; check Error before trusting Status.
 	// ExcludedBySelection marks a session the saved selection left out. Its
 	// Status stays DiffUnchanged for callers that only skip it.
 	ExcludedBySelection bool
@@ -436,23 +440,10 @@ type Pipeline struct {
 	// early-exit audit does not write a second one.
 	auditWritten  bool
 	diagnosticSet map[DiagnosticEntry]struct{}
-	// The two maps below record what this harvest has already told the user
-	// about a session's unusable source. They share one mutex because both are
-	// written from the same lanes in the same run.
-	//
-	// unavailableSettledThisRun names sessions whose source-unavailability
-	// transition was recorded during this harvest. A later lane in the same
-	// run still owes its own report; a later harvest sees the stored row and
-	// owes nothing. It is not a selection signal: a recorded failure never
-	// decides whether a stored pair is indexed.
-	//
-	// laneCauseReportedThisRun is written and read only by the stored-content
-	// lane and the pair-repair lane. If one of them already reported a cause
-	// for a session, the other stays quiet for that same cause. A different
-	// cause still reports. The index lane does not use it.
-	sourceRunStateMu          sync.Mutex
-	unavailableSettledThisRun map[SessionID]struct{}
-	laneCauseReportedThisRun  map[laneCauseReport]struct{}
+	// A report claim is scoped to a session, diagnostic lane, and cause.
+	// Different lanes each owe their own report, even in the same harvest.
+	sourceRunStateMu         sync.Mutex
+	laneCauseReportedThisRun map[laneCauseReport]struct{}
 	// unroutedRepairs are forced repairs whose source could not be routed to
 	// native re-ingestion. They are counted once as failed sessions. A session
 	// the process path already failed is not counted again.
@@ -785,7 +776,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		return nil, err
 	}
 	p.resetDiagnostics()
-	p.resetUnavailableSettledThisRun()
+	p.resetUnavailableReportsThisRun()
 	p.resetUnroutedRepairs()
 	p.locationCache = nil
 	p.seqCursorCache = nil
@@ -1019,6 +1010,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 			Harness:    entry.Session.Harness,
 			ParentUUID: entry.Session.ParentUUID,
 			Status:     status,
+			Decision:   entry.Decision,
 		})
 	}
 	excludeBySelection := func(entry DiffEntry) {
@@ -1060,6 +1052,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 				Harness:    entry.Session.Harness,
 				ParentUUID: entry.Session.ParentUUID,
 				Status:     DiffUnchanged,
+				Decision:   entry.Decision,
 			})
 			advanceFilter()
 			continue
@@ -1108,6 +1101,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 				Harness:    entry.Session.Harness,
 				ParentUUID: entry.Session.ParentUUID,
 				Status:     DiffUnchanged,
+				Decision:   entry.Decision,
 			})
 			advanceFilter()
 			continue
@@ -1148,6 +1142,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 				Harness:    entry.Session.Harness,
 				ParentUUID: entry.Session.ParentUUID,
 				Status:     DiffUnchanged,
+				Decision:   entry.Decision,
 			})
 			if p.refreshesUnchangedCommits() {
 				unchangedCommitRefresh = append(unchangedCommitRefresh, entry)
@@ -1173,12 +1168,10 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	maintenanceQueued := make(map[SessionID]bool, len(toProcessEntries)-priorEntries)
 	for _, entry := range toProcessEntries[priorEntries:] {
 		maintenanceQueued[entry.Session.SessionID] = true
-		// The two maintenance passes know why they queued a session; the
-		// session's final status alone does not.
-		if entry.pairRepair {
-			p.markRefreshReason(entry.Session.SessionID, OutcomeReasonRefreshPairMissing)
-		} else {
-			p.markRefreshReason(entry.Session.SessionID, OutcomeReasonRefreshAdapterBehind)
+		// The maintenance passes carry the decision that queued each session;
+		// the session's final status alone does not name it.
+		if entry.Decision.IsRefresh() {
+			p.markRefreshReason(entry.Session.SessionID, entry.Decision.OutcomeReason())
 		}
 	}
 	keptResults := sessionResults[:0]
@@ -1582,10 +1575,27 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	// without waiting for a new session. A child rewritten this harvest already
 	// had its cache decided by the write path and is left alone. Only the cache
 	// moves; the children were never re-extracted, relocated or re-selected.
-	p.reconcileOrphanParentCaches(ctx, diffResult.Sessions, toProcessEntries)
+	p.reconcileOrphanParentCaches(ctx, diffResult.Sessions, installedEntries(sessionResults))
 
 	// Stages 5-9: INDEX, COMPUTE, CLEANUP, REPORT, AUDIT (shared with runReindex).
 	return p.indexComputeAndFinalize(ctx, indexSessions, drainIndexed, sessionResults, storeErr, start, append(drainIndexLogEntries, p.contentRecoveryLogEntries()...), IndexOutcomeIndexed, "pipeline", &drainDownstream, drainRefusedKinds)
+}
+
+// installedEntries names the sessions whose write path actually installed a
+// pair this run. The reverse parent-cache heal must skip those only; a session
+// that was queued and settled without a write still needs the heal.
+func installedEntries(results []SessionResult) []DiffEntry {
+	written := make([]DiffEntry, 0, len(results))
+	for i := range results {
+		if results[i].Error != nil || results[i].OutputPath == "" {
+			continue
+		}
+		written = append(written, DiffEntry{Session: DiscoveredSession{
+			SessionID: results[i].SessionID,
+			Harness:   results[i].Harness,
+		}})
+	}
+	return written
 }
 
 // contentRecoveryReason labels a stored-content repair in the index log.
@@ -2427,7 +2437,7 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 		// A refusal about the source bytes is reported once. The audit row still
 		// records every attempt, and the parse still runs every harvest, so a
 		// repaired source is seen; only the user-facing repeat settles.
-		if cause, ok := sourceUnavailableCause(err); !ok || p.settleUnavailableSource(ctx, im.session.SessionID, cause, writeLane, StageIndex) {
+		if cause, ok := sourceUnavailableCause(err); !ok || p.settleUnavailableSource(ctx, im.session.SessionID, SourceLaneIndex, cause, writeLane, StageIndex) {
 			p.reportIndexRefusal(im.session.SessionID, err)
 		}
 		errMsg := err.Error()
@@ -3097,9 +3107,10 @@ func (p *Pipeline) diff(ctx context.Context, sessions []DiscoveredSession, prog 
 	// no-change verdict, which lets the reassembly below stop at the exact
 	// point a cancelled pool stopped.
 	type classified struct {
-		status DiffStatus
-		err    error
-		done   bool
+		status   DiffStatus
+		decision RefreshDecision
+		err      error
+		done     bool
 	}
 
 	// One advance per finished session; the store adds each delta, so the
@@ -3109,9 +3120,9 @@ func (p *Pipeline) diff(ctx context.Context, sessions []DiscoveredSession, prog 
 		sessions,
 		parallelWorkers(p.config),
 		func(session DiscoveredSession) classified {
-			status, err := p.classifySession(ctx, session)
+			status, decision, err := p.classifySessionWithDecision(ctx, session)
 			emitAdvance(prog, StageDiff, 1, len(sessions))
-			return classified{status: status, err: err, done: true}
+			return classified{status: status, decision: decision, err: err, done: true}
 		},
 	)
 
@@ -3126,8 +3137,9 @@ func (p *Pipeline) diff(ctx context.Context, sessions []DiscoveredSession, prog 
 			return result, outcome.err
 		}
 		result.Sessions = append(result.Sessions, DiffEntry{
-			Session: sessions[index],
-			Status:  outcome.status,
+			Session:  sessions[index],
+			Status:   outcome.status,
+			Decision: outcome.decision,
 		})
 	}
 
@@ -3198,7 +3210,60 @@ func ClassifyAgainstStore(session DiscoveredSession, loc SessionLocation, _ time
 // classifySession provides the discovery-time hint. Selected supported sources
 // are classified again with captured bytes before the authoritative no-op.
 func (p *Pipeline) classifySession(ctx context.Context, session DiscoveredSession) (DiffStatus, error) {
-	return p.classifyCapturedSession(ctx, session, nil)
+	status, _, err := p.classifySessionWithDecision(ctx, session)
+	return status, err
+}
+
+// classifySessionWithDecision is the diff-phase entry point. It returns the
+// decision that names the work the status summarizes, including a pair the row
+// locates but no longer has.
+func (p *Pipeline) classifySessionWithDecision(ctx context.Context, session DiscoveredSession) (DiffStatus, RefreshDecision, error) {
+	status, err := p.classifyCapturedSession(ctx, session, nil)
+	if err != nil {
+		return status, RefreshDecision{}, err
+	}
+	decision := p.classificationDecision(session, nil)
+	if _, ok := p.locationCache[session.SessionID]; !ok {
+		// Store-free and legacy file fallbacks carry their evidence in the
+		// saved metadata and the owned capture marker, not a row.
+		if metadata, metaErr := p.metadataForRewrite(ctx, session); metaErr == nil {
+			sourceCompare := metadata != nil && metadata.SchemaVersion >= CurrentSchemaVersion
+			if !sourceCompare && metadata != nil {
+				if metaPath, pathErr := p.findMetadataPath(ctx, session); pathErr == nil && metaPath != "" {
+					if _, markerErr := p.fs.Stat(fileCaptureEvidencePath(metaPath)); markerErr == nil {
+						sourceCompare = true
+					}
+				}
+			}
+			decision = p.refreshDecisionForFile(session, metadata, sourceCompare)
+		}
+	}
+	if decision.Reason == RefreshReasonPublicationUnbound && !p.publicationBindable(ctx, session.SessionID) {
+		decision = RefreshDecision{Reason: RefreshReasonSourceChanged, Lane: RefreshLaneNative}
+	}
+	if session.Harness == HarnessOpenCode && (decision.Lane == RefreshLaneStoredIndex || decision.Reason == RefreshReasonNone) {
+		// OpenCode's changed clock is the session row's updated time, not the
+		// file mtime. It can sit older than the ingest audit clock and still be
+		// newer than the stored capture; that is source change evidence the
+		// stored-index lane must not skip.
+		if p.openCodeSessionClockMoved(ctx, session) {
+			decision = RefreshDecision{Reason: RefreshReasonSourceCompare, Lane: RefreshLaneNative}
+		}
+	}
+	if status != DiffActive {
+		if decision.IsRefresh() {
+			// The public summary is derived from the decision. A stored-index
+			// decision still reports unchanged (the index lane rewrote no native
+			// image); a native or stored-metadata decision reports updated.
+			status = decision.Status()
+		} else if decision.Reason == RefreshReasonSourceCompare {
+			// The compare has not run yet. Queue the worker; its captured
+			// comparison settles the public status and writes nothing on a
+			// match. Activity keeps its own status.
+			status = DiffUpdated
+		}
+	}
+	return status, decision, nil
 }
 
 func supportsSessionCapture(session DiscoveredSession) bool {
@@ -3222,6 +3287,35 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 			return DiffActive, nil
 		}
 		return DiffNew, nil
+	}
+	decision := p.classificationDecision(session, captured)
+	if captured == nil && decision.Lane == RefreshLaneStoredIndex {
+		if isActive {
+			return DiffActive, nil
+		}
+		if decision.Reason == RefreshReasonPublicationUnbound && !p.publicationBindable(ctx, session.SessionID) {
+			// A bind needs the stored pair and a current captured snapshot. A
+			// missing pair or a capture row the index cannot reach is a native
+			// repair, not a publication bind.
+			decision = RefreshDecision{Reason: RefreshReasonSourceChanged, Lane: RefreshLaneNative}
+		} else {
+			p.markRefreshReason(session.SessionID, decision.OutcomeReason())
+			return DiffUnchanged, nil
+		}
+	}
+	if captured == nil && decision.Lane == RefreshLaneStoredMetadata {
+		if isActive {
+			return DiffActive, nil
+		}
+		p.markRefreshReason(session.SessionID, decision.OutcomeReason())
+		return DiffUpdated, nil
+	}
+	if captured == nil && decision.Reason == RefreshReasonAdapterBehindNativeOnly {
+		if isActive {
+			return DiffActive, nil
+		}
+		p.markRefreshReason(session.SessionID, decision.OutcomeReason())
+		return DiffUpdated, nil
 	}
 	// Extraction from stored input preserves an unknown acquisition clock.
 	// Once its adapter revision is current, a discovered native file still needs acquisition: no
@@ -3263,15 +3357,8 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 			// its stored-first path: its clock, schema, cursor and captured
 			// evidence decide whether native input is read, and the ordinary
 			// index write binds publication once a capture exists.
-			//
-			// That binding needs a capture to bind. A row that never held a
-			// publication capture (a pre-capture legacy row, revision 0) cannot
-			// be settled from its stored pair: the stored metadata is not
-			// a source-proven capture and the index write records no lossy
-			// backfill from it, so the row would stay "needs ingest" on every
-			// harvest while the push error keeps promising that ingest repairs
-			// it. Only the native re-read can capture it, so the readiness
-			// trigger stands for such a row.
+			// Fingerprint-bearing rows with no capture are selected separately
+			// by the native publication-capture decision.
 			settled := loc
 			settled.PublicationReadiness = PublicationReady
 			if ClassifyAgainstStore(session, settled, p.config.StalenessThreshold) == DiffUnchanged {
@@ -3280,39 +3367,64 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 				}
 			}
 		}
-		if captured != nil && loc.SourceEvidenceSupported {
-			status = DiffUnchanged
-			// A stored adapter revision behind this build is change evidence of
-			// its own: the artifact the row holds was produced by an older parser,
-			// and only a published capture advances the stamp. Without this a
-			// session whose bytes happen to project identically is selected on
-			// every harvest, opened every time, and never settles.
-			//
-			// The harness-wide target applies even to a legacy OpenCode origin
-			// that keeps the baseline target for indexing: ListStaleAdapterSessions
-			// selects by harness, so a narrower classifier rule would leave those
-			// rows selected forever instead of republishing them once. This is
-			// deliberately not sessionVersionTarget, which narrows only the index
-			// lane.
-			// The captured comparison is the authority, so it also names why the
-			// session is refreshed. The first true term is the reason.
-			var reason OutcomeReason
-			switch {
-			case !bytes.Equal(loc.SourceFingerprint, captured.SourceFingerprint):
-				reason = OutcomeReasonRefreshSourceChanged
-			case metadataNeedsNativeRefresh(loc.SchemaVersion):
-				reason = OutcomeReasonRefreshMetadataSchema
-			case loc.PublicationReadiness == PublicationNeedsIngest && !refusalSettled:
-				reason = OutcomeReasonRefreshPublicationUnbound
-			case adapterRevisionBehind(loc.AdapterVersion, p.versionTargets()[session.Harness]):
-				reason = OutcomeReasonRefreshAdapterBehind
-				if loc.AdapterVersion == nil {
-					reason = OutcomeReasonRefreshAdapterStampAbsent
-				}
+		// The stored lanes never read the native source. The stored-index lane
+		// is settled by the index inventory from the stored pair, so the
+		// session stays out of the native worker. The stored-metadata lane is
+		// queued so processSession can re-derive the metadata from the stored
+		// transcript.
+		if captured != nil && decision.Lane == RefreshLaneStoredIndex && identityMatchesLocation(captured.Metadata, loc) {
+			// A native capture already acquired the bytes for a compare, but
+			// the stored pair is the input the indexer reads and the identity
+			// matches. The pair must also still describe the same structural
+			// source context: a reparented child or a moved source locator is a
+			// native rewrite even when the bytes are identical.
+			stored := p.storedMetadataForDecision(ctx, session)
+			parentMatches := !IndependentAdmissionHarness(session.Harness) ||
+				(stored != nil && sameParentSession(stored.ParentUUID, captured.Metadata.ParentUUID))
+			structureMatches := stored == nil || (parentMatches &&
+				stored.Source == captured.Metadata.Source &&
+				stored.HostSlug == captured.Metadata.HostSlug &&
+				stored.Project.Hash == captured.Metadata.Project.Hash)
+			if structureMatches {
+				p.markRefreshReason(session.SessionID, decision.OutcomeReason())
+				return DiffUnchanged, nil
 			}
-			if reason != 0 {
+			decision = RefreshDecision{Reason: RefreshReasonSourceChanged, Lane: RefreshLaneNative}
+		}
+		nativeRefresh := captured != nil && loc.SourceEvidenceSupported && decision.IsRefresh()
+		if nativeRefresh && decision.Lane != RefreshLaneStoredIndex {
+			status = decision.Status()
+			p.markRefreshReason(session.SessionID, decision.OutcomeReason())
+		} else if captured != nil && decision.Reason == RefreshReasonSourceCompare {
+			status = DiffUnchanged
+		}
+		if captured != nil && status == DiffUnchanged {
+			// Bytes that compare equal still do not prove the stored pair
+			// carries the discovered structural context. A reparented child, a
+			// moved source locator or a re-attributed project is a native
+			// rewrite even when the transcript is byte-identical. The stored FK
+			// cache must also match the location the write path would install
+			// at, so a newly available parent can relocate a root-owned child.
+			stored := p.storedMetadataForDecision(ctx, session)
+			parentMatches := true
+			cacheMatches := true
+			if IndependentAdmissionHarness(session.Harness) {
+				parentMatches = stored != nil && sameParentSession(stored.ParentUUID, captured.Metadata.ParentUUID)
+				expectedParent := ""
+				if session.SchedulingParentID != nil {
+					expectedParent = string(*session.SchedulingParentID)
+				}
+				cacheMatches = loc.ParentID == expectedParent
+			}
+			structureMatches := stored == nil || (parentMatches &&
+				stored.Source == captured.Metadata.Source &&
+				stored.HostSlug == captured.Metadata.HostSlug &&
+				stored.Project.Hash == captured.Metadata.Project.Hash &&
+				cacheMatches)
+			if !structureMatches {
+				decision = RefreshDecision{Reason: RefreshReasonSourceChanged, Lane: RefreshLaneNative}
 				status = DiffUpdated
-				p.markRefreshReason(session.SessionID, reason)
+				p.markRefreshReason(session.SessionID, decision.OutcomeReason())
 			}
 		}
 		// Captured-source evidence decides a supported source, and only a
@@ -3726,6 +3838,7 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry, wr
 		Harness:    session.Harness,
 		ParentUUID: session.ParentUUID,
 		Status:     entry.Status,
+		Decision:   entry.Decision,
 	}
 	fail := func(err error) workerResult {
 		result.Error = err
@@ -3799,6 +3912,23 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry, wr
 		result.Status, err = p.classifyCapturedSession(ctx, session, captured)
 		if err != nil {
 			return fail(err)
+		}
+		if !result.Decision.IsRefresh() || result.Decision.Reason == RefreshReasonPublicationCaptureMissing {
+			// The pre-capture decision named why the worker was queued (a
+			// forced run, a missing pair, an old schema or an adapter bump).
+			// Only a source compare has no refresh reason yet; the captured
+			// bytes now decide that one. A missing publication capture also
+			// yields to newly proven source changes.
+			if decision := p.classificationDecision(session, captured); decision.Lane != "" {
+				result.Decision = decision
+			}
+		}
+		if result.Decision.IsRefresh() && result.Status != DiffActive {
+			// A refresh reason the worker was queued for still requires the
+			// write even when the captured bytes compare equal: the pair or its
+			// metadata is what the reason invalidated. source_compare and none
+			// keep the classifier's verdict; activity keeps its own status.
+			result.Status = result.Decision.Status()
 		}
 		if result.Status == DiffUnchanged {
 			// Drain commits the parent and acknowledges the empty arena slot,

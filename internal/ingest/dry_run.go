@@ -31,5 +31,8 @@ func (p *Pipeline) dryRunIndexNeedsWork(ctx context.Context, target reindexTarge
 		p.reportIndexRefusal(target.session.SessionID, err)
 		return false
 	}
-	return p.config.Force || state.IndexerVersion < p.sessionVersionTarget(target.session).IndexerVersion || state.IndexedInputHash == nil || state.IndexedAt == nil
+	if p.config.Force || state.IndexedAt == nil {
+		return true
+	}
+	return p.stateNeedsIndexWork(state, p.sessionVersionTarget(target.session))
 }

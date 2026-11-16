@@ -1098,8 +1098,10 @@ CREATE TABLE session_section_native_metadata (
 ) STRICT;
 
 CREATE TABLE session_source_unavailability (
- session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
- reason TEXT NOT NULL CHECK (reason IN ('original-source-unavailable-no-usable-saved-copy','original-source-present-record-unusable'))
+ session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+ lane TEXT NOT NULL CHECK (lane IN ('stored_content','pair_repair','publication_capture','index')),
+ reason TEXT NOT NULL CHECK (reason IN ('original-source-unavailable-no-usable-saved-copy','original-source-present-record-unusable')),
+ PRIMARY KEY (session_id, lane)
 ) STRICT;
 
 CREATE TABLE sessions (
@@ -2289,6 +2291,7 @@ INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES
 INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (308, 3, 'indexer_behind', 0);
 INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (309, 3, 'refusal_reopened', 0);
 INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (310, 3, 'publication_unbound', 0);
+INSERT INTO "ingest_outcome_reasons" ("id", "kind_id", "code", "retired") VALUES (311, 3, 'publication_capture_missing', 0);
 INSERT INTO "scale_kinds" ("id", "name") VALUES (1, 'nominal');
 INSERT INTO "scale_kinds" ("id", "name") VALUES (2, 'ordinal');
 INSERT INTO "scale_kinds" ("id", "name") VALUES (3, 'continuous');
@@ -2311,4 +2314,4 @@ DELETE FROM "session_search_fts_data";
 INSERT INTO "session_search_fts_data" ("id", "block") VALUES (1, X'000000000000');
 INSERT INTO "session_search_fts_data" ("id", "block") VALUES (10, X'00000000000000');
 
-PRAGMA user_version = 79;
+PRAGMA user_version = 81;

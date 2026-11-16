@@ -8,18 +8,23 @@ reference (constraints, invariants, assumptions), see [AGENTS.md](AGENTS.md).
 
 ## Pipeline Overview
 
-Pair repair records local maintenance evidence in `session_source_unavailability`
-when neither a usable saved pair nor reachable original input can repair a stored
-session. Its closed reason is `original-source-unavailable-no-usable-saved-copy`.
-The first transition reports an actionable diagnostic; subsequent harvests keep
-checking for recovery without repeating that warning. The successful artifact
-mirror clears the evidence in the same transaction as the refresh. Failed
-refreshes preserve both the evidence and prior stored content.
+Source faults record local maintenance evidence in
+`session_source_unavailability`, keyed by session and diagnostic lane:
+stored-content recovery, pair repair, publication capture, or indexing.
+Each lane reports its own first transition and checks again on later harvests
+without repeating a settled warning. The causes distinguish a missing original
+source from a present source with an unusable record. A lane may upgrade the
+former to the latter but never downgrades it; an explicit force retry reports
+again without downgrading. A successful artifact mirror clears all lanes in the
+same transaction as the refresh. Failed refreshes preserve the evidence and
+prior stored content.
 
-Store consumers can use `ReadSourceUnavailability` to annotate maintenance results.
-No row means no unavailability has been recorded, not a guarantee of current source
-availability. This state does not alter transcript wire metadata, access to stored
-entries, or eligibility to recompute metrics from those entries.
+`ReadSourceUnavailabilityForLane` reads one lane. The reason-only
+`ReadSourceUnavailability` selects the most specific cause across lanes;
+`ReadSourceUnavailabilityDetail` also names the owning lane, with lexical lane
+order breaking ties. No row means no unavailability was recorded, not a
+guarantee of current source availability. This state does not alter transcript
+wire metadata, access to stored entries, or eligibility to recompute metrics.
 
 ```
                      MAIN GOROUTINE                        CONCURRENT

@@ -1,0 +1,28 @@
+# Required names for refresh_lane.yaml. A removed or renamed case fails the
+# loader; there is deliberately no bare count.
+requiredNames:
+  - source-changed-is-captured-natively
+  - missing-pair-is-captured-natively
+  - metadata-schema-refresh-is-captured-natively
+  - forced-run-is-captured-natively
+  - adapter-behind-refreshes-metadata-from-the-stored-copy
+  - adapter-behind-without-stored-extractor-is-captured-natively
+  - absent-adapter-stamp-refreshes-metadata-from-the-stored-copy
+  - row-stamp-behind-with-current-file-stamp-reads-no-native-source
+  - indexer-behind-reindexes-the-stored-copy
+  - strict-refusal-reopened-by-indexer-bump-reindexes-the-stored-copy
+  - omitted-records-refusal-reopened-by-indexer-bump-reindexes-the-stored-copy
+  - unknown-data-refusal-reopened-by-indexer-bump-reindexes-the-stored-copy
+  - refusal-at-the-current-indexer-is-left-alone
+  - legacy-strict-refusal-without-publication-does-not-churn
+  - legacy-unknown-preview-without-publication-does-not-churn
+  - legacy-full-retained-unknown-acquires-publication
+  - legacy-full-accounted-omission-acquires-publication
+  - unbound-publication-binds-without-a-reparse
+  - missing-publication-capture-is-acquired-natively
+  - missing-publication-capture-outranks-behind-adapter
+  - missing-publication-capture-outranks-behind-indexer
+  - changed-source-without-newer-clock-outranks-missing-capture
+  - missing-capture-with-malformed-source-reports-once-and-recovers
+  - settled-session-is-left-alone
+  - changed-source-wins-over-a-behind-stamp

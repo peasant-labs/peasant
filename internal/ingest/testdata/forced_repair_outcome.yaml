@@ -12,11 +12,9 @@
 # cause text promises a stored copy only when a completed index is what still
 # serves.
 #
-# A reindex run reaches stored-content recovery before the pair lane, so the
-# stored-content lane is the one that names the missing or malformed source
-# there; the harvest rows are named by the pair lane. want_diagnostics states
-# how many of the two lanes speak, and want_mentions names the one diagnostic
-# that carries the contract text.
+# Each lane reports independently regardless of which stage runs first.
+# want_pair and want_content pin their separate diagnostic counts;
+# want_mentions retains the case-specific cause wording.
 #
 # want_content_promise pins the stored-content lane's own message, which is a
 # different sentence from the pair lane's. A row with no completed index must say
@@ -46,7 +44,11 @@ cases:
     source: missing
     completed_index: true
     want_errors: false
-    want_diagnostics: 1
+    want_diagnostics: 2
+    want_pair: 1
+    want_content: 1
+    want_pair_mentions: "is unavailable"
+    want_content_promise: serving
     want_indexed: 0
     want_promise: serving
     want_mentions: "is unavailable"
@@ -56,7 +58,11 @@ cases:
     force: true
     completed_index: true
     want_errors: true
-    want_diagnostics: 1
+    want_diagnostics: 2
+    want_pair: 1
+    want_content: 1
+    want_pair_mentions: "is unavailable"
+    want_content_promise: serving
     want_indexed: 0
     want_promise: serving
     want_mentions: "is unavailable"
@@ -65,7 +71,11 @@ cases:
     source: malformed
     completed_index: true
     want_errors: false
-    want_diagnostics: 1
+    want_diagnostics: 2
+    want_pair: 1
+    want_content: 1
+    want_pair_mentions: "capture JSONL record 2: malformed complete JSON"
+    want_content_promise: serving
     want_indexed: 0
     want_promise: serving
     want_mentions: "capture JSONL record 2: malformed complete JSON"
@@ -75,7 +85,11 @@ cases:
     force: true
     completed_index: true
     want_errors: true
-    want_diagnostics: 1
+    want_diagnostics: 2
+    want_pair: 1
+    want_content: 1
+    want_pair_mentions: "capture JSONL record 2: malformed complete JSON"
+    want_content_promise: serving
     want_indexed: 0
     want_promise: serving
     want_mentions: "capture JSONL record 2: malformed complete JSON"
@@ -88,7 +102,10 @@ cases:
     source: missing
     completed_index: true
     want_errors: false
-    want_diagnostics: 1
+    want_diagnostics: 2
+    want_pair: 1
+    want_content: 1
+    want_pair_mentions: "is unavailable"
     want_indexed: 0
     want_updated: 1
     want_promise: serving
@@ -101,7 +118,11 @@ cases:
     force: true
     completed_index: true
     want_errors: true
-    want_diagnostics: 1
+    want_diagnostics: 2
+    want_pair: 1
+    want_content: 1
+    want_pair_mentions: "is unavailable"
+    want_content_promise: serving
     want_indexed: 0
     want_promise: serving
     want_mentions: "file does not exist"
@@ -110,7 +131,10 @@ cases:
     source: malformed
     completed_index: true
     want_errors: false
-    want_diagnostics: 1
+    want_diagnostics: 2
+    want_pair: 1
+    want_content: 1
+    want_pair_mentions: "capture JSONL record 2: malformed complete JSON"
     want_indexed: 0
     want_promise: serving
     want_mentions: "malformed JSON"
@@ -122,7 +146,11 @@ cases:
     force: true
     completed_index: true
     want_errors: true
-    want_diagnostics: 1
+    want_diagnostics: 2
+    want_pair: 1
+    want_content: 1
+    want_pair_mentions: "capture JSONL record 2: malformed complete JSON"
+    want_content_promise: serving
     want_indexed: 0
     want_promise: serving
     want_mentions: "malformed JSON"
@@ -134,7 +162,11 @@ cases:
     source: malformed
     completed_index: false
     want_errors: true
-    want_diagnostics: 1
+    want_diagnostics: 2
+    want_pair: 1
+    want_content: 1
+    want_pair_mentions: "capture JSONL record 2: malformed complete JSON"
+    want_content_promise: neutral
     want_indexed: 0
     want_promise: neutral
     want_mentions: "capture JSONL record 2: malformed complete JSON"
@@ -146,7 +178,11 @@ cases:
     source: missing
     completed_index: false
     want_errors: false
-    want_diagnostics: 1
+    want_diagnostics: 2
+    want_pair: 1
+    want_content: 1
+    want_pair_mentions: "is unavailable"
+    want_content_promise: neutral
     want_indexed: 0
     want_promise: neutral
     want_mentions: "is unavailable"
@@ -160,6 +196,9 @@ cases:
     completed_index: false
     want_errors: false
     want_diagnostics: 2
+    want_pair: 1
+    want_content: 1
+    want_pair_mentions: "no recorded original source"
     want_indexed: 0
     want_promise: neutral
     want_mentions: "no recorded original source"
@@ -172,6 +211,9 @@ cases:
     completed_index: false
     want_errors: true
     want_diagnostics: 2
+    want_pair: 1
+    want_content: 1
+    want_pair_mentions: "no recorded original source"
     want_indexed: 0
     want_promise: neutral
     want_mentions: "no recorded original source"
@@ -187,6 +229,8 @@ cases:
     completed_index: false
     want_errors: false
     want_diagnostics: 1
+    want_pair: 1
+    want_pair_mentions: "no recorded original source"
     want_indexed: 0
     want_updated: 0
     want_promise: neutral
@@ -201,6 +245,8 @@ cases:
     completed_index: false
     want_errors: false
     want_diagnostics: 1
+    want_pair: 1
+    want_pair_mentions: "no recorded original source"
     want_indexed: 0
     want_updated: 0
     want_promise: neutral
@@ -214,6 +260,9 @@ cases:
     completed_index: false
     want_errors: true
     want_diagnostics: 2
+    want_pair: 1
+    want_content: 1
+    want_pair_mentions: "no recorded original source"
     want_indexed: 0
     want_updated: 0
     want_promise: neutral
@@ -231,6 +280,8 @@ cases:
     completed_index: true
     want_errors: true
     want_diagnostics: 1
+    want_pair: 1
+    want_pair_mentions: "is unavailable"
     want_indexed: 0
     want_promise: serving
     want_mentions: "is unavailable"
