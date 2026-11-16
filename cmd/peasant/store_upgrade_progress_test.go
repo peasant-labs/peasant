@@ -27,6 +27,10 @@ import (
 //go:embed testdata/store_upgrade_progress.yaml
 var storeUpgradeProgressYAML []byte
 
+// storeUpgradeProgressFixturePath is the embedded upgrade-progress fixture.
+// The embed directive must spell the path; every other use, including errors, uses this name.
+const storeUpgradeProgressFixturePath = "testdata/store_upgrade_progress.yaml"
+
 //go:embed testdata/store_upgrade_progress.manifest.yaml
 var storeUpgradeProgressManifestYAML []byte
 
@@ -50,10 +54,22 @@ type upgradeProgressPlainCase struct {
 	WantContains []string                   `yaml:"wantContains"`
 }
 
+// upgradeProgressFixtureError names the synthetic error supplied to the
+// outcome mapping. It is not a store-upgrade action or a push-wizard state.
+type upgradeProgressFixtureError string
+
+const (
+	upgradeProgressFixtureNoError     upgradeProgressFixtureError = "none"
+	upgradeProgressFixtureInterrupted upgradeProgressFixtureError = "interrupted"
+	upgradeProgressFixtureLowDisk     upgradeProgressFixtureError = "low-disk"
+	upgradeProgressFixtureConsent     upgradeProgressFixtureError = "consent"
+	upgradeProgressFixtureStepError   upgradeProgressFixtureError = "step"
+)
+
 type upgradeProgressOutcomeCase struct {
-	Name  string `yaml:"name"`
-	Error string `yaml:"error"`
-	Want  string `yaml:"want"`
+	Name  string                      `yaml:"name"`
+	Error upgradeProgressFixtureError `yaml:"error"`
+	Want  string                      `yaml:"want"`
 }
 
 type upgradeProgressThemeCase struct {
@@ -63,12 +79,22 @@ type upgradeProgressThemeCase struct {
 	Want   string `yaml:"want"`
 }
 
+// upgradeProgressMountedScenario selects the synthetic mounted upgrade outcome.
+// The screenshot harness owns a different closed set with some shared wire values.
+type upgradeProgressMountedScenario string
+
+const (
+	upgradeProgressMountedDone        upgradeProgressMountedScenario = "done"
+	upgradeProgressMountedStopped     upgradeProgressMountedScenario = "stopped-before-start"
+	upgradeProgressMountedPostFailure upgradeProgressMountedScenario = "failed-after-commit"
+)
+
 type upgradeProgressMountedCase struct {
-	Name         string   `yaml:"name"`
-	Scenario     string   `yaml:"scenario"`
-	Notice       string   `yaml:"notice"`
-	WantContains []string `yaml:"wantContains"`
-	WantAbsent   []string `yaml:"wantAbsent"`
+	Name         string                         `yaml:"name"`
+	Scenario     upgradeProgressMountedScenario `yaml:"scenario"`
+	Notice       string                         `yaml:"notice"`
+	WantContains []string                       `yaml:"wantContains"`
+	WantAbsent   []string                       `yaml:"wantAbsent"`
 }
 
 type upgradeProgressFixtures struct {
@@ -84,7 +110,7 @@ func loadUpgradeProgressFixtures(t *testing.T) upgradeProgressFixtures {
 	decoder := yaml.NewDecoder(bytes.NewReader(storeUpgradeProgressYAML))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&fixtures); err != nil {
-		t.Fatalf("decode testdata/store_upgrade_progress.yaml: %v", err)
+		t.Fatalf("decode %s: %v", storeUpgradeProgressFixturePath, err)
 	}
 	var manifest struct {
 		RequiredNames []string `yaml:"requiredNames"`
@@ -146,7 +172,7 @@ func TestRunUpgradeWithProgressMounted(t *testing.T) {
 				case <-ctx.Done():
 					return report, ctx.Err()
 				}
-				if c.Scenario == "stopped-before-start" {
+				if c.Scenario == upgradeProgressMountedStopped {
 					return report, fmt.Errorf("waiting for the upgrade lock: %w", context.Canceled)
 				}
 				options.Progress(store.UpgradeEvent{Kind: store.UpgradeEventStepStarted, Step: step, Index: 1, Total: 1})
@@ -160,7 +186,7 @@ func TestRunUpgradeWithProgressMounted(t *testing.T) {
 				}
 				options.Progress(store.UpgradeEvent{Kind: store.UpgradeEventStepFinished, Step: step, Index: 1, Total: 1, Elapsed: time.Second})
 				report.Steps = []store.UpgradeStepResult{{Step: step, Duration: time.Second}}
-				if c.Scenario == "failed-after-commit" {
+				if c.Scenario == upgradeProgressMountedPostFailure {
 					return report, errors.New("could not close the database")
 				}
 				return report, nil
@@ -205,10 +231,10 @@ func TestRunUpgradeWithProgressMounted(t *testing.T) {
 			case <-ctx.Done():
 				t.Fatalf("the mounted upgrade did not return after its final report: %v", ctx.Err())
 			}
-			if (got.err == nil) != (c.Scenario == "done") {
+			if (got.err == nil) != (c.Scenario == upgradeProgressMountedDone) {
 				t.Fatalf("upgrade error = %v for scenario %q", got.err, c.Scenario)
 			}
-			if c.Scenario != "stopped-before-start" && len(got.report.Steps) != 1 {
+			if c.Scenario != upgradeProgressMountedStopped && len(got.report.Steps) != 1 {
 				t.Fatalf("upgrade returned %d committed steps, want one", len(got.report.Steps))
 			}
 			if err := terminal.Close(); err != nil {
@@ -411,14 +437,14 @@ func TestStoreUpgradeOutcome(t *testing.T) {
 		t.Run(c.Name, func(t *testing.T) {
 			var err error
 			switch c.Error {
-			case "none":
-			case "interrupted":
+			case upgradeProgressFixtureNoError:
+			case upgradeProgressFixtureInterrupted:
 				err = &store.UpgradeInterruptedError{DBPath: "/synthetic/store.db", Cause: context.Canceled}
-			case "low-disk":
+			case upgradeProgressFixtureLowDisk:
 				err = &store.UpgradeDiskError{DBPath: "/synthetic/store.db", FreeBytes: 1, RequiredBytes: 2}
-			case "consent":
+			case upgradeProgressFixtureConsent:
 				err = errors.Join(errors.New("synthetic refusal"), store.ErrMigrationRefused)
-			case "step":
+			case upgradeProgressFixtureStepError:
 				err = errors.New("synthetic step failure")
 			default:
 				t.Fatalf("unknown fixture error %q", c.Error)

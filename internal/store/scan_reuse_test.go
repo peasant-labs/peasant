@@ -26,10 +26,30 @@ var scanReuseYAML []byte
 //go:embed testdata/scan_reuse_floor.manifest.yaml
 var scanReuseManifest []byte
 
+// scanReuseCaseKind names the behavior each synthetic scan-reuse case exercises.
+// "unknown" and "empty" here are case kinds, not a coordinate kind or an
+// OpenCode schema kind.
+type scanReuseCaseKind string
+
+const (
+	scanReuseEquivalent      scanReuseCaseKind = "equivalent"
+	scanReuseBelowFloor      scanReuseCaseKind = "below_floor"
+	scanReuseNewer           scanReuseCaseKind = "newer"
+	scanReuseReadOnly        scanReuseCaseKind = "read_only"
+	scanReuseUnrequested     scanReuseCaseKind = "unrequested"
+	scanReuseUnknown         scanReuseCaseKind = "unknown"
+	scanReuseEmpty           scanReuseCaseKind = "empty"
+	scanReuseSurfaceSet      scanReuseCaseKind = "surface_set"
+	scanReuseWriteGate       scanReuseCaseKind = "write_gate"
+	scanReuseSnapshot        scanReuseCaseKind = "snapshot"
+	scanReuseEndedSnapshot   scanReuseCaseKind = "ended_snapshot"
+	scanReuseConcurrentClose scanReuseCaseKind = "concurrent_close"
+)
+
 type scanReuseCase struct {
-	Name    string `yaml:"name"`
-	Kind    string `yaml:"kind"`
-	Surface string `yaml:"surface"`
+	Name    string            `yaml:"name"`
+	Kind    scanReuseCaseKind `yaml:"kind"`
+	Surface string            `yaml:"surface"`
 }
 
 type scanReuseSession struct {
@@ -43,12 +63,12 @@ type scanReuseSession struct {
 }
 
 type scanReuseEvidence struct {
-	Path      string `yaml:"path"`
-	Scope     string `yaml:"scope"`
-	Title     string `yaml:"title"`
-	Origin    string `yaml:"origin"`
-	SessionID string `yaml:"session_id"`
-	SpawnID   string `yaml:"spawn_id"`
+	Path      string                     `yaml:"path"`
+	Scope     ingest.ClaudeEvidenceScope `yaml:"scope"`
+	Title     string                     `yaml:"title"`
+	Origin    string                     `yaml:"origin"`
+	SessionID string                     `yaml:"session_id"`
+	SpawnID   string                     `yaml:"spawn_id"`
 }
 
 type scanReuseFixtures struct {
@@ -133,12 +153,12 @@ func seedScanReuseSessions(t *testing.T, conn *sqlite.Conn, version int, fixture
 func seedScanReuseEvidence(t *testing.T, conn *sqlite.Conn, version int, fixture scanReuseFixtures) {
 	t.Helper()
 	for _, row := range fixture.Evidence {
-		scanReuseExec(t, conn, `INSERT INTO claude_transcript_evidence(source_path,scope,mod_time_unix_nano,size_bytes,has_conversation,spawns_json,title,branch,cwd,origin,proof_version,native_agent_id,native_agent_valid,content_digest,identity_records_json) VALUES(?,?,12,34,1,'[]',?,'synthetic-branch','/synthetic/project',?,5,'worker',1,'synthetic-digest',?)`, row.Path, row.Scope, row.Title, row.Origin, `[{"sessionId":"`+row.SessionID+`"}]`)
+		scanReuseExec(t, conn, `INSERT INTO claude_transcript_evidence(source_path,scope,mod_time_unix_nano,size_bytes,has_conversation,spawns_json,title,branch,cwd,origin,proof_version,native_agent_id,native_agent_valid,content_digest,identity_records_json) VALUES(?,?,12,34,1,'[]',?,'synthetic-branch','/synthetic/project',?,5,'worker',1,'synthetic-digest',?)`, row.Path, row.Scope.String(), row.Title, row.Origin, `[{"sessionId":"`+row.SessionID+`"}]`)
 		if version >= 72 {
 			ids, _ := json.Marshal([]string{row.SessionID})
 			spawnIDs, _ := json.Marshal([]string{row.SpawnID})
 			chain := "[]"
-			if row.Scope == "root" {
+			if row.Scope == ingest.ClaudeEvidenceScopeRoot {
 				chain = `[{"sessionId":"` + row.SessionID + `","uuid":"synthetic-uuid","parentUuid":"","type":"user","subtype":""}]`
 			}
 			scanReuseExec(t, conn, `UPDATE claude_transcript_evidence SET identity_session_ids_json=?,identity_spawn_agent_ids_json=?,identity_legacy_agent_proof=1,identity_chain_json=? WHERE source_path=?`, string(ids), string(spawnIDs), chain, row.Path)
@@ -206,7 +226,7 @@ func readScanSurface(t *testing.T, handle *ScanReuse, surface ReadSurface, fixtu
 		row, ok := all[path]
 		if !ok ||
 			row.Title != expected.Title ||
-			row.Scope.String() != expected.Scope ||
+			row.Scope != expected.Scope ||
 			row.Origin.String() != expected.Origin ||
 			row.ProofVersion != 5 ||
 			!reflect.DeepEqual(row.SessionIDs, []string{expected.SessionID}) ||
@@ -218,8 +238,8 @@ func readScanSurface(t *testing.T, handle *ScanReuse, surface ReadSurface, fixtu
 		}
 		selected[path] = row
 		chain, ok := chains[path]
-		rootChainWrong := expected.Scope == "root" && (len(chain) != 1 || chain[0].SessionID != expected.SessionID)
-		childChainWrong := expected.Scope == "subagent" && len(chain) != 0
+		rootChainWrong := expected.Scope == ingest.ClaudeEvidenceScopeRoot && (len(chain) != 1 || chain[0].SessionID != expected.SessionID)
+		childChainWrong := expected.Scope == ingest.ClaudeEvidenceScopeSubagent && len(chain) != 0
 		if !ok || rootChainWrong || childChainWrong {
 			t.Fatalf("identity chain for %s not read correctly: %+v", path, chain)
 		}
@@ -317,13 +337,13 @@ func TestScanReuseFloors(t *testing.T) {
 				t.Fatal(err)
 			}
 			switch c.Kind {
-			case "equivalent":
+			case scanReuseEquivalent:
 				surface, err := NewReadSurface(c.Surface)
 				if err != nil {
 					t.Fatal(err)
 				}
 				assertScanReuseEquivalence(t, dir, surface, fixture)
-			case "below_floor":
+			case scanReuseBelowFloor:
 				surface, err := NewReadSurface(c.Surface)
 				if err != nil {
 					t.Fatal(err)
@@ -334,7 +354,7 @@ func TestScanReuseFloors(t *testing.T) {
 				if _, err := OpenForScanReuse(path, surface); err == nil {
 					t.Fatal("accepted a store below the requested floor")
 				}
-			case "newer", "read_only", "unrequested", "unknown", "empty", "surface_set", "write_gate", "snapshot", "ended_snapshot", "concurrent_close":
+			case scanReuseNewer, scanReuseReadOnly, scanReuseUnrequested, scanReuseUnknown, scanReuseEmpty, scanReuseSurfaceSet, scanReuseWriteGate, scanReuseSnapshot, scanReuseEndedSnapshot, scanReuseConcurrentClose:
 				runScanReuseBoundary(t, dir, c, fixture)
 			default:
 				t.Fatalf("unknown scan reuse case kind %q", c.Kind)
@@ -347,10 +367,10 @@ func runScanReuseBoundary(t *testing.T, dir string, c scanReuseCase, fixture sca
 	t.Helper()
 	path := filepath.Join(dir, "boundary.db")
 	version := CurrentSchemaVersion()
-	if c.Kind == "snapshot" {
+	if c.Kind == scanReuseSnapshot {
 		version--
 	}
-	if c.Kind == "snapshot" {
+	if c.Kind == scanReuseSnapshot {
 		buildBehindStore(t, path, version, func(conn *sqlite.Conn) { seedScanReuseEvidence(t, conn, version, fixture) })
 	} else {
 		// These boundaries need a current store, not another replay of all
@@ -370,18 +390,18 @@ func runScanReuseBoundary(t *testing.T, dir string, c scanReuseCase, fixture sca
 		}
 	}
 	switch c.Kind {
-	case "unknown":
+	case scanReuseUnknown:
 		if _, err := NewReadSurface(c.Surface); err == nil {
 			t.Fatal("accepted an unknown surface")
 		}
 		if _, err := OpenForScanReuse(path, ReadSurface(c.Surface)); err == nil {
 			t.Fatal("opened an unknown surface")
 		}
-	case "empty":
+	case scanReuseEmpty:
 		if _, err := OpenForScanReuse(path); err == nil {
 			t.Fatal("opened with no surfaces")
 		}
-	case "surface_set":
+	case scanReuseSurfaceSet:
 		got := make(map[string]bool, len(AllReadSurfaces))
 		for _, surface := range AllReadSurfaces {
 			if got[surface.String()] {
@@ -399,7 +419,7 @@ func runScanReuseBoundary(t *testing.T, dir string, c scanReuseCase, fixture sca
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("read surface membership = %v, want %v", got, want)
 		}
-	case "newer":
+	case scanReuseNewer:
 		conn, err := sqlite.OpenConn(path, sqlite.OpenReadWrite)
 		if err != nil {
 			t.Fatal(err)
@@ -413,7 +433,7 @@ func runScanReuseBoundary(t *testing.T, dir string, c scanReuseCase, fixture sca
 			t.Fatal("accepted a newer schema")
 		}
 		assertHashUnchanged(t, path, before, "newer-schema refusal")
-	case "unrequested":
+	case scanReuseUnrequested:
 		reader, err := OpenForScanReuse(path, ReadSurfaceKnownSessions)
 		if err != nil {
 			t.Fatal(err)
@@ -422,13 +442,13 @@ func runScanReuseBoundary(t *testing.T, dir string, c scanReuseCase, fixture sca
 		if _, _, err := reader.LoadClaudeEvidenceCompletely(t.Context()); err == nil {
 			t.Fatal("read an unrequested surface")
 		}
-	case "read_only":
+	case scanReuseReadOnly:
 		assertScanReuseReadOnly(t, path)
-	case "write_gate":
+	case scanReuseWriteGate:
 		assertScanReuseWriteGate(t, path)
-	case "snapshot":
+	case scanReuseSnapshot:
 		assertScanReuseSnapshot(t, path, fixture)
-	case "ended_snapshot":
+	case scanReuseEndedSnapshot:
 		reader, err := OpenForScanReuse(path, ReadSurfaceClaudeEvidence)
 		if err != nil {
 			t.Fatal(err)
@@ -445,7 +465,7 @@ func runScanReuseBoundary(t *testing.T, dir string, c scanReuseCase, fixture sca
 		if err := reader.Close(); err != nil {
 			t.Fatal(err)
 		}
-	case "concurrent_close":
+	case scanReuseConcurrentClose:
 		assertConcurrentScanReuseClose(t, path)
 	}
 }

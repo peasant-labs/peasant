@@ -26,10 +26,20 @@ var scanReuseDiscoveryYAML []byte
 //go:embed testdata/scan_reuse_discovery.manifest.yaml
 var scanReuseDiscoveryManifest []byte
 
+// scanReuseDiscoveryState is the synthetic store state before discovery.
+// It is this fixture's vocabulary, not a push-redaction or provenance shape.
+type scanReuseDiscoveryState string
+
+const (
+	scanReuseDiscoveryCurrent        scanReuseDiscoveryState = "current"
+	scanReuseDiscoveryBehind         scanReuseDiscoveryState = "behind"
+	scanReuseDiscoveryRecountPending scanReuseDiscoveryState = "recount_pending"
+)
+
 type scanReuseDiscoveryCase struct {
-	Name     string `yaml:"name"`
-	State    string `yaml:"state"`
-	SavesNew bool   `yaml:"saves_new_evidence"`
+	Name     string                  `yaml:"name"`
+	State    scanReuseDiscoveryState `yaml:"state"`
+	SavesNew bool                    `yaml:"saves_new_evidence"`
 }
 
 type scanReuseDiscoveryFixtures struct {
@@ -125,7 +135,7 @@ func TestScanReuseDiscoveryCache(t *testing.T) {
 				t.Fatal(err)
 			}
 			path := filepath.Join(dir, "store.db")
-			if c.State == "behind" {
+			if c.State == scanReuseDiscoveryBehind {
 				storetest.BuildQuickV78Store(t, path)
 				if store.CurrentSchemaVersion() <= 78 {
 					t.Fatal("the v78 fixture is no longer behind the current store")
@@ -158,8 +168,8 @@ func TestScanReuseDiscoveryCache(t *testing.T) {
 			seedEvidence(cachedPath)
 			seedEvidence(stalePath)
 			switch c.State {
-			case "current", "behind":
-			case "recount_pending":
+			case scanReuseDiscoveryCurrent, scanReuseDiscoveryBehind:
+			case scanReuseDiscoveryRecountPending:
 				if err := sqlitex.ExecuteTransient(conn, `INSERT INTO pending_recounts(name) VALUES('turn_counts')`, nil); err != nil {
 					t.Fatal(err)
 				}
@@ -192,7 +202,7 @@ func TestScanReuseDiscoveryCache(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if c.State == "behind" && reader.SchemaVersion() != 78 {
+			if c.State == scanReuseDiscoveryBehind && reader.SchemaVersion() != 78 {
 				t.Fatalf("behind discovery changed schema version to %d", reader.SchemaVersion())
 			}
 			evidence, _, err := reader.LoadClaudeEvidenceCompletely(t.Context())

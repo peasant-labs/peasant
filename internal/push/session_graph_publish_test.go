@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/config"
@@ -29,22 +30,46 @@ var sessionGraphPublishFixtureYAML []byte
 //go:embed testdata/session_graph_publish.manifest.yaml
 var sessionGraphPublishManifestYAML []byte
 
+// sessionGraphTransport names the simulated receiver used by a publish case.
+// It is not a discovery or collective-observation state.
+type sessionGraphTransport string
+
+const (
+	sessionGraphTransportStub              sessionGraphTransport = "stub"
+	sessionGraphTransportUnavailable       sessionGraphTransport = "unavailable"
+	sessionGraphTransportNullAdvertisement sessionGraphTransport = "null-advertisement"
+)
+
+// sessionGraphPayload names a published detail shape. "plain" here is that
+// shape, not a store-upgrade progress renderer.
+type sessionGraphPayload string
+
+const (
+	sessionGraphPayloadGraph         sessionGraphPayload = "graph"
+	sessionGraphPayloadPlain         sessionGraphPayload = "plain"
+	sessionGraphPayloadCountOnly     sessionGraphPayload = "count-only"
+	sessionGraphPayloadRootOnly      sessionGraphPayload = "root-only"
+	sessionGraphPayloadPurposeOnly   sessionGraphPayload = "purpose-only"
+	sessionGraphPayloadProvenance    sessionGraphPayload = "provenance"
+	sessionGraphPayloadSourceRefOnly sessionGraphPayload = "source-ref-only"
+)
+
 // Closed sets for the fixture. A new arm, payload shape, or transport must be
 // added here and implemented in the test, so an unknown value fails loudly
 // instead of being silently skipped.
 var (
 	sessionGraphPublishArms       = []string{"pipeline", "preflight"}
-	sessionGraphPublishPayloads   = []string{"graph", "plain", "count-only", "root-only", "purpose-only", "provenance", "source-ref-only"}
-	sessionGraphPublishTransports = []string{"stub", "unavailable", "null-advertisement"}
+	sessionGraphPublishPayloads   = []sessionGraphPayload{sessionGraphPayloadGraph, sessionGraphPayloadPlain, sessionGraphPayloadCountOnly, sessionGraphPayloadRootOnly, sessionGraphPayloadPurposeOnly, sessionGraphPayloadProvenance, sessionGraphPayloadSourceRefOnly}
+	sessionGraphPublishTransports = []sessionGraphTransport{sessionGraphTransportStub, sessionGraphTransportUnavailable, sessionGraphTransportNullAdvertisement}
 )
 
 type sessionGraphPublishCase struct {
 	Name             string                     `yaml:"name"`
 	Arm              string                     `yaml:"arm"`
-	Payload          string                     `yaml:"payload"`
+	Payload          sessionGraphPayload        `yaml:"payload"`
 	DryRun           bool                       `yaml:"dryRun"`
 	ScanFirst        bool                       `yaml:"scanFirst"`
-	Transport        string                     `yaml:"transport"`
+	Transport        sessionGraphTransport      `yaml:"transport"`
 	Advertisement    []schema.ContentCapability `yaml:"advertisement"`
 	WantRequired     []schema.ContentCapability `yaml:"wantRequired"`
 	WantMissing      []schema.ContentCapability `yaml:"wantMissing"`
@@ -82,10 +107,10 @@ func loadSessionGraphPublishFixture(t *testing.T) sessionGraphPublishFixture {
 		if !containsString(sessionGraphPublishArms, fixtureCase.Arm) {
 			t.Fatalf("case %q has unknown arm %q", fixtureCase.Name, fixtureCase.Arm)
 		}
-		if !containsString(sessionGraphPublishPayloads, fixtureCase.Payload) {
+		if !slices.Contains(sessionGraphPublishPayloads, fixtureCase.Payload) {
 			t.Fatalf("case %q has unknown payload shape %q", fixtureCase.Name, fixtureCase.Payload)
 		}
-		if fixtureCase.Arm == "pipeline" && !containsString(sessionGraphPublishTransports, fixtureCase.Transport) {
+		if fixtureCase.Arm == "pipeline" && !slices.Contains(sessionGraphPublishTransports, fixtureCase.Transport) {
 			t.Fatalf("case %q has unknown transport %q", fixtureCase.Name, fixtureCase.Transport)
 		}
 		if fixtureCase.WantUploads < 0 || fixtureCase.WantNetworkCalls < 0 {
@@ -242,7 +267,7 @@ func TestSessionGraphPublishNullAdvertisementRefusedByRealTransport(t *testing.T
 	}))
 	defer server.Close()
 
-	store, fs := sessionGraphPublishStore(t, "graph")
+	store, fs := sessionGraphPublishStore(t, sessionGraphPayloadGraph)
 	transport := village.NewVillageClient(server.URL, "test-key", server.Client())
 	pipeline := newSessionGraphPipeline(t, store, transport, fs, baseTestConfig(), push.PipelineConfig{Concurrency: 1}, &bytes.Buffer{})
 	result, err := pipeline.Run(context.Background())
@@ -269,7 +294,7 @@ func TestSessionGraphPublishNullAdvertisementRefusedByRealTransport(t *testing.T
 // owner/project/session tuple and reused rather than duplicated.
 func TestSessionGraphPublishSupportedRepublishPreservesIdentity(t *testing.T) {
 	t.Parallel()
-	store, fs := sessionGraphPublishStore(t, "graph")
+	store, fs := sessionGraphPublishStore(t, sessionGraphPayloadGraph)
 	publisher := &testutil.StubPublisher{SchemaVersionResp: &schema.SchemaVersionResponse{
 		MinPushContractVersion: schema.PushContractVersion("0.0.1"),
 		PushContractVersion:    defaults.PublishSchemaVersion,
@@ -320,7 +345,7 @@ func TestSessionGraphPublishSupportedRepublishPreservesIdentity(t *testing.T) {
 // upload.
 func TestSessionGraphPublishSupportedUploadPreservesEvidence(t *testing.T) {
 	t.Parallel()
-	store, fs := sessionGraphPublishStore(t, "graph")
+	store, fs := sessionGraphPublishStore(t, sessionGraphPayloadGraph)
 	publisher := &testutil.StubPublisher{SchemaVersionResp: &schema.SchemaVersionResponse{
 		MinPushContractVersion: schema.PushContractVersion("0.0.1"),
 		PushContractVersion:    defaults.PublishSchemaVersion,
@@ -358,7 +383,7 @@ func TestSessionGraphPublishSupportedUploadPreservesEvidence(t *testing.T) {
 
 // sessionGraphPublishStore seeds one publishable session whose indexed entries
 // carry either graph provenance or a plain legacy shape.
-func sessionGraphPublishStore(t *testing.T, payload string) (*testutil.StubPushStore, *testutil.MemFS) {
+func sessionGraphPublishStore(t *testing.T, payload sessionGraphPayload) (*testutil.StubPushStore, *testutil.MemFS) {
 	t.Helper()
 	fs := testutil.NewMemFS()
 	seedMemFS(t, fs, testutil.TestHostSlug, testutil.TestSessionUUID, defaults.HarnessClaudeCode)
@@ -372,7 +397,7 @@ func sessionGraphPublishStore(t *testing.T, payload string) (*testutil.StubPushS
 		Depth:          0,
 		ContentPreview: &content,
 	}
-	if payload == "graph" {
+	if payload == sessionGraphPayloadGraph {
 		entry.SourceEntryRef = schema.SourceEntryRef("e_u1")
 		entry.Provenance = &schema.ContentProvenance{
 			Origin:        schema.ContentOriginSubmittedInput,
@@ -395,17 +420,17 @@ func sessionGraphPublishStore(t *testing.T, payload string) (*testutil.StubPushS
 func sessionGraphPublishTransport(t *testing.T, fixtureCase sessionGraphPublishCase) (push.Transport, func() int) {
 	t.Helper()
 	switch fixtureCase.Transport {
-	case "stub":
+	case sessionGraphTransportStub:
 		pub := &testutil.StubPublisher{SchemaVersionResp: &schema.SchemaVersionResponse{
 			MinPushContractVersion: schema.PushContractVersion("0.0.1"),
 			PushContractVersion:    defaults.PublishSchemaVersion,
 			ContentCapabilities:    fixtureCase.Advertisement,
 		}}
 		return pub, func() int { return pub.SchemaVersionCalls }
-	case "unavailable":
+	case sessionGraphTransportUnavailable:
 		pub := &testutil.StubPublisher{SchemaVersionErr: errors.New("dial tcp: network is unreachable")}
 		return pub, func() int { return pub.SchemaVersionCalls }
-	case "null-advertisement":
+	case sessionGraphTransportNullAdvertisement:
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprintf(w, `{"annotationSchemaVersion":"1","pushContractVersion":%q,"minPushContractVersion":%q,"contentCapabilities":null}`, defaults.PublishSchemaVersion, defaults.PublishSchemaVersion)
@@ -428,7 +453,7 @@ func newSessionGraphPipeline(t *testing.T, store *testutil.StubPushStore, transp
 	return pipeline
 }
 
-func sessionGraphPublishDetail(t *testing.T, payload string) *schema.SessionDetailPayload {
+func sessionGraphPublishDetail(t *testing.T, payload sessionGraphPayload) *schema.SessionDetailPayload {
 	t.Helper()
 	detail := &schema.SessionDetailPayload{
 		ID:        "45454545-4545-4545-4545-454545454590",
@@ -437,15 +462,15 @@ func sessionGraphPublishDetail(t *testing.T, payload string) *schema.SessionDeta
 		Turns:     []schema.TurnDetail{{Index: 0, Role: schema.RoleUser, Content: "recorded input"}},
 	}
 	switch payload {
-	case "count-only":
+	case sessionGraphPayloadCountOnly:
 		count := int64(0)
 		detail.InputSubmissionCount = &count
-	case "root-only":
+	case sessionGraphPayloadRootOnly:
 		root := schema.SessionID("45454545-4545-4545-4545-454545454591")
 		detail.RootSessionID = &root
-	case "purpose-only":
+	case sessionGraphPayloadPurposeOnly:
 		detail.Purpose = schema.SessionPurposeInteraction
-	case "provenance":
+	case sessionGraphPayloadProvenance:
 		detail.Turns[0].SourceEntryRef = schema.SourceEntryRef("e_u1")
 		detail.Turns[0].Provenance = &schema.ContentProvenance{
 			Origin:        schema.ContentOriginSubmittedInput,
@@ -456,9 +481,9 @@ func sessionGraphPublishDetail(t *testing.T, payload string) *schema.SessionDeta
 			InputModality: schema.InputModalityText,
 			SubmissionRef: schema.SubmissionRef("s_u1"),
 		}
-	case "source-ref-only":
+	case sessionGraphPayloadSourceRefOnly:
 		detail.Turns[0].SourceEntryRef = schema.SourceEntryRef("e_u1")
-	case "graph", "plain":
+	case sessionGraphPayloadGraph, sessionGraphPayloadPlain:
 		// The preflight arm builds payload shapes the pipeline arm cannot; these
 		// two shapes are exercised there through real indexed entries.
 	default:

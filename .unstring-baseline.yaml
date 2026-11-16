@@ -495,7 +495,6 @@ rules:
     cmd/peasant/cmd_kickstart_test.go: 1
     cmd/peasant/cmd_models.go: 1
     cmd/peasant/cmd_models_test.go: 1
-    cmd/peasant/cmd_open_test.go: 8
     cmd/peasant/cmd_push_profile_test.go: 4
     cmd/peasant/cmd_push_selected_sessions_test.go: 4
     cmd/peasant/cmd_push_test.go: 1
@@ -610,7 +609,6 @@ rules:
     internal/harnesslayout/kiro_crew.go: 5
     internal/harnesslayout/layout_harness_test.go: 1
     internal/harnesslayout/layout_test.go: 4
-    internal/ingest/adapter_stamp_internal_test.go: 1
     internal/ingest/assistant_entry_type_test.go: 1
     internal/ingest/capture_assessment_test.go: 7
     internal/ingest/captured_source_test.go: 1
@@ -679,9 +677,7 @@ rules:
     internal/ingest/opencode_sqlite_source_zombiezen.go: 3
     internal/ingest/opencode_unknown.go: 6
     internal/ingest/opencode_v2_projection.go: 5
-    internal/ingest/pair_install_identity_test.go: 7
     internal/ingest/pair_repair_settling_test.go: 6
-    internal/ingest/pair_repair_test.go: 2
     internal/ingest/parallel_test.go: 1
     internal/ingest/pi_discovery_test.go: 5
     internal/ingest/pi_sanitize.go: 6
@@ -692,7 +688,6 @@ rules:
     internal/ingest/pipeline_test.go: 1
     internal/ingest/projection.go: 1
     internal/ingest/record_kinds_lowering.go: 14
-    internal/ingest/refusal_churn_test.go: 3
     internal/ingest/retained_payload_size_probe.go: 8
     internal/ingest/session_scope_contract_test.go: 5
     internal/ingest/session_scope_error_test.go: 6
@@ -735,7 +730,6 @@ rules:
     internal/push/published_provenance_envelope_test.go: 4
     internal/push/published_session_scope_test.go: 1
     internal/push/redaction_profile_test.go: 2
-    internal/push/session_graph_publish_test.go: 1
     internal/sessionvisibility/policy_test.go: 6
     internal/sqliteforkaudit/audit.go: 1
     internal/store/annotation_store_test.go: 10
