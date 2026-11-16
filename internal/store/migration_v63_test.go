@@ -68,7 +68,7 @@ INSERT INTO session_entries(session_id, entry_index, provider, entry_type, role,
 VALUES('source-session',0,'claude-code','text','user','prior readable content');`, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := sqlitemigration.Migrate(t.Context(), conn, dbSchema); err != nil {
+	if err := sqlitemigration.Migrate(t.Context(), conn, frozenSchema(69)); err != nil {
 		t.Fatal(err)
 	}
 	if err := sqlitex.ExecuteTransient(conn, `PRAGMA foreign_keys = ON`, nil); err != nil {

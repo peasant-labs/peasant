@@ -11,6 +11,42 @@ import (
 // It is local maintenance evidence, not transcript or wire metadata.
 type SourceUnavailabilityReason string
 
+// SourceUnavailabilityLane identifies the diagnostic that owns a recorded
+// source fault. It is local maintenance evidence, not transcript metadata.
+type SourceUnavailabilityLane string
+
+const (
+	SourceLaneStoredContent      SourceUnavailabilityLane = "stored_content"
+	SourceLanePairRepair         SourceUnavailabilityLane = "pair_repair"
+	SourceLanePublicationCapture SourceUnavailabilityLane = "publication_capture"
+	SourceLaneIndex              SourceUnavailabilityLane = "index"
+)
+
+var sourceUnavailabilityLanes = [...]SourceUnavailabilityLane{
+	SourceLaneStoredContent, SourceLanePairRepair, SourceLanePublicationCapture, SourceLaneIndex,
+}
+
+// AllSourceUnavailabilityLanes is the closed diagnostic-lane set.
+func AllSourceUnavailabilityLanes() []SourceUnavailabilityLane {
+	return append([]SourceUnavailabilityLane(nil), sourceUnavailabilityLanes[:]...)
+}
+
+// NewSourceUnavailabilityLane validates a stored diagnostic lane.
+func NewSourceUnavailabilityLane(raw string) (SourceUnavailabilityLane, error) {
+	for _, lane := range sourceUnavailabilityLanes {
+		if string(lane) == raw {
+			return lane, nil
+		}
+	}
+	return "", fmt.Errorf("read session source availability: unknown diagnostic lane %q; maintenance state was refused; use a supported lane or upgrade peasant", raw)
+}
+
+// SourceUnavailability identifies the lane owning a recorded source cause.
+type SourceUnavailability struct {
+	Lane   SourceUnavailabilityLane
+	Reason SourceUnavailabilityReason
+}
+
 const (
 	// SourceUnavailableNoSavedCopy means the original source is missing, so a
 	// stored session cannot be repaired from it. Existing rows keep this value.
@@ -29,19 +65,28 @@ func NewSourceUnavailabilityReason(raw string) (SourceUnavailabilityReason, erro
 	return "", fmt.Errorf("read session source availability: unknown reason %q; maintenance state was refused; use a supported reason or upgrade peasant", raw)
 }
 
-// laneCauseReport is one source cause already reported for a session by the
-// stored-content lane or the pair-repair lane during the current harvest.
+// SupersededReason is the less-specific cause this observation replaces.
+// The zero value means this cause does not supersede another recorded cause.
+func (reason SourceUnavailabilityReason) SupersededReason() SourceUnavailabilityReason {
+	if reason == SourceUnavailableRecordUnusable {
+		return SourceUnavailableNoSavedCopy
+	}
+	return ""
+}
+
+// laneCauseReport identifies one diagnostic a harvest has already reported.
 type laneCauseReport struct {
 	session SessionID
+	lane    SourceUnavailabilityLane
 	cause   SourceUnavailabilityReason
 }
 
-// SourceAvailabilityStore records a cause transition. Repeating the stored
-// cause is not a change. A successful saved artifact refresh clears this
-// evidence without removing prior session content.
+// SourceAvailabilityStore records a cause transition for one diagnostic lane.
+// Repeats and less-specific causes are not changes. A successful saved artifact
+// refresh clears the session's evidence without removing prior content.
 type SourceAvailabilityStore interface {
-	RecordSourceUnavailable(context.Context, SessionID, SourceUnavailabilityReason) (bool, error)
-	ReadSourceUnavailability(context.Context, SessionID) (*SourceUnavailabilityReason, error)
+	RecordSourceUnavailable(context.Context, SessionID, SourceUnavailabilityLane, SourceUnavailabilityReason) (bool, error)
+	ReadSourceUnavailabilityForLane(context.Context, SessionID, SourceUnavailabilityLane) (*SourceUnavailabilityReason, error)
 }
 
 // sourceUnavailable reports whether a stored-content failure is about the
@@ -71,123 +116,47 @@ func sourceUnavailableCause(err error) (SourceUnavailabilityReason, bool) {
 	return "", false
 }
 
-// causeSupersedes reports whether next is a more specific observation than
-// the cause already stored. A source that is present but unusable replaces a
-// missing-source row, so restoring a missing file as a bad record is reported.
-// The reverse does not replace it: another lane can still be stating a path
-// that is absent while the bytes a later lane parsed are unusable, and
-// letting that flip the row would make every later harvest report again.
-//
-// The direction is one-way, so a stored present-but-unusable row that a later
-// harvest sees as a missing file stays quiet on every routine harvest: the
-// row keeps the more specific cause and no report is owed until the source is
-// repaired. settleUnavailableSource never writes a less specific cause over a
-// more specific one, and that holds for an explicit --force retry too: the row
-// keeps the specific cause, while the forced run still owes its report.
-func causeSupersedes(stored, next SourceUnavailabilityReason) bool {
-	return stored == SourceUnavailableNoSavedCopy && next == SourceUnavailableRecordUnusable
-}
-
-// settleUnavailableSource records that a session's source cannot repair it
-// and reports whether this run owes the user the transition. A stored row
-// with the same cause is quiet on a routine harvest. A missing row or a cause
-// that supersedes the stored one is recorded and owed, and an explicit --force
-// retry is owed whether or not its observation is the more specific one. A less
-// specific cause never replaces a more specific one: a routine harvest is quiet
-// about it, and an explicit --force retry reports it without downgrading the
-// stored row, so the one-way replacement holds on both. A record error is
-// reported and still owed, so a failure to keep the evidence cannot hide the
-// diagnostic. A row written earlier in this same harvest is still owed by a
-// later lane: the index lane reports even when stored-content recovery already
-// recorded the same cause. Callers keep doing their work: only the report
-// settles, and the recorded row is never a reason to skip indexing.
-func (p *Pipeline) settleUnavailableSource(ctx context.Context, sid SessionID, cause SourceUnavailabilityReason, lane *storeWriteLane, stage Stage) bool {
-	// A failed read is treated as no stored cause: this harvest still records
-	// what it observed, and a write failure is reported below.
-	stored, _ := p.readUnavailableCause(ctx, sid)
-	if stored != nil && *stored != cause && !causeSupersedes(*stored, cause) {
-		// The stored cause is more specific than this observation. Keep it and
-		// owe the routine user nothing; an explicit retry still owes its report.
-		return p.config.Force || p.unavailableRecordedThisRun(sid)
-	}
-	if stored != nil && *stored == cause && !p.config.Force {
-		// A routine harvest owes no repeat of a cause the user already heard.
-		// A row this run just wrote is still owed by a later lane.
-		return p.unavailableRecordedThisRun(sid)
-	}
+// settleUnavailableSource decides whether a diagnostic lane owes a report.
+// The store atomically inserts or upgrades the lane's cause, never downgrading
+// it. Force reports again without changing that ordering. A failed write cannot
+// suppress a diagnostic; a per-run claim prevents duplicate reports for the
+// same lane and cause even on force or when the store is unavailable.
+func (p *Pipeline) settleUnavailableSource(ctx context.Context, sid SessionID, diagnosticLane SourceUnavailabilityLane, cause SourceUnavailabilityReason, writeLane *storeWriteLane, stage Stage) bool {
 	recorder, ok := p.metricsStore.(SourceAvailabilityStore)
 	if !ok || p.config.DryRun {
-		return true
+		return p.claimLaneCauseReport(sid, diagnosticLane, cause)
 	}
 	var changed bool
 	var err error
-	// Parser workers reach this too, so the write takes the store lane the
-	// other maintenance writes use instead of racing them.
-	p.runStoreWrite(lane, stage, func() {
-		changed, err = recorder.RecordSourceUnavailable(ctx, sid, cause)
+	p.runStoreWrite(writeLane, stage, func() {
+		changed, err = recorder.RecordSourceUnavailable(ctx, sid, diagnosticLane, cause)
 	})
 	if err != nil {
 		p.reportMetadataRefusal(string(sid), err)
-		return true
+		return p.claimLaneCauseReport(sid, diagnosticLane, cause)
 	}
-	if changed {
-		p.markUnavailableRecordedThisRun(sid)
-		return true
+	if !changed && !p.config.Force {
+		return false
 	}
-	// The upsert found the same cause. --force still owes the report, and so
-	// does a lane that lost the insert to another lane in this harvest.
-	return p.config.Force || p.unavailableRecordedThisRun(sid)
+	return p.claimLaneCauseReport(sid, diagnosticLane, cause)
 }
 
-func (p *Pipeline) readUnavailableCause(ctx context.Context, sid SessionID) (*SourceUnavailabilityReason, error) {
-	reader, ok := p.metricsStore.(SourceAvailabilityStore)
-	if !ok {
-		return nil, nil
-	}
-	return reader.ReadSourceUnavailability(ctx, sid)
-}
-
-func (p *Pipeline) unavailableRecordedThisRun(sid SessionID) bool {
-	p.sourceRunStateMu.Lock()
-	defer p.sourceRunStateMu.Unlock()
-	_, ok := p.unavailableSettledThisRun[sid]
-	return ok
-}
-
-func (p *Pipeline) markUnavailableRecordedThisRun(sid SessionID) {
-	p.sourceRunStateMu.Lock()
-	defer p.sourceRunStateMu.Unlock()
-	if p.unavailableSettledThisRun == nil {
-		p.unavailableSettledThisRun = make(map[SessionID]struct{})
-	}
-	p.unavailableSettledThisRun[sid] = struct{}{}
-}
-
-func (p *Pipeline) resetUnavailableSettledThisRun() {
-	p.sourceRunStateMu.Lock()
-	defer p.sourceRunStateMu.Unlock()
-	p.unavailableSettledThisRun = nil
-	p.laneCauseReportedThisRun = nil
-}
-
-// laneCauseAlreadyReported reports whether the stored-content lane or the
-// pair-repair lane already reported this cause for the session during this
-// harvest. The index lane does not consult it.
-func (p *Pipeline) laneCauseAlreadyReported(sid SessionID, cause SourceUnavailabilityReason) bool {
-	p.sourceRunStateMu.Lock()
-	defer p.sourceRunStateMu.Unlock()
-	_, ok := p.laneCauseReportedThisRun[laneCauseReport{session: sid, cause: cause}]
-	return ok
-}
-
-// markLaneCauseReported records a cause the stored-content lane or the
-// pair-repair lane has reported in this harvest, so the other of those two
-// lanes stays quiet for the same cause. A different cause is not marked.
-func (p *Pipeline) markLaneCauseReported(sid SessionID, cause SourceUnavailabilityReason) {
+func (p *Pipeline) claimLaneCauseReport(sid SessionID, lane SourceUnavailabilityLane, cause SourceUnavailabilityReason) bool {
 	p.sourceRunStateMu.Lock()
 	defer p.sourceRunStateMu.Unlock()
 	if p.laneCauseReportedThisRun == nil {
 		p.laneCauseReportedThisRun = make(map[laneCauseReport]struct{})
 	}
-	p.laneCauseReportedThisRun[laneCauseReport{session: sid, cause: cause}] = struct{}{}
+	key := laneCauseReport{session: sid, lane: lane, cause: cause}
+	if _, seen := p.laneCauseReportedThisRun[key]; seen {
+		return false
+	}
+	p.laneCauseReportedThisRun[key] = struct{}{}
+	return true
+}
+
+func (p *Pipeline) resetUnavailableReportsThisRun() {
+	p.sourceRunStateMu.Lock()
+	defer p.sourceRunStateMu.Unlock()
+	p.laneCauseReportedThisRun = nil
 }

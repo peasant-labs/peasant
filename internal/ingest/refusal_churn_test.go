@@ -12,6 +12,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"gopkg.in/yaml.v3"
 )
@@ -19,14 +20,39 @@ import (
 //go:embed testdata/refusal_churn.yaml
 var refusalChurnYAML []byte
 
+type refusalChurnStored string
+
+const (
+	refusalStored              refusalChurnStored = "refusal"
+	refusalStoredNoPublication refusalChurnStored = "refusal_without_publication"
+	refusalStoredLegacyPreview refusalChurnStored = "legacy_preview"
+)
+
+func (v refusalChurnStored) Validate() error {
+	return validateFixtureChoice("stored", v, refusalStored, refusalStoredNoPublication, refusalStoredLegacyPreview)
+}
+
+type refusalChurnMutation string
+
+const (
+	refusalMutationNone       refusalChurnMutation = "none"
+	refusalMutationAppend     refusalChurnMutation = "append_record"
+	refusalMutationIndexer    refusalChurnMutation = "bump_indexer"
+	refusalMutationClearProof refusalChurnMutation = "clear_input_proof"
+)
+
+func (v refusalChurnMutation) Validate() error {
+	return validateFixtureChoice("mutate", v, refusalMutationNone, refusalMutationAppend, refusalMutationIndexer, refusalMutationClearProof)
+}
+
 type refusalChurnCase struct {
-	Name              string `yaml:"name"`
-	Stored            string `yaml:"stored"`
-	Mutate            string `yaml:"mutate"`
-	SecondSourceReads int    `yaml:"second_source_reads"`
-	SecondUpdated     int    `yaml:"second_updated"`
-	SecondUnchanged   int    `yaml:"second_unchanged"`
-	SecondIndexed     int    `yaml:"second_indexed"`
+	Name              string               `yaml:"name"`
+	Stored            refusalChurnStored   `yaml:"stored"`
+	Mutate            refusalChurnMutation `yaml:"mutate"`
+	SecondSourceReads int                  `yaml:"second_source_reads"`
+	SecondUpdated     int                  `yaml:"second_updated"`
+	SecondUnchanged   int                  `yaml:"second_unchanged"`
+	SecondIndexed     int                  `yaml:"second_indexed"`
 }
 
 // refusalChurnFixture is the whole-harvest view of the shared fixture document.
@@ -59,6 +85,12 @@ func loadRefusalChurnFixture(t *testing.T) refusalChurnFixture {
 			t.Fatalf("the refusal churn fixture has an empty or repeated case name %q", testCase.Name)
 		}
 		names[testCase.Name] = true
+		if err := testCase.Stored.Validate(); err != nil {
+			t.Fatalf("refusal churn fixture case %s: %v", testCase.Name, err)
+		}
+		if err := testCase.Mutate.Validate(); err != nil {
+			t.Fatalf("refusal churn fixture case %s: %v", testCase.Name, err)
+		}
 	}
 	for _, name := range fixture.Required {
 		if !names[name] {
@@ -85,7 +117,7 @@ func TestSettledRefusalDoesNotChurn(t *testing.T) {
 	}
 }
 
-func runSettledRefusalChurnCase(t *testing.T, fixture refusalChurnFixture, name, stored, mutate string, wantReads, wantUpdated, wantUnchanged, wantIndexed int) {
+func runSettledRefusalChurnCase(t *testing.T, fixture refusalChurnFixture, name string, stored refusalChurnStored, mutate refusalChurnMutation, wantReads, wantUpdated, wantUnchanged, wantIndexed int) {
 	t.Helper()
 	ctx := context.Background()
 	fs := testutil.NewCountingFS(testutil.NewMemFS())
@@ -102,7 +134,7 @@ func runSettledRefusalChurnCase(t *testing.T, fixture refusalChurnFixture, name,
 	}
 	sourcePath := filepath.Join(testSourceDir, fixture.SessionID+".jsonl")
 	source := fixture.Transcript
-	if stored == "refusal" {
+	if stored == refusalStored || stored == refusalStoredNoPublication {
 		source += fixture.UnrepresentedRecord + "\n"
 	}
 	if err := fs.WriteFile(sourcePath, []byte(source), 0600); err != nil {
@@ -144,11 +176,30 @@ func runSettledRefusalChurnCase(t *testing.T, fixture refusalChurnFixture, name,
 		t.Fatalf("first harvest stored no capture: found=%t err=%v", found, err)
 	}
 	switch stored {
-	case "refusal":
+	case refusalStored, refusalStoredNoPublication:
 		if capture.FailureCode != ingest.ContentCaptureUnknownDataRetained {
 			t.Fatalf("first harvest did not retain the unknown data: %+v; diagnostics=%+v", capture, first.Diagnostics)
 		}
-	case "legacy_preview":
+		if stored == refusalStoredNoPublication {
+			execSessionSQL(t, database, `DELETE FROM session_publication_metadata WHERE session_id=?`, sid.String())
+			execSessionSQL(t, database, `UPDATE sessions SET publication_capture_revision=0, indexed_publication_capture_revision=0 WHERE session_id=?`, sid.String())
+			execSessionSQL(t, database, `UPDATE session_content_captures SET publication_capture_revision=0 WHERE session_id=?`, sid.String())
+			state, err := database.ReadIndexState(ctx, sid)
+			if err != nil || state == nil {
+				t.Fatalf("read refusal without publication capture: state=%+v err=%v", state, err)
+			}
+			if state.PublicationCaptureRevision != 0 || state.IndexedInputHash == nil {
+				t.Fatalf("seed refusal without publication capture: state=%+v err=%v", state, err)
+			}
+			locations, err := database.BulkLookupSessionLocations(ctx, []ingest.SessionID{sid})
+			if err != nil || !locations[sid].SourceEvidenceSupported || len(locations[sid].SourceFingerprint) == 0 {
+				t.Fatalf("seed refusal without source fingerprint: location=%+v err=%v", locations[sid], err)
+			}
+			if !store.PublishableWithOmissions(capture) {
+				t.Fatalf("retained unknown evidence is not a full publishable capture: %+v", capture)
+			}
+		}
+	case refusalStoredLegacyPreview:
 		// The migrated shape: a complete capture rewritten to the preview-only
 		// state the content-capture migration wrote for sessions that predate
 		// it. Nothing refused it, so it is pending work, not a steady state.
@@ -159,18 +210,18 @@ func runSettledRefusalChurnCase(t *testing.T, fixture refusalChurnFixture, name,
 	}
 
 	switch mutate {
-	case "none":
-	case "append_record":
+	case refusalMutationNone:
+	case refusalMutationAppend:
 		changed := source + fixture.UnrepresentedRecord + "\n"
 		if err := fs.WriteFile(sourcePath, []byte(changed), 0600); err != nil {
 			t.Fatal(err)
 		}
 		sessions[0].ModTime = time.Now().Add(time.Hour)
-	case "bump_indexer":
+	case refusalMutationIndexer:
 		bumped := versions[ingest.HarnessClaudeCode]
 		bumped.IndexerVersion++
 		versions[ingest.HarnessClaudeCode] = bumped
-	case "clear_input_proof":
+	case refusalMutationClearProof:
 		execSessionSQL(t, database, `UPDATE sessions SET indexed_input_hash=NULL WHERE session_id=?`, sid.String())
 	default:
 		t.Fatalf("unknown mutation %q", mutate)
@@ -189,6 +240,22 @@ func runSettledRefusalChurnCase(t *testing.T, fixture refusalChurnFixture, name,
 	indexed := indexStore.indexedSessions.Load()
 	if indexed != int64(wantIndexed) || second.Summary.Indexed != wantIndexed {
 		t.Fatalf("%s: the second harvest indexed %d session(s), summary %d, want %d; index maintenance is independent of native metadata updates", name, indexed, second.Summary.Indexed, wantIndexed)
+	}
+	if stored == refusalStoredNoPublication {
+		state, err := database.ReadIndexState(ctx, sid)
+		if err != nil || state == nil {
+			t.Fatalf("read refusal state after the measured harvest: state=%+v err=%v", state, err)
+		}
+		if state.PublicationCaptureRevision <= 0 || !state.PublicationBound {
+			t.Fatalf("measured harvest did not bind the publishable partial capture: %+v", state)
+		}
+		if revision := rawSessionPublicationRevision(t, database, sid); revision <= 0 {
+			t.Fatalf("measured harvest did not create a publication revision for partial content: %d", revision)
+		}
+		input, err := database.LoadPublicationInput(ctx, sid)
+		if err != nil || input.Readiness != ingest.PublicationReady || !store.PublishableWithOmissions(input.ContentCapture) {
+			t.Fatalf("measured harvest did not make partial content publication-ready: input=%+v err=%v", input, err)
+		}
 	}
 }
 
@@ -223,4 +290,31 @@ func execSessionSQL(t *testing.T, database *store.Store, statement string, args 
 	if err := sqlitex.ExecuteTransient(conn, statement, &sqlitex.ExecOptions{Args: args}); err != nil {
 		t.Fatalf("exec %q: %v", statement, err)
 	}
+}
+
+// rawSessionPublicationRevision reads the session counter itself, rather than
+// the public capture projection that masks an absent metadata row.
+func rawSessionPublicationRevision(t *testing.T, database *store.Store, sid ingest.SessionID) int64 {
+	t.Helper()
+	conn, err := database.Pool().Take(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Pool().Put(conn)
+	var revision int64
+	found := false
+	if err := sqlitex.ExecuteTransient(conn, `SELECT publication_capture_revision FROM sessions WHERE session_id=?`, &sqlitex.ExecOptions{
+		Args: []any{sid.String()},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			found = true
+			revision = stmt.ColumnInt64(0)
+			return nil
+		},
+	}); err != nil {
+		t.Fatalf("read session publication revision: %v", err)
+	}
+	if !found {
+		t.Fatalf("session %s was missing while reading its publication revision", sid)
+	}
+	return revision
 }

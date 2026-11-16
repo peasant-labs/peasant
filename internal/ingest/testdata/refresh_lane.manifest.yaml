@@ -14,10 +14,15 @@ requiredNames:
   - omitted-records-refusal-reopened-by-indexer-bump-reindexes-the-stored-copy
   - unknown-data-refusal-reopened-by-indexer-bump-reindexes-the-stored-copy
   - refusal-at-the-current-indexer-is-left-alone
+  - legacy-strict-refusal-without-publication-does-not-churn
+  - legacy-unknown-preview-without-publication-does-not-churn
+  - legacy-full-retained-unknown-acquires-publication
+  - legacy-full-accounted-omission-acquires-publication
   - unbound-publication-binds-without-a-reparse
   - missing-publication-capture-is-acquired-natively
   - missing-publication-capture-outranks-behind-adapter
   - missing-publication-capture-outranks-behind-indexer
   - changed-source-without-newer-clock-outranks-missing-capture
+  - missing-capture-with-malformed-source-reports-once-and-recovers
   - settled-session-is-left-alone
   - changed-source-wins-over-a-behind-stamp

@@ -879,7 +879,8 @@ WHERE s.session_id IN (` +
 				return parseErr
 			}
 			readiness := ingest.PublicationNeedsIngest
-			eligible, captureErr := publicationContentEligible(stmt, 16, stmt.ColumnInt64(8))
+			contentPublishable, contentRevision, captureErr := publicationContentCertificate(stmt, 16)
+			eligible := publicationContentBound(contentPublishable, contentRevision, stmt.ColumnInt64(8))
 			if stmt.ColumnInt(9) == 1 && publicationLocationSnapshotValid(stmt) && captureErr == nil && eligible {
 				readiness = ingest.PublicationReady
 			}
@@ -924,6 +925,7 @@ WHERE s.session_id IN (` +
 				SourceFingerprint:       sourceFingerprint,
 				SourceEvidenceSupported: true,
 				ContentFailureCode:      failureCode,
+				ContentPublishable:      captureErr == nil && contentPublishable,
 				IndexerVersion:          stmt.ColumnInt(22),
 				IndexedInputHash:        indexedInputHash,
 			}

@@ -79,6 +79,11 @@ func Seed(t *testing.T, path string, version int, unionTerms, legacyTerms []Resi
 	}
 	seedTerms("session_search_fts", unionTerms)
 	seedTerms("session_entries_fts", legacyTerms)
+	// The upgrade plan also inspects this pre-lane ledger to classify the
+	// diagnostic-lane rebuild. This minimal fixture has no source faults.
+	if err := sqlitex.ExecuteTransient(conn, `CREATE TABLE session_source_unavailability (session_id TEXT PRIMARY KEY, reason TEXT NOT NULL)`, nil); err != nil {
+		t.Fatalf("create the empty pre-lane source ledger: %v", err)
+	}
 	if err := sqlitex.ExecuteTransient(conn, fmt.Sprintf(`PRAGMA user_version = %d`, version), nil); err != nil {
 		t.Fatalf("stamp user_version %d: %v", version, err)
 	}

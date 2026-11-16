@@ -72,7 +72,7 @@ slots:
   - {name: v66-session-thinking-level, slot: 66, needle: "ADD COLUMN thinking_level_raw TEXT"}
   - {name: v67-latest-attempt-pointer, slot: 67, needle: "ADD COLUMN latest_attempt_generation_id TEXT"}
   - {name: v68-collective-observations, slot: 68, needle: "CREATE TABLE collective_observation_scopes"}
-  - {name: v69-source-unavailability-cause, slot: 69, needle: "original-source-present-record-unusable"}
+  - {name: v69-source-unavailability-cause, slot: 69, needle: "CREATE TABLE session_source_unavailability_v68 AS SELECT * FROM session_source_unavailability;"}
   - {name: v70-parent-state, slot: 70, needle: "ALTER TABLE sessions ADD COLUMN resolved_parent_id TEXT"}
   - {name: v71-derived-lookups, slot: 71, needle: "CREATE TABLE claude_teammate_spawns ("}
   - {name: v72-compact-identity-facts, slot: 72, needle: "ADD COLUMN identity_session_ids_json TEXT"}
@@ -84,6 +84,7 @@ slots:
   - {name: v78-harness-check-widening, slot: 78, needle: "CREATE TABLE sessions_v78 AS SELECT * FROM sessions;"}
   - {name: v79-import-profile-and-outcome-reasons, slot: 79, needle: "CREATE TABLE ingest_outcome_reasons ("}
   - {name: v80-publication-capture-outcome, slot: 80, needle: "VALUES (311, 3, 'publication_capture_missing', 0);"}
+  - {name: v81-source-diagnostic-lanes, slot: 81, needle: "CREATE TABLE session_source_unavailability_v80 AS SELECT session_id, reason"}
 guards:
   - name: deleted-required-slot
     operation: delete-required-slot
