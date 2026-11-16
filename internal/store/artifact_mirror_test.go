@@ -200,8 +200,10 @@ func TestArtifactMirrorCommitsEvidenceTogether(t *testing.T) {
 				if err := db.InsertSessions(t.Context(), []ingest.StoreEntry{entry}); err != nil {
 					t.Fatal(err)
 				}
-				if changed, err := db.RecordSourceUnavailable(t.Context(), entry.Metadata.SessionID, ingest.SourceUnavailableNoSavedCopy); err != nil || !changed {
-					t.Fatalf("seed unavailable source: changed=%t err=%v", changed, err)
+				for _, lane := range ingest.AllSourceUnavailabilityLanes() {
+					if changed, err := db.RecordSourceUnavailable(t.Context(), entry.Metadata.SessionID, lane, ingest.SourceUnavailableNoSavedCopy); err != nil || !changed {
+						t.Fatalf("seed unavailable source for %s: changed=%t err=%v", lane, changed, err)
+					}
 				}
 				if err := db.UpsertOpenCodeSeqCursor(t.Context(), entry.Metadata.SessionID, fixture.OriginalCursor); err != nil {
 					t.Fatal(err)
@@ -259,9 +261,14 @@ func TestArtifactMirrorCommitsEvidenceTogether(t *testing.T) {
 			}
 			after := mirrorDatabaseState(t, db.Pool(), fixture.SessionID)
 			if seeded {
-				reason, err := db.ReadSourceUnavailability(t.Context(), entry.Metadata.SessionID)
-				if err != nil || (reason != nil) != row.WantError {
-					t.Fatalf("mirror availability state: %v %v, want retained=%t", reason, err, row.WantError)
+				for _, lane := range ingest.AllSourceUnavailabilityLanes() {
+					reason, err := db.ReadSourceUnavailabilityForLane(t.Context(), entry.Metadata.SessionID, lane)
+					if err != nil || (reason != nil) != row.WantError {
+						t.Fatalf("mirror availability for %s: %v %v, want retained=%t", lane, reason, err, row.WantError)
+					}
+					if reason != nil && *reason != ingest.SourceUnavailableNoSavedCopy {
+						t.Fatalf("failed mirror changed the %s cause to %s", lane, *reason)
+					}
 				}
 			}
 			if row.WantError {

@@ -374,6 +374,7 @@ cases:
     harness: claude-code
     source: current
     native_source: malformed
+    pair_after_capture_failure: true
     max_native_reads: 2
     stored_adapter: current
     metadata_schema: current

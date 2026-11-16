@@ -32,34 +32,35 @@ var refreshLaneManifestYAML []byte
 var refreshLaneStrikeTranscript []byte
 
 type refreshLaneCase struct {
-	Name                 string                           `yaml:"name"`
-	Harness              ingest.Harness                   `yaml:"harness"`
-	Source               refreshLaneSource                `yaml:"source"`
-	Discover             bool                             `yaml:"discover"`
-	StoredAdapter        refreshLaneAdapter               `yaml:"stored_adapter"`
-	FileAdapter          refreshLaneFileAdapter           `yaml:"file_adapter"`
-	MetadataSchema       refreshLaneMetadataSchema        `yaml:"metadata_schema"`
-	Pair                 refreshLanePair                  `yaml:"pair"`
-	Force                bool                             `yaml:"force"`
-	Indexer              refreshLaneIndexer               `yaml:"indexer"`
-	Refusal              ingest.ContentCaptureFailureCode `yaml:"refusal"`
-	RefusalIndexer       refreshLaneRefusalIndexer        `yaml:"refusal_indexer"`
-	Publication          refreshLanePublication           `yaml:"publication"`
-	NativeSource         fixtureNativeSource              `yaml:"native_source"`
-	RetainedUnknown      bool                             `yaml:"retained_unknown"`
-	RecordLimitBytes     int                              `yaml:"record_limit_bytes"`
-	OversizedRecordBytes int                              `yaml:"oversized_record_bytes"`
-	MaxNativeReads       int                              `yaml:"max_native_reads"`
-	WantReason           ingest.RefreshReason             `yaml:"want_reason"`
-	WantLane             ingest.RefreshLane               `yaml:"want_lane"`
-	WantNativeRead       bool                             `yaml:"want_native_read"`
-	SecondSourceReads    *int                             `yaml:"second_source_reads"`
-	WantPairWrites       []refreshLanePairMember          `yaml:"want_pair_writes"`
-	WantIndexed          bool                             `yaml:"want_indexed"`
-	WantBound            bool                             `yaml:"want_bound"`
-	WantSeedPublishable  *bool                            `yaml:"want_seed_publishable"`
-	WantCaptureRevision  *int64                           `yaml:"want_capture_revision"`
-	WantPublicationBound *bool                            `yaml:"want_publication_bound"`
+	Name                    string                           `yaml:"name"`
+	Harness                 ingest.Harness                   `yaml:"harness"`
+	Source                  refreshLaneSource                `yaml:"source"`
+	Discover                bool                             `yaml:"discover"`
+	StoredAdapter           refreshLaneAdapter               `yaml:"stored_adapter"`
+	FileAdapter             refreshLaneFileAdapter           `yaml:"file_adapter"`
+	MetadataSchema          refreshLaneMetadataSchema        `yaml:"metadata_schema"`
+	Pair                    refreshLanePair                  `yaml:"pair"`
+	Force                   bool                             `yaml:"force"`
+	Indexer                 refreshLaneIndexer               `yaml:"indexer"`
+	Refusal                 ingest.ContentCaptureFailureCode `yaml:"refusal"`
+	RefusalIndexer          refreshLaneRefusalIndexer        `yaml:"refusal_indexer"`
+	Publication             refreshLanePublication           `yaml:"publication"`
+	NativeSource            fixtureNativeSource              `yaml:"native_source"`
+	PairAfterCaptureFailure bool                             `yaml:"pair_after_capture_failure"`
+	RetainedUnknown         bool                             `yaml:"retained_unknown"`
+	RecordLimitBytes        int                              `yaml:"record_limit_bytes"`
+	OversizedRecordBytes    int                              `yaml:"oversized_record_bytes"`
+	MaxNativeReads          int                              `yaml:"max_native_reads"`
+	WantReason              ingest.RefreshReason             `yaml:"want_reason"`
+	WantLane                ingest.RefreshLane               `yaml:"want_lane"`
+	WantNativeRead          bool                             `yaml:"want_native_read"`
+	SecondSourceReads       *int                             `yaml:"second_source_reads"`
+	WantPairWrites          []refreshLanePairMember          `yaml:"want_pair_writes"`
+	WantIndexed             bool                             `yaml:"want_indexed"`
+	WantBound               bool                             `yaml:"want_bound"`
+	WantSeedPublishable     *bool                            `yaml:"want_seed_publishable"`
+	WantCaptureRevision     *int64                           `yaml:"want_capture_revision"`
+	WantPublicationBound    *bool                            `yaml:"want_publication_bound"`
 }
 
 type refreshLaneFixture struct {
@@ -953,7 +954,7 @@ func TestRefreshLaneMissingCaptureWithUnavailableSource(t *testing.T) {
 				if reports != wantReports {
 					t.Fatalf("attempt %d: %d unavailable reports, want %d: %+v", attempt, reports, wantReports, result.Diagnostics)
 				}
-				cause, err := bench.database.ReadSourceUnavailability(t.Context(), bench.sessionID)
+				cause, err := bench.database.ReadSourceUnavailabilityForLane(t.Context(), bench.sessionID, ingest.SourceLanePublicationCapture)
 				if err != nil || cause == nil || *cause != ingest.SourceUnavailableRecordUnusable {
 					t.Fatalf("attempt %d: stored unavailable cause = %v, err %v", attempt, cause, err)
 				}
@@ -975,11 +976,38 @@ func TestRefreshLaneMissingCaptureWithUnavailableSource(t *testing.T) {
 				}
 			}
 
+			recoveryReason := ingest.RefreshReasonPublicationCaptureMissing
+			if testCase.PairAfterCaptureFailure {
+				if err := bench.fs.Remove(bench.metadataPath); err != nil {
+					t.Fatal(err)
+				}
+				execSessionSQL(t, bench.database, `UPDATE sessions SET indexed_input_hash=NULL WHERE session_id=?`, string(bench.sessionID))
+				for attempt := 1; attempt <= 2; attempt++ {
+					result := bench.run(false, true)
+					reports := typedSessionDiagnostics(result, bench.sessionID, ingest.OutcomeReasonPairRepairUnavailable.Code())
+					wantReports := 0
+					if attempt == 1 {
+						wantReports = 1
+					}
+					if len(reports) != wantReports {
+						t.Fatalf("pair attempt %d: reports=%+v, want %d; diagnostics=%+v", attempt, reports, wantReports, result.Diagnostics)
+					}
+					cause, err := bench.database.ReadSourceUnavailabilityForLane(t.Context(), bench.sessionID, ingest.SourceLanePairRepair)
+					if err != nil || cause == nil || *cause != ingest.SourceUnavailableRecordUnusable {
+						t.Fatalf("pair attempt %d: stored cause=%v, err=%v", attempt, cause, err)
+					}
+					publicationCause, err := bench.database.ReadSourceUnavailabilityForLane(t.Context(), bench.sessionID, ingest.SourceLanePublicationCapture)
+					if err != nil || publicationCause == nil || *publicationCause != ingest.SourceUnavailableRecordUnusable {
+						t.Fatalf("pair attempt %d changed publication cause: %v, err=%v", attempt, publicationCause, err)
+					}
+				}
+				recoveryReason = ingest.RefreshReasonPairMissing
+			}
 			if err := bench.fs.WriteFile(bench.sourcePath, []byte(bench.sourceTranscript()), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			recovered := bench.run(false, true)
-			if decision := bench.decision(recovered); decision.Reason != ingest.RefreshReasonPublicationCaptureMissing {
+			if decision := bench.decision(recovered); decision.Reason != recoveryReason {
 				t.Fatalf("recovered decision = %s/%s", decision.Reason, decision.Lane)
 			}
 			location := bench.location()

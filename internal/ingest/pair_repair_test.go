@@ -82,9 +82,10 @@ type pairRepairCase struct {
 	// record. It is required with WantSourceReport, because the two causes are
 	// different user situations and a wrong one is a wrong fix.
 	WantCause ingest.SourceUnavailabilityReason `yaml:"wantCause"`
-	// WantMessageContains pins wording of the one source report: the template
-	// the reporting lane must print, not only the session it names.
-	WantMessageContains string `yaml:"wantMessageContains"`
+	// Each lane has its own message and remediation. A case with no content
+	// fragment expects only the pair-repair lane to report.
+	WantPairMessageContains    string `yaml:"wantPairMessageContains"`
+	WantContentMessageContains string `yaml:"wantContentMessageContains"`
 }
 
 func loadPairRepairFixtures(t *testing.T) pairRepairDocument {
@@ -109,6 +110,9 @@ func loadPairRepairFixtures(t *testing.T) pairRepairDocument {
 		}
 		if fixture.WantSourceReport && fixture.WantCause == pairRepairNoCause {
 			t.Fatalf("pair repair fixture %s reports an unavailable source without naming its cause", fixture.Name)
+		}
+		if fixture.WantSourceReport && fixture.WantPairMessageContains == "" {
+			t.Fatalf("pair repair fixture %s reports an unavailable source without specifying its pair message", fixture.Name)
 		}
 		if fixture.WantCause != pairRepairNoCause {
 			if _, err := ingest.NewSourceUnavailabilityReason(string(fixture.WantCause)); err != nil {
@@ -350,9 +354,9 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 				}
 				if fixture.WantSourceReport {
 					wantCause := fixture.WantCause
-					reason, err := database.ReadSourceUnavailability(ctx, id)
+					reason, err := database.ReadSourceUnavailabilityForLane(ctx, id, ingest.SourceLanePairRepair)
 					if err != nil || reason == nil || *reason != wantCause {
-						t.Fatalf("unavailable source was not persisted: %v %v, want %s", reason, err, wantCause)
+						t.Fatalf("pair-repair cause was not persisted: %v %v, want %s", reason, err, wantCause)
 					}
 					second := run()
 					kept, err := database.ListEntries(ctx, id)
@@ -364,22 +368,25 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 							t.Fatalf("unchanged unavailable source warned again: %+v", diagnostic)
 						}
 					}
-					// Harvest index runs stored-content recovery before pair
-					// repair, so the one report for this missing source may come
-					// from either lane. The other lane stays quiet, and the
-					// message has to name the session it is about.
-					reported := sourceUnavailableDiagnostics(result, id)
-					if len(reported) != 1 {
-						t.Fatalf("the unavailable source was reported %d times, want one actionable diagnostic: %+v", len(reported), result.Diagnostics)
+					pairReports := typedSessionDiagnostics(result, id, ingest.OutcomeReasonPairRepairUnavailable.Code())
+					if len(pairReports) != 1 {
+						t.Fatalf("pair repair reported %d times, want one: %+v", len(pairReports), result.Diagnostics)
 					}
-					if reported[0].Remediation == "" {
-						t.Fatalf("the unavailable-source diagnostic carries no remediation: %+v", reported[0])
+					assertPairRepairDiagnostic(t, id, pairReports[0], fixture.WantPairMessageContains)
+					contentReports := typedSessionDiagnostics(result, id, ingest.OutcomeReasonContentRecoveryUnavailable.Code())
+					wantContent := 0
+					if fixture.WantContentMessageContains != "" {
+						wantContent = 1
 					}
-					if !strings.Contains(reported[0].Message, id.String()) {
-						t.Fatalf("the unavailable-source diagnostic does not name session %s: %q", id, reported[0].Message)
+					if len(contentReports) != wantContent {
+						t.Fatalf("stored-content recovery reported %d times, want %d: %+v", len(contentReports), wantContent, result.Diagnostics)
 					}
-					if !strings.Contains(reported[0].Message, fixture.WantMessageContains) {
-						t.Fatalf("the unavailable-source diagnostic does not say %q: %q", fixture.WantMessageContains, reported[0].Message)
+					if wantContent != 0 {
+						assertPairRepairDiagnostic(t, id, contentReports[0], fixture.WantContentMessageContains)
+						contentCause, err := database.ReadSourceUnavailabilityForLane(ctx, id, ingest.SourceLaneStoredContent)
+						if err != nil || contentCause == nil || *contentCause != wantCause {
+							t.Fatalf("stored-content cause = %v, %v; want %s", contentCause, err, wantCause)
+						}
 					}
 				} else if len(result.Diagnostics) == 0 {
 					t.Fatalf("a refused repair reported nothing")
@@ -471,6 +478,16 @@ func TestPairRepairReingestsFromNative(t *testing.T) {
 				t.Fatalf("the second harvest re-indexed %d session(s); a repaired session settles", second.Summary.Indexed)
 			}
 		})
+	}
+}
+
+func assertPairRepairDiagnostic(t *testing.T, id ingest.SessionID, diagnostic ingest.DiagnosticEntry, wantMessage string) {
+	t.Helper()
+	if diagnostic.Remediation == "" || !strings.Contains(diagnostic.Message, id.String()) {
+		t.Fatalf("diagnostic must name session %s and carry a remediation: %+v", id, diagnostic)
+	}
+	if !strings.Contains(diagnostic.Message, wantMessage) {
+		t.Fatalf("diagnostic does not say %q: %q", wantMessage, diagnostic.Message)
 	}
 }
 

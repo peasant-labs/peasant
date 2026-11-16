@@ -25,6 +25,9 @@ var sourceUnavailableCauseFixtureData []byte
 //go:embed testdata/source_settle_rereport.yaml
 var sourceSettleRereportFixtureData []byte
 
+//go:embed testdata/source_diagnostic_lanes.yaml
+var sourceDiagnosticLanesFixtureData []byte
+
 type sourceUnavailableFixtures struct {
 	Required []string `yaml:"required_names"`
 	Cases    []struct {
@@ -173,39 +176,47 @@ type recordingAvailabilityStore struct {
 	MetricsStore
 
 	mu      sync.Mutex
-	reason  *SourceUnavailabilityReason
+	reasons map[availabilityKey]SourceUnavailabilityReason
 	records int
 }
 
-func (s *recordingAvailabilityStore) ReadSourceUnavailability(context.Context, SessionID) (*SourceUnavailabilityReason, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.reason == nil {
-		return nil, nil
-	}
-	copied := *s.reason
-	return &copied, nil
+var _ SourceAvailabilityStore = (*recordingAvailabilityStore)(nil)
+
+type availabilityKey struct {
+	session SessionID
+	lane    SourceUnavailabilityLane
 }
 
-func (s *recordingAvailabilityStore) RecordSourceUnavailable(_ context.Context, _ SessionID, reason SourceUnavailabilityReason) (bool, error) {
+func (s *recordingAvailabilityStore) ReadSourceUnavailabilityForLane(_ context.Context, sid SessionID, lane SourceUnavailabilityLane) (*SourceUnavailabilityReason, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	reason, ok := s.reasons[availabilityKey{session: sid, lane: lane}]
+	if !ok {
+		return nil, nil
+	}
+	return &reason, nil
+}
+
+func (s *recordingAvailabilityStore) RecordSourceUnavailable(_ context.Context, sid SessionID, lane SourceUnavailabilityLane, reason SourceUnavailabilityReason) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.records++
-	if s.reason != nil && *s.reason == reason {
+	if s.reasons == nil {
+		s.reasons = make(map[availabilityKey]SourceUnavailabilityReason)
+	}
+	key := availabilityKey{session: sid, lane: lane}
+	if previous, ok := s.reasons[key]; ok && previous != reason.SupersededReason() {
 		return false, nil
 	}
-	copied := reason
-	s.reason = &copied
+	s.reasons[key] = reason
 	return true, nil
 }
 
-func (s *recordingAvailabilityStore) stored() (SourceUnavailabilityReason, bool) {
+func (s *recordingAvailabilityStore) stored(sid SessionID, lane SourceUnavailabilityLane) (SourceUnavailabilityReason, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.reason == nil {
-		return "", false
-	}
-	return *s.reason, true
+	reason, ok := s.reasons[availabilityKey{session: sid, lane: lane}]
+	return reason, ok
 }
 
 // TestSettleUnavailableSourceRereportsForceAndCauseChange holds the report
@@ -250,14 +261,14 @@ func TestSettleUnavailableSourceRereportsForceAndCauseChange(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		// A new pipeline is a later harvest. The same pipeline would still
-		// owe a report it recorded earlier in that run.
+		// A new pipeline is a later harvest: it starts with no per-run claims
+		// and uses the durable lane state to settle routine repeats.
 		pipeline := &Pipeline{config: PipelineConfig{Force: step.Force}, metricsStore: store}
-		got := pipeline.settleUnavailableSource(ctx, sid, cause, nil, StageIndex)
+		got := pipeline.settleUnavailableSource(ctx, sid, SourceLaneIndex, cause, nil, StageIndex)
 		if got != step.WantReport {
 			t.Fatalf("step %s report = %v, want %v", step.Name, got, step.WantReport)
 		}
-		stored, ok := store.stored()
+		stored, ok := store.stored(sid, SourceLaneIndex)
 		if !ok || string(stored) != step.WantStored {
 			t.Fatalf("step %s stored %q, %v; want %q", step.Name, stored, ok, step.WantStored)
 		}
@@ -278,7 +289,7 @@ func TestSettleUnavailableSourceUsesCallerWriteLane(t *testing.T) {
 
 	done := make(chan bool, 1)
 	go func() {
-		done <- pipeline.settleUnavailableSource(context.Background(), SessionID("11111111-1111-4111-8111-111111111111"), SourceUnavailableRecordUnusable, lane, StageIndex)
+		done <- pipeline.settleUnavailableSource(context.Background(), SessionID("11111111-1111-4111-8111-111111111111"), SourceLaneIndex, SourceUnavailableRecordUnusable, lane, StageIndex)
 	}()
 	// The lane completion is the wake. The deadline is the failure bound: a
 	// write on the caller's lane finishes in-process, and a fallback lock
@@ -296,5 +307,95 @@ func TestSettleUnavailableSourceUsesCallerWriteLane(t *testing.T) {
 	store.mu.Unlock()
 	if records != 1 {
 		t.Fatalf("records = %d, want the lane to run the write", records)
+	}
+}
+
+// TestSourceDiagnosticLanes exercises the same reporting helpers used by
+// harvest. Both diagnostics can be observed in one run even when they report
+// the same source cause; their stored causes remain independent across runs.
+func TestSourceDiagnosticLanes(t *testing.T) {
+	var fixture struct {
+		Required []string `yaml:"required_names"`
+		Runs     []struct {
+			Name   string `yaml:"name"`
+			Force  bool   `yaml:"force"`
+			Events []struct {
+				Lane       string `yaml:"lane"`
+				Cause      string `yaml:"cause"`
+				WantReport bool   `yaml:"want_report"`
+				WantStored string `yaml:"want_stored"`
+			} `yaml:"events"`
+		} `yaml:"runs"`
+	}
+	decodeOneFixture(t, sourceDiagnosticLanesFixtureData, &fixture, "source diagnostic lanes")
+	present := make(map[string]bool, len(fixture.Runs))
+	for _, run := range fixture.Runs {
+		if run.Name == "" || present[run.Name] || len(run.Events) == 0 {
+			t.Fatalf("invalid diagnostic-lane run %q", run.Name)
+		}
+		present[run.Name] = true
+	}
+	requireNamedCases(t, "source diagnostic lanes", fixture.Required, present)
+
+	store := &recordingAvailabilityStore{}
+	sid := SessionID("11111111-1111-4111-8111-111111111111")
+	session := DiscoveredSession{SessionID: sid, Harness: HarnessClaudeCode}
+	decision := RefreshDecision{Reason: RefreshReasonPublicationCaptureMissing, Lane: RefreshLaneNative}
+	for _, run := range fixture.Runs {
+		t.Run(run.Name, func(t *testing.T) {
+			pipeline := &Pipeline{config: PipelineConfig{Force: run.Force}, metricsStore: store}
+			for _, event := range run.Events {
+				lane, err := NewSourceUnavailabilityLane(event.Lane)
+				if err != nil {
+					t.Fatal(err)
+				}
+				cause, err := NewSourceUnavailabilityReason(event.Cause)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var sourceErr error
+				switch cause {
+				case SourceUnavailableNoSavedCopy:
+					sourceErr = fs.ErrNotExist
+				case SourceUnavailableRecordUnusable:
+					sourceErr = malformedSourceRecord{}
+				}
+				before := pipeline.snapshotDiagnostics()
+				var wantType string
+				switch lane {
+				case SourceLanePairRepair:
+					wantType = OutcomeReasonPairRepairUnavailable.Code()
+					pipeline.reportPairRepairUnavailable(t.Context(), sid, "/synthetic/source", sourceErr, nil)
+				case SourceLanePublicationCapture:
+					wantType = OutcomeReasonAdapterRefreshUnavailable.Code()
+					pipeline.reportAdapterAcquisitionUnavailable(t.Context(), session, decision, &adapterAcquisitionError{cause: sourceErr}, nil)
+				default:
+					t.Fatalf("fixture lane %q does not name a diagnostic producer", lane)
+				}
+				diagnostics := pipeline.snapshotDiagnostics()
+				reported := len(diagnostics) > len(before)
+				if reported != event.WantReport {
+					t.Fatalf("%s/%s report=%t, want %t; diagnostics=%+v", lane, cause, reported, event.WantReport, diagnostics)
+				}
+				beforeType, afterType := 0, 0
+				for _, diagnostic := range before {
+					if diagnostic.ErrorType == wantType {
+						beforeType++
+					}
+				}
+				for _, diagnostic := range diagnostics {
+					if diagnostic.ErrorType == wantType {
+						afterType++
+					}
+				}
+				if reported && (len(diagnostics) != len(before)+1 || afterType != beforeType+1) {
+					t.Fatalf("%s/%s emitted the wrong diagnostic: before=%+v after=%+v", lane, cause, before, diagnostics)
+				}
+				stored, ok := store.stored(sid, lane)
+				if !ok || string(stored) != event.WantStored {
+					t.Fatalf("%s stored %q, %t; want %q", lane, stored, ok, event.WantStored)
+				}
+			}
+		})
 	}
 }

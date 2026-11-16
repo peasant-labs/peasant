@@ -289,6 +289,12 @@ func planUpgradeOnConn(conn *sqlite.Conn, dbPath string) (UpgradePlan, []string,
 				notices = append(notices, notice)
 			}
 		}
+		if produced == sourceDiagnosticLanesSchemaVersion {
+			step, err = sourceDiagnosticLanesStep(conn, plan.From, step)
+			if err != nil {
+				return UpgradePlan{}, nil, err
+			}
+		}
 		addStep(step, entry)
 		// A recount this migration marks as owed runs right after it, in
 		// its own transaction.
@@ -307,6 +313,29 @@ func planUpgradeOnConn(conn *sqlite.Conn, dbPath string) (UpgradePlan, []string,
 		}
 	}
 	return plan, notices, nil
+}
+
+// An empty ledger has no rows to copy, so its table rebuild is a quick
+// catalog operation. A nonempty ledger remains row-scaled. A store predating
+// the ledger creates it empty on its way to this migration.
+func sourceDiagnosticLanesStep(conn *sqlite.Conn, from int, step UpgradeStep) (UpgradeStep, error) {
+	if !tableExistsOnConn(conn, "session_source_unavailability") {
+		if from >= sourceUnavailabilitySchemaVersion {
+			return UpgradeStep{}, fmt.Errorf("store: plan the source diagnostic lane upgrade: session_source_unavailability is missing from schema %d; nothing was changed; restore the database from a backup or rebuild it from the original transcripts", from)
+		}
+		step.Cost = UpgradeCostQuick
+		return step, nil
+	}
+	hasRows := false
+	if err := sqlitex.ExecuteTransient(conn, `SELECT 1 FROM session_source_unavailability LIMIT 1`, &sqlitex.ExecOptions{
+		ResultFunc: func(*sqlite.Stmt) error { hasRows = true; return nil },
+	}); err != nil {
+		return UpgradeStep{}, fmt.Errorf("store: plan the source diagnostic lane upgrade: inspect existing unavailability evidence: %w; nothing was changed; restore database access and retry", err)
+	}
+	if !hasRows {
+		step.Cost = UpgradeCostQuick
+	}
+	return step, nil
 }
 
 // recountOwedAfterMigration reports whether the migration that marks the

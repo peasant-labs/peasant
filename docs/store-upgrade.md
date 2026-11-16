@@ -235,12 +235,13 @@ the conversation turns. A session with no stored entries, or whose entries
 cannot be read, keeps both stored values and is logged. The recount walks the
 sessions with the same code as the step 74 fill. 0.17.0 ran this recount when
 it opened the store; a 0.17.0 store whose open was killed part way is at
-schema 77 with the marker, and its plan is the recount, then 78 and 79.
+schema 77 with the marker, and its plan is the recount, then 78 through 81.
 
-A 0.16.2 store (schema 76) with sessions plans four steps: 77 (quick), the
+A 0.16.2 store (schema 76) with sessions plans six steps: 77 (quick), the
 turn count recount (scales with rows, counted in sessions), 78 (scales with
-rows: it copies the session tables to widen their harness CHECK) and 79
-(quick). A 0.17.0 store whose recount finished plans 78 and 79.
+rows: it copies the session tables to widen their harness CHECK), 79 and 80
+(quick), and 81 (quick for an empty source-fault ledger; row-scaled otherwise).
+A 0.17.0 store whose recount finished plans 78 through 81.
 
 Step 78 is long on every store, whatever its size: it copies the `sessions`
 and `daily_summary_harness` tables to widen their harness CHECK, and its time
@@ -267,7 +268,11 @@ fails when either has a name the other lacks.
 
 A cost can depend on the store. The step that repairs the search index
 triggers (schema 76) is long only on a store that carries stale search results
-from 0.16.1; the plan reads the store to decide.
+from 0.16.1; the plan reads the store to decide. The source-diagnostic lane
+rebuild (schema 81) copies the source-unavailability ledger: the plan treats
+it as quick only when that ledger has no rows, and as row-scaled otherwise.
+The migration preserves every old cause in the stored-content lane; pair
+repair, publication capture and indexing can then report independently.
 
 ## Progress events
 

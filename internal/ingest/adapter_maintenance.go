@@ -348,14 +348,11 @@ func (p *Pipeline) reportPairRepairUnavailable(ctx context.Context, sid SessionI
 		causeClass, shaped = sourceUnavailableCause(cause)
 	}
 	if shaped {
-		if !p.settleUnavailableSource(ctx, sid, causeClass, lane, StageExtract) || p.laneCauseAlreadyReported(sid, causeClass) {
-			// A routine harvest stays quiet once this cause is recorded, and
-			// so does this lane when stored-content recovery already reported
-			// the same cause in this harvest. A store, locator, or write fault
-			// is not a source cause: it is not recorded and keeps reporting.
+		if !p.settleUnavailableSource(ctx, sid, SourceLanePairRepair, causeClass, lane, StageExtract) {
+			// A routine harvest stays quiet once this lane's cause is recorded.
+			// A store, locator, or write fault is not recorded and keeps reporting.
 			return
 		}
-		p.markLaneCauseReported(sid, causeClass)
 	}
 	serving := p.hasCompletedStoredIndex(ctx, sid)
 	message := missingPairText(sid, source)
@@ -876,36 +873,7 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry, writeLan
 		}
 		return result
 	}
-	// The manual index refresh (harvest index --force) names its own
-	// unavailable native input; every other path, including a forced ordinary
-	// harvest, reports the adapter refresh it could not complete.
-	errorType, location := "adapter_refresh_unavailable", fmt.Sprintf("%s session %s adapter refresh", entry.Session.Harness, entry.Session.SessionID)
-	if p.config.Reindex && p.config.Force {
-		errorType, location = "native_refresh_unavailable", fmt.Sprintf("%s session %s forced refresh", entry.Session.Harness, entry.Session.SessionID)
-	}
-	message := acquisition.Error() + "; the previous artifact and adapter stamp were preserved; supported stored indexing may continue"
-	report := true
-	if decision.Reason == RefreshReasonPublicationCaptureMissing {
-		location = fmt.Sprintf("%s session %s publication capture", entry.Session.Harness, entry.Session.SessionID)
-		message = acquisition.Error() + "; the previous artifact was preserved, but publication still needs a native capture"
-		if cause, sourceFault := sourceUnavailableCause(acquisition); sourceFault {
-			// Keep trying the source so restoration can be observed, but use
-			// the existing durable source-cause ledger to report each stable
-			// source fault only once. Non-source faults keep reporting.
-			report = p.settleUnavailableSource(ctx, entry.Session.SessionID, cause, writeLane, StageExtract) &&
-				!p.laneCauseAlreadyReported(entry.Session.SessionID, cause)
-			if report {
-				p.markLaneCauseReported(entry.Session.SessionID, cause)
-			}
-		}
-	}
-	if report {
-		p.reportSessionDiagnostic(entry.Session.SessionID, DiagnosticEntry{
-			ErrorType: errorType, Location: location,
-			Message:     message,
-			Remediation: "Restore access to the original harness source and discovery context, then retry harvest.",
-		})
-	}
+	p.reportAdapterAcquisitionUnavailable(ctx, entry.Session, decision, acquisition, writeLane)
 	result.result.Error = nil
 	result.result.Status = DiffUnchanged
 	retained, err := readArtifactPair(p.fs, string(p.config.OutputDir), metadataPath, entry.Session.SessionID)
@@ -929,6 +897,35 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry, writeLan
 	result.transcriptOrigin = entry.Session.TranscriptOrigin
 	result.startMs = retained.Metadata.Timestamp.Start
 	return result
+}
+
+// reportAdapterAcquisitionUnavailable reports the native acquisition failure
+// while the last-good pair remains available. Publication capture owns its
+// own source-fault lane; other adapter refresh errors keep reporting normally.
+func (p *Pipeline) reportAdapterAcquisitionUnavailable(ctx context.Context, session DiscoveredSession, decision RefreshDecision, acquisition *adapterAcquisitionError, writeLane *storeWriteLane) {
+	// The manual index refresh names its own unavailable native input.
+	errorType, location := "adapter_refresh_unavailable", fmt.Sprintf("%s session %s adapter refresh", session.Harness, session.SessionID)
+	if p.config.Reindex && p.config.Force {
+		errorType, location = "native_refresh_unavailable", fmt.Sprintf("%s session %s forced refresh", session.Harness, session.SessionID)
+	}
+	message := acquisition.Error() + "; the previous artifact and adapter stamp were preserved; supported stored indexing may continue"
+	report := true
+	if decision.Reason == RefreshReasonPublicationCaptureMissing {
+		location = fmt.Sprintf("%s session %s publication capture", session.Harness, session.SessionID)
+		message = acquisition.Error() + "; the previous artifact was preserved, but publication still needs a native capture"
+		if cause, sourceFault := sourceUnavailableCause(acquisition); sourceFault {
+			// Keep trying the source so restoration can be observed, but
+			// settle this diagnostic independently of other maintenance lanes.
+			report = p.settleUnavailableSource(ctx, session.SessionID, SourceLanePublicationCapture, cause, writeLane, StageExtract)
+		}
+	}
+	if report {
+		p.reportSessionDiagnostic(session.SessionID, DiagnosticEntry{
+			ErrorType: errorType, Location: location,
+			Message:     message,
+			Remediation: "Restore access to the original harness source and discovery context, then retry harvest.",
+		})
+	}
 }
 
 // hasUsableRetainedSession decides, only when native discovery FAILED, whether
