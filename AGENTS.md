@@ -111,11 +111,21 @@ ast-grep scan --config sgconfig.yml .
 ### Static guard
 
 `make check-unstring` runs `unstring` v0.0.2 over the Go tree and `web/`. It
-needs Go 1.26+ and ast-grep 0.51.2; the dev shell provides both. The generated
-baseline can only shrink; `make unstring-update` lowers it. A deliberate
-exception uses `// unstring-allow: <rule-id> — <reason>` with at least three
-words. `closed-set-literal` and `go-closed-set-literal` accept no marker.
-Generated files are exempt in `.unstring.yaml`.
+needs Go 1.26+ and ast-grep 0.51.2; the dev shell provides both. `make check`
+runs the guard directly after the strict ast-grep scan, and a guard failure
+stops the gate. The generated baseline can only shrink; `make unstring-update`
+lowers it. The catalog's closed sets come from the schema module each root
+pins, so a schema pin change moves the counts; run `make unstring-update` in
+the same commit and say why. The Go catalog uses the backend's schema pin and
+the TypeScript catalog uses the web package's pin; that is why the two can be
+different versions. A deliberate exception uses
+`// unstring-allow: <rule-id> — <reason>` with at least three words.
+`closed-set-literal` and `go-closed-set-literal` accept no marker. Generated
+files are exempt in `.unstring.yaml`. A rule-specific exemption is a review
+decision and the exempt file must still be generated, even though the loader
+only enforces the generated header for `rule: "*"` and the two closed-set
+rules. A re-sync of `third_party/zombiezen-sqlite` regenerates the baseline in
+the same commit because the two endpoint entries live in vendored code.
 
 ### Record-kind vocabulary
 

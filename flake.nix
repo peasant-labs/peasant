@@ -116,7 +116,7 @@
             };
 
             astGrepPkgs = import nixpkgs-ast-grep { inherit system; };
-            ast-grep = astGrepPkgs.ast-grep;
+            ast-grep = assert astGrepPkgs.ast-grep.version == "0.51.2"; astGrepPkgs.ast-grep;
 
             goPackage =
               if goAttr != null

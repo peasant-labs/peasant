@@ -11,8 +11,7 @@
 # on every pre-existing legacy hit, with no way to express "this file may
 # carry exactly N hits until it migrates."
 #
-# Validated against ast-grep 0.51.2 (this repo's flake.nix-pinned devShell/CI
-# version) AND 0.43.0 (a newer ambient version) - both produce identical
-# match counts and JSON shapes for these rules against this repository.
+# Validated against ast-grep 0.51.2, this repo's flake.nix-pinned
+# devShell/CI version.
 ruleDirs:
   - rules

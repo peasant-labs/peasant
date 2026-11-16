@@ -10,10 +10,9 @@
 // after the pre-existing (and already ast-grep-dependent) repo-wide
 // `ast-grep scan` step.
 //
-// Validated against ast-grep 0.45.0 (this repo's flake.nix-pinned
-// devShell/CI version) and 0.43.0 (a newer ambient version): both produce
-// byte-identical match sets and --json shapes for the rules in
-// internal/tui/gates/astrules against this repository as of this writing.
+// Validated against ast-grep 0.51.2, this repo's flake.nix-pinned
+// devShell/CI version. 0.45.0 and 0.43.0 were validated before the pin
+// moved; compare a failing scan against 0.51.2, not those earlier versions.
 package gates_test
 
 import (
@@ -83,7 +82,7 @@ func runAstGrep(t *testing.T, dir, configAbsPath string) []gates.KeyMatch {
 		t.Fatalf(
 			"keys_astgrep_test: ast-grep binary not found on PATH.\n"+
 				"what: exec.LookPath(%q) failed: %v.\n"+
-				"why: this test invokes the ast-grep CLI (validated against 0.45.0/0.43.0) to detect raw key-string "+
+				"why: this test invokes the ast-grep CLI (validated against 0.51.2) to detect raw key-string "+
 				"comparisons structurally; it cannot run without the binary.\n"+
 				"where: internal/tui/gates/keys_astgrep_test.go, runAstGrep.\n"+
 				"when: go test -tags=astgrep ./internal/tui/gates/...\n"+
@@ -112,7 +111,7 @@ func runAstGrep(t *testing.T, dir, configAbsPath string) []gates.KeyMatch {
 				"when: invoking `ast-grep scan --config %s --json=compact .` in %s.\n"+
 				"means: no real matches could be read, so the count-pinned comparison cannot run.\n"+
 				"fix: run `ast-grep --version` and compare against the versions this test is validated for "+
-				"(0.45.0, 0.43.0); if ast-grep itself errored, see stderr:\n%s",
+				"(0.51.2); if ast-grep itself errored, see stderr:\n%s",
 			err, configAbsPath, dir, stderr.String())
 	}
 	// ast-grep exits non-zero when it finds matches at error severity (all 3
@@ -146,7 +145,7 @@ func runAstGrep(t *testing.T, dir, configAbsPath string) []gates.KeyMatch {
 					"failing closed here instead of letting that through.\n"+
 					"where: internal/tui/gates/keys_astgrep_test.go, runAstGrep.\n"+
 					"means: a version drift likely changed ast-grep's --json field names.\n"+
-					"fix: compare `ast-grep --version` against 0.45.0/0.43.0 and update astGrepMatch's json tags.",
+					"fix: compare `ast-grep --version` against 0.51.2 and update astGrepMatch's json tags.",
 				i, m.File, m.RuleID, m.Range.Start.Line)
 		}
 		matches = append(matches, gates.KeyMatch{
