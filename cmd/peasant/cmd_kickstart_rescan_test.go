@@ -485,9 +485,8 @@ func TestKickstartRescan_ReusesRecordedSessions(t *testing.T) {
 }
 
 // TestKickstartRescan_FallsBackWithoutCompatibleDatabase proves the gate: a
-// missing database, one stamped with an older schema, and one stamped with a
-// newer schema each fall back to resolving every session, and the fallback
-// listing carries the resolved values rather than the recorded ones.
+// missing database and one stamped with a newer schema fall back to resolving
+// every session. The scan-reuse floor family covers the older boundary.
 func TestKickstartRescan_FallsBackWithoutCompatibleDatabase(t *testing.T) {
 	t.Parallel()
 	fixtures := loadRescanFixtures(t)
@@ -499,15 +498,13 @@ func TestKickstartRescan_FallsBackWithoutCompatibleDatabase(t *testing.T) {
 		t.Errorf("a missing database loaded %d records; a first run has nothing to reuse", len(known))
 	}
 
-	for _, delta := range []int{-1, 1} {
-		version := store.CurrentSchemaVersion() + delta
-		path := filepath.Join(dir, fmt.Sprintf("stamped-%d.db", version))
-		seedRescanStore(t, path, fixtures, ingestedAt)
-		stampSchemaVersion(t, path, version)
-		if known := loadKnownSessions(t.Context(), path); known != nil {
-			t.Errorf("a database stamped at schema version %d (this build writes %d) loaded %d records; it must be re-scanned the full way instead",
-				version, store.CurrentSchemaVersion(), len(known))
-		}
+	version := store.CurrentSchemaVersion() + 1
+	path := filepath.Join(dir, fmt.Sprintf("stamped-%d.db", version))
+	seedRescanStore(t, path, fixtures, ingestedAt)
+	stampSchemaVersion(t, path, version)
+	if known := loadKnownSessions(t.Context(), path); known != nil {
+		t.Errorf("a database stamped at schema version %d (this build writes %d) loaded %d records; it must be re-scanned the full way instead",
+			version, store.CurrentSchemaVersion(), len(known))
 	}
 
 	// What that fallback then does: every session, recorded or not, is resolved.

@@ -514,6 +514,11 @@ type IngestedSessionRow struct {
 	SchemaVersion int
 }
 
+// knownSessionsReuseFloor is the first version whose harness names and other
+// values selected by sqlAllIngestedSessions survive the remaining migrations.
+// Version 33 renamed the legacy harness values in that query's result.
+const knownSessionsReuseFloor = 33
+
 // sqlAllIngestedSessions reads every session with the dimension values a
 // re-scan reuses. The metrics join is LEFT because a session can outlive its
 // metrics row (prune deletes the metrics row before the session row), and a
