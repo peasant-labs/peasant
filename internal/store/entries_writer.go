@@ -147,6 +147,19 @@ func (s *Store) IndexSessionEntryBatch(ctx context.Context, writes []ingest.Sess
 	}
 	defer s.pool.Put(conn)
 
+	// Acquire the writer before the first read. A deferred transaction takes a
+	// read snapshot first and its first write then needs a lock upgrade, which
+	// returns BUSY immediately despite busy_timeout when another connection
+	// (such as a concurrent harvest's post-commit delete) holds the writer.
+	// IMMEDIATE waits on the bounded busy backoff instead.
+	endFn, err := sqlitex.ImmediateTransaction(conn)
+	if err != nil {
+		for i := range results {
+			results[i].Err = fmt.Errorf("store: begin session entry batch: %w; no session in this batch was written", err)
+		}
+		return results
+	}
+
 	txnErr := error(nil)
 	// This cleanup runs after transaction finalization, so a failed COMMIT can
 	// never leave a successful completion result for rolled-back entries.
@@ -164,7 +177,6 @@ func (s *Store) IndexSessionEntryBatch(ctx context.Context, writes []ingest.Sess
 			}
 		}
 	}()
-	endFn := sqlitex.Transaction(conn)
 	// Keep this a direct defer: sqlitex must recover an active handler panic
 	// here, roll back the entire outer transaction, then propagate the panic.
 	defer endFn(&txnErr)
