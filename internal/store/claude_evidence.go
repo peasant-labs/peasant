@@ -570,12 +570,13 @@ func (s *Store) SaveClaudeEvidence(ctx context.Context, upserts []ingest.ClaudeT
 
 // SaveClaudeEvidenceIfCurrent is the separate write path for a current-store
 // discovery scan. The read-only scan handle never owns this connection. The
-// A read-only preflight refuses a behind, newer, or recount-pending store before
+// read-only preflight refuses a behind, newer, or recount-pending store before
 // opening a writable connection, whose close could otherwise checkpoint a WAL.
-// The preflight stays open while the write connection is in use. Version and
-// pending recounts are rechecked in the transaction that is later promoted to a
-// writer: a concurrent commit makes that promotion fail rather than writing
-// against a different schema.
+// The preflight stays open while the write connection is in use. The immediate
+// transaction takes the writer lock before rechecking the schema version and
+// pending recounts, and before any write. A concurrent upgrade waits or prevents
+// this transaction from starting; an upgrade committed first is caught by the
+// rechecks instead of allowing writes against a different schema.
 func SaveClaudeEvidenceIfCurrent(ctx context.Context, path string, upserts []ingest.ClaudeTranscriptEvidence, deletes []ingest.ResolvedPath) (err error) {
 	if len(upserts) == 0 && len(deletes) == 0 {
 		return nil
@@ -596,19 +597,24 @@ func SaveClaudeEvidenceIfCurrent(ctx context.Context, path string, upserts []ing
 	conn.SetInterrupt(ctx.Done())
 	defer conn.SetInterrupt(nil)
 	if err := prepareReadOnlyConn(conn); err != nil {
-		return err
+		return fmt.Errorf("store: prepare the current evidence cache writer: %w; no evidence was written; check database access and retry discovery", err)
 	}
-	end := sqlitex.Transaction(conn)
+	if err := sqlitex.ExecuteTransient(conn, "PRAGMA query_only = OFF", nil); err != nil {
+		return fmt.Errorf("store: enable writes on the current evidence cache: %w; no evidence was written; check database write access and retry discovery", err)
+	}
+	// Acquire the writer before reading, so contention waits on busy_timeout
+	// instead of failing immediately while upgrading a read transaction.
+	end, err := sqlitex.ImmediateTransaction(conn)
+	if err != nil {
+		return fmt.Errorf("store: begin the current evidence cache write transaction: %w; no evidence was written; wait for other writers or check the context deadline, then retry discovery", err)
+	}
 	defer end(&err)
-	if err := sqlitex.ExecuteTransient(conn, "SELECT name FROM sqlite_master LIMIT 1", nil); err != nil {
-		return fmt.Errorf("store: establish evidence cache write snapshot: %w", err)
-	}
 	version, err := readPragmaInt(conn, "PRAGMA user_version")
 	if err != nil {
-		return fmt.Errorf("store: read the evidence cache schema before writing: %w", err)
+		return fmt.Errorf("store: read the evidence cache schema before writing: %w; no evidence was written; check database access and retry discovery", err)
 	}
 	if int(version) != CurrentSchemaVersion() {
-		return fmt.Errorf("store: evidence cache schema is %d, not current schema %d; no evidence was written", version, CurrentSchemaVersion())
+		return fmt.Errorf("store: evidence cache schema is %d, not current schema %d; no evidence was written; run peasant migrate --schema-only for an older schema or upgrade Peasant for a newer schema", version, CurrentSchemaVersion())
 	}
 	owed, err := owedRecountsOnConn(conn)
 	if err != nil {
@@ -616,9 +622,6 @@ func SaveClaudeEvidenceIfCurrent(ctx context.Context, path string, upserts []ing
 	}
 	if len(owed) != 0 {
 		return fmt.Errorf("store: evidence cache owes a recount; no evidence was written; run peasant migrate --schema-only")
-	}
-	if err := sqlitex.ExecuteTransient(conn, "PRAGMA query_only = OFF", nil); err != nil {
-		return fmt.Errorf("store: enable writes on the current evidence cache: %w", err)
 	}
 	return saveClaudeEvidenceOnConn(conn, upserts, deletes)
 }
