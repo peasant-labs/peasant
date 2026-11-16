@@ -1,16 +1,78 @@
-# Recording a source cause is a transition. The first observation is new, a
-# repeat of that cause is not, and a different cause replaces the stored one.
+# A cause belongs to its diagnostic lane. Each lane upgrades its own missing
+# source to the more specific unusable record, never the reverse. The
+# reason-only view chooses the most specific cause across all lanes; equal
+# causes choose the lexically first owning lane.
 requiredNames:
-  - insert-missing-source
-  - repeat-missing-source
-  - replace-with-unusable-record
+  - insert-content-missing
+  - repeat-content-missing
+  - insert-pair-missing
+  - insert-publication-missing
+  - publication-becomes-unusable
+  - pair-remains-missing
+  - publication-never-downgrades
+  - pair-becomes-unusable
+  - index-reports-separately
 steps:
-  - name: insert-missing-source
+  - name: insert-content-missing
+    lane: stored_content
     reason: original-source-unavailable-no-usable-saved-copy
     wantChanged: true
-  - name: repeat-missing-source
+    wantStored: original-source-unavailable-no-usable-saved-copy
+    wantAggregateLane: stored_content
+    wantAggregateReason: original-source-unavailable-no-usable-saved-copy
+  - name: repeat-content-missing
+    lane: stored_content
     reason: original-source-unavailable-no-usable-saved-copy
     wantChanged: false
-  - name: replace-with-unusable-record
+    wantStored: original-source-unavailable-no-usable-saved-copy
+    wantAggregateLane: stored_content
+    wantAggregateReason: original-source-unavailable-no-usable-saved-copy
+  - name: insert-pair-missing
+    lane: pair_repair
+    reason: original-source-unavailable-no-usable-saved-copy
+    wantChanged: true
+    wantStored: original-source-unavailable-no-usable-saved-copy
+    wantAggregateLane: pair_repair
+    wantAggregateReason: original-source-unavailable-no-usable-saved-copy
+  - name: insert-publication-missing
+    lane: publication_capture
+    reason: original-source-unavailable-no-usable-saved-copy
+    wantChanged: true
+    wantStored: original-source-unavailable-no-usable-saved-copy
+    wantAggregateLane: pair_repair
+    wantAggregateReason: original-source-unavailable-no-usable-saved-copy
+  - name: publication-becomes-unusable
+    lane: publication_capture
     reason: original-source-present-record-unusable
     wantChanged: true
+    wantStored: original-source-present-record-unusable
+    wantAggregateLane: publication_capture
+    wantAggregateReason: original-source-present-record-unusable
+  - name: pair-remains-missing
+    lane: pair_repair
+    reason: original-source-unavailable-no-usable-saved-copy
+    wantChanged: false
+    wantStored: original-source-unavailable-no-usable-saved-copy
+    wantAggregateLane: publication_capture
+    wantAggregateReason: original-source-present-record-unusable
+  - name: publication-never-downgrades
+    lane: publication_capture
+    reason: original-source-unavailable-no-usable-saved-copy
+    wantChanged: false
+    wantStored: original-source-present-record-unusable
+    wantAggregateLane: publication_capture
+    wantAggregateReason: original-source-present-record-unusable
+  - name: pair-becomes-unusable
+    lane: pair_repair
+    reason: original-source-present-record-unusable
+    wantChanged: true
+    wantStored: original-source-present-record-unusable
+    wantAggregateLane: pair_repair
+    wantAggregateReason: original-source-present-record-unusable
+  - name: index-reports-separately
+    lane: index
+    reason: original-source-unavailable-no-usable-saved-copy
+    wantChanged: true
+    wantStored: original-source-unavailable-no-usable-saved-copy
+    wantAggregateLane: pair_repair
+    wantAggregateReason: original-source-present-record-unusable

@@ -63,7 +63,8 @@ cases:
     wantRepaired: false
     wantSourceReport: true
     wantCause: original-source-unavailable-no-usable-saved-copy
-    wantMessageContains: "complete content was not stored"
+    wantPairMessageContains: "has no usable saved copy"
+    wantContentMessageContains: "complete content was not stored"
   - name: ordinary-missing-metadata-repairs
     pairState: missing-metadata
     discovered: true
@@ -82,7 +83,8 @@ cases:
     wantRepaired: false
     wantSourceReport: true
     wantCause: original-source-unavailable-no-usable-saved-copy
-    wantMessageContains: "has no usable saved copy"
+    wantPairMessageContains: "has no usable saved copy"
+    wantContentMessageContains: "complete content was not stored"
   # A pair that needs repair beside a native source that is PRESENT but cannot
   # be used. The pair lane is the one that reports here, and this is the only
   # shape that prints the re-ingest template with its cause, so the template and
@@ -94,7 +96,7 @@ cases:
     wantRepaired: false
     wantSourceReport: true
     wantCause: original-source-present-record-unusable
-    wantMessageContains: "could not be re-ingested from its original source"
+    wantPairMessageContains: "could not be re-ingested from its original source"
   # The stored source locator alone is enough to repair a session native
   # discovery did not offer.
   - name: ordinary-reconstructed-source-repairs

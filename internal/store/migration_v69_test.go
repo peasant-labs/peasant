@@ -19,9 +19,13 @@ import (
 var sourceUnavailabilityUpsertYAML []byte
 
 type sourceUnavailabilityUpsertStep struct {
-	Name        string `yaml:"name"`
-	Reason      string `yaml:"reason"`
-	WantChanged bool   `yaml:"wantChanged"`
+	Name                string `yaml:"name"`
+	Lane                string `yaml:"lane"`
+	Reason              string `yaml:"reason"`
+	WantChanged         bool   `yaml:"wantChanged"`
+	WantStored          string `yaml:"wantStored"`
+	WantAggregateLane   string `yaml:"wantAggregateLane"`
+	WantAggregateReason string `yaml:"wantAggregateReason"`
 }
 
 func loadSourceUnavailabilityUpsertSteps(t *testing.T) []sourceUnavailabilityUpsertStep {
@@ -113,7 +117,7 @@ INSERT INTO session_source_unavailability(session_id, reason) VALUES('unusable-s
 	if err := sqlitex.ExecuteTransient(conn, `UPDATE session_source_unavailability SET reason='original-source-present-record-unusable' WHERE session_id='cause-session'`, nil); err == nil {
 		t.Fatal("predecessor schema accepted the present-but-unusable cause")
 	}
-	if err := sqlitemigration.Migrate(t.Context(), conn, dbSchema); err != nil {
+	if err := sqlitemigration.Migrate(t.Context(), conn, frozenSchema(69)); err != nil {
 		t.Fatal(err)
 	}
 	// The rebuild copies the stored rows, so each row has to survive the
@@ -176,20 +180,36 @@ VALUES('11111111-1111-4111-8111-111111111111','claude-code','fixture-model','ups
 	db.pool.Put(conn)
 	sid := ingest.SessionID("11111111-1111-4111-8111-111111111111")
 	for _, step := range loadSourceUnavailabilityUpsertSteps(t) {
+		lane, err := ingest.NewSourceUnavailabilityLane(step.Lane)
+		if err != nil {
+			t.Fatalf("step %s: %v", step.Name, err)
+		}
 		reason, err := ingest.NewSourceUnavailabilityReason(step.Reason)
 		if err != nil {
 			t.Fatalf("step %s: %v", step.Name, err)
 		}
-		changed, err := db.RecordSourceUnavailable(t.Context(), sid, reason)
+		changed, err := db.RecordSourceUnavailable(t.Context(), sid, lane, reason)
 		if err != nil {
 			t.Fatalf("step %s: %v", step.Name, err)
 		}
 		if changed != step.WantChanged {
 			t.Fatalf("step %s: changed=%t, want %t", step.Name, changed, step.WantChanged)
 		}
-		stored, err := db.ReadSourceUnavailability(t.Context(), sid)
-		if err != nil || stored == nil || *stored != reason {
-			t.Fatalf("step %s: stored %v, err %v, want %s", step.Name, stored, err, reason)
+		stored, err := db.ReadSourceUnavailabilityForLane(t.Context(), sid, lane)
+		if err != nil || stored == nil || string(*stored) != step.WantStored {
+			t.Fatalf("step %s: stored %v, err %v, want %s", step.Name, stored, err, step.WantStored)
+		}
+		aggregate, err := db.ReadSourceUnavailabilityDetail(t.Context(), sid)
+		if err != nil || aggregate == nil {
+			t.Fatalf("step %s: aggregate %+v, err %v", step.Name, aggregate, err)
+		}
+		if string(aggregate.Lane) != step.WantAggregateLane || string(aggregate.Reason) != step.WantAggregateReason {
+			t.Fatalf("step %s: aggregate %+v, err %v, want lane %s cause %s",
+				step.Name, aggregate, err, step.WantAggregateLane, step.WantAggregateReason)
+		}
+		reasonOnly, err := db.ReadSourceUnavailability(t.Context(), sid)
+		if err != nil || reasonOnly == nil || string(*reasonOnly) != step.WantAggregateReason {
+			t.Fatalf("step %s: reason-only aggregate %v, err %v, want %s", step.Name, reasonOnly, err, step.WantAggregateReason)
 		}
 	}
 }

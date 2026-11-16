@@ -1,0 +1,13 @@
+required_names:
+  - unknown-priority-mutation
+  - unknown-priority-reason
+  - unknown-priority-lane
+  - unknown-diff-status
+  - diff-status-fallback-is-not-an-input
+priority_cases:
+  - {name: unknown-priority-mutation, patch: {mutation: typo}, error_contains: mutation}
+  - {name: unknown-priority-reason, patch: {reason: typo}, error_contains: reason}
+  - {name: unknown-priority-lane, patch: {lane: typo}, error_contains: lane}
+status_cases:
+  - {name: unknown-diff-status, value: typo, error_contains: status}
+  - {name: diff-status-fallback-is-not-an-input, value: unknown, error_contains: status}

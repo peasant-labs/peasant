@@ -22,26 +22,27 @@ var diffParallelYAML []byte
 type diffParallelArm string
 
 const (
-	diffParallelCanceledBefore diffParallelArm = "canceled"
-	diffParallelDeadline       diffParallelArm = "deadline"
-	diffParallelDuringDiff     diffParallelArm = "during-diff"
+	diffParallelCanceledBefore         diffParallelArm      = "canceled"
+	diffParallelDeadline               diffParallelArm      = "deadline"
+	diffParallelDuringDiff             diffParallelArm      = "during-diff"
+	diffParallelPublicationUnspecified PublicationReadiness = ""
 )
 
 type diffParallelSessionCase struct {
-	Name                    string `yaml:"name"`
-	SessionID               string `yaml:"sessionID"`
-	ParentID                string `yaml:"parentID"`
-	Stored                  bool   `yaml:"stored"`
-	IngestedMs              int64  `yaml:"ingestedMs"`
-	ModTimeMs               int64  `yaml:"modTimeMs"`
-	SchemaVersion           int    `yaml:"schemaVersion"`
-	AdapterVersion          int    `yaml:"adapterVersion"`
-	SourceEvidenceSupported bool   `yaml:"sourceEvidenceSupported"`
-	PublicationReadiness    string `yaml:"publicationReadiness"`
-	TrackedCursor           bool   `yaml:"trackedCursor"`
-	StoredSeq               int64  `yaml:"storedSeq"`
-	EventSeq                int64  `yaml:"eventSeq"`
-	ExpectedStatus          string `yaml:"expected_status"`
+	Name                    string               `yaml:"name"`
+	SessionID               string               `yaml:"sessionID"`
+	ParentID                string               `yaml:"parentID"`
+	Stored                  bool                 `yaml:"stored"`
+	IngestedMs              int64                `yaml:"ingestedMs"`
+	ModTimeMs               int64                `yaml:"modTimeMs"`
+	SchemaVersion           int                  `yaml:"schemaVersion"`
+	AdapterVersion          int                  `yaml:"adapterVersion"`
+	SourceEvidenceSupported bool                 `yaml:"sourceEvidenceSupported"`
+	PublicationReadiness    PublicationReadiness `yaml:"publicationReadiness"`
+	TrackedCursor           bool                 `yaml:"trackedCursor"`
+	StoredSeq               int64                `yaml:"storedSeq"`
+	EventSeq                int64                `yaml:"eventSeq"`
+	ExpectedStatus          fixtureDiffStatus    `yaml:"expected_status"`
 }
 
 type diffParallelCancellationCase struct {
@@ -75,6 +76,18 @@ func loadDiffParallelFixture(t *testing.T) diffParallelFixture {
 			t.Fatalf("the diff parallelism fixture has an empty or repeated case name %q", session.Name)
 		}
 		present[session.Name] = true
+		if _, err := session.ExpectedStatus.Status(); err != nil {
+			t.Fatalf("diff parallelism fixture case %s: %v", session.Name, err)
+		}
+		switch session.PublicationReadiness {
+		case PublicationReady, PublicationNeedsIngest:
+		case diffParallelPublicationUnspecified:
+			if session.Stored {
+				t.Fatalf("diff parallelism fixture case %s: stored session needs a publication readiness; use %q or %q", session.Name, PublicationReady, PublicationNeedsIngest)
+			}
+		default:
+			t.Fatalf("diff parallelism fixture case %s: unknown publication readiness %q; use %q or %q", session.Name, session.PublicationReadiness, PublicationReady, PublicationNeedsIngest)
+		}
 	}
 	for _, required := range fixture.RequiredCases {
 		if !present[required] {
@@ -145,7 +158,7 @@ func buildDiffParallelPipeline(t *testing.T, cases []diffParallelSessionCase, fi
 				IngestedMs:              &ingested,
 				SchemaVersion:           testCase.SchemaVersion,
 				SourceEvidenceSupported: testCase.SourceEvidenceSupported,
-				PublicationReadiness:    PublicationReadiness(testCase.PublicationReadiness),
+				PublicationReadiness:    testCase.PublicationReadiness,
 			}
 			if testCase.AdapterVersion != 0 {
 				adapter := testCase.AdapterVersion
@@ -202,7 +215,8 @@ func TestDiffParallelMatchesSequentialAndPreservesOrder(t *testing.T) {
 		if entry.Status != sequential[index] {
 			t.Fatalf("session %q classified %s by the pool and %s sequentially; the result must not depend on the worker", sessions[index].SessionID, entry.Status, sequential[index])
 		}
-		if got, want := entry.Status.String(), fixture.Sessions[index].ExpectedStatus; got != want {
+		want, _ := fixture.Sessions[index].ExpectedStatus.Status() // validated by the fixture loader
+		if got := entry.Status; got != want {
 			t.Fatalf("session %q classified %q, fixture expects %q", sessions[index].SessionID, got, want)
 		}
 	}

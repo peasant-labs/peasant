@@ -33,6 +33,32 @@ var pairInstallStoredPairYAML []byte
 //go:embed testdata/pair_install_identity.manifest.yaml
 var pairInstallIdentityManifestYAML []byte
 
+type pairInstallMode string
+
+const (
+	pairInstallModeInstall  pairInstallMode = "install"
+	pairInstallModeGated    pairInstallMode = "gated"
+	pairInstallModeRetained pairInstallMode = "retained"
+	pairInstallModeHarvest  pairInstallMode = "harvest"
+)
+
+func (v pairInstallMode) Validate() error {
+	return validateFixtureChoice("mode", v, pairInstallModeInstall, pairInstallModeGated, pairInstallModeRetained, pairInstallModeHarvest)
+}
+
+type pairHarvestChange string
+
+const (
+	pairHarvestInitial    pairHarvestChange = "initial"
+	pairHarvestMetadata   pairHarvestChange = "metadata"
+	pairHarvestTranscript pairHarvestChange = "transcript"
+	pairHarvestNone       pairHarvestChange = "none"
+)
+
+func (v pairHarvestChange) Validate() error {
+	return validateFixtureChoice("change", v, pairHarvestInitial, pairHarvestMetadata, pairHarvestTranscript, pairHarvestNone)
+}
+
 type pairInstallFiles struct {
 	Transcript       string            `yaml:"transcript"`
 	MetadataFor      string            `yaml:"metadataFor"`
@@ -57,7 +83,7 @@ type pairInstallExpect struct {
 
 type pairInstallCase struct {
 	Name      string            `yaml:"name"`
-	Mode      string            `yaml:"mode"`
+	Mode      pairInstallMode   `yaml:"mode"`
 	Installed pairInstallFiles  `yaml:"installed"`
 	Candidate pairInstallFiles  `yaml:"candidate"`
 	Expect    pairInstallExpect `yaml:"expect"`
@@ -67,7 +93,7 @@ type pairInstallCase struct {
 // pairHarvestRun is one harvest of a harvest-mode case; the fixture header
 // documents every field.
 type pairHarvestRun struct {
-	Change                string            `yaml:"change"`
+	Change                pairHarvestChange `yaml:"change"`
 	Transcript            string            `yaml:"transcript"`
 	MoveCaptureBeforeBind bool              `yaml:"moveCaptureBeforeBind"`
 	Expect                pairHarvestExpect `yaml:"expect"`
@@ -106,6 +132,14 @@ func LoadPairInstallIdentityFixtures(t *testing.T) pairInstallDocument {
 	names := make([]string, len(document.Cases))
 	for i, c := range document.Cases {
 		names[i] = c.Name
+		if err := c.Mode.Validate(); err != nil {
+			t.Fatalf("pair install fixture case %s: %v", c.Name, err)
+		}
+		for _, run := range c.Runs {
+			if err := run.Change.Validate(); err != nil {
+				t.Fatalf("pair install fixture case %s: %v", c.Name, err)
+			}
+		}
 	}
 	if err := testutil.ValidateRequiredNames(manifest, names, "pair install identity"); err != nil {
 		t.Fatal(err)
@@ -245,13 +279,13 @@ func TestPairInstallIdentity(t *testing.T) {
 		t.Run(c.Name, func(t *testing.T) {
 			t.Parallel()
 			switch c.Mode {
-			case "install":
+			case pairInstallModeInstall:
 				runPairInstallCase(t, document, c)
-			case "gated":
+			case pairInstallModeGated:
 				runGatedPairInstallCase(t, document, c)
-			case "retained":
+			case pairInstallModeRetained:
 				runRetainedRefreshCase(t, c)
-			case "harvest":
+			case pairInstallModeHarvest:
 				runHarvestCase(t, document, c)
 			default:
 				t.Fatalf("unknown pair install mode %q", c.Mode)
@@ -439,7 +473,7 @@ func (s *captureMovingStore) BindPublicationIndex(ctx context.Context, bind inge
 // parsed, bound or refused, the index rows, the bound capture revision and the
 // files the run touched.
 func runHarvestCase(t *testing.T, document pairInstallDocument, c pairInstallCase) {
-	if len(c.Runs) == 0 || c.Runs[0].Change != "initial" {
+	if len(c.Runs) == 0 || c.Runs[0].Change != pairHarvestInitial {
 		t.Fatal("a harvest case starts with its initial run")
 	}
 	fs := testutil.NewCountingFS(testutil.NewMemFS())
@@ -497,19 +531,19 @@ func runHarvestCase(t *testing.T, document pairInstallDocument, c pairInstallCas
 	for i, step := range c.Runs {
 		label := fmt.Sprintf("run %d (%s)", i+1, step.Change)
 		switch step.Change {
-		case "initial":
+		case pairHarvestInitial:
 			if i != 0 {
 				t.Fatalf("%s: only the first run is initial", label)
 			}
-		case "metadata":
+		case pairHarvestMetadata:
 			claude := versions[ingest.HarnessClaudeCode]
 			claude.AdapterVersion++
 			versions[ingest.HarnessClaudeCode] = claude
-		case "transcript":
+		case pairHarvestTranscript:
 			modTime = modTime.Add(time.Minute)
 			sessions[0].ModTime = modTime
 			writeSource(step.Transcript)
-		case "none":
+		case pairHarvestNone:
 		default:
 			t.Fatalf("%s: unknown change", label)
 		}

@@ -1,0 +1,35 @@
+requiredNames:
+  - empty-ledger-is-quick
+  - existing-ledger-is-row-scaled
+  - legacy-missing-source
+  - legacy-unusable-record
+  - accepts-stored-content
+  - accepts-pair-repair
+  - accepts-publication-capture
+  - accepts-index
+  - accepts-unusable-record
+  - refuses-unknown-lane
+  - refuses-empty-lane
+  - refuses-unknown-reason
+  - simultaneous-causes-never-downgrade
+plans:
+  - {name: empty-ledger-is-quick, seedRows: false, wantLong: false}
+  - {name: existing-ledger-is-row-scaled, seedRows: true, wantLong: true}
+legacyRows:
+  - {name: legacy-missing-source, sessionID: "11111111-1111-4111-8111-111111111101", reason: original-source-unavailable-no-usable-saved-copy, expectedLane: stored_content}
+  - {name: legacy-unusable-record, sessionID: "11111111-1111-4111-8111-111111111102", reason: original-source-present-record-unusable, expectedLane: stored_content}
+checks:
+  - {name: accepts-stored-content, lane: stored_content, reason: original-source-unavailable-no-usable-saved-copy, valid: true}
+  - {name: accepts-pair-repair, lane: pair_repair, reason: original-source-unavailable-no-usable-saved-copy, valid: true}
+  - {name: accepts-publication-capture, lane: publication_capture, reason: original-source-unavailable-no-usable-saved-copy, valid: true}
+  - {name: accepts-index, lane: index, reason: original-source-unavailable-no-usable-saved-copy, valid: true}
+  - {name: accepts-unusable-record, lane: pair_repair, reason: original-source-present-record-unusable, valid: true}
+  - {name: refuses-unknown-lane, lane: future_lane, reason: original-source-unavailable-no-usable-saved-copy, valid: false}
+  - {name: refuses-empty-lane, lane: "", reason: original-source-unavailable-no-usable-saved-copy, valid: false}
+  - {name: refuses-unknown-reason, lane: pair_repair, reason: unknown, valid: false}
+concurrent:
+  - name: simultaneous-causes-never-downgrade
+    sessionID: "11111111-1111-4111-8111-111111111101"
+    lane: publication_capture
+    reasons: [original-source-unavailable-no-usable-saved-copy, original-source-present-record-unusable]
+    wantStored: original-source-present-record-unusable

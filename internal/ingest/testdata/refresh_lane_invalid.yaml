@@ -1,0 +1,52 @@
+required_names:
+  - unknown-harness
+  - unknown-source
+  - unknown-stored-adapter
+  - unknown-file-adapter
+  - unknown-schema
+  - unknown-pair
+  - unknown-indexer
+  - unknown-refusal
+  - unknown-refusal-indexer
+  - unknown-publication
+  - unknown-native-source
+  - unbounded-malformed-source
+  - unknown-pair-member
+  - unknown-reason
+  - unknown-lane
+  - file-adapter-requires-behind
+  - refusal-indexer-requires-refusal
+  - refusal-requires-indexer
+  - read-bound-requires-malformed-source
+  - negative-second-source-reads
+  - negative-capture-revision
+  - retained-unknown-requires-claude
+  - retained-unknown-conflicts-with-refusal
+  - oversized-record-needs-limit
+  - oversized-record-must-exceed-limit
+cases:
+  - {name: unknown-harness, patch: {harness: future-harness}, error_contains: harness}
+  - {name: unknown-source, patch: {source: typo}, error_contains: source}
+  - {name: unknown-stored-adapter, patch: {stored_adapter: typo}, error_contains: stored_adapter}
+  - {name: unknown-file-adapter, patch: {file_adapter: typo}, error_contains: file_adapter}
+  - {name: unknown-schema, patch: {metadata_schema: typo}, error_contains: metadata_schema}
+  - {name: unknown-pair, patch: {pair: typo}, error_contains: pair}
+  - {name: unknown-indexer, patch: {indexer: typo}, error_contains: indexer}
+  - {name: unknown-refusal, patch: {refusal: typo}, error_contains: refusal}
+  - {name: unknown-refusal-indexer, patch: {refusal_indexer: typo}, error_contains: refusal_indexer}
+  - {name: unknown-publication, patch: {publication: typo}, error_contains: publication}
+  - {name: unknown-native-source, patch: {native_source: typo}, error_contains: native source}
+  - {name: unbounded-malformed-source, patch: {native_source: malformed, max_native_reads: 0}, error_contains: max_native_reads}
+  - {name: unknown-pair-member, patch: {want_pair_writes: [typo]}, error_contains: want_pair_writes}
+  - {name: unknown-reason, patch: {want_reason: typo}, error_contains: want_reason}
+  - {name: unknown-lane, patch: {want_lane: typo}, error_contains: want_lane}
+  - {name: file-adapter-requires-behind, patch: {file_adapter: current}, error_contains: file_adapter}
+  - {name: refusal-indexer-requires-refusal, patch: {refusal_indexer: behind}, error_contains: refusal_indexer}
+  - {name: refusal-requires-indexer, patch: {refusal: strict_capture_refused}, error_contains: refusal_indexer}
+  - {name: read-bound-requires-malformed-source, patch: {max_native_reads: 2}, error_contains: max_native_reads}
+  - {name: negative-second-source-reads, patch: {second_source_reads: -1}, error_contains: second_source_reads}
+  - {name: negative-capture-revision, patch: {want_capture_revision: -1}, error_contains: want_capture_revision}
+  - {name: retained-unknown-requires-claude, patch: {harness: strike, retained_unknown: true}, error_contains: retained_unknown}
+  - {name: retained-unknown-conflicts-with-refusal, patch: {retained_unknown: true, refusal: strict_capture_refused, refusal_indexer: current}, error_contains: retained_unknown}
+  - {name: oversized-record-needs-limit, patch: {oversized_record_bytes: 4096}, error_contains: oversized_record_bytes}
+  - {name: oversized-record-must-exceed-limit, patch: {record_limit_bytes: 2048, oversized_record_bytes: 1024}, error_contains: oversized_record_bytes}

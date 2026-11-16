@@ -88,6 +88,16 @@ CREATE TABLE ingest_run_outcomes (
 CREATE INDEX idx_ingest_run_outcomes_run ON ingest_run_outcomes(run_id, id);
 `
 
+// Both legacy builders start with an empty availability ledger. Restore the
+// pre-lane shape before stamping a version earlier than the lane migration.
+const undoSourceDiagnosticLanesScript = `
+DROP TABLE session_source_unavailability;
+CREATE TABLE session_source_unavailability (
+ session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
+ reason TEXT NOT NULL CHECK (reason IN ('original-source-unavailable-no-usable-saved-copy','original-source-present-record-unusable'))
+) STRICT;
+`
+
 // BuildCleanV75Store writes a real, clean version-75 store at path: it opens
 // the current schema (so every table, view, and trigger is the shipped
 // shape), seeds one session entry through the live triggers, then undoes
@@ -121,7 +131,7 @@ func BuildCleanV75Store(t *testing.T, path string) {
 			t.Errorf("close the v75 store: %v", err)
 		}
 	}()
-	if err := sqlitex.ExecuteScript(conn, legacySearchIndexScript+undoImportProfileScript+`
+	if err := sqlitex.ExecuteScript(conn, legacySearchIndexScript+undoImportProfileScript+undoSourceDiagnosticLanesScript+`
 INSERT INTO session_entries_fts(session_entries_fts) VALUES('rebuild');
 DROP TABLE pending_recounts;
 PRAGMA user_version = 75;`, nil); err != nil {
@@ -162,8 +172,8 @@ func BuildRecountOwedHeadStore(t *testing.T, path string) {
 }
 
 // BuildQuickV78Store writes a real version-78 store that holds no session:
-// the current schema with what migration v79 adds undone, stamped 78. Its
-// upgrade plan contains only quick steps, and a real upgrade finishes it.
+// the current schema with migrations v79 and v81 undone, stamped 78. Its
+// availability ledger is empty, so its upgrade plan contains only quick steps.
 // Every store below 78 plans step 78, which copies the session tables and is
 // long, so this is the quick behind store an entry-point policy test needs.
 func BuildQuickV78Store(t *testing.T, path string) {
@@ -184,7 +194,7 @@ func BuildQuickV78Store(t *testing.T, path string) {
 			t.Errorf("close the v78 store: %v", err)
 		}
 	}()
-	if err := sqlitex.ExecuteScript(conn, undoImportProfileScript+`
+	if err := sqlitex.ExecuteScript(conn, undoImportProfileScript+undoSourceDiagnosticLanesScript+`
 PRAGMA user_version = 78;`, nil); err != nil {
 		t.Fatalf("restore the v78 shape: %v", err)
 	}

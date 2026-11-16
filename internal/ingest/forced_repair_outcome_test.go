@@ -24,19 +24,22 @@ var forcedRepairOutcomeFixtureData []byte
 type forcedRepairOutcomeFixtures struct {
 	Required []string `yaml:"required_names"`
 	Cases    []struct {
-		Name            string `yaml:"name"`
-		Command         string `yaml:"command"`
-		Source          string `yaml:"source"`
-		StoredPair      string `yaml:"stored_pair"`
-		Since           string `yaml:"since"`
-		Force           bool   `yaml:"force"`
-		CompletedIndex  bool   `yaml:"completed_index"`
-		WantErrors      bool   `yaml:"want_errors"`
-		WantIndexed     int    `yaml:"want_indexed"`
-		WantUpdated     int    `yaml:"want_updated"`
-		WantDiagnostics int    `yaml:"want_diagnostics"`
-		WantPromise     string `yaml:"want_promise"`
-		WantMentions    string `yaml:"want_mentions"`
+		Name             string `yaml:"name"`
+		Command          string `yaml:"command"`
+		Source           string `yaml:"source"`
+		StoredPair       string `yaml:"stored_pair"`
+		Since            string `yaml:"since"`
+		Force            bool   `yaml:"force"`
+		CompletedIndex   bool   `yaml:"completed_index"`
+		WantErrors       bool   `yaml:"want_errors"`
+		WantIndexed      int    `yaml:"want_indexed"`
+		WantUpdated      int    `yaml:"want_updated"`
+		WantDiagnostics  int    `yaml:"want_diagnostics"`
+		WantPair         int    `yaml:"want_pair"`
+		WantContent      int    `yaml:"want_content"`
+		WantPromise      string `yaml:"want_promise"`
+		WantMentions     string `yaml:"want_mentions"`
+		WantPairMentions string `yaml:"want_pair_mentions"`
 		// WantContentPromise pins the wording of the stored-content lane's own
 		// report, which is a different message from the pair lane's. It is
 		// asserted on the content-recovery diagnostic itself, so reverting that
@@ -113,6 +116,12 @@ func TestForcedRepairOutcomeFailsEveryUnroutedShape(t *testing.T) {
 			if fixture.WantMentions == "" {
 				t.Fatalf("fixture %s asserts no diagnostic text", fixture.Name)
 			}
+		}
+		if fixture.WantPair+fixture.WantContent != fixture.WantDiagnostics {
+			t.Fatalf("fixture %s: pair and content report counts do not add up to %d", fixture.Name, fixture.WantDiagnostics)
+		}
+		if fixture.WantPair > 0 && fixture.WantPairMentions == "" {
+			t.Fatalf("fixture %s does not specify the pair diagnostic wording", fixture.Name)
 		}
 		switch fixture.WantContentPromise {
 		case "", "serving", "neutral":
@@ -222,15 +231,23 @@ func TestForcedRepairOutcomeFailsEveryUnroutedShape(t *testing.T) {
 				t.Fatalf("%s: %v", fixture.Command, err)
 			}
 
-			// Harvest reports the pair diagnostic itself. Reindex runs stored-content
-			// recovery first, so the stored-content lane is the one that names a
-			// missing or malformed source there, and the pair lane stays quiet for
-			// that same cause. Whichever lane carries it, the wording is the same
-			// contract, so the text is asserted on the diagnostic that states it and
-			// the total is asserted separately.
+			// Both lanes own their reports regardless of which stage runs first.
 			reported := sourceUnavailableDiagnostics(result, id)
 			if len(reported) != fixture.WantDiagnostics {
 				t.Fatalf("the unavailable source was reported %d times, want %d: %+v", len(reported), fixture.WantDiagnostics, result.Diagnostics)
+			}
+			pair := typedSessionDiagnostics(result, id, ingest.OutcomeReasonPairRepairUnavailable.Code())
+			content := typedSessionDiagnostics(result, id, ingest.OutcomeReasonContentRecoveryUnavailable.Code())
+			if len(pair) != fixture.WantPair || len(content) != fixture.WantContent {
+				t.Fatalf("pair/content reports = %d/%d, want %d/%d: %+v", len(pair), len(content), fixture.WantPair, fixture.WantContent, reported)
+			}
+			for _, diagnostic := range reported {
+				if diagnostic.Remediation == "" || !strings.Contains(diagnosticText(diagnostic), id.String()) {
+					t.Fatalf("diagnostic must name its session and remediation: %+v", diagnostic)
+				}
+			}
+			if fixture.WantPair > 0 && !strings.Contains(diagnosticText(pair[0]), fixture.WantPairMentions) {
+				t.Fatalf("pair diagnostic did not name %q: %+v", fixture.WantPairMentions, pair[0])
 			}
 			if fixture.WantDiagnostics > 0 {
 				var reporting []ingest.DiagnosticEntry
