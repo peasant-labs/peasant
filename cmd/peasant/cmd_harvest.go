@@ -513,6 +513,16 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 		restoreLogger = func() { slog.SetDefault(slog.New(orig)) }
 	}
 	stopProgress := func() {
+		// Early store/rebuild failures return before executeHarvest can finish
+		// the renderer. Join it here too, so the command's error is printed
+		// only after the terminal is released. Finish is idempotent when the
+		// pipeline already supplied its own final outcome.
+		outcome := ingestprogress.FinalFailed
+		if ctx.Err() != nil {
+			outcome = ingestprogress.FinalCanceled
+		}
+		renderer.Finish(ingestprogress.FinalMsg{At: time.Now(), Snapshot: progState.Snapshot(), Outcome: outcome})
+		renderer.Wait()
 		renderer.Clear()
 		if restoreLogger != nil {
 			restoreLogger()
@@ -535,7 +545,7 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 	// place an already-stored session on the branch the setup tree lists it under.
 	var storedSessions ingest.KnownSessionIndex
 	if !skipDB {
-		db, err := openRunStore(cmd, flags.dryRun, string(resolvedOutput), cfg.Write)
+		db, err := openRunStore(cmd, flags.dryRun, string(resolvedOutput), cfg.Write, storeUpgradeProgressPlain)
 		if err != nil {
 			return fmt.Errorf("open analytics store: %w", err)
 		}
@@ -545,7 +555,12 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 		// keeps the state crash-safe. Skipped on dry runs, which must not
 		// write.
 		if !flags.dryRun {
-			if _, err := db.EnsureSearchIndexHealthy(ctx); err != nil {
+			// A flagged index is rebuilt before any harvest work. The rebuild
+			// reports through the same upgrade step events as the explicit
+			// upgrade. The renderer inserts these lines above its live block,
+			// or writes plain lines directly when no terminal is mounted.
+			searchPrinter := newStoreUpgradeLinePrinter(renderer)
+			if _, err := db.EnsureSearchIndexHealthyWithProgress(ctx, searchPrinter.event); err != nil {
 				return fmt.Errorf("heal the flagged search index: %w", err)
 			}
 		}
@@ -572,7 +587,7 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 		// (no tree), never when the database has rows.
 		if mode == harvestAll && !flags.dryRun {
 			if count, countErr := db.CountSessionsFiltered(ctx, store.SessionListFilter{}); countErr == nil && count == 0 && ingest.RetainedTreeHoldsSessions(fs, string(resolvedOutput)) {
-				fmt.Fprintln(cmd.ErrOrStderr(), "notice: The database is empty, but peasant-sync/ already holds saved sessions. Run `peasant harvest index --all` first to rebuild the database from them. A harvest now reads the harness sources again and overwrites the saved copies.")
+				fmt.Fprintln(renderer, "notice: The database is empty, but peasant-sync/ already holds saved sessions. Run `peasant harvest index --all` first to rebuild the database from them. A harvest now reads the harness sources again and overwrites the saved copies.")
 			}
 		}
 	}

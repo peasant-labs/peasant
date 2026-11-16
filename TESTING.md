@@ -867,7 +867,7 @@ Freeze invocation, or PNG dimension check fails.
 
 ### Contact sheets and evidence review
 
-The harness publishes eight contact sheets under the commit-derived directory
+The harness publishes nine contact sheets under the commit-derived directory
 `out/test/screenshots/peasant-guided-final-<commit>/`:
 
 | File | PNG dimensions | Contents |
@@ -880,6 +880,7 @@ The harness publishes eight contact sheets under the commit-derived directory
 | `ingest-completion.png` | `1800x7000` | Local import completion with the refresh census, unavailable census, actionable warnings, and scrolled next steps. Every state includes both themes and both terminal sizes. |
 | `pull-progress.png` | `1800x3600` | The bulk collective-pull progress bar: running, canceling, and canceled. Every state includes both themes and both terminal sizes. |
 | `discovery-progress.png` | `1800x3600` | The inline kickstart discovery spinner: mid-run and completed file counts with required re-reads, plus a phase-only adapter. Every state includes both themes and both terminal sizes. |
+| `upgrade-progress.png` | `1800x15000` | Store upgrade plans, running steps, and terminal outcomes before, between, during, and after steps. Every state includes both themes and both terminal sizes. |
 
 The selection fixture contains synthetic sessions across multiple harnesses. One session is marked as
 already ingested. One carries scrubbed transcript turns in the store. One carries a scrubbed harness

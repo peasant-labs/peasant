@@ -277,8 +277,7 @@ repair, publication capture and indexing can then report independently.
 ## Progress events
 
 `store.UpgradeOptions.Progress` receives `store.UpgradeEvent` values. This type
-is the contract between the upgrade and whatever shows it; commands print one
-plain line per step today.
+is the contract between the upgrade and whatever shows it.
 
 - Events arrive one at a time, never concurrently.
 - For each step: one `step_started`, zero or more `step_progress`, then one
@@ -286,11 +285,39 @@ plain line per step today.
 - `Index` is the 1-based position of the step and `Total` the number of steps.
 - `Done`, `Of` and `Unit` count the step's work when the step can count
   (`Unit` is `sessions` or `bytes`); they are zero and empty otherwise.
-- `WALBytes` is how much the write-ahead log grew during the step.
+- `WALBytes` is the write-ahead log file's net growth while the step ran. It
+  is not bytes written, and it is not a peak: a reused log can read zero while
+  work is underway, and a checkpoint inside the step can shrink the file.
 - `Elapsed` is the time since the step started.
 
 A running step sends a `step_progress` event every two seconds with its elapsed
 time and log growth, and one whenever its own count moves.
+
+At a terminal, the upgrade runs the inline progress child in
+`internal/tui/upgradeprogress` before the command's own program starts. It
+names the plan, the current step and what remains, and shows:
+
+- a counted bar with done/total and an estimate for a step that reports a
+  count, such as the turn-count fill or a recount;
+- a spinner, elapsed time and the write-ahead log's growth for a long step
+  that cannot report a count, such as the search index rebuild or the table
+  copies. No bar is drawn for it: a fraction would be a guess.
+
+The search index rebuild is one FTS5 statement and cannot report a position
+part way through. A batched form that deleted the postings and re-inserted them
+in pages was measured against it on a synthetic 20.7 MB corpus: 1.64 times the
+one-statement rebuild at 512-row pages and 1.22 times at 16384-row pages,
+slower in every paired run. It is therefore not used, and the step shows no
+fraction. The rebuild observes cancellation at its boundaries; a cancel that
+arrives during the statement rolls back when the statement returns.
+
+A command that already owns the terminal with its own progress program, such
+as `peasant harvest`, prints plain lines instead of mounting a second inline
+program. Off a terminal, every command prints one line when a step starts, at
+most one progress line per step every five seconds, and one line when a step
+finishes. The search index rebuild that harvest runs at startup when the
+rebuild flag is set reports through the same events and plain lines, so it is
+no longer silent.
 
 ## Measuring
 

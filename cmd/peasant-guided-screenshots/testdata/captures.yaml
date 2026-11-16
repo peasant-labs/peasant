@@ -45,6 +45,11 @@ sheets:
     title: "mounted kickstart discovery: file counts, completed count, and a phase-only adapter"
     theme: dark
     viewport: {width: 1800, height: 3600}
+  - name: upgrade-progress
+    kind: upgrade-progress
+    title: "mounted store upgrade progress: plan, running, stopped, refused, failed and done in both themes"
+    theme: dark
+    viewport: {width: 1800, height: 15000}
 
 completion:
   new: 2
@@ -593,3 +598,98 @@ discoveryProgressCaptures:
   - {name: discovery-progress-phase-only-dark-120x40, state: phase-only, theme: dark, width: 120, height: 40}
   - {name: discovery-progress-phase-only-light-80x24, state: phase-only, theme: light, width: 80, height: 24}
   - {name: discovery-progress-phase-only-light-120x40, state: phase-only, theme: light, width: 120, height: 40}
+
+upgradeProgressStates:
+  - key: plan-quick-only
+    wantContains: [upgrading the local store, "schema 71 → 74", "step 1 of 3", "add the model reference table", "○"]
+    wantAbsent: ["█", "estimate", "finished 7 step(s)"]
+  - key: plan-with-long-step-before-start
+    wantContains: [upgrading the local store, "schema 69 → 76", "step 6 of 7", "widen entry types and rebuild search", "long", "a precise fraction is not available"]
+    wantAbsent: ["█", "estimate"]
+  - key: running-uncounted-step
+    wantContains: ["step 6 of 7", "41s elapsed", "write-ahead log grew 12.5 MiB", "●"]
+    wantAbsent: [estimate, "█"]
+  - key: running-counted-step
+    wantContains: ["step 5 of 7", "13902/20616", sessions, estimate, "3m5s"]
+    wantAbsent: ["write-ahead log grew"]
+  - key: done
+    wantContains: ["finished 7 step(s) in 28s", "schema 69 → 76", "✓"]
+    wantAbsent: ["ctrl+c rolls back", "stopped by user"]
+  - key: stopped-by-user
+    wantContains: ["stopped by user", "running step rolled back", "step 6 of 7", "✗"]
+    wantAbsent: ["ctrl+c rolls back", "failed:"]
+  - key: refused-low-disk
+    wantContains: ["refused: not enough free disk", "nothing was changed", "step 1 of 7"]
+    wantAbsent: ["ctrl+c rolls back", "finished 7 step(s)"]
+  - key: failed-step
+    wantContains: ["failed: the running step rolled back", "step 6 of 7", "✗"]
+    wantAbsent: ["ctrl+c rolls back", "stopped by user"]
+  - key: failed-before-start
+    wantContains: ["failed before any step ran", "nothing was changed", "step 1 of 7"]
+    wantAbsent: ["rolled back", "ctrl+c rolls back"]
+  - key: stopped-before-start
+    wantContains: ["stopped before any step ran", "nothing was changed", "step 1 of 7"]
+    wantAbsent: ["rolled back", "ctrl+c rolls back"]
+  - key: stopped-between-steps
+    wantContains: ["stopped before the next step", "5 step(s) finished and are kept", "step 6 of 7"]
+    wantAbsent: ["rolled back", "nothing was changed"]
+  - key: failed-between-steps
+    wantContains: ["failed before the next step", "1 step(s) finished and are kept", "step 2 of 7"]
+    wantAbsent: ["rolled back", "nothing was changed"]
+  - key: failed-after-all-steps
+    wantContains: ["all 7 step(s) committed", "the store is at schema 76", "the command then failed", "opaque", "identifier data migration"]
+    wantAbsent: ["rolled back", "nothing was changed"]
+
+upgradeProgressCaptures:
+  - {name: upgrade-progress-plan-quick-only-dark-80x24, state: plan-quick-only, theme: dark, width: 80, height: 24}
+  - {name: upgrade-progress-plan-quick-only-dark-120x40, state: plan-quick-only, theme: dark, width: 120, height: 40}
+  - {name: upgrade-progress-plan-quick-only-light-80x24, state: plan-quick-only, theme: light, width: 80, height: 24}
+  - {name: upgrade-progress-plan-quick-only-light-120x40, state: plan-quick-only, theme: light, width: 120, height: 40}
+  - {name: upgrade-progress-plan-with-long-step-before-start-dark-80x24, state: plan-with-long-step-before-start, theme: dark, width: 80, height: 24}
+  - {name: upgrade-progress-plan-with-long-step-before-start-dark-120x40, state: plan-with-long-step-before-start, theme: dark, width: 120, height: 40}
+  - {name: upgrade-progress-plan-with-long-step-before-start-light-80x24, state: plan-with-long-step-before-start, theme: light, width: 80, height: 24}
+  - {name: upgrade-progress-plan-with-long-step-before-start-light-120x40, state: plan-with-long-step-before-start, theme: light, width: 120, height: 40}
+  - {name: upgrade-progress-running-uncounted-step-dark-80x24, state: running-uncounted-step, theme: dark, width: 80, height: 24}
+  - {name: upgrade-progress-running-uncounted-step-dark-120x40, state: running-uncounted-step, theme: dark, width: 120, height: 40}
+  - {name: upgrade-progress-running-uncounted-step-light-80x24, state: running-uncounted-step, theme: light, width: 80, height: 24}
+  - {name: upgrade-progress-running-uncounted-step-light-120x40, state: running-uncounted-step, theme: light, width: 120, height: 40}
+  - {name: upgrade-progress-running-counted-step-dark-80x24, state: running-counted-step, theme: dark, width: 80, height: 24}
+  - {name: upgrade-progress-running-counted-step-dark-120x40, state: running-counted-step, theme: dark, width: 120, height: 40}
+  - {name: upgrade-progress-running-counted-step-light-80x24, state: running-counted-step, theme: light, width: 80, height: 24}
+  - {name: upgrade-progress-running-counted-step-light-120x40, state: running-counted-step, theme: light, width: 120, height: 40}
+  - {name: upgrade-progress-done-dark-80x24, state: done, theme: dark, width: 80, height: 24}
+  - {name: upgrade-progress-done-dark-120x40, state: done, theme: dark, width: 120, height: 40}
+  - {name: upgrade-progress-done-light-80x24, state: done, theme: light, width: 80, height: 24}
+  - {name: upgrade-progress-done-light-120x40, state: done, theme: light, width: 120, height: 40}
+  - {name: upgrade-progress-stopped-by-user-dark-80x24, state: stopped-by-user, theme: dark, width: 80, height: 24}
+  - {name: upgrade-progress-stopped-by-user-dark-120x40, state: stopped-by-user, theme: dark, width: 120, height: 40}
+  - {name: upgrade-progress-stopped-by-user-light-80x24, state: stopped-by-user, theme: light, width: 80, height: 24}
+  - {name: upgrade-progress-stopped-by-user-light-120x40, state: stopped-by-user, theme: light, width: 120, height: 40}
+  - {name: upgrade-progress-refused-low-disk-dark-80x24, state: refused-low-disk, theme: dark, width: 80, height: 24}
+  - {name: upgrade-progress-refused-low-disk-dark-120x40, state: refused-low-disk, theme: dark, width: 120, height: 40}
+  - {name: upgrade-progress-refused-low-disk-light-80x24, state: refused-low-disk, theme: light, width: 80, height: 24}
+  - {name: upgrade-progress-refused-low-disk-light-120x40, state: refused-low-disk, theme: light, width: 120, height: 40}
+  - {name: upgrade-progress-failed-step-dark-80x24, state: failed-step, theme: dark, width: 80, height: 24}
+  - {name: upgrade-progress-failed-step-dark-120x40, state: failed-step, theme: dark, width: 120, height: 40}
+  - {name: upgrade-progress-failed-step-light-80x24, state: failed-step, theme: light, width: 80, height: 24}
+  - {name: upgrade-progress-failed-step-light-120x40, state: failed-step, theme: light, width: 120, height: 40}
+  - {name: upgrade-progress-failed-before-start-dark-80x24, state: failed-before-start, theme: dark, width: 80, height: 24}
+  - {name: upgrade-progress-failed-before-start-dark-120x40, state: failed-before-start, theme: dark, width: 120, height: 40}
+  - {name: upgrade-progress-failed-before-start-light-80x24, state: failed-before-start, theme: light, width: 80, height: 24}
+  - {name: upgrade-progress-failed-before-start-light-120x40, state: failed-before-start, theme: light, width: 120, height: 40}
+  - {name: upgrade-progress-stopped-before-start-dark-80x24, state: stopped-before-start, theme: dark, width: 80, height: 24}
+  - {name: upgrade-progress-stopped-before-start-dark-120x40, state: stopped-before-start, theme: dark, width: 120, height: 40}
+  - {name: upgrade-progress-stopped-before-start-light-80x24, state: stopped-before-start, theme: light, width: 80, height: 24}
+  - {name: upgrade-progress-stopped-before-start-light-120x40, state: stopped-before-start, theme: light, width: 120, height: 40}
+  - {name: upgrade-progress-stopped-between-steps-dark-80x24, state: stopped-between-steps, theme: dark, width: 80, height: 24}
+  - {name: upgrade-progress-stopped-between-steps-dark-120x40, state: stopped-between-steps, theme: dark, width: 120, height: 40}
+  - {name: upgrade-progress-stopped-between-steps-light-80x24, state: stopped-between-steps, theme: light, width: 80, height: 24}
+  - {name: upgrade-progress-stopped-between-steps-light-120x40, state: stopped-between-steps, theme: light, width: 120, height: 40}
+  - {name: upgrade-progress-failed-between-steps-dark-80x24, state: failed-between-steps, theme: dark, width: 80, height: 24}
+  - {name: upgrade-progress-failed-between-steps-dark-120x40, state: failed-between-steps, theme: dark, width: 120, height: 40}
+  - {name: upgrade-progress-failed-between-steps-light-80x24, state: failed-between-steps, theme: light, width: 80, height: 24}
+  - {name: upgrade-progress-failed-between-steps-light-120x40, state: failed-between-steps, theme: light, width: 120, height: 40}
+  - {name: upgrade-progress-failed-after-all-steps-dark-80x24, state: failed-after-all-steps, theme: dark, width: 80, height: 24}
+  - {name: upgrade-progress-failed-after-all-steps-dark-120x40, state: failed-after-all-steps, theme: dark, width: 120, height: 40}
+  - {name: upgrade-progress-failed-after-all-steps-light-80x24, state: failed-after-all-steps, theme: light, width: 80, height: 24}
+  - {name: upgrade-progress-failed-after-all-steps-light-120x40, state: failed-after-all-steps, theme: light, width: 120, height: 40}

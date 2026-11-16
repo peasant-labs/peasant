@@ -33,18 +33,21 @@ import (
 //	r.Wait()            // blocks until renderer goroutine exits
 //	r.Clear()           // erase progress lines before printing final summary
 type progressProgram struct {
-	w        io.Writer
-	input    io.Reader
-	state    *ingest.ProgressState
-	anim     *animation.Animation
-	isTTY    bool
-	theme    theme.Theme
-	wg       sync.WaitGroup
-	cancel   context.CancelFunc
-	errMu    sync.Mutex
-	err      error
-	finish   chan ingestprogress.FinalMsg
-	stopOnce sync.Once
+	w            io.Writer
+	input        io.Reader
+	state        *ingest.ProgressState
+	anim         *animation.Animation
+	isTTY        bool
+	theme        theme.Theme
+	wg           sync.WaitGroup
+	cancel       context.CancelFunc
+	errMu        sync.Mutex
+	err          error
+	finish       chan ingestprogress.FinalMsg
+	stopOnce     sync.Once
+	programReady chan struct{}
+	runDone      chan struct{}
+	program      *tea.Program
 }
 
 type harvestPipeline interface {
@@ -119,13 +122,15 @@ func newProgressProgram(w io.Writer, state *ingest.ProgressState, anim *animatio
 		input = os.Stdin
 	}
 	r := &progressProgram{
-		w:      w,
-		input:  input,
-		state:  state,
-		anim:   anim,
-		isTTY:  isTTY,
-		theme:  theme.New(theme.ModeDark),
-		finish: make(chan ingestprogress.FinalMsg, 1),
+		w:            w,
+		input:        input,
+		state:        state,
+		anim:         anim,
+		isTTY:        isTTY,
+		theme:        theme.New(theme.ModeDark),
+		finish:       make(chan ingestprogress.FinalMsg, 1),
+		programReady: make(chan struct{}),
+		runDone:      make(chan struct{}),
 	}
 	if len(cancel) > 0 {
 		r.cancel = cancel[0]
@@ -141,6 +146,7 @@ func newProgressProgram(w io.Writer, state *ingest.ProgressState, anim *animatio
 // without a startup race.
 func (r *progressProgram) Run(ctx context.Context) {
 	defer r.wg.Done()
+	defer close(r.runDone)
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -157,6 +163,8 @@ func (r *progressProgram) Run(ctx context.Context) {
 		tea.WithFPS(progressProgramFPS),
 		tea.WithoutSignalHandler(),
 	)
+	r.program = program
+	close(r.programReady)
 	finished := make(chan struct{})
 	watcherDone := make(chan struct{})
 	go func() {
@@ -189,6 +197,22 @@ func (r *progressProgram) Run(ctx context.Context) {
 	}
 }
 
+// Write inserts a line above the live progress block. When no terminal
+// renderer is mounted, the original writer keeps the plain streaming path.
+// Send stops waiting when Bubble Tea exits, so a failed renderer cannot hold
+// the harvest or its store lock.
+func (r *progressProgram) Write(p []byte) (int, error) {
+	if !r.isTTY {
+		return r.w.Write(p)
+	}
+	select {
+	case <-r.programReady:
+		r.program.Send(tea.Printf("%s", string(p))())
+	case <-r.runDone:
+	}
+	return len(p), nil
+}
+
 func (r *progressProgram) newModel(ctx context.Context, startedAt time.Time) harvestprogress.Model {
 	return harvestprogress.New(harvestprogress.Options{Progress: r.state, Theme: r.theme, Animation: r.anim, StartedAt: startedAt, Cancel: r.cancel, ContextErr: ctx.Err})
 }
@@ -219,3 +243,4 @@ func (r *progressProgram) Clear() {}
 
 var _ harvestPipeline = (*ingest.Pipeline)(nil)
 var _ harvestProgressProgram = (*progressProgram)(nil)
+var _ io.Writer = (*progressProgram)(nil)

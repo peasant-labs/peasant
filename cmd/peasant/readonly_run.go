@@ -109,7 +109,7 @@ func generationStoreOptionsReadOnly(ownedRoot string) ([]store.OpenOption, error
 // honors the user's batch caps instead of the shipped defaults. A dry-run
 // store is opened read-only but with the same target-resolving reader, so its
 // forecast matches a real run; it still changes no file.
-func openRunStore(cmd *cobra.Command, dryRun bool, ownedRoot string, write ingest.WriteConfig) (*store.Store, error) {
+func openRunStore(cmd *cobra.Command, dryRun bool, ownedRoot string, write ingest.WriteConfig, progress storeUpgradeProgressMode) (*store.Store, error) {
 	path := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
 	if dryRun {
 		options, err := generationStoreOptionsReadOnly(ownedRoot)
@@ -127,7 +127,7 @@ func openRunStore(cmd *cobra.Command, dryRun bool, ownedRoot string, write inges
 		return nil, err
 	}
 	options = append(options, store.WithWriteConfig(write))
-	if err := ensureStoreCurrent(cmd, path, storeEntryModeFor(cmd)); err != nil {
+	if err := ensureStoreCurrentWithProgress(cmd, path, storeEntryModeFor(cmd), false, progress); err != nil {
 		return nil, err
 	}
 	return store.Open(path, options...)

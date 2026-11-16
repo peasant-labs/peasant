@@ -12,9 +12,13 @@ import (
 	"syscall"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/tui/theme"
+	"github.com/peasant-labs/peasant/internal/tui/upgradeprogress"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 // storeEntryMode is the class of entry point that is about to open the
@@ -251,9 +255,22 @@ func ensureStoreCurrent(cmd *cobra.Command, dbPath string, mode storeEntryMode) 
 	return ensureStoreCurrentConfirmed(cmd, dbPath, mode, false)
 }
 
+// ensureStoreCurrentPlain is ensureStoreCurrent for a command that already
+// owns the terminal with its own progress program. The upgrade reports plain
+// lines instead of mounting a second inline program over the first.
+func ensureStoreCurrentPlain(cmd *cobra.Command, dbPath string, mode storeEntryMode) error {
+	return ensureStoreCurrentWithProgress(cmd, dbPath, mode, false, storeUpgradeProgressPlain)
+}
+
 // ensureStoreCurrentConfirmed is ensureStoreCurrent for a command that owns
 // the upgrade and takes --confirm.
 func ensureStoreCurrentConfirmed(cmd *cobra.Command, dbPath string, mode storeEntryMode, confirmed bool) error {
+	return ensureStoreCurrentWithProgress(cmd, dbPath, mode, confirmed, storeUpgradeProgressAuto)
+}
+
+// ensureStoreCurrentWithProgress is the one check every entry point runs
+// before it opens the store, with the upgrade's progress renderer chosen.
+func ensureStoreCurrentWithProgress(cmd *cobra.Command, dbPath string, mode storeEntryMode, confirmed bool, progress storeUpgradeProgressMode) error {
 	plan, err := planStoreUpgrade(dbPath)
 	if err != nil {
 		return err
@@ -285,7 +302,12 @@ func ensureStoreCurrentConfirmed(cmd *cobra.Command, dbPath string, mode storeEn
 	case storeUpgradeRun:
 		writeStoreUpgradePlan(stderr, plan)
 	}
-	return runStoreUpgrade(cmd, dbPath, stderr)
+	if progress == storeUpgradeProgressAuto {
+		_, err = runUpgradeWithProgress(cmd, plan)
+	} else {
+		_, err = runUpgradeWithProgressMode(cmd, plan, progress)
+	}
+	return err
 }
 
 // confirmStoreUpgrade asks one yes/no question on the command's input.
@@ -346,59 +368,247 @@ func storeUpgradeCostLabel(cost store.UpgradeCost) string {
 	}
 }
 
-// runStoreUpgrade runs the upgrade with one plain line per step on stderr.
-// Ctrl-C cancels the running step, which rolls back.
-func runStoreUpgrade(cmd *cobra.Command, dbPath string, stderr io.Writer) error {
+// storeUpgradeProgressMode chooses who renders an upgrade's progress. The
+// set is closed.
+type storeUpgradeProgressMode string
+
+const (
+	// storeUpgradeProgressAuto mounts the inline progress child on a terminal
+	// and prints plain lines otherwise.
+	storeUpgradeProgressAuto storeUpgradeProgressMode = "auto"
+	// storeUpgradeProgressPlain prints plain lines even on a terminal because
+	// the command already owns it with its own progress program.
+	storeUpgradeProgressPlain storeUpgradeProgressMode = "plain"
+)
+
+// allStoreUpgradeProgressModes is the closed progress-mode set.
+var allStoreUpgradeProgressModes = []storeUpgradeProgressMode{storeUpgradeProgressAuto, storeUpgradeProgressPlain}
+
+// newStoreUpgradeProgressMode validates a raw progress mode at an input
+// boundary.
+func newStoreUpgradeProgressMode(raw string) (storeUpgradeProgressMode, error) {
+	for _, mode := range allStoreUpgradeProgressModes {
+		if string(mode) == raw {
+			return mode, nil
+		}
+	}
+	return "", fmt.Errorf("store upgrade progress mode %q is outside the closed set %v; the upgrade cannot choose a renderer; use one of the listed modes", raw, allStoreUpgradeProgressModes)
+}
+
+// runUpgradeWithProgress runs the planned upgrade with its progress rendered:
+// the inline progress child on a terminal, plain lines otherwise. It is the
+// one caller of store.Upgrade for an entry point that opens the store.
+func runUpgradeWithProgress(cmd *cobra.Command, plan store.UpgradePlan) (store.UpgradeReport, error) {
+	return runUpgradeWithProgressMode(cmd, plan, storeUpgradeProgressAuto)
+}
+
+func runUpgradeWithProgressMode(cmd *cobra.Command, plan store.UpgradePlan, progress storeUpgradeProgressMode) (store.UpgradeReport, error) {
+	stderr := io.Writer(os.Stderr)
+	if cmd != nil {
+		stderr = cmd.ErrOrStderr()
+	}
 	parent := signalParentContext(cmd)
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	options := store.UpgradeOptions{
+		Notices: stderr,
+		Consent: store.PromptMigrationConsentOnTTY(),
+	}
 	started := time.Now()
-	report, err := upgradeStore(ctx, dbPath, store.UpgradeOptions{
-		Progress: storeUpgradeLinePrinter(stderr),
-		Notices:  stderr,
-		Consent:  store.PromptMigrationConsentOnTTY(),
-	})
-	if err != nil {
-		return err
+	if !shouldMountUpgradeProgress(progress, isTerminalWriter(stderr), plan.DBPath) {
+		printer := newStoreUpgradeLinePrinter(stderr)
+		options.Progress = printer.event
+		report, err := upgradeStore(ctx, plan.DBPath, options)
+		if err != nil {
+			return report, err
+		}
+		if len(report.Steps) > 0 {
+			fmt.Fprintf(stderr, "store upgrade finished: schema %d to %d, %d step(s) in %s\n",
+				report.From, report.To, len(report.Steps), time.Since(started).Round(time.Millisecond))
+		}
+		return report, nil
 	}
-	if len(report.Steps) > 0 {
-		fmt.Fprintf(stderr, "store upgrade finished: schema %d to %d, %d step(s) in %s\n",
-			report.From, report.To, len(report.Steps), time.Since(started).Round(time.Millisecond))
-	}
-	return nil
+	return runUpgradeProgressProgram(ctx, stderr, plan, options, storeUpgradeTheme(cmd))
 }
 
-// storeUpgradeProgressLineEvery is the least time between two progress
-// lines of one running step.
-const storeUpgradeProgressLineEvery = 10 * time.Second
+// isTerminalWriter reports whether w is an interactive terminal.
+func isTerminalWriter(w io.Writer) bool {
+	file, ok := w.(*os.File)
+	return ok && term.IsTerminal(int(file.Fd()))
+}
+
+// needsMigrationConsent is the read-only gate the terminal progress path runs
+// before it mounts the program. A pending one-time migration prompt writes to
+// the terminal directly, so mounting first would let the next redraw erase the
+// prompt while it is being answered. A variable so a test can exercise both
+// answers without a real store.
+var needsMigrationConsent = store.NeedsMigrationConsent
+
+// shouldMountUpgradeProgress reports whether the inline program can own the
+// terminal for this upgrade. It refuses when the upgrade still has to ask the
+// one-time migration consent on that same terminal.
+func shouldMountUpgradeProgress(progress storeUpgradeProgressMode, terminal bool, dbPath string) bool {
+	if progress == storeUpgradeProgressPlain || !terminal {
+		return false
+	}
+	consentPending, err := needsMigrationConsent(dbPath)
+	return err == nil && !consentPending
+}
+
+// storeUpgradeTheme resolves the palette for the upgrade progress child from
+// the command's config without opening the store. It follows the same path as
+// the other pre-store terminal surfaces: resolveConfigPath, loadConfig, and
+// themeModeFor. A missing, unreadable, or invalid config falls back to dark,
+// the default the rest of the CLI uses.
+func storeUpgradeTheme(cmd *cobra.Command) theme.Theme {
+	if cfg, err := loadConfig(resolveConfigPath(cmd)); err == nil && cfg != nil {
+		return theme.New(themeModeFor(cfg))
+	}
+	return theme.New(theme.ModeDark)
+}
+
+// newUpgradeProgressModel builds the production progress model. The theme is
+// resolved before the store opens and passed in, so the child renders in the
+// command's configured palette.
+func newUpgradeProgressModel(plan store.UpgradePlan, th theme.Theme) upgradeprogress.Model {
+	return upgradeprogress.New(upgradeprogress.Options{Theme: th, Plan: plan})
+}
+
+// runUpgradeProgressProgram mounts the inline progress child over the
+// upgrade. It occupies only its content rows (no alternate screen) and leaves
+// the terminal's final block in place. Input is disabled so the terminal stays
+// in cooked mode and ctrl+c reaches the command's signal context; the model
+// has no keyboard interaction.
+func runUpgradeProgressProgram(ctx context.Context, out io.Writer, plan store.UpgradePlan, options store.UpgradeOptions, th theme.Theme) (store.UpgradeReport, error) {
+	model := newUpgradeProgressModel(plan, th)
+	if file, ok := out.(*os.File); ok {
+		if width, height, err := term.GetSize(int(file.Fd())); err == nil {
+			model.SetSize(width, height)
+		}
+	}
+	program := tea.NewProgram(upgradeProgramModel{child: model},
+		tea.WithOutput(out),
+		tea.WithInput(nil),
+		tea.WithFPS(progressProgramFPS),
+		tea.WithoutSignalHandler(),
+	)
+	options.Notices = upgradeProgramNoticeWriter{program: program}
+	options.Progress = func(event store.UpgradeEvent) {
+		program.Send(upgradeprogress.EventMsg{Event: event})
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+	report, upgradeErr := upgradeStore(ctx, plan.DBPath, options)
+	program.Send(upgradeprogress.FinalMsg{
+		Report:  report,
+		Outcome: storeUpgradeOutcome(report, upgradeErr),
+		Err:     upgradeErr,
+	})
+	renderErr := <-done
+	if renderErr != nil {
+		fmt.Fprintf(out, "warning: the store upgrade progress renderer failed: %v\n", renderErr)
+	}
+	return report, upgradeErr
+}
+
+// upgradeProgramNoticeWriter inserts notices above the live block instead of
+// writing through the terminal while Bubble Tea owns it.
+type upgradeProgramNoticeWriter struct{ program *tea.Program }
+
+func (w upgradeProgramNoticeWriter) Write(p []byte) (int, error) {
+	// Program.Printf sends on an unguarded channel. Send selects on the
+	// program's cancellation as well, so a stopped renderer cannot strand the
+	// upgrade while it still owns the store lock.
+	w.program.Send(tea.Printf("%s", string(p))())
+	return len(p), nil
+}
+
+var _ io.Writer = upgradeProgramNoticeWriter{}
+
+// upgradeProgramModel adapts the data-only upgrade progress child to Bubble
+// Tea's top-level model. The child owns all state and rendering; this adapter
+// only forwards messages and quits once the final report is applied.
+type upgradeProgramModel struct {
+	child upgradeprogress.Model
+}
+
+func (m upgradeProgramModel) Init() tea.Cmd { return m.child.Init() }
+
+func (m upgradeProgramModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+	var command tea.Cmd
+	m.child, command = m.child.Update(message)
+	if _, final := message.(upgradeprogress.FinalMsg); final {
+		return m, tea.Quit
+	}
+	return m, command
+}
+
+func (m upgradeProgramModel) View() tea.View { return tea.NewView(m.child.View()) }
+
+var _ tea.Model = upgradeProgramModel{}
+
+// storeUpgradeOutcome maps an upgrade's result to the progress child's closed
+// outcome set. Specific refusals and cancellation precede generic failure.
+func storeUpgradeOutcome(report store.UpgradeReport, err error) upgradeprogress.Outcome {
+	if err == nil {
+		return upgradeprogress.OutcomeDone
+	}
+	var disk *store.UpgradeDiskError
+	if errors.As(err, &disk) {
+		return upgradeprogress.OutcomeRefusedLowDisk
+	}
+	if errors.Is(err, store.ErrMigrationRefused) {
+		return upgradeprogress.OutcomeRefusedConsent
+	}
+	var interrupted *store.UpgradeInterruptedError
+	if errors.As(err, &interrupted) || errors.Is(err, context.Canceled) {
+		return upgradeprogress.OutcomeStoppedByUser
+	}
+	return upgradeprogress.OutcomeFailedStep
+}
+
+// storeUpgradeProgressLineEvery is the least time between two progress lines
+// of one running step.
+const storeUpgradeProgressLineEvery = 5 * time.Second
 
 // storeUpgradeLinePrinter renders upgrade events as plain lines: one when a
-// long step starts, at most one every storeUpgradeProgressLineEvery while it
-// runs, and one when any step finishes, with its duration and how much the
-// write-ahead log grew.
-func storeUpgradeLinePrinter(w io.Writer) func(store.UpgradeEvent) {
-	var lastLine time.Time
-	return func(event store.UpgradeEvent) {
-		prefix := fmt.Sprintf("store upgrade %d/%d: %s", event.Index, event.Total, event.Step.Title)
-		switch event.Kind {
-		case store.UpgradeEventStepStarted:
-			lastLine = time.Now()
-			if event.Step.Cost.Long() {
-				fmt.Fprintf(w, "%s: started\n", prefix)
-			}
-		case store.UpgradeEventStepProgress:
-			if time.Since(lastLine) < storeUpgradeProgressLineEvery {
-				return
-			}
-			lastLine = time.Now()
-			counted := ""
-			if event.Unit != store.UpgradeUnitNone && event.Of > 0 {
-				counted = fmt.Sprintf(" %d/%d %s,", event.Done, event.Of, event.Unit)
-			}
-			fmt.Fprintf(w, "%s:%s %s elapsed, %s written to the log\n", prefix, counted, event.Elapsed.Round(time.Second), formatMigrateBytes(event.WALBytes))
-		case store.UpgradeEventStepFinished:
-			fmt.Fprintf(w, "%s: done in %s, %s written to the log\n", prefix, event.Elapsed.Round(time.Millisecond), formatMigrateBytes(event.WALBytes))
+// step starts, at most one progress line per step every
+// storeUpgradeProgressLineEvery, and one when a step finishes. The
+// write-ahead-log number is the log file's net growth since the step started,
+// not bytes written and not a peak; the wording says so.
+type storeUpgradeLinePrinter struct {
+	w    io.Writer
+	now  func() time.Time
+	last map[int]time.Time
+}
+
+func newStoreUpgradeLinePrinter(w io.Writer) *storeUpgradeLinePrinter {
+	return &storeUpgradeLinePrinter{w: w, now: time.Now, last: map[int]time.Time{}}
+}
+
+func (p *storeUpgradeLinePrinter) event(event store.UpgradeEvent) {
+	prefix := fmt.Sprintf("store upgrade %d/%d: %s", event.Index, event.Total, event.Step.Title)
+	switch event.Kind {
+	case store.UpgradeEventStepStarted:
+		p.last[event.Index] = p.now()
+		fmt.Fprintf(p.w, "%s: started\n", prefix)
+	case store.UpgradeEventStepProgress:
+		if last, ok := p.last[event.Index]; ok && p.now().Sub(last) < storeUpgradeProgressLineEvery {
+			return
 		}
+		p.last[event.Index] = p.now()
+		counted := ""
+		if event.Unit != store.UpgradeUnitNone && event.Of > 0 {
+			counted = fmt.Sprintf(" %d/%d %s,", event.Done, event.Of, event.Unit)
+		}
+		fmt.Fprintf(p.w, "%s:%s %s elapsed, write-ahead log grew by %s\n",
+			prefix, counted, event.Elapsed.Round(time.Second), formatMigrateBytes(event.WALBytes))
+	case store.UpgradeEventStepFinished:
+		fmt.Fprintf(p.w, "%s: done in %s, write-ahead log grew by %s\n",
+			prefix, event.Elapsed.Round(time.Millisecond), formatMigrateBytes(event.WALBytes))
 	}
 }
 
