@@ -1,0 +1,14 @@
+version: 1
+ts:
+  roots: [web]
+go:
+  roots: [.]
+schema:
+  module: github.com/peasant-labs/schema
+exempt:
+  - rule: "*"
+    paths:
+      - internal/tui/theme/palette_gen.go
+      - web/src/lib/session-detail/mock-redactions.ts
+      - web/src/lib/share/redaction-policy.generated.ts
+    reason: generated code, not hand-edited

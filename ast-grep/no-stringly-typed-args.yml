@@ -15,5 +15,5 @@ rule:
     - pattern: 'WorkflowDecision{$$$, Reason: "$VAL"}'
     - pattern: 'SendDecisionInput{$$$, Status: "$VAL"}'
     - pattern: 'SendDecisionInput{$$$, Reason: "$VAL"}'
-ignore:
+ignores:
   - "**/vendor/**"

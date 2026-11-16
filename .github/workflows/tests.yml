@@ -34,6 +34,8 @@ on:
       - "scripts/check-module-install/**"
       - "Makefile"
       - "sgconfig.yml"
+      - ".unstring.yaml"
+      - ".unstring-baseline.yaml"
       - "ast-grep/**"
       - "internal/tui/gates/astrules/**"
       - "flake.nix"
@@ -70,6 +72,8 @@ on:
       - "scripts/check-module-install/**"
       - "Makefile"
       - "sgconfig.yml"
+      - ".unstring.yaml"
+      - ".unstring-baseline.yaml"
       - "ast-grep/**"
       - "internal/tui/gates/astrules/**"
       - "flake.nix"
@@ -256,7 +260,7 @@ jobs:
           node-version: 26
 
       - name: Install ast-grep
-        run: npm install --global @ast-grep/cli@0.43.0
+        run: npm install --global @ast-grep/cli@0.51.2
 
       # Cache the Go build + module dirs. The key is namespaced `-go-amd64-`:
       # `runner.os` is `Linux` on the arm64 runner too, so the old shared

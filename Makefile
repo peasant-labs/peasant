@@ -1,8 +1,11 @@
 # Run release-validate's per-distribution snapshot matrix on release pull
 # requests before a tag is minted.
-.PHONY: build run clean web web-stub fmt fmt-check lint check dev docs docs-cli-check docs-open e2e e2e-schema-parity demo nix-vendor-hash guided-screenshots guided-screenshots-test origin-audit origin-audit-test
+.PHONY: build run clean web web-stub fmt fmt-check lint check dev docs docs-cli-check docs-open e2e e2e-schema-parity demo nix-vendor-hash guided-screenshots guided-screenshots-test origin-audit origin-audit-test check-unstring unstring-update
 
 VERSION ?=
+
+# Static guard against stringly-typed values, pinned to the published tool.
+UNSTRING ?= go run github.com/peasant-labs/infra/unstring/cmd/unstring@v0.0.2
 
 define build_peasant_cli
 set -e; \
@@ -103,6 +106,7 @@ check: fmt-check lint docs-cli-check
 	@set -e; \
 	export CHECK_START_NS="$(CHECK_START_NS)"; \
 	ast-grep scan --error=unused-suppression --config sgconfig.yml .; \
+	$(UNSTRING) check; \
 	go test -tags=astgrep $(GORACE_FLAG) ./internal/tui/gates/... ./internal/testkit/astgreprules/...; \
 	go test -tags=projection_negative_seed -run '^(TestThinkingSeedNegativeFailsOnlyDesignatedCases|TestModelProjectionNegativeFailsOnlyDesignatedCase)$$' ./internal/transcript/; \
 	go test -tags=projection_negative_scope -run '^(TestThinkingSeedNegativeFailsOnlyDesignatedCases|TestModelProjectionNegativeFailsOnlyDesignatedCase)$$' ./internal/transcript/; \
@@ -133,6 +137,12 @@ check: fmt-check lint docs-cli-check
 .PHONY: check-harvester-versions
 check-harvester-versions:
 	go run ./scripts/harvester-version-guard -base "$(BASE)" -candidate "$(or $(CANDIDATE),HEAD)"
+
+check-unstring:
+	$(UNSTRING) check
+
+unstring-update:
+	$(UNSTRING) update
 
 # The audited SQLite driver is part of the main module and its normal test plan.
 .PHONY: sqlite-connection-test module-install-check
