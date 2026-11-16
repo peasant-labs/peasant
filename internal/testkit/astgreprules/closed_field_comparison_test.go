@@ -7,10 +7,10 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	regexp "github.com/wasilibs/go-re2"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"testing"
 	"time"
 
