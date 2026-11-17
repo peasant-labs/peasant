@@ -499,20 +499,44 @@ jobs:
             if ($LASTEXITCODE -ne 0) { Write-Host "::warning::web stop exited $LASTEXITCODE" }
           }
 
-  # Post-publish macOS smoke: on final tags, install from the live tap. The tap
-  # publisher is separate, so a stale tap fails this smoke rather than silently
-  # certifying an older package as the current release.
+  # Post-publish macOS smoke: on final tags, install from the live tap.
+  # The tap publisher polls on its own fifteen-minute schedule and peasant holds
+  # no tap credential, so this job waits for the tap to carry the tagged version
+  # before installing. A tap that never catches up still fails the smoke rather
+  # than certifying an older package as the current release.
   macos-cask-smoke:
     name: macos cask smoke (final only)
     needs: publish
     if: github.event_name == 'push' && !contains(github.ref_name, '-rc')
     runs-on: macos-15
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: read
     env:
       TAG: ${{ github.ref_name }}
     steps:
+      - name: Wait for the tap publisher to carry this release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          expected="${TAG#v}"
+          deadline=$((SECONDS + 960))
+          while :; do
+            published="$(gh api -H 'Accept: application/vnd.github.raw' \
+              repos/peasant-labs/homebrew-tap/contents/Casks/peasant.rb 2>/dev/null || true)"
+            if printf '%s' "${published}" | grep -qF "version \"${expected}\""; then
+              echo "the tap serves peasant ${expected}"
+              exit 0
+            fi
+            if [ "${SECONDS}" -ge "${deadline}" ]; then
+              echo "::error::the tap did not publish peasant ${expected} within 16 minutes. The tap publisher runs every 15 minutes; a stale tap fails this smoke rather than certifying an older package as the current release."
+              exit 1
+            fi
+            echo "the tap does not carry ${expected} yet; checking again in 30s"
+            sleep 30
+          done
+
       - name: Tap + install the published cask
         run: |
           set -euxo pipefail
