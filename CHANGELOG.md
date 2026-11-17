@@ -8,7 +8,7 @@ was tagged but not published links to its tag instead.
 
 ## [Unreleased]
 
-## [0.18.0] - 2026-11-15
+## [0.18.0] - 2026-11-16
 
 ### Added
 - `peasant migrate --schema-only` upgrades the store schema and stops before
