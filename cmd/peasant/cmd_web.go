@@ -474,7 +474,15 @@ func stopWeb(port int) error {
 		return fmt.Errorf("cannot tell whether PID %d from %s is the peasant web server on port %d (%v), so nothing was signalled and the file was kept", pid, pidFile, port, probeErr)
 	}
 	if !isServer {
+		gone, goneErr := processGone(pid)
+		if goneErr != nil {
+			return fmt.Errorf("cannot tell whether PID %d from %s is still running (%v), so nothing was signalled and the file was kept", pid, pidFile, goneErr)
+		}
 		os.Remove(pidFile)
+		if gone {
+			fmt.Println("Peasant web dashboard is already stopped")
+			return nil
+		}
 		return fmt.Errorf("stale PID file %s: PID %d is not a peasant web server on port %d, so nothing was signalled; the file was removed. If a server is still running, find it with your process list and stop it there", pidFile, pid, port)
 	}
 	proc, findErr := os.FindProcess(pid)

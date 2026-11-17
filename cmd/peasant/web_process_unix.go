@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 // isPeasantWebServer asks ps for the process's executable and command line
@@ -44,4 +45,17 @@ func isPeasantWebServer(pid, port int) (bool, error) {
 	}
 	argv := append([]string{executable}, strings.Fields(strings.TrimPrefix(line, executable+" "))...)
 	return isWebServerCommandLine(argv, port), nil
+}
+
+// processGone reports whether the PID no longer names a live process. EPERM
+// means the process exists but belongs to another user.
+func processGone(pid int) (bool, error) {
+	err := syscall.Kill(pid, 0)
+	if errors.Is(err, syscall.ESRCH) {
+		return true, nil
+	}
+	if err != nil && !errors.Is(err, syscall.EPERM) {
+		return false, err
+	}
+	return false, nil
 }

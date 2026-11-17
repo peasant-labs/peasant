@@ -34,3 +34,15 @@ func isPeasantWebServer(pid, port int) (bool, error) {
 	}
 	return sameExecutablePath(exe), nil
 }
+
+// processGone reports whether the PID no longer names a live process.
+func processGone(pid int) (bool, error) {
+	_, err := os.Stat(fmt.Sprintf("/proc/%d", pid))
+	if errors.Is(err, fs.ErrNotExist) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return false, nil
+}
