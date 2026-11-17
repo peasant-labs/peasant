@@ -39,8 +39,8 @@ var (
 	_ PreTestStep = StepFmt
 	_ PreTestStep = StepLint
 	_ PreTestStep = StepAstGrepScan
+	_ PreTestStep = StepUnstring
 	_ PreTestStep = StepAstGrepGate
-	_ PreTestStep = StepReleaseGuard
 
 	_ Severity = SeverityReport
 	_ Severity = SeverityFail

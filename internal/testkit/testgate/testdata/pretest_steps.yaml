@@ -7,24 +7,23 @@
 # repository Makefile and asserts the steps run in this order, so a recipe that
 # drops, reorders, or renames a step fails loudly instead of the fixture
 # measuring a step the Makefile no longer runs. The fragment is the recipe's own
-# text, which may use Make variables (release-guard's line, for example, is
-# verbatim; ast-grep-gate-test's carries `$(GORACE_FLAG)`), so it cannot be
-# derived from `program` + `args`.
+# text, which may use Make variables (`$(UNSTRING)` and `$(GORACE_FLAG)`), so
+# it cannot be derived from `program` + `args`.
 #
 # Each step runs alone, under the outer getrusage(RUSAGE_CHILDREN) accumulator,
 # so its wall/user/system are exact.
 #
-# required_names is a deletion-protection manifest: it lists the five step names
+# required_names is a deletion-protection manifest: it lists the step names
 # the table must carry, in execution order. Adding a step never requires editing
 # it; removing one does.
 required_names:
   - fmt
   - lint
   - ast-grep-scan
+  - unstring
   - ast-grep-gate-test
   - projection-negative-seed
   - projection-negative-scope
-  - release-guard
 
 steps:
   # The step keeps its name "fmt" (budget tables key on it); since `check`
@@ -45,6 +44,11 @@ steps:
     args: ["scan", "--error=unused-suppression", "--config", "sgconfig.yml", "."]
     target: check
     fragment: "ast-grep scan --error=unused-suppression --config sgconfig.yml ."
+  - step: unstring
+    program: go
+    args: ["run", "github.com/peasant-labs/infra/unstring/cmd/unstring@v0.0.2", "check"]
+    target: check
+    fragment: "$(UNSTRING) check"
   - step: ast-grep-gate-test
     program: go
     args: ["test", "-race", "-tags=astgrep", "./internal/tui/gates/...", "./internal/testkit/astgreprules/..."]
@@ -60,8 +64,8 @@ steps:
     args: ["test", "-tags=projection_negative_scope", "-run", "^(TestThinkingSeedNegativeFailsOnlyDesignatedCases|TestModelProjectionNegativeFailsOnlyDesignatedCase)$", "./internal/transcript/"]
     target: check
     fragment: "go test -tags=projection_negative_scope -run '^(TestThinkingSeedNegativeFailsOnlyDesignatedCases|TestModelProjectionNegativeFailsOnlyDesignatedCase)$$' ./internal/transcript/"
-  - step: release-guard
-    program: go
-    args: ["run", "github.com/peasant-labs/schema/cmd/release-guard", "check-workflow", "--policy", ".github/release-guard.policy.yml", "--release", ".github/workflows/release.yml"]
-    target: check
-    fragment: "go run github.com/peasant-labs/schema/cmd/release-guard check-workflow --policy .github/release-guard.policy.yml --release .github/workflows/release.yml"
+
+# This check is a separate target, not a `make check` pre-test measurement.
+workflow_check:
+  target: check-workflows
+  fragment: '"$$tmp/release-intent" check-workflows --policy .github/release-queue.policy.yml --dir .github/workflows'

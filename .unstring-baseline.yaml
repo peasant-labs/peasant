@@ -590,7 +590,7 @@ rules:
     internal/e2e/githooks_substrate_e2e_test.go: 1
     internal/e2e/publication_convergence_e2e_test.go: 1
     internal/e2e/publication_convergence_fixture_test.go: 1
-    internal/e2e/release_workflow_contract_test.go: 3
+    internal/e2e/release_workflow_contract_test.go: 2
     internal/e2e/skipgate_e2e_test.go: 2
     internal/e2e/skipgate_seams_test.go: 4
     internal/e2e/village_procdeath_linux_test.go: 1
@@ -861,8 +861,6 @@ rules:
     scripts/profile-index-parser/main.go: 4
     scripts/profile-opencode-native/main.go: 8
     scripts/record-kinds-docgen/main_test.go: 2
-    scripts/release-pr-delta/main.go: 2
-    scripts/release-pr-delta/main_test.go: 8
     third_party/zombiezen-sqlite/shell/shell.go: 1
   go-data-path-literal:
     cmd/peasant-guided-screenshots/contentfit.go: 1
@@ -1065,8 +1063,6 @@ rules:
     scripts/post-merge-evidence/main_test.go: 4
     scripts/profile_push_copy_setup_test.go: 2
     scripts/profile_push_copy_test.go: 2
-    scripts/release-pr-delta/main_test.go: 11
-    scripts/release-pr-delta/release_pr_concurrency_test.go: 4
     scripts/rollup_test.go: 2
   go-endpoint-literal:
     cmd/peasant/browsing_startup_test.go: 2
@@ -1222,7 +1218,6 @@ rules:
     internal/store/migration_v71_reader_test.go: 1
     internal/testutil/village_collectives.go: 1
     internal/village/legacy_people.go: 2
-    scripts/release-pr-delta/main_test.go: 1
     third_party/zombiezen-sqlite/sqlitex/exec_test.go: 4
     web/scripts/visual/seed-transcript-store.go: 1
   go-json-key-assert:
@@ -1263,7 +1258,6 @@ rules:
     internal/store/stored_metadata.go: 1
     internal/testutil/pull_legacy_envelope.go: 3
     internal/tui/ftue/config_test.go: 2
-    scripts/release-pr-delta/main_test.go: 1
   json-body-object:
     web/scripts/visual/inspect-feedback-shoot.mjs: 1
     web/scripts/visual/settings-shoot.mjs: 2

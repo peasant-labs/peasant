@@ -75,7 +75,8 @@ func repoMakefile(t *testing.T) []byte {
 
 // TestPreTestSources_MatchMakefile pins the embedded fixture to the repository
 // Makefile: every step's fragment must appear in its declared target's recipe,
-// in the same order the `check` target executes them.
+// in the same order the `check` target executes them. The standalone workflow
+// check must appear as an exact line in its own target.
 func TestPreTestSources_MatchMakefile(t *testing.T) {
 	file, err := LoadPreTestFixture(preTestFixtureYAML)
 	if err != nil {
@@ -88,7 +89,8 @@ func TestPreTestSources_MatchMakefile(t *testing.T) {
 
 // TestPreTestSources_MutationsAreRejected proves the source check is not
 // vacuous: a fragment absent from its target, a target that does not exist, a
-// fragment in the wrong target, and a reordered step must each fail.
+// fragment in the wrong target, a reordered step, and a misplaced or changed
+// standalone workflow check must each fail.
 func TestPreTestSources_MutationsAreRejected(t *testing.T) {
 	base, err := LoadPreTestFixture(preTestFixtureYAML)
 	if err != nil {
@@ -98,6 +100,16 @@ func TestPreTestSources_MutationsAreRejected(t *testing.T) {
 	file := loadPretestRefMutations(t)
 	for _, m := range file.Mutations {
 		t.Run(m.Name, func(t *testing.T) {
+			if m.Op == "replace-makefile" {
+				if bytes.Count(makefile, []byte(m.Value)) != 1 {
+					t.Fatalf("mutation %q must match exactly one Makefile fragment", m.Name)
+				}
+				mutated := bytes.Replace(makefile, []byte(m.Value), []byte(m.With), 1)
+				if err := validatePreTestSources(base, mutated); err == nil {
+					t.Fatalf("the %s mutation was NOT detected", m.Name)
+				}
+				return
+			}
 			mutated, err := applyPretestRefMutation(base, m)
 			if err != nil {
 				t.Fatalf("apply %s: %v", m.Op, err)
@@ -112,6 +124,17 @@ func TestPreTestSources_MutationsAreRejected(t *testing.T) {
 func applyPretestRefMutation(file PreTestFixture, m pretestRefMutation) (PreTestFixture, error) {
 	out := file
 	out.Steps = append([]PreTestCommand(nil), file.Steps...)
+	if m.Step == file.WorkflowCheck.Target {
+		switch m.Op {
+		case "set-fragment":
+			out.WorkflowCheck.Fragment = m.Value
+		case "set-target":
+			out.WorkflowCheck.Target = m.Value
+		default:
+			return PreTestFixture{}, fmt.Errorf("workflow mutation %q has unknown op %q", m.Name, m.Op)
+		}
+		return out, nil
+	}
 	idx := -1
 	for i, cmd := range out.Steps {
 		if string(cmd.Step) == m.Step {

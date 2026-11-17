@@ -29,8 +29,8 @@ type profileOptions struct {
 	race     bool
 }
 
-// runProfile dispatches the two measurement modes of `profile`: the five
-// pre-test steps (`-pretest`), and the batched LPT profile of one package.
+// runProfile dispatches the two measurement modes of `profile`: the pre-test
+// steps (`-pretest`), and the batched LPT profile of one package.
 func runProfile(opts profileOptions) int {
 	if opts.pretest {
 		return runPreTestProfile(opts)

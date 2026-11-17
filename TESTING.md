@@ -49,13 +49,15 @@ and to prove that every test still runs exactly once across the passes.
 
 ### Pre-test steps
 
-`make check` runs a fixed set of steps before the test passes: fmt, lint, the
-ast-grep scan, the ast-grep key gate, the two tagged projection mutation proofs,
-and the release-workflow guard. Each is measured as its own unit so the pre-test
-wall stays separate from the test wall. The frozen step set lives in
+The measured `make check` pre-test steps are fmt, lint, the ast-grep scan,
+unstring, the ast-grep key gate, and the two tagged projection mutation proofs.
+Each is measured as its own unit so the pre-test wall stays separate from the
+test wall. The frozen step set lives in
 `internal/testkit/testgate/class.go` and is mirrored by
 `internal/testkit/testgate/testdata/pretest_steps.yaml`, which a test resolves
-against the Makefile so a dropped or reordered recipe line fails loudly.
+against the Makefile so a dropped or reordered recipe line fails loudly. The
+workflow policy check is a separate `make check-workflows` target, not a
+pre-test step; the fixture pins its exact recipe line separately.
 
 Lint declares opt-in build tags in `scripts/vet-go.sh` and fails if owned Go sources, including
 untracked files, contain an undeclared custom tag. It runs `go vet` for each tag and compiles its
