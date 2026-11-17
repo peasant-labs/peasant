@@ -21,12 +21,20 @@ import (
 //go:embed testdata/version-probe.yaml
 var versionProbeYAML []byte
 
+type versionProbeTree string
+
+const (
+	versionProbeRegistered  versionProbeTree = "registered"
+	versionProbePreRegistry versionProbeTree = "pre-registry"
+	versionProbeUnreadable  versionProbeTree = "unreadable"
+)
+
 type versionProbeCase struct {
-	Name       string   `yaml:"name"`
-	Tree       string   `yaml:"tree"`
-	Reads      []string `yaml:"reads"`
-	NeverReads []string `yaml:"neverReads"`
-	Error      string   `yaml:"error"`
+	Name       string           `yaml:"name"`
+	Tree       versionProbeTree `yaml:"tree"`
+	Reads      []string         `yaml:"reads"`
+	NeverReads []string         `yaml:"neverReads"`
+	Error      string           `yaml:"error"`
 }
 
 func loadVersionProbeCases(t *testing.T) []versionProbeCase {
@@ -67,12 +75,12 @@ func TestVersionProbeMatchesTheArchivedRevision(t *testing.T) {
 				t.Fatal(err)
 			}
 			switch c.Tree {
-			case "registered":
+			case versionProbeRegistered:
 				if err := os.WriteFile(filepath.Join(ingest, "harvester_versions.go"), []byte("package ingest\n"), 0o600); err != nil {
 					t.Fatal(err)
 				}
-			case "pre-registry":
-			case "unreadable":
+			case versionProbePreRegistry:
+			case versionProbeUnreadable:
 				if err := os.Chmod(ingest, 0); err != nil {
 					t.Fatal(err)
 				}

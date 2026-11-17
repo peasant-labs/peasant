@@ -368,11 +368,14 @@ func TestRefreshRejectsMissingDatabaseHandle(t *testing.T) {
 
 // installFakePeasant copies the stand-in program testdata/fake_peasant/<name>.sh
 // to path as an executable and returns path.
+const fakePeasantFixtureDir = "testdata/fake_peasant"
+
 func installFakePeasant(t *testing.T, name, path string) string {
 	t.Helper()
-	script, err := os.ReadFile(filepath.Join("testdata", "fake_peasant", name+".sh"))
+	scriptPath := filepath.Join(fakePeasantFixtureDir, name+".sh")
+	script, err := os.ReadFile(scriptPath)
 	if err != nil {
-		t.Fatalf("read the %s stand-in for peasant: %v", name, err)
+		t.Fatalf("read the %s stand-in for peasant from %s: %v", name, scriptPath, err)
 	}
 	if err := os.WriteFile(path, script, 0o700); err != nil {
 		t.Fatalf("install the %s stand-in for peasant at %s: %v", name, path, err)

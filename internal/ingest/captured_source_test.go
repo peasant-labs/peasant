@@ -168,7 +168,7 @@ func testCapturedFileOrdinaryLifecycle(t *testing.T, fixture capturedSourceCase)
 	}
 	refused := false
 	for _, diagnostic := range failed.Diagnostics {
-		if diagnostic.ErrorType == "adapter_refresh_unavailable" && strings.Contains(diagnostic.Message, fixture.SessionID) && strings.Contains(diagnostic.Message, "malformed") && diagnostic.Location != "" && diagnostic.Remediation != "" {
+		if diagnostic.ErrorType == ingest.OutcomeReasonAdapterRefreshUnavailable.Code() && strings.Contains(diagnostic.Message, fixture.SessionID) && strings.Contains(diagnostic.Message, "malformed") && diagnostic.Location != "" && diagnostic.Remediation != "" {
 			refused = true
 		}
 	}
@@ -238,7 +238,8 @@ func TestStoreFreeCapturedFileLifecycle(t *testing.T) {
 			if err := os.MkdirAll(filepath.Dir(child), 0o700); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(child, []byte("retained"), 0o600); err != nil {
+			retainedContent := []byte("retained")
+			if err := os.WriteFile(child, retainedContent, 0o600); err != nil {
 				t.Fatal(err)
 			}
 			if repeat := run(); repeat.Summary.Unchanged != 1 {
@@ -273,7 +274,7 @@ func TestStoreFreeCapturedFileLifecycle(t *testing.T) {
 			if err != nil || !bytes.Equal(before, after) {
 				t.Fatalf("no-op rewrote metadata: %v", err)
 			}
-			if data, err := os.ReadFile(child); err != nil || string(data) != "retained" {
+			if data, err := os.ReadFile(child); err != nil || !bytes.Equal(data, retainedContent) {
 				t.Fatalf("child lost: %v", err)
 			}
 			if _, err := os.Stat(filepath.Join(oldDir, fixture.SessionID+"--metadata.json")); !os.IsNotExist(err) {

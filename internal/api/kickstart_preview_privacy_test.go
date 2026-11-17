@@ -22,6 +22,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/onboarding"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
+	"github.com/peasant-labs/schema/route"
 )
 
 //go:embed testdata/kickstart_preview_privacy.yaml
@@ -39,24 +40,32 @@ type previewPrivacySecrets struct {
 	Cursor      string `yaml:"cursor"`
 }
 
+type privacyReaderMode string
+
+const (
+	privacyReaderSuccess privacyReaderMode = "success"
+	privacyReaderFail    privacyReaderMode = "fail"
+	privacyReaderCancel  privacyReaderMode = "cancel"
+)
+
 type previewPrivacyCase struct {
-	Name         string `yaml:"name"`
-	Row          string `yaml:"row"`
-	Route        string `yaml:"route"`
-	Method       string `yaml:"method"`
-	Host         string `yaml:"host"`
-	Origin       string `yaml:"origin"`
-	Suffix       string `yaml:"suffix"`
-	Reader       string `yaml:"reader"`
-	UnknownSetup bool   `yaml:"unknownSetup"`
-	Noncanonical bool   `yaml:"noncanonical"`
-	EscapedRoute bool   `yaml:"escapedRoute"`
-	FallbackPath bool   `yaml:"fallbackPath"`
-	Status       int    `yaml:"status"`
-	Code         string `yaml:"code"`
-	Expected     string `yaml:"expected"`
-	NoStore      bool   `yaml:"noStore"`
-	RawLog       string `yaml:"rawLog"`
+	Name         string            `yaml:"name"`
+	Row          string            `yaml:"row"`
+	Route        string            `yaml:"route"`
+	Method       string            `yaml:"method"`
+	Host         string            `yaml:"host"`
+	Origin       string            `yaml:"origin"`
+	Suffix       string            `yaml:"suffix"`
+	Reader       privacyReaderMode `yaml:"reader"`
+	UnknownSetup bool              `yaml:"unknownSetup"`
+	Noncanonical bool              `yaml:"noncanonical"`
+	EscapedRoute bool              `yaml:"escapedRoute"`
+	FallbackPath bool              `yaml:"fallbackPath"`
+	Status       int               `yaml:"status"`
+	Code         string            `yaml:"code"`
+	Expected     string            `yaml:"expected"`
+	NoStore      bool              `yaml:"noStore"`
+	RawLog       string            `yaml:"rawLog"`
 }
 
 type previewPrivacyFixture struct {
@@ -69,7 +78,7 @@ type previewPrivacyFixture struct {
 // request logging, preview construction and error writing are production code.
 type privacyPreviewReader struct {
 	secrets previewPrivacySecrets
-	mode    string
+	mode    privacyReaderMode
 	called  int
 	started chan struct{}
 	release chan struct{}
@@ -85,11 +94,11 @@ func (r *privacyPreviewReader) Read(ctx context.Context, id string) (discovery.S
 		return discovery.SourcePreview{}, errors.New("fixture reader got the wrong session")
 	}
 	switch r.mode {
-	case "success":
+	case privacyReaderSuccess:
 		return discovery.SourcePreview{Turns: []ingest.Turn{{Role: schema.RoleUser, Content: r.secrets.Transcript}}}, nil
-	case "fail":
+	case privacyReaderFail:
 		return discovery.SourcePreview{}, fmt.Errorf("%s at %s: %s", r.secrets.ReaderError, r.secrets.RepoPath, r.secrets.Transcript)
-	case "cancel":
+	case privacyReaderCancel:
 		close(r.started)
 		select {
 		case <-ctx.Done():
@@ -157,7 +166,11 @@ func TestKickstartPreviewPrivacy(t *testing.T) {
 				if c.UnknownSetup {
 					setup += "-unknown"
 				}
-				requestPath = fmt.Sprintf("/api/v1/kickstart/sessions/%s/tree/%s/preview%s", url.PathEscape(setup), url.PathEscape(row), c.Suffix)
+				previewPath, err := route.LocalGetKickstartPreviewPath(setup, row)
+				if err != nil {
+					t.Fatalf("build preview path: %v", err)
+				}
+				requestPath = previewPath + c.Suffix
 				if c.Noncanonical {
 					requestPath = strings.Replace(requestPath, "/tree/", "//tree/", 1)
 				}
@@ -174,7 +187,7 @@ func TestKickstartPreviewPrivacy(t *testing.T) {
 				request.Header.Set("Origin", c.Origin)
 			}
 			response := httptest.NewRecorder()
-			if c.Reader == "cancel" {
+			if c.Reader == privacyReaderCancel {
 				ctx, cancel := context.WithCancel(request.Context())
 				defer cancel()
 				done := make(chan struct{})
@@ -241,10 +254,14 @@ func TestKickstartPreviewPrivacy(t *testing.T) {
 					}
 				}
 			}
-			var entries []map[string]any
+			type requestLogEntry struct {
+				Message string `json:"msg"`
+				Path    string `json:"path"`
+			}
+			var entries []requestLogEntry
 			decoder := json.NewDecoder(&logs)
 			for decoder.More() {
-				var entry map[string]any
+				var entry requestLogEntry
 				if err := decoder.Decode(&entry); err != nil {
 					t.Fatalf("decode request log: %v", err)
 				}
@@ -259,11 +276,11 @@ func TestKickstartPreviewPrivacy(t *testing.T) {
 			}
 			var loggedPath string
 			for _, entry := range entries {
-				if entry["msg"] == "http" {
-					loggedPath, _ = entry["path"].(string)
+				if entry.Message == "http" {
+					loggedPath = entry.Path
 				}
-				if entry["msg"] == "http: refused a request that did not come from this local server" && entry["path"] != wantPath {
-					t.Errorf("guard log path = %q, want %q", entry["path"], wantPath)
+				if entry.Message == "http: refused a request that did not come from this local server" && entry.Path != wantPath {
+					t.Errorf("guard log path = %q, want %q", entry.Path, wantPath)
 				}
 			}
 			if loggedPath != wantPath {

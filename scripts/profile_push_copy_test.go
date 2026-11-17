@@ -22,6 +22,9 @@ import (
 //go:embed testdata/profile_push_copy/*.yaml
 var profileScriptFixtures embed.FS
 
+const profileCasesPath = "testdata/profile_push_copy/cases.yaml"
+const profileManifestPath = "testdata/profile_push_copy/manifest.yaml"
+
 type profileScriptCase struct {
 	Name string `yaml:"name"`
 	// Setup is performed by the test below the case root before the script runs.
@@ -49,9 +52,9 @@ func loadProfileScriptFixtures(t *testing.T) []profileScriptCase {
 }
 
 func decodeProfileScriptFixtures() ([]profileScriptCase, error) {
-	data, err := profileScriptFixtures.ReadFile("testdata/profile_push_copy/cases.yaml")
+	data, err := profileScriptFixtures.ReadFile(profileCasesPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read %s: %w", profileCasesPath, err)
 	}
 	var cases []profileScriptCase
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
@@ -63,9 +66,9 @@ func decodeProfileScriptFixtures() ([]profileScriptCase, error) {
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("fixture must have exactly one document: %v", err)
 	}
-	data, err = profileScriptFixtures.ReadFile("testdata/profile_push_copy/manifest.yaml")
+	data, err = profileScriptFixtures.ReadFile(profileManifestPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read %s: %w", profileManifestPath, err)
 	}
 	manifest, err := testutil.DecodeRequiredNamesManifest(data, "profile script")
 	if err != nil {
@@ -116,7 +119,7 @@ func runProfileChild(name string, args []string) int {
 	}
 	index := slices.IndexFunc(cases, func(c profileScriptCase) bool { return c.Name == name })
 	if index < 0 {
-		return fail(fmt.Errorf("no fixture case has this name; %s must name a case in testdata/profile_push_copy/cases.yaml", profileChildCaseEnv))
+		return fail(fmt.Errorf("no fixture case has this name; %s must name a case in %s", profileChildCaseEnv, profileCasesPath))
 	}
 	root := os.Getenv("ROOT")
 	if !filepath.IsAbs(root) {

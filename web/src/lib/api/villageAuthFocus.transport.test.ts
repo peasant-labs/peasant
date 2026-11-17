@@ -4,12 +4,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parse } from 'yaml';
 import type { VillageAuthReading } from './villageAuthFocus';
 
+const TransportStall = Object.freeze({ Response: 'response', Body: 'body' } as const);
 interface TransportCase {
   name: string;
-  stall: 'response' | 'body';
+  stall: (typeof TransportStall)[keyof typeof TransportStall];
 }
 
-const fixture = parse(readFileSync(resolve(process.cwd(), 'src/lib/api/testdata/village_auth_focus_transport.yaml'), 'utf8')) as {
+const FIXTURE = 'src/lib/api/testdata/village_auth_focus_transport.yaml';
+const fixture = parse(readFileSync(resolve(process.cwd(), FIXTURE), 'utf8')) as {
   requiredNames: string[];
   cases: TransportCase[];
 };
@@ -51,7 +53,7 @@ describe('the shared sign-in reader through the HTTP transport', () => {
             : { authenticated: false }));
         }
         return new Promise<Response>((resolveResponse, rejectResponse) => {
-          if (row.stall === 'response') {
+          if (row.stall === TransportStall.Response) {
             init?.signal?.addEventListener('abort', () => {
               active -= 1;
               aborts.push(Date.now() - t0);
@@ -89,10 +91,11 @@ describe('the shared sign-in reader through the HTTP transport', () => {
         await vi.advanceTimersByTimeAsync(500);
         window.dispatchEvent(new Event('focus'));
         expect(calls.map((call) => call.at)).toEqual([0, 3000]);
+        // unstring-allow: endpoint-literal — pinned schema has no route members
         expect(calls.every((call) => call.path === '/api/v1/sync/auth')).toBe(true);
         expect(calls[1].signal).toBeDefined();
         expect(calls[1].signal?.aborted).toBe(false);
-        expect(bodyReads).toBe(row.stall === 'body' ? 1 : 0);
+        expect(bodyReads).toBe(row.stall === TransportStall.Body ? 1 : 0);
 
         await vi.advanceTimersByTimeAsync(9499);
         expect(calls[1].signal?.aborted).toBe(false);

@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { parse } from 'yaml';
+import { License, LocalKickstartEventKind, LocalKickstartIngestState, LocalKickstartNodeKind, LocalKickstartScanState, LocalKickstartStopKind, MessageType } from '@peasant-labs/schema';
 import { railProblems } from './lib/kickstart-rail.mjs';
 
 /**
@@ -39,7 +40,36 @@ const marketingRepo = fixture.recordings.repositories.find((repo) => repo.name =
 const marketingLabel = new URL(marketingRepo.remote).pathname.replace(/^\//, '').replace(/\.git$/, '');
 
 const theme = () => test.info().project.metadata.theme;
+// unstring-allow: endpoint-literal — pinned schema has no route members
 const API = '/api/v1/kickstart';
+const Routes = Object.freeze({
+  // unstring-allow: endpoint-literal — pinned schema has no route members
+  SyncSessions: '/api/v1/sync/sessions',
+  // unstring-allow: endpoint-literal — pinned schema has no route members
+  SyncAuth: '/api/v1/sync/auth',
+  // unstring-allow: endpoint-literal — pinned schema has no route members
+  Observations: '/api/v1/village/collective-observations',
+  // unstring-allow: endpoint-literal — pinned schema has no route members
+  Sessions: '/api/v1/sessions',
+  // unstring-allow: endpoint-literal — pinned schema has no route members
+  SyncIngest: '/api/v1/sync/ingest',
+});
+const Method = Object.freeze({ Get: 'GET', Post: 'POST' });
+const ConsoleLevel = Object.freeze({ Error: 'error' });
+const Tab = Object.freeze({ A: 'A', B: 'B', C: 'C', D: 'D', E: 'E', F: 'F' });
+const Css = Object.freeze({ None: 'none', Hidden: 'hidden' });
+const Labels = Object.freeze({
+  Continue: 'continue', SaveAndImport: 'save and import', ImportFinished: 'import finished',
+  SetUp: 'set up peasant', Yes: 'yes', No: 'no', Back: 'back', ScanAgain: 'scan again',
+  ScanProgress: 'scan progress', AutoIngest: /auto-ingest new branches/,
+  PublishLater: 'plan to publish later', RedactionExample: 'example for redaction level',
+  SetupSaved: 'your setup is saved', TakeTheirs: /^take theirs for/,
+  NothingPublished: 'nothing was published and no hook was installed',
+  ImportNow: 'import now', Importing: 'reading your selected sessions',
+  ChooseRules: 'choose automatic publishing rules', AutomaticPublishing: 'automatic publishing',
+  Settings: 'settings', KeepLocal: 'keep local, do not publish',
+  ChooseSessions: 'choose sessions', SelectionSaved: 'your selection is saved',
+});
 
 // The pointer's click-through: the connection stop's answer and the next stop's
 // `continue` sit in the same foot slot, so a right edge or vertical centre that
@@ -88,7 +118,7 @@ function watch(page, label) {
   page.on('console', (message) => {
     // The browser logs every non-2xx response as a console error with no URL;
     // those are accounted for one by one in failedResponses below.
-    if (message.type() === 'error' && !message.text().startsWith('Failed to load resource')) consoleErrors.push(`${label}: ${message.text()}`);
+    if (message.type() === ConsoleLevel.Error && !message.text().startsWith('Failed to load resource')) consoleErrors.push(`${label}: ${message.text()}`);
   });
   page.on('response', (response) => {
     if (response.status() >= 400) failedResponses.push({ tab: label, status: response.status(), method: response.request().method(), path: new URL(response.url()).pathname });
@@ -97,7 +127,7 @@ function watch(page, label) {
   page.on('request', (request) => {
     const entry = { tab: label, method: request.method(), path: new URL(request.url()).pathname };
     // Which scope a page asked a session for says which page opened it.
-    if (entry.method === 'POST' && entry.path === `${API}/sessions`) {
+    if (entry.method === Method.Post && entry.path === `${API}/sessions`) {
       try { entry.scope = JSON.parse(request.postData() ?? '{}').scope; } catch { entry.scope = null; }
     }
     requests.push(entry);
@@ -106,7 +136,7 @@ function watch(page, label) {
     if (typeof event.payload !== 'string') return;
     let message;
     try { message = JSON.parse(event.payload); } catch { return; }
-    if (message.type !== 'kickstart' || !message.data) return;
+    if (message.type !== MessageType.Kickstart || !message.data) return;
     const { kind, sessionId, revision, reason, scan, ingest } = message.data;
     frames.push({ tab: label, kind, sessionId, revision, reason, scan, ingest });
   }));
@@ -121,8 +151,8 @@ async function openPage(label, url) {
 
 // ── reading the page ────────────────────────────────────────────────────────
 const title = (page) => page.locator('.swz-body h2.ks-title').first();
-const next = (page) => page.getByRole('button', { name: 'continue', exact: true });
-const save = (page) => page.getByRole('button', { name: 'save and import' });
+const next = (page) => page.getByRole('button', { name: Labels.Continue, exact: true });
+const save = (page) => page.getByRole('button', { name: Labels.SaveAndImport });
 
 async function stepOf(page) {
   const text = await page.locator('.swz-count .swz-sr-only').first().textContent();
@@ -156,7 +186,7 @@ async function snapshot(request) {
 const visibleStops = (view) => view.stops.filter((stop) => stop.visible);
 
 async function storedTitles(request) {
-  const response = await request.get('/api/v1/sync/sessions');
+  const response = await request.get(Routes.SyncSessions);
   expect(response.ok()).toBe(true);
   return (await response.json()).items.map((item) => item.title).sort();
 }
@@ -168,7 +198,7 @@ const readConfig = () => parse(readFileSync(configPath, 'utf8'));
  * the store did not have (new) and the ones it had and re-read (updated).
  */
 async function finishCounts(page) {
-  await expect(page.getByText('import finished')).toBeVisible();
+  await expect(page.getByText(Labels.ImportFinished)).toBeVisible();
   const text = await page.locator('.ks-finish .ks-counts').first().textContent();
   const counts = /(\d+) new,\s*(\d+) updated/.exec(text ?? '');
   expect(counts, `the finish panel counts the import (reads ${JSON.stringify(text)})`).not.toBeNull();
@@ -201,7 +231,7 @@ const checked = (locator) => locator.getAttribute('aria-checked');
  * is the one exemption.
  */
 async function probe(page) {
-  return page.evaluate(() => {
+  return page.evaluate((css) => {
     const family = /^"?atkinsonHyperlegible(Mono)?"?(,|$)/i;
     const corners = ['borderTopLeftRadius', 'borderTopRightRadius', 'borderBottomLeftRadius', 'borderBottomRightRadius'];
     const surface = document.querySelector('.wizard-page');
@@ -211,7 +241,7 @@ async function probe(page) {
     const describe = (element) => `${element.tagName.toLowerCase()}${element.className && typeof element.className === 'string' ? `.${element.className.trim().split(/\s+/).join('.')}` : ''}`;
     for (const element of surface ? surface.querySelectorAll('*') : []) {
       const style = getComputedStyle(element);
-      if (style.display === 'none' || style.visibility === 'hidden') continue;
+      if (style.display === css.None || style.visibility === css.Hidden) continue;
       drawn += 1;
       if ([...element.childNodes].some((node) => node.nodeType === 3 && node.textContent.trim())) {
         textElements += 1;
@@ -237,7 +267,7 @@ async function probe(page) {
         text: element.textContent.trim(),
         place: (/swz-label--(\w+)/.exec(element.className) ?? [])[1] ?? '',
         left: box.left, right: box.right, textLeft: text.left, textRight: text.right,
-        visible: box.width > 0 && box.height > 0 && style.visibility !== 'hidden' && style.display !== 'none',
+        visible: box.width > 0 && box.height > 0 && style.visibility !== css.Hidden && style.display !== css.None,
       };
     });
     const rail = {
@@ -257,7 +287,7 @@ async function probe(page) {
       tabularOffenders: tabular,
       rail,
     };
-  });
+  }, Css);
 }
 
 async function shoot(page, name) {
@@ -287,7 +317,7 @@ test.afterAll(async () => {
 
 test('fresh-install-redirects-to-setup', async () => {
   pageA = await context.newPage();
-  watch(pageA, 'A');
+  watch(pageA, Tab.A);
   const status = await (await pageA.request.get(`${API}/status`)).json();
   expect(status.configured, 'a fresh computer has no saved setup').toBe(false);
   expect(existsSync(configPath), 'no config.yaml exists before setup').toBe(false);
@@ -303,7 +333,7 @@ test('fresh-install-redirects-to-setup', async () => {
   await expect(pageA).toHaveURL(/\/kickstart\/?$/);
   await expect(title(pageA)).toHaveText('peasant online');
   const opened = requests.slice(beforeSelection)
-    .filter((entry) => entry.tab === 'A' && entry.method === 'POST' && entry.path === `${API}/sessions`)
+    .filter((entry) => entry.tab === Tab.A && entry.method === Method.Post && entry.path === `${API}/sessions`)
     .map((entry) => entry.scope);
   expect(opened, 'the setup page opened its own session').toContain('full');
   expect(opened, 'the selection page opened no session before setup was saved').not.toContain('selection');
@@ -315,7 +345,7 @@ test('fresh-install-redirects-to-setup', async () => {
   await pageA.goto('/');
   await expect(pageA).toHaveURL(/\/kickstart\/?$/);
 
-  await expect(pageA.getByRole('heading', { level: 1, name: 'set up peasant' })).toBeVisible();
+  await expect(pageA.getByRole('heading', { level: 1, name: Labels.SetUp })).toBeVisible();
   await expect(title(pageA)).toHaveText('peasant online');
   await seen(pageA);
   // The opening scan may still be running when the first stop is drawn; its
@@ -328,7 +358,7 @@ test('fresh-install-redirects-to-setup', async () => {
   const first = await stepOf(pageA);
   expect(first.index).toBe(1);
   expect(first.total, 'the page counts the stops the server shows').toBe(expectedStops);
-  await expect.poll(() => frames.some((frame) => frame.tab === 'A' && frame.kind === 'session' && frame.sessionId === id), 'the topic sends the session snapshot on subscribe').toBe(true);
+  await expect.poll(() => frames.some((frame) => frame.tab === Tab.A && frame.kind === LocalKickstartEventKind.Session && frame.sessionId === id), 'the topic sends the session snapshot on subscribe').toBe(true);
   await shoot(pageA, '01-village');
 });
 
@@ -337,7 +367,7 @@ test('answers-sit-where-continue-sits', async () => {
   // `continue` sits. The reader who clicked through lands on `yes` without
   // moving the pointer, and the narrow foot keeps back and the count on their
   // own line above the answers.
-  const yes = pageA.getByRole('button', { name: 'yes', exact: true });
+  const yes = pageA.getByRole('button', { name: Labels.Yes, exact: true });
   const answer = await yes.boundingBox();
   expect(answer, 'the connection stop draws yes in its foot').not.toBeNull();
   const desktop = test.info().project.use.viewport;
@@ -360,7 +390,7 @@ test('answers-sit-where-continue-sits', async () => {
 
   // `yes` must sit exactly where the next stop's `continue` sits: same right
   // edge, same vertical centre, so a second click-through needs no pointer move.
-  await pageA.getByRole('button', { name: 'no', exact: true }).click();
+  await pageA.getByRole('button', { name: Labels.No, exact: true }).click();
   await expect(title(pageA)).toHaveText('choose sessions to import');
   const proceed = await next(pageA).boundingBox();
   expect(proceed, 'the tree stop draws continue in its foot').not.toBeNull();
@@ -371,13 +401,13 @@ test('answers-sit-where-continue-sits', async () => {
 
   // Leave the walk where the story left it: the next case answers the
   // connection stop itself.
-  await pageA.getByRole('button', { name: 'back' }).click();
+  await pageA.getByRole('button', { name: Labels.Back }).click();
   await expect(title(pageA)).toHaveText('peasant online');
 });
 
 test('scan-progress-and-tree-selection', async () => {
   const first = await stepOf(pageA);
-  await pageA.getByRole('button', { name: 'no', exact: true }).click();
+  await pageA.getByRole('button', { name: Labels.No, exact: true }).click();
   await expect(title(pageA)).toHaveText('choose sessions to import');
   await seen(pageA);
 
@@ -396,8 +426,8 @@ test('scan-progress-and-tree-selection', async () => {
   });
   const frameMark = frames.length;
   const requestMark = requests.length;
-  await pageA.getByRole('button', { name: 'scan again' }).click();
-  const bar = pageA.getByRole('progressbar', { name: 'scan progress' });
+  await pageA.getByRole('button', { name: Labels.ScanAgain }).click();
+  const bar = pageA.getByRole('progressbar', { name: Labels.ScanProgress });
   await expect(bar).toBeVisible();
   await shoot(pageA, '02-scan-progress');
   await expect(bar).toBeHidden({ timeout: 30000 });
@@ -405,19 +435,19 @@ test('scan-progress-and-tree-selection', async () => {
 
   const values = (await pageA.evaluate(() => window.__ks.values)).map(Number);
   expect(values.some((value) => value > 0 && value < 100), `the bar advanced through the scan (saw ${values.join(', ')})`).toBe(true);
-  const scans = frames.slice(frameMark).filter((frame) => frame.tab === 'A' && frame.kind === 'scan');
-  expect(new Set(scans.filter((frame) => frame.scan.state === 'running' && frame.scan.done > 0).map((frame) => frame.scan.done)).size, 'the server pushed more than one progress tick').toBeGreaterThan(1);
+  const scans = frames.slice(frameMark).filter((frame) => frame.tab === Tab.A && frame.kind === LocalKickstartEventKind.Scan);
+  expect(new Set(scans.filter((frame) => frame.scan.state === LocalKickstartScanState.Running && frame.scan.done > 0).map((frame) => frame.scan.done)).size, 'the server pushed more than one progress tick').toBeGreaterThan(1);
   expect(scans.at(-1).scan.state, 'the last pushed scan state').toBe('done');
-  expect(requests.slice(requestMark).filter((entry) => entry.tab === 'A' && entry.method === 'GET' && /\/tree$/.test(entry.path)).length, 'the forest was read again when the scan ended').toBeGreaterThan(0);
+  expect(requests.slice(requestMark).filter((entry) => entry.tab === Tab.A && entry.method === Method.Get && /\/tree$/.test(entry.path)).length, 'the forest was read again when the scan ended').toBeGreaterThan(0);
 
   // What the tree lists each session under, from the server's own tree: the
   // project row above its branch row. The stored remote is compared with it later.
   const { id: wizardId } = await snapshot(pageA.request);
   const treeNodes = (await (await pageA.request.get(`${API}/sessions/${wizardId}/tree`)).json()).nodes;
   const nodeById = new Map(treeNodes.map((node) => [node.id, node]));
-  for (const node of treeNodes.filter((candidate) => candidate.kind === 'session')) {
+  for (const node of treeNodes.filter((candidate) => candidate.kind === LocalKickstartNodeKind.Session)) {
     let up = node;
-    while (up && up.kind !== 'project') up = nodeById.get(up.parentId);
+    while (up && up.kind !== LocalKickstartNodeKind.Project) up = nodeById.get(up.parentId);
     if (up) treeProjectOf.set(node.sessionId ?? node.id, up.label);
   }
   for (const entry of seeded) expect(treeProjectOf.has(entry.sessionId), `the tree lists ${entry.name} under a project`).toBe(true);
@@ -425,10 +455,10 @@ test('scan-progress-and-tree-selection', async () => {
   // Nothing is chosen yet, and the tree is the server's, not the page's.
   await expect(pageA.locator('.ks-counts', { hasText: '0 chosen' })).toBeVisible();
   await branch(pageA, 'main').scrollIntoViewIfNeeded();
-  await project(pageA).getByRole('checkbox', { name: 'main', exact: true }).click();
+  await project(pageA).getByRole('checkbox', { name: fixture.chosen.branch, exact: true }).click();
   await expect(pageA.locator('.ks-counts', { hasText: `${chosenSessions.length} chosen` })).toBeVisible();
   await expect(project(pageA).first().getByRole('checkbox').first()).toHaveAttribute('aria-checked', 'mixed');
-  await expect(project(pageA).getByRole('checkbox', { name: 'main', exact: true })).toHaveAttribute('aria-checked', 'true');
+  await expect(project(pageA).getByRole('checkbox', { name: fixture.chosen.branch, exact: true })).toHaveAttribute('aria-checked', 'true');
   for (const entry of chosenSessions) await expect(row(pageA, entry.prompt)).toBeChecked();
   await expect(row(pageA, taxReport.prompt), 'a session on another branch is not chosen').not.toBeChecked();
   await expect(row(pageA, marketing.prompt), 'a session of another project is not chosen').not.toBeChecked();
@@ -448,7 +478,7 @@ test('scan-progress-and-tree-selection', async () => {
 });
 
 test('second-tab-converges-without-reload', async () => {
-  pageB = await openPage('B', '/kickstart/');
+  pageB = await openPage(Tab.B, '/kickstart/');
   await expect(title(pageB)).toHaveText('peasant online');
   const navigations = { count: 0 };
   pageB.on('framenavigated', () => { navigations.count += 1; });
@@ -457,15 +487,15 @@ test('second-tab-converges-without-reload', async () => {
   expect(new Set(sameSession).size, 'two tabs of the wizard share one session').toBe(1);
 
   // B opens on the answers A already gave.
-  await pageB.getByRole('button', { name: 'no', exact: true }).click();
+  await pageB.getByRole('button', { name: Labels.No, exact: true }).click();
   await expect(title(pageB)).toHaveText('choose sessions to import');
   await expect(pageB.locator('.ks-counts', { hasText: `${chosenSessions.length} chosen` })).toBeVisible();
-  await expect(project(pageB).getByRole('checkbox', { name: 'main', exact: true })).toHaveAttribute('aria-checked', 'true');
+  await expect(project(pageB).getByRole('checkbox', { name: fixture.chosen.branch, exact: true })).toHaveAttribute('aria-checked', 'true');
 
   // Both move to the auto-ingest stop. A changes it; B sees that with no reload.
   await advance(pageA, 'auto-ingest new branches');
   await advance(pageB, 'auto-ingest new branches');
-  const autoIngest = (page) => page.getByRole('checkbox', { name: /auto-ingest new branches/ });
+  const autoIngest = (page) => page.getByRole('checkbox', { name: Labels.AutoIngest });
   await expect(autoIngest(pageA), 'the server serves the saved default').toBeChecked();
   await expect(autoIngest(pageB)).toBeChecked();
   await autoIngest(pageA).click();
@@ -477,16 +507,16 @@ test('second-tab-converges-without-reload', async () => {
 
   // And the other way round: B answers, A sees it before A has chosen anything.
   await advance(pageB, 'publication');
-  await pageB.getByRole('radio', { name: 'plan to publish later' }).click();
+  await pageB.getByRole('radio', { name: Labels.PublishLater }).click();
   await advance(pageA, 'publication');
-  await expect(pageA.getByRole('radio', { name: 'plan to publish later' }), "A shows B's answer").toBeChecked();
-  expect(requests.filter((entry) => /\/api\/v1\/kickstart\/sessions\/[0-9a-f]+$/.test(entry.path) && entry.method === 'GET'), 'no tab read the snapshot to learn of the other').toEqual([]);
+  await expect(pageA.getByRole('radio', { name: Labels.PublishLater }), "A shows B's answer").toBeChecked();
+  expect(requests.filter((entry) => /\/api\/v1\/kickstart\/sessions\/[0-9a-f]+$/.test(entry.path) && entry.method === Method.Get), 'no tab read the snapshot to learn of the other').toEqual([]);
 });
 
 test('every-stop-the-server-shows', async () => {
   await advance(pageA, 'auto-publish');
   await advance(pageA, 'privacy');
-  const example = pageA.getByRole('list', { name: 'example for redaction level' });
+  const example = pageA.getByRole('list', { name: Labels.RedactionExample });
   await expect(example).toBeVisible();
   const lines = await example.getByRole('listitem').allTextContents();
   expect(lines.length, 'the example shows a before and an after').toBeGreaterThanOrEqual(2);
@@ -494,8 +524,8 @@ test('every-stop-the-server-shows', async () => {
   await shoot(pageA, '05-privacy');
 
   await advance(pageA, 'content license');
-  await pageA.getByRole('radio', { name: 'CC0-1.0' }).click();
-  await expect(pageA.getByRole('radio', { name: 'CC0-1.0' })).toBeChecked();
+  await pageA.getByRole('radio', { name: License.CC0 }).click();
+  await expect(pageA.getByRole('radio', { name: License.CC0 })).toBeChecked();
 
   // The server says the village offer follows the license stop. It is drawn on
   // the stop after it, never on the license stop or before.
@@ -507,10 +537,10 @@ test('every-stop-the-server-shows', async () => {
   await expect(title(pageA)).toHaveText(before.view.connect.prompt);
   offerSeen = before.view.connect.prompt;
   await seen(pageA);
-  await expect(pageA.getByRole('button', { name: 'yes', exact: true })).toBeVisible();
+  await expect(pageA.getByRole('button', { name: Labels.Yes, exact: true })).toBeVisible();
   await expect(next(pageA), 'the offer has its own answers, not continue').toHaveCount(0);
   await shoot(pageA, '06-offer');
-  await pageA.getByRole('button', { name: 'no', exact: true }).click();
+  await pageA.getByRole('button', { name: Labels.No, exact: true }).click();
   await expect(title(pageA)).toHaveText('claude retention');
   await seen(pageA);
   await advance(pageA, 'review');
@@ -518,7 +548,7 @@ test('every-stop-the-server-shows', async () => {
   // The stops walked are the stops the server shows, in its order, with the
   // offer after the one it follows.
   const { view } = await snapshot(pageA.request);
-  const expected = visibleStops(view).filter((stop) => stop.kind !== 'ingest').map((stop) => stop.title);
+  const expected = visibleStops(view).filter((stop) => stop.kind !== LocalKickstartStopKind.Ingest).map((stop) => stop.title);
   expected.splice(expected.indexOf('content license') + 1, 0, offerSeen);
   expect(walked).toEqual(expected);
   expect(view.connect.offered, 'a skipped offer is not asked again').toBe(false);
@@ -560,7 +590,7 @@ test('concurrent-change-offers-mine-or-theirs', async () => {
   await expect(rows.first()).toContainText('CC0-1.0');
   await expect(rows.first()).toContainText('CC-BY-4.0');
   expect(readFileSync(configPath, 'utf8'), 'a refused save writes nothing').toBe(theirs);
-  await expect(pageA.getByRole('heading', { name: 'your setup is saved' })).toHaveCount(0);
+  await expect(pageA.getByRole('heading', { name: Labels.SetupSaved })).toHaveCount(0);
   await shoot(pageA, '08-review-conflict');
 
   // B was not asked; it is shown the same rows when it reaches the review.
@@ -569,7 +599,7 @@ test('concurrent-change-offers-mine-or-theirs', async () => {
   await expect(pageB.locator('.ks-conflict')).toHaveCount(1);
 
   // The choice is the person's: take the saved value.
-  await pageA.getByRole('button', { name: /^take theirs for/ }).click();
+  await pageA.getByRole('button', { name: Labels.TakeTheirs }).click();
   await expect(pageA.locator('.ks-conflict')).toHaveCount(0);
   await expect(pageB.locator('.ks-conflict'), 'the settled row leaves every tab').toHaveCount(0);
   expect(readFileSync(configPath, 'utf8'), 'choosing writes nothing either').toBe(theirs);
@@ -577,24 +607,24 @@ test('concurrent-change-offers-mine-or-theirs', async () => {
 
 test('save-finish-and-ingest-end', async () => {
   await save(pageA).click();
-  const saved = (page) => page.getByRole('heading', { name: 'your setup is saved' });
+  const saved = (page) => page.getByRole('heading', { name: Labels.SetupSaved });
   await expect(saved(pageA)).toBeVisible();
   await expect(saved(pageB), 'the other tab moves to the finish with no reload').toBeVisible();
   await expect(pageA.locator('.ks-finish code')).toHaveText(configPath);
-  await expect(pageA.getByText('nothing was published and no hook was installed')).toBeVisible();
+  await expect(pageA.getByText(Labels.NothingPublished)).toBeVisible();
 
   // The import reports its end: idle with counts, never a stream of ticks.
   ingestCounts = await finishCounts(pageA);
   // Every chosen session is new to a fresh store, and nothing is updated. A panel
   // that reports 0 new after the sessions were stored is wrong, not a count.
   expect(ingestCounts, 'the import brought in exactly the chosen sessions').toEqual({ new: fixture.chosen.imported, updated: 0 });
-  const ingests = frames.filter((frame) => frame.tab === 'A' && frame.kind === 'ingest');
-  expect(ingests.filter((frame) => frame.ingest.state === 'idle'), 'one end event').toHaveLength(1);
-  expect(ingests.at(-1).ingest.state).toBe('idle');
+  const ingests = frames.filter((frame) => frame.tab === Tab.A && frame.kind === LocalKickstartEventKind.Ingest);
+  expect(ingests.filter((frame) => frame.ingest.state === LocalKickstartIngestState.Idle), 'one end event').toHaveLength(1);
+  expect(ingests.at(-1).ingest.state).toBe(LocalKickstartIngestState.Idle);
   expect(ingests.at(-1).ingest.new).toBe(ingestCounts.new);
   expect(ingests.at(-1).ingest.updated).toBe(ingestCounts.updated);
-  expect(frames.filter((frame) => frame.tab === 'A' && frame.kind === 'closed').map((frame) => frame.reason)).toEqual(['committed']);
-  await expect(pageA.getByRole('button', { name: 'import now' })).toBeEnabled();
+  expect(frames.filter((frame) => frame.tab === Tab.A && frame.kind === LocalKickstartEventKind.Closed).map((frame) => frame.reason)).toEqual(['committed']);
+  await expect(pageA.getByRole('button', { name: Labels.ImportNow })).toBeEnabled();
 
   // The store holds exactly the sessions that were chosen.
   const stored = await storedTitles(pageA.request);
@@ -607,27 +637,27 @@ test('save-finish-and-ingest-end', async () => {
   // not pushed. Every chosen session is stored already, so the second run brings in
   // none and updates none, and its counts differ from the first run's.
   expect(fixture.chosen.imported, 'the first import brought sessions in, so the second run\'s counts differ from it').toBeGreaterThan(0);
-  const pushedBefore = frames.filter((frame) => frame.tab === 'A' && frame.kind === 'ingest').length;
-  await pageA.getByRole('button', { name: 'import now' }).click();
+  const pushedBefore = frames.filter((frame) => frame.tab === Tab.A && frame.kind === LocalKickstartEventKind.Ingest).length;
+  await pageA.getByRole('button', { name: Labels.ImportNow }).click();
   await expect(pageA.locator('.ks-finish .ks-counts').first(), 'the panel shows the end of the second import, with its counts').toHaveText(/^\s*0 new,\s*0 updated\s*$/);
-  await expect(pageA.getByText('import finished')).toBeVisible();
-  await expect(pageA.getByText('reading your selected sessions'), 'the spinner is gone').toHaveCount(0);
-  await expect(pageA.getByRole('button', { name: 'import now' })).toBeEnabled();
+  await expect(pageA.getByText(Labels.ImportFinished)).toBeVisible();
+  await expect(pageA.getByText(Labels.Importing), 'the spinner is gone').toHaveCount(0);
+  await expect(pageA.getByRole('button', { name: Labels.ImportNow })).toBeEnabled();
   importNowCounts = await finishCounts(pageA);
-  importNowStates = frames.filter((frame) => frame.tab === 'A' && frame.kind === 'ingest').slice(pushedBefore).map((frame) => frame.ingest.state);
-  expect(importNowStates, 'the server pushed the second import\'s start and then its end').toEqual(['running', 'idle']);
+  importNowStates = frames.filter((frame) => frame.tab === Tab.A && frame.kind === LocalKickstartEventKind.Ingest).slice(pushedBefore).map((frame) => frame.ingest.state);
+  expect(importNowStates, 'the server pushed the second import\'s start and then its end').toEqual([LocalKickstartIngestState.Running, LocalKickstartIngestState.Idle]);
   expect(importNowCounts, 'nothing new came in').toEqual({ new: 0, updated: 0 });
   expect(await storedTitles(pageA.request), 'and the store holds the same sessions').toEqual(chosenTitles);
 
   // The finish only offers: the settings section it names is a real one.
-  const link = pageA.getByRole('link', { name: 'choose automatic publishing rules' });
+  const link = pageA.getByRole('link', { name: Labels.ChooseRules });
   // The app serves directory-style pages, so the link carries the trailing slash.
   const target = new URL(await link.getAttribute('href'), 'http://app.invalid');
   expect(target.pathname.replace(/\/$/, '')).toBe('/settings');
   expect(target.searchParams.get('section')).toBe('automatic-publishing');
   await link.click();
   await expect(pageA).toHaveURL(/\/settings\/?\?section=automatic-publishing/);
-  await expect(pageA.getByRole('heading', { name: 'automatic publishing' }).first()).toBeVisible();
+  await expect(pageA.getByRole('heading', { name: Labels.AutomaticPublishing }).first()).toBeVisible();
 
   // Setup is saved, so no page redirects again. The top-level page reads the
   // status route when it loads; the redirect is decided by that answer, so the
@@ -646,12 +676,12 @@ test('focus-burst-reads-sign-in-once', async () => {
   // per listener, so the same burst was ten reads. The setup is saved by now,
   // so `/village` is the online page rather than a first-run redirect.
   const pageF = await context.newPage();
-  watch(pageF, 'F');
-  const firstRead = pageF.waitForResponse((response) => new URL(response.url()).pathname === '/api/v1/sync/auth', { timeout: 20000 });
+  watch(pageF, Tab.F);
+  const firstRead = pageF.waitForResponse((response) => new URL(response.url()).pathname === Routes.SyncAuth, { timeout: 20000 });
   await pageF.goto('/village/');
   expect(new URL(pageF.url()).pathname, 'the online page stays the online page').toBe('/village/');
   await (await firstRead).finished();
-  const reads = () => requests.filter((entry) => entry.tab === 'F' && entry.method === 'GET' && entry.path === '/api/v1/sync/auth').length;
+  const reads = () => requests.filter((entry) => entry.tab === Tab.F && entry.method === Method.Get && entry.path === Routes.SyncAuth).length;
   expect(reads(), 'the online page read the sign-in once when it opened').toBe(1);
 
   // The burst starts outside the two-second gap the opening read began, so its
@@ -669,7 +699,7 @@ test('focus-burst-reads-sign-in-once', async () => {
   // The page's own saved-observations read runs at opening and on each focus;
   // wait for the last refusal so the journey's exact refusal list is settled.
   await expect.poll(
-    () => failedResponses.filter((entry) => entry.tab === 'F' && entry.status === 401 && entry.path === '/api/v1/village/collective-observations').length,
+    () => failedResponses.filter((entry) => entry.tab === Tab.F && entry.status === 401 && entry.path === Routes.Observations).length,
     { message: 'the online page finished its saved-observations reads', timeout: 15000 },
   ).toBe(FOCUS_BURST.focuses + 1);
   focusBurstReads = { landed: new URL(pageF.url()).pathname, before, after: reads(), ...FOCUS_BURST };
@@ -712,12 +742,12 @@ test('config-holds-only-the-chosen-selection', async () => {
     const installed = existsSync(hooks) ? readdirSync(hooks).filter((name) => !name.endsWith('.sample')) : [];
     expect(installed, `no Git hook was installed in ${repo.name}`).toEqual([]);
   }
-  const touched = requests.filter((entry) => entry.method !== 'GET' && !entry.path.startsWith(`${API}/`)).map((entry) => `${entry.method} ${entry.path}`);
+  const touched = requests.filter((entry) => entry.method !== Method.Get && !entry.path.startsWith(`${API}/`)).map((entry) => `${entry.method} ${entry.path}`);
   // The only write outside the setup's own routes is the finish panel's "import now".
-  expect(touched, 'the only writes were setup\'s own').toEqual(['POST /api/v1/sync/ingest']);
+  expect(touched, 'the only writes were setup\'s own').toEqual([`${Method.Post} ${Routes.SyncIngest}`]);
   // The online page is mounted later for the sign-in read; its own saved
   // observations read is not part of the setup's walk.
-  expect(requests.filter((entry) => entry.tab !== 'F' && entry.path.startsWith('/api/') && /\/auto-publish|\/sync\/push|\/sync\/login|\/village\//.test(entry.path)), 'no publish, sign-in or hook route was called').toEqual([]);
+  expect(requests.filter((entry) => entry.tab !== Tab.F && entry.path.startsWith('/api/') && /\/auto-publish|\/sync\/push|\/sync\/login|\/village\//.test(entry.path)), 'no publish, sign-in or hook route was called').toEqual([]);
 });
 
 test('selection-page-saves-only-selection', async () => {
@@ -725,28 +755,28 @@ test('selection-page-saves-only-selection', async () => {
   const { selection: beforeSelection, ...beforeRest } = before;
 
   // A wizard is open with an answer that is not saved.
-  const pageC = await openPage('C', '/kickstart/?from=settings');
-  await expect(pageC.locator('.wizard-page').getByRole('link', { name: 'settings', exact: true }), 'the trail says setup was opened from settings').toBeVisible();
+  const pageC = await openPage(Tab.C, '/kickstart/?from=settings');
+  await expect(pageC.locator('.wizard-page').getByRole('link', { name: Labels.Settings, exact: true }), 'the trail says setup was opened from settings').toBeVisible();
   await expect(title(pageC)).toHaveText('peasant online');
-  await pageC.getByRole('button', { name: 'no', exact: true }).click();
+  await pageC.getByRole('button', { name: Labels.No, exact: true }).click();
   await expect(title(pageC)).toHaveText('choose sessions to import');
   await expect(pageC.locator('.ks-counts', { hasText: `${chosenSessions.length} chosen` }), 're-running setup starts from the saved selection').toBeVisible();
   for (const entry of chosenSessions) await expect(row(pageC, entry.prompt)).toBeChecked();
   await advance(pageC, 'auto-ingest new branches');
-  await expect(pageC.getByRole('checkbox', { name: /auto-ingest new branches/ })).not.toBeChecked();
+  await expect(pageC.getByRole('checkbox', { name: Labels.AutoIngest })).not.toBeChecked();
   await advance(pageC, 'publication');
-  await expect(pageC.getByRole('radio', { name: 'plan to publish later' }), 'the saved preference is filled in').toBeChecked();
-  await pageC.getByRole('radio', { name: 'keep local, do not publish' }).click();
+  await expect(pageC.getByRole('radio', { name: Labels.PublishLater }), 'the saved preference is filled in').toBeChecked();
+  await pageC.getByRole('radio', { name: Labels.KeepLocal }).click();
   await advance(pageC, 'auto-publish');
   await advance(pageC, 'privacy');
   await advance(pageC, 'content license');
-  await expect(pageC.getByRole('radio', { name: 'CC-BY-4.0' }), 'the saved license is filled in').toBeChecked();
+  await expect(pageC.getByRole('radio', { name: License.CCBY }), 'the saved license is filled in').toBeChecked();
   await shoot(pageC, '11-rerun-prefilled');
   const wizard = (await snapshot(pageC.request)).id;
 
   // The selection page has its own session and its own three stops.
-  const pageD = await openPage('D', '/selection/');
-  await expect(pageD.getByRole('heading', { level: 1, name: 'choose sessions' })).toBeVisible();
+  const pageD = await openPage(Tab.D, '/selection/');
+  await expect(pageD.getByRole('heading', { level: 1, name: Labels.ChooseSessions })).toBeVisible();
   await expect(title(pageD)).toHaveText('choose sessions to import');
   expect(await stepOf(pageD), 'the selection page has selection, review and ingest').toEqual({ index: 1, total: 3 });
   expect((await snapshot(pageC.request)).id, 'opening the selection page did not replace the wizard session').toBe(wizard);
@@ -757,7 +787,7 @@ test('selection-page-saves-only-selection', async () => {
   await advance(pageD, 'review');
   await expect(pageD.locator('.ks-summary')).toContainText('your choices');
   await save(pageD).click();
-  await expect(pageD.getByRole('heading', { name: 'your selection is saved' })).toBeVisible();
+  await expect(pageD.getByRole('heading', { name: Labels.SelectionSaved })).toBeVisible();
   // The sessions stored already are not counted again: the import brings in the one that was added.
   laterImports.selectionPage = await finishCounts(pageD);
   // The sessions stored already are unchanged on disk, so they are neither new nor updated.
@@ -774,19 +804,19 @@ test('selection-page-saves-only-selection', async () => {
 
   // The wizard is exactly as it was left: same session, same unsaved answer, still open.
   expect((await snapshot(pageC.request)).id).toBe(wizard);
-  await expect(pageC.getByRole('heading', { name: 'your setup is saved' })).toHaveCount(0);
+  await expect(pageC.getByRole('heading', { name: Labels.SetupSaved })).toHaveCount(0);
   for (const stop of ['privacy', 'auto-publish', 'publication']) {
-    await pageC.getByRole('button', { name: 'back' }).click();
+    await pageC.getByRole('button', { name: Labels.Back }).click();
     await expect(title(pageC)).toHaveText(stop);
   }
-  await expect(pageC.getByRole('radio', { name: 'keep local, do not publish' }), 'the wizard kept its unsaved answer').toBeChecked();
+  await expect(pageC.getByRole('radio', { name: Labels.KeepLocal }), 'the wizard kept its unsaved answer').toBeChecked();
   expect(readConfig().push.sharePreference, 'and saved nothing').toBe('share-later');
 });
 
 test('selection-page-names-the-chosen-branch', async () => {
   // One branch of a project whose clone hosts sessions of two branches: the
   // selection page saves a branch rule, and only that.
-  const page = await openPage('E', '/selection/');
+  const page = await openPage(Tab.E, '/selection/');
   await expect(title(page)).toHaveText('choose sessions to import');
   const marketingProject = projectOf(page, marketingLabel);
   await expect(marketingProject).toBeVisible();
@@ -797,7 +827,7 @@ test('selection-page-names-the-chosen-branch', async () => {
   await expect(page.locator('.ks-counts', { hasText: `${chosenSessions.length + 2} chosen` })).toBeVisible();
   await advance(page, 'review');
   await save(page).click();
-  await expect(page.getByRole('heading', { name: 'your selection is saved' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: Labels.SelectionSaved })).toBeVisible();
   laterImports.branchChoice = await finishCounts(page);
   expect(laterImports.branchChoice, 'the import brought in the session of the chosen branch and updated none').toEqual({ new: fixture.branchChoice.imported, updated: 0 });
 
@@ -824,10 +854,10 @@ test('stored-remote-matches-the-tree', async () => {
   // project the store files the session under, and the remote and branch the
   // store holds for it are read from the server, and the seeded repository is
   // the only place the journey says what they should be.
-  const list = (await (await pageA.request.get('/api/v1/sessions')).json()).sessions;
+  const list = (await (await pageA.request.get(Routes.Sessions)).json()).sessions;
   const stored = [];
   for (const row of list) {
-    const detail = await (await pageA.request.get(`/api/v1/sessions/${row.id}`)).json();
+    const detail = await (await pageA.request.get(`${Routes.Sessions}/${row.id}`)).json();
     stored.push({ id: row.id, project: row.project, gitRemote: detail.gitRemote, gitBranch: detail.gitBranch });
   }
   const imported = new Set([...chosenIds, taxReport.sessionId, marketing.sessionId]);
@@ -874,7 +904,7 @@ test('computed-styles-and-themes', async () => {
   // each focus of the burst; every one is refused with 401. That is the page
   // saying nobody is signed in, not a refusal of the setup walk's routes, so it
   // is counted here and left out of the exact list below.
-  const signedOut = failedResponses.filter((entry) => entry.tab === 'F' && entry.status === 401 && entry.path === '/api/v1/village/collective-observations');
+  const signedOut = failedResponses.filter((entry) => entry.tab === Tab.F && entry.status === 401 && entry.path === Routes.Observations);
   expect(signedOut, 'the signed-out online page refused one saved-observations read at opening and one per focus').toHaveLength(FOCUS_BURST.focuses + 1);
   // Every other refused request was one the journey provoked on purpose: the save
   // that found a changed field (409), and the deep links to work never recorded.

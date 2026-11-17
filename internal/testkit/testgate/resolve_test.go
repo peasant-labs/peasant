@@ -14,11 +14,14 @@ import (
 
 // writeSiteFile copies testdata/exec_site/<name>.go.txt to site.go in a fresh
 // directory, the file the anchors below name.
+const execSiteFixtureDir = "testdata/exec_site"
+
 func writeSiteFile(t *testing.T, name string) string {
 	t.Helper()
-	body, err := os.ReadFile(filepath.Join("testdata", "exec_site", name+".go.txt"))
+	fixturePath := filepath.Join(execSiteFixtureDir, name+".go.txt")
+	body, err := os.ReadFile(fixturePath)
 	if err != nil {
-		t.Fatalf("read the locator input for %s: %v", name, err)
+		t.Fatalf("read the locator input for %s from %s: %v", name, fixturePath, err)
 	}
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "site.go"), body, 0o600); err != nil {

@@ -14,6 +14,9 @@ import (
 //go:embed testdata/grouping_guard.yaml
 var groupingGuardData []byte
 
+const groupingGuardFixture = "testdata/grouping_guard.yaml"
+const groupingGuardTrees = "testdata/grouping_guard"
+
 type groupingGuardCase struct {
 	Name              string   `yaml:"name"`
 	Root              string   `yaml:"root"`
@@ -38,12 +41,12 @@ func TestGroupingGuardModuleBoundary(t *testing.T) {
 	t.Parallel()
 	var document groupingGuardDocument
 	if err := testutil.DecodeNamedFixtureYAML(groupingGuardData, &document); err != nil {
-		t.Fatalf("decode testdata/grouping_guard.yaml: %v", err)
+		t.Fatalf("decode %s: %v", groupingGuardFixture, err)
 	}
 	for _, row := range document.Cases {
 		t.Run(row.Name, func(t *testing.T) {
 			t.Parallel()
-			root := filepath.Join("testdata", "grouping_guard", row.Root)
+			root := filepath.Join(groupingGuardTrees, row.Root)
 			scanRoot := root
 			if row.WantErrorContains == "" {
 				// Scan a copy outside the repository's Git metadata, so every

@@ -25,7 +25,8 @@ import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { parse } from 'yaml';
 
-const f = parse(readFileSync(new URL('./testdata/seed-transcript-store.yaml', import.meta.url), 'utf8'));
+const FIXTURE = new URL('./testdata/seed-transcript-store.yaml', import.meta.url);
+const f = parse(readFileSync(FIXTURE, 'utf8'));
 assert.deepEqual(new Set(f.cases.map((row) => row.name)), new Set(f.requiredNames));
 
 const REPO = fileURLToPath(new URL('../../..', import.meta.url));
@@ -33,6 +34,7 @@ const SEEDER = './web/scripts/visual/seed-transcript-store.go';
 const PREFIX = 'peasant-transcript-segments-';
 // A relative argument this test never expects to be created, even when the refusal is mutated.
 const RELATIVE_ARGUMENT = 'relative-data-dir-that-must-not-be-created';
+const Mode = Object.freeze({ ExistingStore: 'existing-store', EmptyDir: 'empty-dir', Symlink: 'symlink', File: 'file', Relative: 'relative', Fresh: 'fresh' });
 
 // Runs the seeder as the capture does and reports its status, output and errors.
 function runSeeder(args, environment = {}) {
@@ -71,21 +73,21 @@ function sentinelDatabase(path) {
 }
 
 function populate(mode, root, supplied) {
-  if (mode === 'existing-store') {
+  if (mode === Mode.ExistingStore) {
     sentinelDatabase(join(supplied, 'peasant', 'peasant.db'));
     mkdirSync(join(supplied, 'peasant-sync'));
     writeFileSync(join(supplied, 'peasant-sync', 'kept.jsonl'), 'kept-transcript-bytes');
     return;
   }
-  if (mode === 'empty-dir') { mkdirSync(supplied); return; }
-  if (mode === 'symlink') {
+  if (mode === Mode.EmptyDir) { mkdirSync(supplied); return; }
+  if (mode === Mode.Symlink) {
     const realStore = join(root, 'real-store');
     sentinelDatabase(join(realStore, 'peasant', 'peasant.db'));
     symlinkSync(realStore, supplied);
     return;
   }
-  if (mode === 'file') { writeFileSync(supplied, 'sentinel-file-bytes'); return; }
-  assert.ok(['relative', 'fresh'].includes(mode), `unknown mode ${mode}`);
+  if (mode === Mode.File) { writeFileSync(supplied, 'sentinel-file-bytes'); return; }
+  assert.ok([Mode.Relative, Mode.Fresh].includes(mode), `unknown mode ${mode}`);
 }
 
 for (const row of f.cases) test(row.name, { timeout: 180000 }, async (t) => {
@@ -112,7 +114,7 @@ for (const row of f.cases) test(row.name, { timeout: 180000 }, async (t) => {
     assert.deepEqual(readdirSync(root), [said.dataDir.slice(root.length + 1)], 'the run created only its own data directory');
     return;
   }
-  const supplied = row.mode === 'relative' ? RELATIVE_ARGUMENT : join(root, 'supplied-store');
+  const supplied = row.mode === Mode.Relative ? RELATIVE_ARGUMENT : join(root, 'supplied-store');
   populate(row.mode, root, supplied);
   const before = snapshot(root);
   const result = runSeeder(row.form === 'positional' ? [supplied] : ['-data-dir', supplied]);

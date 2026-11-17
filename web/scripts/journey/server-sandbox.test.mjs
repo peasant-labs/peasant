@@ -20,6 +20,7 @@ assert.deepEqual(new Set([...f.cases.map(c => c.name), 'every-script-that-starts
 const FAKE_SERVER = fileURLToPath(new URL('./lib/fake-server.mjs', import.meta.url));
 const OWNED_SANDBOX_SCRIPT = fileURLToPath(new URL('./lib/owned-sandbox-script.mjs', import.meta.url));
 const LIFECYCLE_CHILD = fileURLToPath(new URL('./lib/lifecycle-child.mjs', import.meta.url));
+const Child = Object.freeze({ Waits: 'waits', IgnoresTerm: 'ignores-term', Missing: 'missing' });
 
 // Starts `program` with `args` and kills it when the case ends, if it is still running.
 function launch(cleanups, program, args, { ipc = false } = {}) {
@@ -162,9 +163,9 @@ const modes = {
     if (row.stopped) { await new Promise((done) => (gone(started) ? done() : started.once('exit', done))); assert.equal(started.signalCode, 'SIGKILL'); }
   },
   async stop(row, root, cleanups) {
-    assert.ok(['waits', 'ignores-term', 'missing'].includes(row.child), `case ${row.name} has the unknown child ${row.child}`);
-    const program = row.child === 'missing' ? join(root, 'no-such-program') : process.execPath;
-    const args = row.child === 'missing' ? [] : [LIFECYCLE_CHILD, row.child, '--exit-after-ms', String(row.exitAfterMs ?? 60000), ...(row.child === 'ignores-term' ? ['--status', '0'] : [])];
+    assert.ok(Object.values(Child).includes(row.child), `case ${row.name} has the unknown child ${row.child}`);
+    const program = row.child === Child.Missing ? join(root, 'no-such-program') : process.execPath;
+    const args = row.child === Child.Missing ? [] : [LIFECYCLE_CHILD, row.child, '--exit-after-ms', String(row.exitAfterMs ?? 60000), ...(row.child === Child.IgnoresTerm ? ['--status', '0'] : [])];
     const child = spawn(program, args, { stdio: ['ignore', 'pipe', 'inherit'] });
     const failed = new Promise((done) => child.once('error', done));
     const realKill = child.kill.bind(child);
@@ -181,9 +182,9 @@ const modes = {
     };
     cleanups.push(() => { try { if (!gone(child)) realKill('SIGKILL'); } catch { /* already gone */ } });
     // The ignoring child prints ready only after its SIGTERM handler is in place.
-    if (row.child === 'ignores-term') await new Promise((done) => child.stdout.once('data', done));
+    if (row.child === Child.IgnoresTerm) await new Promise((done) => child.stdout.once('data', done));
     if (row.before === 'exited') await new Promise((done) => child.once('exit', done));
-    if (row.child === 'missing') await failed;
+    if (row.child === Child.Missing) await failed;
     const before = Date.now();
     if (row.error) {
       await assert.rejects(stopOwnedServer(child, { termMs: row.termMs, killMs: row.killMs, what: 'the test server' }), (error) => error.message.includes(row.error) && error.message.includes('may still be alive'));
@@ -192,10 +193,10 @@ const modes = {
       await new Promise((done) => child.once('exit', done));
     } else {
       await stopOwnedServer(child, { termMs: row.termMs, killMs: row.killMs, what: 'the test server' });
-      if (row.child === 'missing') assert.equal(child.pid, undefined, 'a spawn that never produced a process is already stopped');
+      if (row.child === Child.Missing) assert.equal(child.pid, undefined, 'a spawn that never produced a process is already stopped');
       else assert.equal(gone(child), true, 'the child has exited');
       if (row.signal) assert.equal(child.signalCode, row.signal);
-      if (row.killError && row.child === 'ignores-term') assert.ok(Date.now() - before >= row.termMs - 10, 'a kill error does not count as an exit');
+      if (row.killError && row.child === Child.IgnoresTerm) assert.ok(Date.now() - before >= row.termMs - 10, 'a kill error does not count as an exit');
     }
     if (row.calls) assert.deepEqual(calls, row.calls);
     assert.ok(Date.now() - before < (row.termMs ?? 3000) + (row.killMs ?? 2000) + 2000, 'the stop waits only its deadlines');

@@ -38,31 +38,38 @@ import (
 //go:embed testdata/native_unknown_public.yaml
 var nativeUnknownPublicYAML []byte
 
+type legacyFixtureSource string
+
+const (
+	legacyFixtureFileTree legacyFixtureSource = "file-tree"
+	legacyFixtureSQLite   legacyFixtureSource = "sqlite"
+)
+
 type nativeUnknownPublicCase struct {
-	Payload          string         `yaml:"payload"`
-	Expected         string         `yaml:"expected"`
-	Corrupt          string         `yaml:"corrupt"`
-	Kind             string         `yaml:"kind"`
-	KnownTexts       []string       `yaml:"known_texts"`
-	KnownRole        schema.Role    `yaml:"known_role"`
-	RetainedFallback bool           `yaml:"retained_fallback"`
-	Unaccounted      bool           `yaml:"unaccounted"`
-	Legacy           string         `yaml:"legacy"`
-	Message          string         `yaml:"message"`
-	CopyBoundary     *int64         `yaml:"copy_boundary"`
-	Inherited        bool           `yaml:"inherited"`
-	Forbidden        []string       `yaml:"forbidden"`
-	Name             string         `yaml:"name"`
-	Harness          ingest.Harness `yaml:"harness"`
-	Native           bool           `yaml:"native"`
-	OpaqueOnly       bool           `yaml:"opaque_only"`
-	Framing          bool           `yaml:"framing"`
-	Source           string         `yaml:"source"`
-	Rows             []ocProvRow    `yaml:"rows"`
-	Namespace        string         `yaml:"namespace"`
-	RecordIndices    []int64        `yaml:"record_indices"`
-	Positions        []int64        `yaml:"positions"`
-	Pointers         []string       `yaml:"pointers"`
+	Payload          string              `yaml:"payload"`
+	Expected         string              `yaml:"expected"`
+	Corrupt          string              `yaml:"corrupt"`
+	Kind             string              `yaml:"kind"`
+	KnownTexts       []string            `yaml:"known_texts"`
+	KnownRole        schema.Role         `yaml:"known_role"`
+	RetainedFallback bool                `yaml:"retained_fallback"`
+	Unaccounted      bool                `yaml:"unaccounted"`
+	Legacy           legacyFixtureSource `yaml:"legacy"`
+	Message          string              `yaml:"message"`
+	CopyBoundary     *int64              `yaml:"copy_boundary"`
+	Inherited        bool                `yaml:"inherited"`
+	Forbidden        []string            `yaml:"forbidden"`
+	Name             string              `yaml:"name"`
+	Harness          ingest.Harness      `yaml:"harness"`
+	Native           bool                `yaml:"native"`
+	OpaqueOnly       bool                `yaml:"opaque_only"`
+	Framing          bool                `yaml:"framing"`
+	Source           string              `yaml:"source"`
+	Rows             []ocProvRow         `yaml:"rows"`
+	Namespace        string              `yaml:"namespace"`
+	RecordIndices    []int64             `yaml:"record_indices"`
+	Positions        []int64             `yaml:"positions"`
+	Pointers         []string            `yaml:"pointers"`
 }
 
 type nativeUnknownPublicDocument struct {
@@ -507,7 +514,7 @@ func TestNativeUnknownSourceToPublication(t *testing.T) {
 				if c.RetainedFallback {
 					refused := false
 					for _, diagnostic := range damaged.Diagnostics {
-						if diagnostic.ErrorType == "adapter_refresh_unavailable" && strings.Contains(diagnostic.Message, "cannot unmarshal number") {
+						if diagnostic.ErrorType == ingest.OutcomeReasonAdapterRefreshUnavailable.Code() && strings.Contains(diagnostic.Message, "cannot unmarshal number") {
 							refused = true
 						}
 					}
@@ -650,7 +657,7 @@ func checkNativeUnknownPublic(t *testing.T, c nativeUnknownPublicCase, expected 
 func setupLegacyUnknownPublic(t *testing.T, c nativeUnknownPublicCase, dir string, sid schema.SessionID, payload string) ingest.ResolvedPath {
 	t.Helper()
 	const messageID = "msg_legacy_public"
-	if c.Legacy == "file-tree" {
+	if c.Legacy == legacyFixtureFileTree {
 		write := func(relative, data string) {
 			path := filepath.Join(dir, "provider", "storage", relative)
 			if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
@@ -667,7 +674,7 @@ func setupLegacyUnknownPublic(t *testing.T, c nativeUnknownPublicCase, dir strin
 		}
 		return ingest.ResolvedPath(filepath.Join(dir, "provider"))
 	}
-	if c.Legacy != "sqlite" {
+	if c.Legacy != legacyFixtureSQLite {
 		t.Fatalf("unknown legacy source %q", c.Legacy)
 	}
 	source := testfixture.MaterializeByName(t, "legacy-message-part")

@@ -5,7 +5,6 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"slices"
@@ -18,11 +17,14 @@ import (
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/schema"
+	"github.com/peasant-labs/schema/route"
 	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/transcript_segments.yaml
 var transcriptSegmentsFixtureYAML []byte
+
+const transcriptSegmentsFixturePath = "testdata/transcript_segments.yaml"
 
 type transcriptSegmentsCase struct {
 	Name               string `yaml:"name"`
@@ -45,7 +47,7 @@ func loadTranscriptSegmentsFixture(t *testing.T) transcriptSegmentsFixture {
 	decoder.KnownFields(true)
 	var fixture transcriptSegmentsFixture
 	if err := decoder.Decode(&fixture); err != nil {
-		t.Fatalf("decode internal/mock/testdata/transcript_segments.yaml: %v", err)
+		t.Fatalf("decode %s: %v", transcriptSegmentsFixturePath, err)
 	}
 	names := make([]string, 0, len(fixture.Cases))
 	for _, c := range fixture.Cases {
@@ -233,7 +235,11 @@ func TestMockSessionsServeTranscriptSegments(t *testing.T) {
 			if err != nil {
 				t.Fatalf("fixture session %s is not a mock session: %v", c.SessionID, err)
 			}
-			sessionURL := base + "/api/v1/sessions/" + c.SessionID
+			sessionPath, err := route.LocalGetSessionPath(c.SessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sessionURL := base + sessionPath
 
 			var header schema.SessionDetailReadPayload
 			getMockJSON(t, sessionURL, &header)
@@ -242,7 +248,11 @@ func TestMockSessionsServeTranscriptSegments(t *testing.T) {
 			}
 
 			var directory schema.TranscriptSegmentDirectory
-			getMockJSON(t, sessionURL+"/transcript/segments", &directory)
+			directoryPath, err := route.LocalGetSessionTranscriptSegmentsPath(c.SessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			getMockJSON(t, base+directoryPath, &directory)
 			if directory.TotalTurns != header.TurnCount || directory.TotalSegments == 0 || len(directory.Segments) != directory.TotalSegments {
 				t.Fatalf("segment directory of %s holds %d turns in %d segments (%d refs) while its detail header counts %d turns; the session page would show the transcript as not indexed", c.SessionID, directory.TotalTurns, directory.TotalSegments, len(directory.Segments), header.TurnCount)
 			}
@@ -261,7 +271,11 @@ func TestMockSessionsServeTranscriptSegments(t *testing.T) {
 				}
 				before += ref.ConversationTurns.Count
 				var segment schema.TranscriptSegment
-				getMockJSON(t, fmt.Sprintf("%s/transcript/segments/%d", sessionURL, ref.Index), &segment)
+				segmentPath, err := route.LocalGetSessionTranscriptSegmentPath(c.SessionID, ref.Index)
+				if err != nil {
+					t.Fatal(err)
+				}
+				getMockJSON(t, base+segmentPath, &segment)
 				if segment.Revision != directory.Revision {
 					t.Errorf("segment %d revision = %q, want the directory's %q", ref.Index, segment.Revision, directory.Revision)
 				}
@@ -281,7 +295,11 @@ func TestMockSessionsServeTranscriptSegments(t *testing.T) {
 func TestUnmockedSessionsReadTheAnalyticsStore(t *testing.T) {
 	base := startMockSessionsServer(t, []defaults.MockSection{defaults.MockSections.Dashboard})
 	var directory schema.TranscriptSegmentDirectory
-	getMockJSON(t, base+"/api/v1/sessions/"+canonicalContextNavigationFixture.Child.ID+"/transcript/segments", &directory)
+	directoryPath, err := route.LocalGetSessionTranscriptSegmentsPath(canonicalContextNavigationFixture.Child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	getMockJSON(t, base+directoryPath, &directory)
 	if directory.TotalTurns != 0 || directory.TotalSegments != 0 {
 		t.Fatalf("with only the dashboard mocked the segment directory of mock session %s holds %d turns in %d segments; the transcript reads must stay on the analytics store", canonicalContextNavigationFixture.Child.ID, directory.TotalTurns, directory.TotalSegments)
 	}

@@ -29,6 +29,18 @@ import (
 //go:embed testdata/observations.yaml
 var fixtureYAML []byte
 
+type fixtureAction string
+
+const (
+	fixtureActionSeed        fixtureAction = "seed"
+	fixtureActionDiagnostic  fixtureAction = "diagnostic"
+	fixtureActionReceipt     fixtureAction = "receipt"
+	fixtureActionInvalidated fixtureAction = "association-invalidated"
+	fixtureActionTerminal    fixtureAction = "terminal"
+	fixtureActionSnapshot    fixtureAction = "snapshot"
+	fixtureActionExport      fixtureAction = "fixture"
+)
+
 type account struct {
 	Name     string `yaml:"name"`
 	UserID   string `yaml:"userId"`
@@ -134,7 +146,7 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 	root := flags.String("root", "", "test-owned state root with an ownership marker")
 	remote := flags.String("village-url", "", "loopback fixture Village URL")
 	selected := flags.String("account", "alice", "named fixture account")
-	action := flags.String("action", "seed", "seed, diagnostic, receipt, terminal, association-invalidated, snapshot, or fixture")
+	action := flags.String("action", string(fixtureActionSeed), "seed, diagnostic, receipt, terminal, association-invalidated, snapshot, or fixture")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -142,7 +154,7 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if *action == "fixture" {
+	if fixtureAction(*action) == fixtureActionExport {
 		return exportFixtures(f, output)
 	}
 	if *root == "" {
@@ -172,7 +184,7 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 		return errors.New("fixture Village must be an explicit http://127.0.0.1:<port> origin; no remote credentials will be saved")
 	}
 	config, data := filepath.Join(*root, "config"), filepath.Join(*root, "data")
-	if *action == "seed" {
+	if fixtureAction(*action) == fixtureActionSeed {
 		var chosen *account
 		for _, a := range f.Accounts {
 			if a.Name == *selected {
@@ -218,7 +230,7 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 	if err := issue.Validate(); err != nil {
 		return err
 	}
-	if *action == "seed" {
+	if fixtureAction(*action) == fixtureActionSeed {
 		invocation, err := db.BeginCollectiveObservation(ctx, snapshot)
 		if err != nil {
 			return err
@@ -264,7 +276,7 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 				return err
 			}
 		}
-	} else if *action == "diagnostic" {
+	} else if fixtureAction(*action) == fixtureActionDiagnostic {
 		id, err := uuid.NewRandom()
 		if err != nil {
 			return err
@@ -276,11 +288,11 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 		if err := db.RecordOperationDiagnostic(ctx, snapshot, schema.LocalOperationDiagnostic{OperationID: operationID, Operation: schema.CollectiveOperationShare, AttemptedAt: f.ObservedAt, Outcome: schema.LocalOperationDiagnosticUncertain, Issue: issue}); err != nil {
 			return err
 		}
-	} else if *action == "receipt" {
+	} else if fixtureAction(*action) == fixtureActionReceipt {
 		if err := db.RecordContributionReceipt(ctx, snapshot, schema.LocalConfirmedContributionReceipt{ReceiptID: "fixture-new-receipt", Operation: schema.CollectiveOperationShare, TranscriptID: transcript, CollectiveID: &collective, ConfirmedAt: f.ObservedAt, Outcome: schema.LocalConfirmedContributionSubmitted}); err != nil {
 			return err
 		}
-	} else if *action == "association-invalidated" {
+	} else if fixtureAction(*action) == fixtureActionInvalidated {
 		invocation, err := db.BeginCollectiveObservation(ctx, snapshot)
 		if err != nil {
 			return err
@@ -288,7 +300,7 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 		if err := db.InstallTranscriptAssociations(ctx, invocation, transcript, []schema.VillageTranscriptCollective{}, f.ObservedAt, true); err != nil {
 			return err
 		}
-	} else if *action == "terminal" {
+	} else if fixtureAction(*action) == fixtureActionTerminal {
 		var terminal schema.VillageShareEvent
 		if err := json.Unmarshal([]byte(f.TerminalJSON), &terminal); err != nil {
 			return err
@@ -300,7 +312,7 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 		if _, err := db.InstallContributionAttemptSources(ctx, invocation, []store.ContributionAttemptSource{{CollectiveID: collective, TranscriptID: transcript, Events: []schema.VillageShareEvent{terminal}, ObservedAt: f.ObservedAt}}); err != nil {
 			return err
 		}
-	} else if *action != "snapshot" {
+	} else if fixtureAction(*action) != fixtureActionSnapshot {
 		return fmt.Errorf("unknown fixture action %q; no matching fixture operation exists", *action)
 	}
 	view, err := db.ReadCollectiveObservations(ctx, snapshot)

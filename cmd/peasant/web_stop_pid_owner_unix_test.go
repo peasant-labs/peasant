@@ -119,6 +119,8 @@ func TestStopWebLeavesAnUnrelatedProcessAlone(t *testing.T) {
 	}
 }
 
+const programWithServerArgsFixture = "testdata/program_with_server_args.sh"
+
 // TestStopWebLeavesAnotherProgramWithServerArgsAlone is the #714 review repro:
 // a different executable started with the server's own trailing arguments
 // (`sh program_with_server_args.sh web start --foreground --port P`) must not
@@ -130,9 +132,9 @@ func TestStopWebLeavesAnotherProgramWithServerArgsAlone(t *testing.T) {
 	if err != nil {
 		t.Skip("sh not installed")
 	}
-	program, err := filepath.Abs(filepath.Join("testdata", "program_with_server_args.sh"))
+	program, err := filepath.Abs(programWithServerArgsFixture)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("resolve fixture %s: %v", programWithServerArgsFixture, err)
 	}
 	stdin, hold, err := os.Pipe()
 	if err != nil {

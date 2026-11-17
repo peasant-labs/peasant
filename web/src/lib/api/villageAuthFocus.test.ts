@@ -24,7 +24,8 @@ interface Case {
   expectListening: boolean;
 }
 
-const fixture = parse(readFileSync(resolve(process.cwd(), 'src/lib/api/testdata/village_auth_focus.yaml'), 'utf8')) as { requiredNames: string[]; cases: Case[] };
+const FIXTURE = 'src/lib/api/testdata/village_auth_focus.yaml';
+const fixture = parse(readFileSync(resolve(process.cwd(), FIXTURE), 'utf8')) as { requiredNames: string[]; cases: Case[] };
 const EVENT_KEYS = ['at', 'subscribe', 'unsubscribe', 'focus', 'pendingTimers', 'listeners'];
 
 /** What a subscriber heard, in the fixture's words. */

@@ -189,8 +189,8 @@ func TestDisposableSeederProductionStore(t *testing.T) {
 			after := read()
 			for kind, old := range pages {
 				changed := old.TraversalRevision != after[kind].TraversalRevision
-				diagnosticChanged := c.Mode == "diagnostic" && kind == schema.LocalContributionEvidenceOperationDiagnostics
-				attemptChanged := c.Mode == "terminal" && kind == schema.LocalContributionEvidenceRemoteAttempts
+				diagnosticChanged := fixtureAction(c.Mode) == fixtureActionDiagnostic && kind == schema.LocalContributionEvidenceOperationDiagnostics
+				attemptChanged := fixtureAction(c.Mode) == fixtureActionTerminal && kind == schema.LocalContributionEvidenceRemoteAttempts
 				want := diagnosticChanged || attemptChanged
 				if changed != want {
 					t.Fatalf("%s changed=%v, want %v after %s", kind, changed, want, c.Mode)

@@ -22,6 +22,7 @@ const SESSION_ID = 'sess-reading-position';
 const REVISION = '3';
 const TURN_COUNT = 6;
 const SCROLLED_TO = 432;
+const Labels = Object.freeze({ Loading: 'Loading transcript', Graph: 'graph', List: 'list' });
 
 let channelData: unknown;
 let releaseSegments: (() => void) | null = null;
@@ -134,7 +135,7 @@ function mountPage() {
 
 /** Mount behind the skeleton, then release the segment read and return the mounted stream. */
 async function mountAfterSkeleton(view: ReturnType<typeof render>): Promise<HTMLElement> {
-  await waitFor(() => expect(view.getByLabelText('Loading transcript')).toBeInTheDocument());
+  await waitFor(() => expect(view.getByLabelText(Labels.Loading)).toBeInTheDocument());
   expect(view.container.querySelector('.txn-stream')).toBeNull();
   await act(async () => { releaseSegments?.(); });
   return waitFor(() => {
@@ -193,9 +194,9 @@ describe('SessionDetailV2 saved reading position for a segmented transcript', ()
     await mountAfterSkeleton(view);
     await nextFrame();
 
-    fireEvent.click(view.getByRole('button', { name: 'graph' }));
+    fireEvent.click(view.getByRole('button', { name: Labels.Graph }));
     await waitFor(() => expect(view.container.querySelector('.txn-stream')).toBeNull());
-    fireEvent.click(view.getByRole('button', { name: 'list' }));
+    fireEvent.click(view.getByRole('button', { name: Labels.List }));
     const replaced = await waitFor(() => {
       const stream = view.container.querySelector<HTMLElement>('.txn-stream');
       if (!stream) throw new Error('the transcript stream did not return after switching back to the list view');

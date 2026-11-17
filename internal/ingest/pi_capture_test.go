@@ -67,7 +67,7 @@ func assertStoredCaptureRefusedNonfatally(t *testing.T, result *ingest.PipelineR
 		t.Fatalf("refused stored session missing from results: %+v", result.Sessions)
 	}
 	for _, diagnostic := range result.Diagnostics {
-		if diagnostic.ErrorType == "adapter_refresh_unavailable" && strings.Contains(diagnostic.Location+diagnostic.Message, string(sid)) && strings.Contains(diagnostic.Message, "preserved") && diagnostic.Location != "" && diagnostic.Remediation != "" {
+		if diagnostic.ErrorType == ingest.OutcomeReasonAdapterRefreshUnavailable.Code() && strings.Contains(diagnostic.Location+diagnostic.Message, string(sid)) && strings.Contains(diagnostic.Message, "preserved") && diagnostic.Location != "" && diagnostic.Remediation != "" {
 			return
 		}
 	}
