@@ -194,7 +194,16 @@ func TestStopWebLeavesSameNamedExecutableAtAnotherPathAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	other := filepath.Join(t.TempDir(), filepath.Base(self))
-	if err := os.WriteFile(other, data, 0o755); err != nil {
+	staged := other + ".staged"
+	if err := os.WriteFile(staged, data, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Publish the copy with a rename so the executed path is never the inode a
+	// write descriptor is attached to. A parallel test can fork between the
+	// write and the start; that child inherits the open write descriptor, and
+	// an exec of the same path fails with ETXTBSY ("text file busy"). The
+	// rename leaves the inherited descriptor on the unlinked staged inode.
+	if err := os.Rename(staged, other); err != nil {
 		t.Fatal(err)
 	}
 	port := freePort(t)
