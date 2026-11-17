@@ -9,8 +9,14 @@ on:
   pull_request_target:
     types: [opened, reopened, ready_for_review, closed]
 
+permissions:
+  contents: read
+
 jobs:
   notify:
     if: github.event.action != 'closed' || github.event.pull_request.merged == true
+    permissions:
+      contents: read
     uses: peasant-labs/.github/.github/workflows/discord-pr-notify.yml@main
-    secrets: inherit
+    secrets:
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}

@@ -1,0 +1,192 @@
+# Title guard: every pull request title is intent, and only intent.
+#
+# Runs on every pull_request event (opened, edited, synchronize, reopened)
+# with no early exit: GitHub reports the newest check run of this name on the
+# head commit, so a body-only edit must re-run the full check instead of
+# replacing a red run with a skipped one. Runs again per merge-group build,
+# where the entry PR is resolved with `group-pr` and its live title, author,
+# and SHAs are read from the API: a re-run reuses an old payload, and group
+# commits are never parsed as squash subjects.
+#
+# Which PR is the release PR is decided with `release-intent classify`,
+# never by comparing a branch literal: the release config's `bot_branches`
+# is the one source the classifier reads. On the release PR the generated
+# content is also compared with `release-pr --check`, which fails closed with
+# `release-content-stale`. If the entry PR of a merge group cannot be
+# resolved, the job fails closed: the PR-time check stays authoritative, but
+# an unidentified entry never lands unchecked.
+name: title-guard
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+  merge_group:
+
+# read-only: this workflow validates titles and release content from git and
+# the API; it never pushes, opens, edits, or closes a PR
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: title-guard-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# The checks build release-intent from the pinned infra checkout below.
+
+jobs:
+  title-guard:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    timeout-minutes: 10
+    steps:
+      - name: Check out the repository (full history and tags, no blobs)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          filter: blob:none
+          persist-credentials: false
+
+      - name: Check out the release-intent tool
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: peasant-labs/infra
+          ref: 87d75184b1eba3ba28c716b317ce060751a151c5
+          path: infra-tool
+          sparse-checkout: |
+            tools/release
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: infra-tool/tools/release/go.mod
+          cache-dependency-path: infra-tool/tools/release/go.sum
+
+      - name: Build release-intent
+        working-directory: infra-tool/tools/release
+        run: |
+          go build -o "${RUNNER_TEMP}/release-intent" ./cmd/release-intent
+          echo "${RUNNER_TEMP}" >> "${GITHUB_PATH}"
+
+      - name: Check the release config
+        run: release-intent check-config --config .github/release-intent.yaml
+
+      - name: Check the workflows against the policy
+        run: release-intent check-workflows --policy .github/release-queue.policy.yml --dir .github/workflows
+
+      # The entry PR is resolved first: from the merge-group ref on a group
+      # build, from the event otherwise. The title, author, and SHAs then come
+      # from the live API, never from the event payload, so a re-run of an old
+      # run checks the current title. On a merge group, check-branch is the
+      # group head, so the release-content check below compares against the
+      # default branch's current tip. The event name is tested only in
+      # step-level `if:` conditions; the run scripts below branch on step
+      # outputs.
+      - name: Resolve the merge-group entry PR
+        id: entry
+        if: github.event_name == 'merge_group'
+        env:
+          GROUP_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          resolved="$(release-intent group-pr --ref "${GROUP_REF}")"
+          number="${resolved#pr=}"
+          if [ -z "${number}" ]; then
+            echo "::error::title-guard cannot resolve the merge-group entry PR from ${GROUP_REF}; failing closed so an unidentified entry never lands unchecked."
+            exit 1
+          fi
+          echo "number=${number}" >> "${GITHUB_OUTPUT}"
+
+      - name: Read the live pull request
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ENTRY_NUMBER: ${{ steps.entry.outputs.number }}
+          EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
+          GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+          GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+        run: |
+          set -euo pipefail
+          if [ -n "${ENTRY_NUMBER}" ]; then
+            number="${ENTRY_NUMBER}"
+            group=true
+          else
+            number="${EVENT_PR_NUMBER}"
+            group=false
+          fi
+          payload="$(gh pr view "${number}" --repo "${GITHUB_REPOSITORY}" --json number,title,author,headRefName,headRefOid,baseRefOid)"
+          title="$(printf '%s' "${payload}" | jq -r .title)"
+          author="$(printf '%s' "${payload}" | jq -r .author.login)"
+          head_branch="$(printf '%s' "${payload}" | jq -r .headRefName)"
+          head_sha="$(printf '%s' "${payload}" | jq -r .headRefOid)"
+          if [ "${group}" = "true" ]; then
+            base_sha="${GROUP_BASE_SHA}"
+            check_branch="${GROUP_HEAD_SHA}"
+          else
+            base_sha="$(printf '%s' "${payload}" | jq -r .baseRefOid)"
+            check_branch="${head_sha}"
+          fi
+          {
+            echo "number=${number}"
+            printf 'title=%s\n' "${title}"
+            echo "author=${author}"
+            echo "head_branch=${head_branch}"
+            echo "head_sha=${head_sha}"
+            echo "base_sha=${base_sha}"
+            echo "check_branch=${check_branch}"
+            echo "group=${group}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Classify the pull request
+        id: classify
+        env:
+          PR_AUTHOR: ${{ steps.pr.outputs.author }}
+          PR_BRANCH: ${{ steps.pr.outputs.head_branch }}
+          PR_BASE: ${{ steps.pr.outputs.base_sha }}
+        run: |
+          set -euo pipefail
+          # The PR that adopts the release config has no config at its base.
+          # Read the config from the checked-out commit, which carries the
+          # adopted file; its author and head branch are not a configured bot.
+          rev="${PR_BASE}"
+          if ! git cat-file -e "${PR_BASE}:.github/release-intent.yaml" 2>/dev/null; then
+            rev="$(git rev-parse HEAD)"
+          fi
+          release-intent classify --author "${PR_AUTHOR}" --head-branch "${PR_BRANCH}" --rev "${rev}"
+
+      - name: Check the pull request title
+        env:
+          PR_TITLE: ${{ steps.pr.outputs.title }}
+          PR_BASE: ${{ steps.pr.outputs.base_sha }}
+          PR_HEAD: ${{ steps.pr.outputs.head_sha }}
+          PR_AUTHOR: ${{ steps.pr.outputs.author }}
+          PR_BRANCH: ${{ steps.pr.outputs.head_branch }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --filter=blob:none origin "${PR_HEAD}"
+          printf '%s' "${PR_TITLE}" | release-intent check-title --base "${PR_BASE}" --head "${PR_HEAD}" --author "${PR_AUTHOR}" --head-branch "${PR_BRANCH}"
+
+      - name: Check out the entry head (pull request events)
+        if: steps.pr.outputs.group != 'true' && steps.classify.outputs.kind == 'release'
+        env:
+          PR_HEAD: ${{ steps.pr.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --filter=blob:none origin "${PR_HEAD}"
+          git checkout --detach "${PR_HEAD}"
+
+      # On merge-group builds the working tree is already the group commit, so
+      # the content is compared against the default branch's current tip with
+      # no checkout. A stale release PR fails the group build and leaves the
+      # queue; the release job rebuilds it.
+      - name: Check the release PR content
+        if: steps.classify.outputs.kind == 'release'
+        env:
+          CHECK_BRANCH: ${{ steps.pr.outputs.check_branch }}
+        run: |
+          set -euo pipefail
+          release-intent release-pr --check --branch "${CHECK_BRANCH}" --floor "${{ vars.RELEASE_BATCH_FLOOR }}"

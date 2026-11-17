@@ -21,10 +21,13 @@ jobs:
   built-binary:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: DeterminateSystems/nix-installer-action@33c9ab3ef95cd57c164d9d6eb1f9a46338538d41
       # Hosted runners are ephemeral. Restore Go's module/build caches for the
       # fixture seeder and both binary builds; the Nix shell still supplies Go.

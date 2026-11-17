@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# A merge group has no pull_request payload. Resolve its entry and classify
+# the live author and head branch using the release config in the tested tree.
+resolved="$(release-intent group-pr --ref "$GITHUB_REF")"
+number="${resolved#pr=}"
+if [[ ! "$number" =~ ^[0-9]+$ ]]; then
+  echo "::error::Cannot resolve the merge-group entry from $GITHUB_REF."
+  exit 1
+fi
+pr="$(gh pr view "$number" --repo "$GITHUB_REPOSITORY" --json author,headRefName)"
+author="$(jq -er '.author.login | select(length > 0)' <<< "$pr")"
+branch="$(jq -er '.headRefName | select(length > 0)' <<< "$pr")"
+release-intent classify --author "$author" --head-branch "$branch" --rev HEAD

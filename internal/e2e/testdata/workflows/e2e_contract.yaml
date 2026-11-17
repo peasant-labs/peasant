@@ -1,4 +1,16 @@
 expected_village_ref: 88f38cd872b0983bb631ad606c733d908afc126c
+queue_adoption:
+  required_gate_jobs:
+    - changes
+    - schema-parity
+    - release-content
+    - vendor-hash
+    - e2e
+    - release-validate
+  entry_script: scripts/release-group-entry
+  pin_fixture: internal/e2e/testdata/workflows/e2e_contract.yaml
+  e2e_resolver_workflow: .github/workflows/e2e.yml
+  validate_resolver_workflow: .github/workflows/release-validate.yml
 e2e:
   required_triggers:
     - push
@@ -77,13 +89,8 @@ release_guard:
   workflow: .github/workflows/release.yml
   job: guard
   job_if_condition: github.event_name == 'push'
-  required_pr_branches:
-    - develop
-  required_pr_paths:
-    - .github/workflows/release.yml
-    - .github/workflows/e2e.yml
-    - .github/workflows/release-e2e.yml
-    - .github/workflows/release-validate.yml
+  required_pr_branches: []
+  required_pr_paths: []
   required_job_permissions:
     - key: contents
       value: read
@@ -102,7 +109,7 @@ release_guard:
       value: "291504229"
   actor_run: |-
     if [ "$RELEASE_ACTOR" != "$EXPECTED_RELEASE_ACTOR" ] || [ "$RELEASE_ACTOR_ID" != "$EXPECTED_RELEASE_ACTOR_ID" ]; then
-      echo "::error::release tag ${TAG} was pushed by ${RELEASE_ACTOR} (${RELEASE_ACTOR_ID}), not the peasant-labs-releaser App. Create releases only by merging a protected release PR."
+      echo "::error::release tag ${TAG} was pushed by ${RELEASE_ACTOR} (${RELEASE_ACTOR_ID}), not the peasant-labs-releaser App. Use the release batch to tag a fresh queued release."
       exit 1
     fi
   checkout_step: Checkout repository (full history + tags)
@@ -117,6 +124,8 @@ reusable_callers:
         permissions:
           - key: contents
             value: read
+          - key: pull-requests
+            value: read
       - job: release-e2e
         uses: ./.github/workflows/release-e2e.yml
         permissions:
@@ -130,47 +139,29 @@ reusable_callers:
         permissions:
           - key: contents
             value: read
-  - workflow: .github/workflows/release-pr.yml
+          - key: pull-requests
+            value: read
+  - workflow: .github/workflows/tests.yml
     jobs:
-      - job: tests
-        uses: ./.github/workflows/tests.yml
-        needs: [validate]
+      - job: e2e
+        uses: ./.github/workflows/e2e.yml
+        needs: [changes, release-content, vendor-hash]
         if_contains:
-          - startsWith(github.event.pull_request.title, 'release(')
-          - contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action)
-          - github.event.label.name == 'full-gate'
+          - needs.changes.outputs.release == 'true'
         permissions:
           - key: contents
-            value: read
-          - key: checks
             value: read
           - key: pull-requests
             value: read
-      - job: e2e
-        uses: ./.github/workflows/e2e.yml
-        needs: [validate, changes]
+      - job: release-validate
+        uses: ./.github/workflows/release-validate.yml
+        needs: [changes, release-content, vendor-hash]
         if_contains:
-          - startsWith(github.event.pull_request.title, 'release(')
-          - contains(fromJSON('["opened","reopened"]'), github.event.action)
-          - needs.changes.outputs.e2e != 'false'
-          - needs.changes.result != 'success'
-          - needs.validate.result == 'success'
-          - github.event.label.name == 'full-gate'
+          - needs.changes.outputs.release == 'true'
         permissions:
           - key: contents
             value: read
-      - job: release-validate
-        uses: ./.github/workflows/release-validate.yml
-        needs: [validate, changes]
-        if_contains:
-          - startsWith(github.event.pull_request.title, 'release(')
-          - contains(fromJSON('["opened","reopened"]'), github.event.action)
-          - needs.changes.outputs.release_validate != 'false'
-          - needs.changes.result != 'success'
-          - needs.validate.result == 'success'
-          - github.event.label.name == 'full-gate'
-        permissions:
-          - key: contents
+          - key: pull-requests
             value: read
 router:
   workflow: peasant-labs/infra/.github/workflows/runner-router.yml
@@ -197,10 +188,11 @@ release_validate:
 tests_workflow:
   triggers:
     - pull_request
+    - merge_group
     - push
   required_paths:
-    - .github/workflows/**
-    - .github/release-guard.policy.yml
+    - .github/workflows/*
+    - .github/release-queue.policy.yml
   post_merge_evidence:
     job: post-merge-evidence
     job_if_condition: github.event_name == 'push'

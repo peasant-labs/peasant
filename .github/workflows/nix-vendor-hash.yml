@@ -1,8 +1,5 @@
 name: Nix Vendor Hash
 
-# Keep flake.nix's buildGoModule vendorHash in sync after dependency-bearing
-# changes land on develop. Release PR tagging also runs the same script before
-# creating a tag, because tagged release source cannot be repaired in-place.
 on:
   push:
     branches: [develop]
@@ -19,49 +16,143 @@ on:
       - ".github/workflows/nix-vendor-hash.yml"
   workflow_dispatch:
 
+# One writer for the branch; a later run reconciles any newer default-branch tip.
 concurrency:
-  group: nix-vendor-hash-${{ github.ref }}
-  cancel-in-progress: true
+  group: nix-vendor-hash
+  cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
-  update:
-    name: update vendorHash
+  prepare:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      changed: ${{ steps.hash.outputs.changed }}
+      number: ${{ steps.find.outputs.number }}
     steps:
-      - name: Mint App token (Contents:write to commit hash drift)
-        id: tok
-        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          app-id: ${{ secrets.PEASANT_RELEASER_APP_ID }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@33c9ab3ef95cd57c164d9d6eb1f9a46338538d41
+
+      - name: Compute and bundle the vendor hash
+        id: hash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin develop
+          git checkout -B automation/vendor-hash origin/develop
+          make nix-vendor-hash
+          git diff --exit-code -- . ':(exclude)flake.nix'
+          if git diff --quiet -- flake.nix; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git diff --check
+          test "$(git diff --numstat -- flake.nix)" = $'1\t1\tflake.nix'
+          git diff --unified=0 -- flake.nix | awk '
+            /^--- |^\+\+\+ |^@@|^diff |^index / { next }
+            /^-/ { if ($0 !~ /^-[[:space:]]*vendorHash = "sha256-[^"]+";[[:space:]]*$/) exit 1; removed++; next }
+            /^\+/ { if ($0 !~ /^\+[[:space:]]*vendorHash = "sha256-[^"]+";[[:space:]]*$/) exit 1; added++; next }
+            END { if (removed != 1 || added != 1) exit 1 }
+          '
+          git config user.name peasant-release-bot
+          git config user.email bots@peasant-labs.invalid
+          git add -- flake.nix
+          git commit -m "chore(nix): update vendor hash"
+          mkdir -p bundle
+          git bundle create bundle/vendor.bundle refs/heads/automation/vendor-hash "^${GITHUB_SHA}"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Find the vendor hash PR
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "number=$(gh pr list --head automation/vendor-hash --state open --json number --jq '.[0].number // empty')" >> "$GITHUB_OUTPUT"
+
+      - name: Hand the bundle to the update job
+        if: steps.hash.outputs.changed == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: vendor-bundle
+          path: bundle
+          if-no-files-found: error
+          retention-days: 1
+
+  update:
+    needs: [prepare]
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download the bundle
+        if: needs.prepare.outputs.changed == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: vendor-bundle
+          path: bundle
+
+      - name: Mint the releaser App token
+        id: mint
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.PEASANT_RELEASER_CLIENT_ID }}
           private-key: ${{ secrets.PEASANT_RELEASER_APP_PRIVATE_KEY }}
           owner: peasant-labs
           repositories: peasant
 
-      - name: Checkout repository
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          fetch-depth: 0
-          token: ${{ steps.tok.outputs.token }}
+      - name: Fetch the bot branch
+        if: needs.prepare.outputs.changed == 'true'
+        run: git fetch --no-tags bundle/vendor.bundle automation/vendor-hash:automation/vendor-hash
 
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@33c9ab3ef95cd57c164d9d6eb1f9a46338538d41 # main
-
-      - name: Update vendorHash
-        run: make nix-vendor-hash
-
-      - name: Commit updated vendorHash
+      - name: Push the bot branch
+        if: needs.prepare.outputs.changed == 'true'
+        env:
+          APP_TOKEN: ${{ steps.mint.outputs.token }}
         run: |
-          set -euo pipefail
-          if git diff --quiet -- flake.nix; then
-            echo "vendorHash already current"
-            exit 0
-          fi
-          git config user.name "peasant-release-bot"
-          git config user.email "noreply@peasantlabs.org"
-          git add flake.nix
-          git commit -m "chore: update nix vendor hash"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
+          git -c credential.helper='!f() { echo "username=x-access-token"; echo "password=${APP_TOKEN}"; }; f' push --force-with-lease origin automation/vendor-hash
+
+      - name: Open the vendor hash PR
+        if: needs.prepare.outputs.changed == 'true' && needs.prepare.outputs.number == ''
+        env:
+          GH_TOKEN: ${{ steps.mint.outputs.token }}
+        run: |
+          gh pr create --head automation/vendor-hash --base develop --title "chore(nix): update vendor hash" --body "Automated vendor hash update."
+
+      - name: Update the vendor hash PR
+        if: needs.prepare.outputs.changed == 'true' && needs.prepare.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ steps.mint.outputs.token }}
+        run: |
+          gh pr edit --title "chore(nix): update vendor hash" --body "Automated vendor hash update." -- automation/vendor-hash
+
+      - name: Arm auto-merge on the vendor hash PR
+        if: needs.prepare.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.mint.outputs.token }}
+        run: gh pr merge --auto --squash -- automation/vendor-hash
+
+      - name: Close the vendor hash PR when current
+        if: needs.prepare.outputs.changed == 'false' && needs.prepare.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ steps.mint.outputs.token }}
+        run: gh pr close -- automation/vendor-hash

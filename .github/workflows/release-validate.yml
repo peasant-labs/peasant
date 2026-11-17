@@ -6,7 +6,7 @@ name: Release Validate
 # WITHOUT touching any external registry (everything stays local).
 #
 # Entry points:
-#   - workflow_call from release-pr.yml for release(...) PRs.
+#   - workflow_call from tests.yml for the release merge-group build.
 #   - workflow_call from release.yml on the rc tag path.
 #
 # This workflow has one purpose: packaging validation
@@ -15,16 +15,18 @@ name: Release Validate
 # the darwin smoke release.yml deliberately omits, and runs ONLY on rc.
 on:
   workflow_call:
+    secrets:
+      RUNNER_STATUS_TOKEN:
+        required: false
 
-# Cancel superseded runs on the same ref to save minutes. On a release PR the
-# group is scoped to the head SHA so a stale labeled run cannot cancel the
-# current head's gate.
+# Only PR runs cancel superseded runs; merge groups use separate ref keys.
 concurrency:
-  group: release-validate-${{ github.ref }}-${{ startsWith(github.event.pull_request.title, 'release(') && github.event.pull_request.head.sha || 'shared' }}
-  cancel-in-progress: true
+  group: release-validate-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   # Route the x86_64 and architecture-neutral packaging jobs to the self-hosted
@@ -33,19 +35,23 @@ jobs:
   # `nix-build`, the arm64 `deb` entries, and `macos-cask` keep their current
   # runners.
   determine-runner:
+    permissions:
+      contents: read
     uses: peasant-labs/infra/.github/workflows/runner-router.yml@71e687cef7eede9a63659be98ce9adac3c563398
     with:
       fallback: '["blacksmith-4vcpu-ubuntu-2404"]'
     secrets:
       RUNNER_STATUS_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
 
-  # Decide whether this is a release CANDIDATE, from whichever signal the entry
-  # point provides (PR title grammar, or the tag's -rc suffix on workflow_call).
-  # Drives the rc-only macOS cask job from both supported entry points.
+  # Resolve a group entry independently; candidate status comes from a tag's
+  # suffix, never a PR title. Group builds are not release-candidate tags.
   classify:
     name: classify rc
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       is_rc: ${{ steps.c.outputs.is_rc }}
     steps:
@@ -53,38 +59,53 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 1
+          persist-credentials: false
+      - name: Checkout release-intent
+        if: github.event_name == 'merge_group'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: peasant-labs/infra
+          ref: 87d75184b1eba3ba28c716b317ce060751a151c5
+          path: infra-tool
+          sparse-checkout: tools/release
+          persist-credentials: false
       - name: Set up Go
+        if: github.event_name == 'merge_group'
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version-file: go.mod
-          cache-dependency-path: go.sum
+          go-version-file: infra-tool/tools/release/go.mod
+          cache: false
+      - name: Build release-intent
+        if: github.event_name == 'merge_group'
+        env:
+          GOWORK: "off"
+        run: go build -C infra-tool/tools/release -o "${RUNNER_TEMP}/release-intent" ./cmd/release-intent
+      - name: Resolve and classify the entry
+        if: github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          export PATH="$RUNNER_TEMP:$PATH"
+          kind="$(bash scripts/release-group-entry)"
+          test "$kind" = 'kind=release'
       - name: Classify
         id: c
         env:
-          EVENT: ${{ github.event_name }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
           REF_NAME: ${{ github.ref_name }}
         run: |
-          set -uo pipefail
-          if [ "$EVENT" = "pull_request" ]; then
-            # rc only if the PR title parses AND its kind is rc; a non-release PR
-            # simply yields is_rc=false (never fails this job).
-            if out=$(go run github.com/peasant-labs/schema/cmd/release-guard parse-title "$PR_TITLE" 2>/dev/null); then
-              kind=$(printf '%s\n' "$out" | sed -n 's/^kind=//p')
-              [ "$kind" = "rc" ] && echo "is_rc=true" >> "$GITHUB_OUTPUT" || echo "is_rc=false" >> "$GITHUB_OUTPUT"
-            else
-              echo "is_rc=false" >> "$GITHUB_OUTPUT"
-            fi
-          else
-            case "$REF_NAME" in
-              *-rc*) echo "is_rc=true" >> "$GITHUB_OUTPUT" ;;
-              *)     echo "is_rc=false" >> "$GITHUB_OUTPUT" ;;
-            esac
-          fi
+          set -euo pipefail
+          case "$REF_NAME" in
+            *-rc*) echo "is_rc=true" >> "$GITHUB_OUTPUT" ;;
+            *)     echo "is_rc=false" >> "$GITHUB_OUTPUT" ;;
+          esac
 
   # Build the snapshot artifacts once; every install job consumes them.
   snapshot:
     name: goreleaser snapshot
+    needs: classify
+    permissions:
+      contents: read
     # Deliberately NOT routed through determine-runner. The self-hosted
     # container pool keeps a runner's workspace between jobs, and an earlier
     # container run leaves root-owned dist/ that goreleaser's --clean cannot
@@ -98,6 +119,7 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
@@ -147,9 +169,8 @@ jobs:
         run: |
           "$RUNNER_TEMP/goreleaser-bin/goreleaser" release --snapshot --clean
         env:
-          # Snapshot never publishes, but the aur/cask templates must resolve.
+          # Snapshot never publishes, but the AUR template must resolve.
           AUR_KEY: "snapshot-unused"
-          TAP_GITHUB_TOKEN: "snapshot-unused"
       - name: Upload dist/
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -163,6 +184,8 @@ jobs:
   deb:
     name: deb (${{ matrix.image }} / ${{ matrix.target.debarch }})
     needs: [determine-runner, snapshot]
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -215,6 +238,8 @@ jobs:
   rpm:
     name: rpm (${{ matrix.image }})
     needs: [determine-runner, snapshot]
+    permissions:
+      contents: read
     runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     timeout-minutes: 15
     strategy:
@@ -258,6 +283,8 @@ jobs:
   makepkg:
     name: makepkg (archlinux x86_64)
     needs: [determine-runner, snapshot]
+    permissions:
+      contents: read
     runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     timeout-minutes: 20
     container:
@@ -307,6 +334,8 @@ jobs:
   brew-style:
     name: brew style (linux)
     needs: snapshot
+    permissions:
+      contents: read
     # GitHub-hosted, NOT Blacksmith: setup-homebrew needs the preinstalled
     # /home/linuxbrew tree owned by the job user; on Blacksmith it retry-looped
     # on "could not lock config file .git/config: Permission denied" until the
@@ -335,6 +364,9 @@ jobs:
   # Nix: build the flake package (S5). Standalone — does not need the snapshot.
   nix-build:
     name: nix build .#peasant
+    needs: classify
+    permissions:
+      contents: read
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 30
     steps:
@@ -342,6 +374,7 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 1
+          persist-credentials: false
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@33c9ab3ef95cd57c164d9d6eb1f9a46338538d41 # main
       - name: nix build .#peasant
@@ -354,6 +387,8 @@ jobs:
   macos-cask:
     name: macos cask install (rc only)
     needs: [classify, snapshot]
+    permissions:
+      contents: read
     if: needs.classify.outputs.is_rc == 'true'
     runs-on: macos-15
     timeout-minutes: 20
