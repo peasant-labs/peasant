@@ -222,6 +222,21 @@ jobs:
           "$RUNNER_TEMP/goreleaser-bin/goreleaser" release --clean --skip=publish
           printf '%s\n' "$PEASANT_RELEASE_HEADER" > dist/release-notes.md
 
+      - name: Stage the bare Windows binary at its checksum name
+        run: |
+          set -euo pipefail
+          # `goreleaser release --skip=publish` leaves the bare Windows binary
+          # in its build subdirectory, but the checksums and release assets name
+          # it `peasant_<version>_windows_amd64.exe` at the dist root. The
+          # publisher would normally copy it there; stage it so the checksum
+          # verification and the release-dist artifact both see it.
+          exe_name="$(awk '$2 ~ /_windows_amd64\.exe$/ {print $2; exit}' dist/checksums.txt)"
+          test -n "${exe_name}"
+          exe_src="$(find dist -type f -name '*.exe' ! -path "dist/${exe_name}" -print -quit)"
+          test -n "${exe_src}"
+          cp "${exe_src}" "dist/${exe_name}"
+          ls -l "dist/${exe_name}"
+
       - name: Verify release checksums
         run: |
           set -euo pipefail
