@@ -1,0 +1,11 @@
+releases: true
+tag_prefix: v
+automation_author: app/peasant-labs-releaser
+changelog: CHANGELOG.md
+version_files: []
+protected_paths: []
+surfaces: {}
+bot_branches:
+  release: automation/release
+  cut-release: automation/cut-release
+  vendor-hash: automation/vendor-hash

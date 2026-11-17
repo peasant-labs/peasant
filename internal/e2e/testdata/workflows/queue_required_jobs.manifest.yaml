@@ -1,0 +1,7 @@
+requiredNames:
+  - changes
+  - schema-parity
+  - release-content
+  - vendor-hash
+  - e2e
+  - release-validate

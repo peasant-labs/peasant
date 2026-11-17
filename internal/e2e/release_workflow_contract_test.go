@@ -24,6 +24,9 @@ var e2eWorkflowContractFixtureBytes []byte
 //go:embed testdata/workflows/e2e_asserted_tests.manifest.yaml
 var e2eAssertedTestsManifest []byte
 
+//go:embed testdata/workflows/queue_required_jobs.manifest.yaml
+var queueRequiredJobsManifest []byte
+
 //go:embed testdata/workflows/release_validate_rpm.yaml
 var releaseValidateRPMFixtureBytes []byte
 
@@ -53,7 +56,14 @@ type releaseValidateRPMMutationCase struct {
 
 type e2eWorkflowContractFixture struct {
 	ExpectedVillageRef string `yaml:"expected_village_ref"`
-	E2E                struct {
+	QueueAdoption      struct {
+		RequiredGateJobs nonEmptyStrings `yaml:"required_gate_jobs"`
+		EntryScript      string          `yaml:"entry_script"`
+		PinFixture       string          `yaml:"pin_fixture"`
+		E2EResolver      string          `yaml:"e2e_resolver_workflow"`
+		ValidateResolver string          `yaml:"validate_resolver_workflow"`
+	} `yaml:"queue_adoption"`
+	E2E struct {
 		RequiredTriggers         nonEmptyStrings          `yaml:"required_triggers"`
 		RequiredPaths            nonEmptyStrings          `yaml:"required_paths"`
 		ParityStep               string                   `yaml:"parity_step"`
@@ -268,6 +278,8 @@ func loadE2EWorkflowContractFixture(t *testing.T) e2eWorkflowContractFixture {
 		t.Fatalf("e2e: workflow contract fixture must have exact EOF: %v", err)
 	}
 	if !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(fixture.ExpectedVillageRef) || len(fixture.E2E.RequiredTriggers) != 3 || len(fixture.E2E.RequiredPaths) != 9 ||
+		len(fixture.QueueAdoption.RequiredGateJobs) == 0 || fixture.QueueAdoption.EntryScript == "" || fixture.QueueAdoption.PinFixture == "" ||
+		fixture.QueueAdoption.E2EResolver == "" || fixture.QueueAdoption.ValidateResolver == "" ||
 		fixture.E2E.ParityStep == "" || fixture.E2E.ParityRunContains == "" ||
 		fixture.E2E.ParityEnv.Key == "" || fixture.E2E.ParityEnv.Value == "" ||
 		fixture.E2E.DriverStep == "" || fixture.E2E.DriverEnv.Key == "" || fixture.E2E.DriverEnv.Value == "" ||
@@ -279,7 +291,7 @@ func loadE2EWorkflowContractFixture(t *testing.T) e2eWorkflowContractFixture {
 		fixture.Release.ParityEnv.Key == "" || fixture.Release.ParityEnv.Value == "" ||
 		fixture.Release.DriverStep == "" || fixture.Release.DriverEnv.Key == "" || fixture.Release.DriverEnv.Value == "" ||
 		len(fixture.Release.DriverContains) != 4 || len(fixture.Release.OutputGuards) != 3 ||
-		fixture.ReleaseGuard.Workflow == "" || fixture.ReleaseGuard.Job == "" || fixture.ReleaseGuard.JobIfCondition == "" || len(fixture.ReleaseGuard.RequiredPRBranches) != 1 || len(fixture.ReleaseGuard.RequiredPRPaths) != 4 ||
+		fixture.ReleaseGuard.Workflow == "" || fixture.ReleaseGuard.Job == "" || fixture.ReleaseGuard.JobIfCondition == "" ||
 		len(fixture.ReleaseGuard.RequiredJobPermissions) != 1 || len(fixture.ReleaseGuard.RequiredJobEnv) != 1 ||
 		fixture.ReleaseGuard.ActorStep == "" || len(fixture.ReleaseGuard.ActorEnv) != 4 || strings.TrimSpace(fixture.ReleaseGuard.ActorRun) == "" ||
 		fixture.ReleaseGuard.CheckoutStep == "" || fixture.ReleaseGuard.ParseStep == "" || fixture.ReleaseGuard.CheckoutFetchDepth == "" || fixture.ReleaseGuard.CheckoutFetchTags == "" ||
@@ -287,7 +299,7 @@ func loadE2EWorkflowContractFixture(t *testing.T) e2eWorkflowContractFixture {
 		fixture.Router.Workflow == "" || fixture.Router.Ref == "" || fixture.Router.SecretKey == "" || len(fixture.Router.RoutedWorkflows) == 0 ||
 		fixture.ReleaseValidate.Workflow == "" || len(fixture.ReleaseValidate.RequiredTriggers) == 0 || len(fixture.ReleaseValidate.ForbiddenTriggers) == 0 ||
 		fixture.ReleaseValidate.SnapshotJob == "" || fixture.ReleaseValidate.SnapshotRunner == "" || fixture.ReleaseValidate.SnapshotForbiddenRouter == "" ||
-		len(fixture.TestsWorkflow.Triggers) != 2 || len(fixture.TestsWorkflow.RequiredPaths) != 2 ||
+		len(fixture.TestsWorkflow.Triggers) == 0 || len(fixture.TestsWorkflow.RequiredPaths) == 0 ||
 		fixture.TestsWorkflow.PostMergeEvidence.Job == "" ||
 		fixture.TestsWorkflow.PostMergeEvidence.JobIfCondition == "" ||
 		len(fixture.TestsWorkflow.PostMergeEvidence.RequiredPermissions) != 2 ||
@@ -305,9 +317,16 @@ func loadE2EWorkflowContractFixture(t *testing.T) e2eWorkflowContractFixture {
 	if err := testutil.ValidateRequiredNames(manifest, fixture.E2E.AssertedTests, "asserted E2E tests"); err != nil {
 		t.Fatal(err)
 	}
+	queueManifest, err := testutil.DecodeRequiredNamesManifest(queueRequiredJobsManifest, "queue gate jobs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.ValidateRequiredNames(queueManifest, fixture.QueueAdoption.RequiredGateJobs, "queue gate jobs"); err != nil {
+		t.Fatal(err)
+	}
 	seenCallers := make(map[string]struct{}, len(fixture.ReusableCallers))
 	for callerIndex, caller := range fixture.ReusableCallers {
-		if strings.TrimSpace(caller.Workflow) == "" || len(caller.Jobs) != 3 {
+		if strings.TrimSpace(caller.Workflow) == "" || len(caller.Jobs) == 0 {
 			t.Fatalf("e2e: reusable caller fixture %d is incomplete: %+v", callerIndex, caller)
 		}
 		if _, exists := seenCallers[caller.Workflow]; exists {
@@ -334,9 +353,63 @@ func TestReleaseE2EWorkflowContract(t *testing.T) {
 	assertReusableWorkflowCallerSecrets(t)
 }
 
+// TestReleaseQueueWorkflowContract protects the mounted queue caller and the
+// reusable workflows. The Village ref comes only from the existing fixture.
+func TestReleaseQueueWorkflowContract(t *testing.T) {
+	t.Parallel()
+	fixture := loadE2EWorkflowContractFixture(t)
+	root := releaseWorkflowRepoRoot(t)
+	tests := readWorkflowDoc(t, filepath.Join(root, ".github/workflows/tests.yml"))
+	jobs := yamlMappingValue(tests, "jobs")
+	gate := yamlMappingValue(jobs, "merge-gate")
+	if gate == nil || yamlMappingValue(gate, "if") == nil || yamlMappingValue(gate, "if").Value != "always()" {
+		t.Fatal("merge-gate must always report")
+	}
+	needs := workflowNeedsValues(yamlMappingValue(gate, "needs"))
+	for _, required := range fixture.QueueAdoption.RequiredGateJobs {
+		found := false
+		for _, need := range needs {
+			found = found || need == required
+		}
+		if !found {
+			t.Fatalf("merge-gate must need %q", required)
+		}
+	}
+	parity := yamlMappingValue(jobs, "schema-parity")
+	paritySteps := yamlMappingValue(parity, "steps")
+	if paritySteps == nil || !strings.Contains(workflowStepRun(t, paritySteps.Content, "Read the existing Village fixture pin"), fixture.QueueAdoption.PinFixture) {
+		t.Fatal("schema parity must read the Village pin from the existing fixture")
+	}
+	checkResolver := func(path, jobName string) {
+		t.Helper()
+		doc := readWorkflowDoc(t, filepath.Join(root, path))
+		job := yamlMappingValue(yamlMappingValue(doc, "jobs"), jobName)
+		steps := yamlMappingValue(job, "steps")
+		if steps == nil || !strings.Contains(workflowStepRun(t, steps.Content, "Resolve and classify the entry"), fixture.QueueAdoption.EntryScript) {
+			t.Fatalf("%s must resolve and classify its merge-group entry", path)
+		}
+		data, err := os.ReadFile(filepath.Join(root, path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(data), "parse-title") || strings.Contains(string(data), "github.event.pull_request.title") {
+			t.Fatalf("%s must not infer release identity or candidate status from a PR title", path)
+		}
+	}
+	checkResolver(fixture.QueueAdoption.E2EResolver, "entry")
+	checkResolver(fixture.QueueAdoption.ValidateResolver, "classify")
+	e2e := readWorkflowDoc(t, filepath.Join(root, ".github/workflows/e2e.yml"))
+	job := yamlMappingValue(yamlMappingValue(e2e, "jobs"), "e2e")
+	condition := yamlMappingValue(job, "if")
+	if condition == nil || !strings.Contains(condition.Value, "github.event_name == 'merge_group'") ||
+		!strings.Contains(condition.Value, "needs.entry.outputs.kind == 'release'") {
+		t.Fatal("e2e must admit the classified release group and not an ordinary PR")
+	}
+}
+
 func TestReleaseArtifactWorkflowsRequireRealDashboard(t *testing.T) {
 	t.Parallel()
-	assertReleaseWorkflowBuildsRealDashboard(t, ".github/workflows/release.yml", "release", "Run goreleaser")
+	assertReleaseWorkflowBuildsRealDashboard(t, ".github/workflows/release.yml", "build", "Run goreleaser")
 	assertReleaseWorkflowBuildsRealDashboard(t, ".github/workflows/release-e2e.yml", "release-e2e", "Build release snapshot artifacts")
 	assertReleaseWorkflowBuildsRealDashboard(t, ".github/workflows/release-validate.yml", "snapshot", "goreleaser release --snapshot")
 }
@@ -355,9 +428,9 @@ func TestReleaseWorkflowGuardDoesNotRequirePriorRC(t *testing.T) {
 		t.Fatalf("release: jobs.%s if = %v, want %q", fixture.ReleaseGuard.Job, jobCondition, fixture.ReleaseGuard.JobIfCondition)
 	}
 	on := yamlMappingValue(doc, "on")
-	pullRequest := yamlMappingValue(on, "pull_request")
-	assertYAMLSequenceExact(t, yamlMappingValue(pullRequest, "branches"), fixture.ReleaseGuard.RequiredPRBranches, "release startup PR branches")
-	assertYAMLSequenceExact(t, yamlMappingValue(pullRequest, "paths"), fixture.ReleaseGuard.RequiredPRPaths, "release startup PR paths")
+	if yamlMappingValue(on, "pull_request") != nil || yamlMappingValue(on, "push") == nil {
+		t.Fatal("release: publisher must run only on a pushed tag")
+	}
 
 	permissions := yamlMappingValue(job, "permissions")
 	assertYAMLMappingExact(t, permissions, fixture.ReleaseGuard.RequiredJobPermissions, "release guard permissions")
@@ -865,8 +938,8 @@ func TestE2EWorkflowContract(t *testing.T) {
 	}
 	concurrency := yamlMappingValue(doc, "concurrency")
 	cancel := yamlMappingValue(concurrency, "cancel-in-progress")
-	if cancel == nil || cancel.Value != "true" {
-		t.Fatal("e2e: concurrency.cancel-in-progress must stay true")
+	if cancel == nil || !strings.Contains(cancel.Value, "github.event_name == 'pull_request'") {
+		t.Fatal("e2e: only PR runs may cancel an earlier run")
 	}
 	steps := e2eWorkflowSteps(t, doc)
 	cleanup := workflowStepRun(t, steps, "Clean up stale e2e podman containers")
@@ -1050,11 +1123,19 @@ func assertTestsWorkflowTracksE2EChanges(t *testing.T, fixture e2eWorkflowContra
 	doc := readWorkflowDoc(t, path)
 	on := yamlMappingValue(doc, "on")
 	for _, trigger := range fixture.TestsWorkflow.Triggers {
-		paths := yamlMappingValue(yamlMappingValue(on, trigger), "paths")
-		for _, want := range fixture.TestsWorkflow.RequiredPaths {
-			if !yamlSequenceContains(paths, want) {
-				t.Fatalf("e2e: tests workflow on.%s.paths missing %q", trigger, want)
-			}
+		if yamlMappingValue(on, trigger) == nil {
+			t.Fatalf("e2e: tests workflow missing trigger %s", trigger)
+		}
+	}
+	changes := yamlMappingValue(yamlMappingValue(doc, "jobs"), "changes")
+	steps := yamlMappingValue(changes, "steps")
+	if steps == nil || steps.Kind != yaml.SequenceNode {
+		t.Fatal("e2e: tests workflow changes job must define steps")
+	}
+	diff := workflowStepRun(t, steps.Content, "Classify changed paths")
+	for _, want := range fixture.TestsWorkflow.RequiredPaths {
+		if !strings.Contains(diff, want) {
+			t.Fatalf("e2e: tests workflow changes job missing %q", want)
 		}
 	}
 }
@@ -1208,8 +1289,9 @@ func assertReusableWorkflowCallerSecrets(t *testing.T) {
 			}
 			secrets := yamlMappingValue(job, "secrets")
 			if calledWorkflowRoutesRunners(t, fixture, expectation) {
-				if secrets == nil || secrets.Kind != yaml.ScalarNode || secrets.Value != "inherit" {
-					t.Fatalf("%s: reusable job %q must pass `secrets: inherit`; %s routes runners through the shared router, which reads %s", caller.Workflow, expectation.Job, expectation.Uses, runnerRoutingSecret)
+				token := yamlMappingValue(secrets, fixture.Router.SecretKey)
+				if secrets == nil || secrets.Kind != yaml.MappingNode || len(secrets.Content) != 2 || token == nil || token.Value != runnerRoutingSecret {
+					t.Fatalf("%s: reusable job %q must pass only the runner routing secret", caller.Workflow, expectation.Job)
 				}
 				continue
 			}
@@ -1223,7 +1305,7 @@ func assertReusableWorkflowCallerSecrets(t *testing.T) {
 // calledWorkflowRoutesRunners reports whether the reusable workflow that a
 // caller job invokes defines a determine-runner job that calls the shared
 // runner-router reusable workflow and maps the routing secret explicitly. Only
-// those callers may pass `secrets: inherit`.
+// those callers may pass the named runner routing secret.
 func calledWorkflowRoutesRunners(t *testing.T, fixture e2eWorkflowContractFixture, expectation workflowJobPermissionsExpectation) bool {
 	t.Helper()
 	if !strings.HasPrefix(expectation.Uses, localWorkflowPrefix) {

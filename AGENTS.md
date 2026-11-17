@@ -367,3 +367,18 @@ the server serves the newly built assets before you trust a screenshot or a comp
 - Stage intended changes with `git add -- <path>...`; inspect `git diff --cached` before committing.
 - Never use `git add .`, `git add -A`, or wildcard staging.
 - Commit with `git agent-commit -m "..."`.
+
+## Release intent
+
+PR titles carry intent as `type(scope)[level]: subject`. `feat`, `fix`, and
+`release` require `[patch]` or `[minor]`; `docs`, `test`, `ci`, `chore`, and
+`style` never take a level. Do not put a version in a title or edit
+`CHANGELOG.md`: the standing bot release PR generates the entire release
+section, including the existing `[Unreleased]` entries on its first run.
+
+The merge queue requires `merge-gate` and `title-guard`. The release PR's
+merge-group build checks release content and the Nix vendor hash before its
+full-stack and packaging gates. A failed gate ejects the PR before it lands.
+`release-batch.yml` tags only a fresh landed release commit; never create,
+move, or delete a tag by hand. The full operator procedure is in
+[`docs/release-runbook.md`](docs/release-runbook.md).

@@ -44,4 +44,15 @@ Reviewers may ask for changes to correctness, tests, security, compatibility, or
 Keep pull requests small enough to review and avoid unrelated cleanup. By contributing, you agree
 that your contribution is licensed under this repository's license.
 
+## Release notes and PR titles
+
+Use `type(scope)[level]: subject` for a releasing change, for example
+`fix(cli)[patch]: handle a missing configuration` or
+`feat(web)[minor]: show import progress`. `feat`, `fix`, and `release` require
+a level; `docs`, `test`, `ci`, `chore`, and `style` do not release and must not
+include one. Do not choose a version or edit `CHANGELOG.md`: the release bot
+generates the notes and computes the version after changes land. A queued PR
+must leave the queue before its title is edited. See
+[`docs/release-runbook.md`](docs/release-runbook.md).
+
 All participation is governed by [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).

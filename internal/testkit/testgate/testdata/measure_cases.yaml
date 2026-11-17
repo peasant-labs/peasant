@@ -58,7 +58,7 @@ pretest_cases:
   - name: pretest-rows-exact
     steps:
       - {step: fmt, wall: 25s, user: 24s, system: 1s}
-      - {step: release-guard, wall: 12s, user: 10s, system: 2s}
+      - {step: unstring, wall: 12s, user: 10s, system: 2s}
     want:
       - {class: "pre:fmt", units: 1, wall_ms: 25000, user_ms: 24000, system_ms: 1000, gap_ms: 0, basis: pre-test-step}
-      - {class: "pre:release-guard", units: 1, wall_ms: 12000, user_ms: 10000, system_ms: 2000, gap_ms: 0, basis: pre-test-step}
+      - {class: "pre:unstring", units: 1, wall_ms: 12000, user_ms: 10000, system_ms: 2000, gap_ms: 0, basis: pre-test-step}

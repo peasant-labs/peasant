@@ -1,5 +1,9 @@
 # Peasant Release Architecture
 
+> Historical reference: the release-PR tagging and direct Homebrew publication
+> described below have been superseded. For the current queue, tag, publisher,
+> and vendor-hash procedures, use the [release runbook](release-runbook.md).
+
 This document is the maintainer-facing reference for the release system: which
 workflow owns which invariant, how release data moves from source commits into
 packages, and why tags are created only after Nix hash freshness has been proven.

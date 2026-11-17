@@ -1,0 +1,152 @@
+# Cut release: the maintainer's button for forcing a release with nothing to
+# change. A dispatch with a level makes the bot push an empty commit to its
+# own branch and open the cut-release PR with auto-merge on; that PR then
+# lands through the queue like any releasing PR and the release job builds
+# the release PR from it. The level rides in the landed commit, never in a
+# number, so a rebuild can always reproduce the request.
+#
+# Two jobs. `prepare` holds no credential: it makes the empty commit on the
+# bot branch, hands it over as a git bundle, and finds an open cut-release PR
+# with the read-only default token. `cut` holds the releaser App token and
+# runs only pinned allowed actions, the bundle fetch, and one git or gh
+# command per step. The button decides nothing by branch literal: its branch
+# below is the push target the release config names for the cut-release
+# kind, and every write step runs only while tag mode is on.
+name: cut-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      level:
+        description: Bump level for the forced release
+        required: true
+        type: choice
+        options: [patch, minor]
+
+concurrency:
+  group: cut-release
+  cancel-in-progress: false
+
+# read-only: the branch push and the PR writes below use the minted releaser
+# App token in the `cut` job.
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    # A dispatch on any other branch would run that branch's copy of this file,
+    # and a run while tag mode is off must change nothing.
+    if: github.ref == 'refs/heads/develop' && vars.RELEASE_BATCH_MODE == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      number: ${{ steps.find.outputs.number }}
+      stale: ${{ steps.find.outputs.stale }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Commit an empty release commit on the bot branch
+        env:
+          LEVEL: ${{ inputs.level }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin develop
+          git checkout -B automation/cut-release origin/develop
+          git config user.name peasant-release-bot
+          git config user.email bots@peasant-labs.invalid
+          git commit --allow-empty -m "release[${LEVEL}]: cut a release"
+          mkdir -p bundle
+          git bundle create bundle/cut.bundle refs/heads/automation/cut-release "^${GITHUB_SHA}"
+
+      # An already-open cut-release PR with this title is left open: the push
+      # updates it. One with another level is closed and recreated, so the
+      # title always names the requested level.
+      - name: Find the open cut-release PR
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LEVEL: ${{ inputs.level }}
+        run: |
+          set -euo pipefail
+          title="release[${LEVEL}]: cut a release"
+          open="$(gh pr list --head automation/cut-release --state open --json number,title --jq '.[0] // empty | [.number, .title] | @tsv')"
+          number="${open%%$'\t'*}"
+          open_title="${open#*$'\t'}"
+          stale=false
+          if [ -n "${number}" ] && [ "${open_title}" != "${title}" ]; then stale=true; number=""; fi
+          { echo "number=${number}"; echo "stale=${stale}"; } >> "${GITHUB_OUTPUT}"
+
+      - name: Hand the bundle to the cut job
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: cut-bundle
+          path: bundle
+          overwrite: true
+          retention-days: 1
+
+  cut:
+    needs: [prepare]
+    if: github.ref == 'refs/heads/develop' && vars.RELEASE_BATCH_MODE == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download the bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: cut-bundle
+          path: bundle
+
+      - name: Mint the releaser App token
+        id: mint
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.PEASANT_RELEASER_CLIENT_ID }}
+          private-key: ${{ secrets.PEASANT_RELEASER_APP_PRIVATE_KEY }}
+          owner: peasant-labs
+          repositories: peasant
+
+      - name: Fetch the bot branch
+        if: vars.RELEASE_BATCH_MODE == 'tag'
+        run: git fetch --no-tags bundle/cut.bundle automation/cut-release:automation/cut-release
+
+      - name: Push the bot branch
+        if: vars.RELEASE_BATCH_MODE == 'tag'
+        env:
+          APP_TOKEN: ${{ steps.mint.outputs.token }}
+        run: |
+          git -c credential.helper='!f() { echo "username=x-access-token"; echo "password=${APP_TOKEN}"; }; f' push --force-with-lease origin automation/cut-release
+
+      - name: Close a cut-release PR with another level
+        if: vars.RELEASE_BATCH_MODE == 'tag' && needs.prepare.outputs.stale == 'true'
+        env:
+          GH_TOKEN: ${{ steps.mint.outputs.token }}
+        run: gh pr close automation/cut-release
+
+      - name: Open the cut-release PR
+        if: vars.RELEASE_BATCH_MODE == 'tag' && needs.prepare.outputs.number == ''
+        env:
+          GH_TOKEN: ${{ steps.mint.outputs.token }}
+          TITLE: "release[${{ inputs.level }}]: cut a release"
+          BODY: "Forced ${{ inputs.level }} release requested by @${{ github.triggering_actor }} through the cut-release button. Landing this empty commit makes the release job build the release PR."
+        run: gh pr create --head automation/cut-release --base develop --title "${TITLE}" --body "${BODY}"
+
+      - name: Arm auto-merge on the cut-release PR
+        if: vars.RELEASE_BATCH_MODE == 'tag'
+        env:
+          GH_TOKEN: ${{ steps.mint.outputs.token }}
+        run: gh pr merge --auto --squash automation/cut-release

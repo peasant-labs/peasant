@@ -44,10 +44,10 @@ const (
 	StepFmt                     PreTestStep = "fmt"
 	StepLint                    PreTestStep = "lint"
 	StepAstGrepScan             PreTestStep = "ast-grep-scan"
+	StepUnstring                PreTestStep = "unstring"
 	StepAstGrepGate             PreTestStep = "ast-grep-gate-test"
 	StepProjectionNegativeSeed  PreTestStep = "projection-negative-seed"
 	StepProjectionNegativeScope PreTestStep = "projection-negative-scope"
-	StepReleaseGuard            PreTestStep = "release-guard"
 )
 
 // PreTestSteps is the closed set of pre-test steps, in execution order.
@@ -55,10 +55,10 @@ var PreTestSteps = []PreTestStep{
 	StepFmt,
 	StepLint,
 	StepAstGrepScan,
+	StepUnstring,
 	StepAstGrepGate,
 	StepProjectionNegativeSeed,
 	StepProjectionNegativeScope,
-	StepReleaseGuard,
 }
 
 // PreTestClass returns the record class for a pre-test step.

@@ -110,7 +110,6 @@ check: fmt-check lint docs-cli-check
 	go test -tags=astgrep $(GORACE_FLAG) ./internal/tui/gates/... ./internal/testkit/astgreprules/...; \
 	go test -tags=projection_negative_seed -run '^(TestThinkingSeedNegativeFailsOnlyDesignatedCases|TestModelProjectionNegativeFailsOnlyDesignatedCase)$$' ./internal/transcript/; \
 	go test -tags=projection_negative_scope -run '^(TestThinkingSeedNegativeFailsOnlyDesignatedCases|TestModelProjectionNegativeFailsOnlyDesignatedCase)$$' ./internal/transcript/; \
-	go run github.com/peasant-labs/schema/cmd/release-guard check-workflow --policy .github/release-guard.policy.yml --release .github/workflows/release.yml; \
 	go run ./cmd/testgate run -race=$(RACE)
 	# The gate above replaces the single `go test` pass. It computes the run
 	# plan from `go test -list`, runs a race pass and a no-race pass (or one
@@ -132,6 +131,18 @@ check: fmt-check lint docs-cli-check
 	# a single no-race pass but still plans and screens. cmd/peasant and
 	# internal/api exceed Go's 10m default under race, so the gate sets
 	# -timeout=0 and lets the job's own budget apply.
+
+.PHONY: check-workflows
+check-workflows:
+	@set -eu; \
+	pin=$$(awk '/repository: peasant-labs\/infra/ { found=1; next } found && /ref:/ { print $$2; exit }' .github/workflows/title-guard.yml); \
+	printf '%s\n' "$$pin" | grep -Eq '^[0-9a-f]{40}$$'; \
+	tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+	git init -q "$$tmp/infra"; \
+	git -C "$$tmp/infra" fetch -q --depth=1 https://github.com/peasant-labs/infra.git "$$pin"; \
+	git -C "$$tmp/infra" checkout -q --detach FETCH_HEAD; \
+	GOWORK=off go build -C "$$tmp/infra/tools/release" -o "$$tmp/release-intent" ./cmd/release-intent; \
+	"$$tmp/release-intent" check-workflows --policy .github/release-queue.policy.yml --dir .github/workflows
 
 # Explicit revisions keep the expensive cross-revision check out of ordinary builds.
 .PHONY: check-harvester-versions

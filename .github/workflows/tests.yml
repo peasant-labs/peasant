@@ -1,123 +1,216 @@
 name: Tests
 
-# Runs the peasant quality gate (`make check`: gofmt + go vet + ast-grep +
-# `go test`, incl. the versioned back-compat golden corpus consumed from the
-# schema module) on PRs and pushes to the long-lived branches. A post-merge push
-# skips `make check` when the post-merge-evidence probe proves the merged tree
-# already passed it on the pull request; everything the probe cannot prove runs
-# it. The race detector
-# is currently disabled on this gate; see the check job for the re-enable note.
-# Uses the project's own nix dev shell so the toolchain (Go, ast-grep, …) matches
-# local exactly.
-#
-# This is kept light and path-filtered. The `check` job does NOT build the web frontend
-# — `make lint` stubs `web/out` to satisfy the `//go:embed all:web/out`
-# directive, and the frontend is not under test in that Go job. The contract
-# now lives in the public `github.com/peasant-labs/schema` module, fetched as a
-# normal public dependency.
-#
-# The web/ jobs (`web-lockfiles-in-sync`, `web-pnpm-build`,
-# `home-phone-gate`) DO build or exercise the frontend — they guard the pnpm-only
-# web build: pnpm-lock.yaml drift and a broken real pnpm build. Web is pnpm-only.
-# They only run when web/**, the Makefile, or this workflow change
-# (see the path filters below).
+# Every PR and merge group gets an always-reporting merge-gate. The first job
+# classifies changed paths and the live merge-group entry; heavy jobs run for
+# relevant changes and the release group. Push CI remains until same-SHA queue
+# evidence justifies removing it. The check job stubs the dashboard; the web
+# jobs build and exercise the actual embedded frontend.
 on:
   pull_request:
-    paths:
-      - "**.go"
-      - "**/testdata/**"
-      - "go.mod"
-      - "go.sum"
-      - "third_party/zombiezen-sqlite/**"
-      - "internal/sqliteforkaudit/**"
-      - "scripts/vet-go.sh"
-      - "scripts/check-module-install/**"
-      - "Makefile"
-      - "sgconfig.yml"
-      - ".unstring.yaml"
-      - ".unstring-baseline.yaml"
-      - "ast-grep/**"
-      - "internal/tui/gates/astrules/**"
-      - "flake.nix"
-      - "flake.lock"
-      - ".gitignore"
-      - "web/.gitignore"
-      - "web/out/**"
-      - "web/**"
-      # Every workflow can affect the CI/release gate graph. Keep policy and
-      # release-tool inputs in the ordinary PR gate as well, so drift is caught
-      # before a release-only event exercises it.
-      - ".github/workflows/**"
-      - ".github/workflows/e2e.yml"
-      - ".github/workflows/release-e2e.yml"
-      - ".github/release-guard.policy.yml"
-      - ".goreleaser.yml"
-      - "scripts/install-goreleaser"
-      - "scripts/goreleaser-v2.17.1-homebrew.patch"
-      - "scripts/update-nix-vendor-hash.sh"
-      - "scripts/gen-third-party-notices.sh"
-      - "scripts/check-dep-licenses.sh"
-      - "THIRD_PARTY_NOTICES"
-      - "scripts/release-e2e/**"
+  merge_group:
   push:
     branches: [develop, main]
-    paths:
-      - "**.go"
-      - "**/testdata/**"
-      - "go.mod"
-      - "go.sum"
-      - "third_party/zombiezen-sqlite/**"
-      - "internal/sqliteforkaudit/**"
-      - "scripts/vet-go.sh"
-      - "scripts/check-module-install/**"
-      - "Makefile"
-      - "sgconfig.yml"
-      - ".unstring.yaml"
-      - ".unstring-baseline.yaml"
-      - "ast-grep/**"
-      - "internal/tui/gates/astrules/**"
-      - "flake.nix"
-      - "flake.lock"
-      - ".gitignore"
-      - "web/.gitignore"
-      - "web/out/**"
-      - "web/**"
-      # Mirror the PR inputs exactly: post-merge CI must exercise every workflow
-      # and release-policy/tooling change that can alter a gate or artifact.
-      - ".github/workflows/**"
-      - ".github/workflows/e2e.yml"
-      - ".github/workflows/release-e2e.yml"
-      - ".github/release-guard.policy.yml"
-      - ".goreleaser.yml"
-      - "scripts/install-goreleaser"
-      - "scripts/goreleaser-v2.17.1-homebrew.patch"
-      - "scripts/update-nix-vendor-hash.sh"
-      - "scripts/gen-third-party-notices.sh"
-      - "scripts/check-dep-licenses.sh"
-      - "THIRD_PARTY_NOTICES"
-      - "scripts/release-e2e/**"
-  # Reusable entry point: release-pr.yml calls this on a release(...) PR so the
-  # quality gate runs even when the release marker commit touches none of the
-  # path-filtered files above. Also handy for on-demand reruns.
-  workflow_call:
   workflow_dispatch:
 
-# Cancel superseded runs on the same ref to save minutes. The group is scoped by
-# the workflow name: in a called reusable workflow the github context belongs to
-# the caller, so the standalone copy (github.workflow == 'Tests') and the
-# release-pr.yml-called copy (github.workflow == 'Release PR') would otherwise
-# share a group and cancel each other instead of running their own copies. On a
-# release PR the group is also scoped to the head SHA, so a stale labeled run
-# cannot cancel the current head's gate; ordinary runs keep ref-level
-# superseding. See the per-job guards below.
+# Only PR runs cancel superseded runs; queue builds use separate ref keys.
 concurrency:
-  group: tests-${{ github.workflow }}-${{ github.ref }}-${{ startsWith(github.event.pull_request.title, 'release(') && github.event.pull_request.head.sha || 'shared' }}
-  cancel-in-progress: true
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+      release: ${{ steps.entry.outputs.release }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - name: Checkout release-intent
+        if: github.event_name == 'merge_group'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: peasant-labs/infra
+          ref: bcdaa02f9defd528b4dd9cb3077238573e709749
+          path: infra-tool
+          sparse-checkout: tools/release
+          persist-credentials: false
+      - name: Set up Go
+        if: github.event_name == 'merge_group'
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: infra-tool/tools/release/go.mod
+          cache: false
+      - name: Build release-intent
+        if: github.event_name == 'merge_group'
+        env:
+          GOWORK: "off"
+        run: go build -C infra-tool/tools/release -o "${RUNNER_TEMP}/release-intent" ./cmd/release-intent
+      - name: Classify the merge-group entry
+        id: entry
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" != merge_group ]; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          export PATH="$RUNNER_TEMP:$PATH"
+          kind="$(bash scripts/release-group-entry)"
+          if [ "$kind" = 'kind=release' ]; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Classify changed paths
+        id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.merge_group.base_sha || github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.merge_group.head_sha || github.event.pull_request.head.sha || github.sha }}
+          RELEASE: ${{ steps.entry.outputs.release }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = workflow_dispatch ] || [ "$RELEASE" = true ] || [ -z "$BASE" ] || [[ "$BASE" =~ ^0+$ ]]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git fetch --no-tags origin "$BASE" "$HEAD"
+          code=false
+          git diff --name-only -z "$BASE" "$HEAD" > "$RUNNER_TEMP/changed-paths"
+          while IFS= read -r -d '' file; do
+            case "$file" in
+              *.go|*/testdata/*|go.mod|go.sum|third_party/zombiezen-sqlite/*|internal/sqliteforkaudit/*|scripts/vet-go.sh|scripts/check-module-install/*|scripts/release-group-entry|Makefile|sgconfig.yml|.unstring.yaml|.unstring-baseline.yaml|ast-grep/*|internal/tui/gates/astrules/*|flake.nix|flake.lock|.gitignore|web/*|.github/workflows/*|.github/release-queue.policy.yml|.github/release-intent.yaml|.goreleaser.yml|scripts/install-goreleaser|scripts/goreleaser-v2.17.1-homebrew.patch|scripts/update-nix-vendor-hash.sh|scripts/gen-third-party-notices.sh|scripts/check-dep-licenses.sh|THIRD_PARTY_NOTICES|scripts/release-e2e/*)
+                code=true ;;
+            esac
+          done < "$RUNNER_TEMP/changed-paths"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
+  release-content:
+    needs: changes
+    if: needs.changes.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: peasant-labs/infra
+          ref: bcdaa02f9defd528b4dd9cb3077238573e709749
+          path: infra-tool
+          sparse-checkout: tools/release
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: infra-tool/tools/release/go.mod
+          cache: false
+      - name: Build release-intent
+        env:
+          GOWORK: "off"
+        run: go build -C infra-tool/tools/release -o "${RUNNER_TEMP}/release-intent" ./cmd/release-intent
+      - name: Recheck release content against the current default branch
+        env:
+          FLOOR: ${{ vars.RELEASE_BATCH_FLOOR }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin develop
+          "$RUNNER_TEMP/release-intent" release-pr --check --branch origin/develop --floor "$FLOOR"
+
+  vendor-hash:
+    needs: changes
+    if: github.event_name == 'pull_request' || needs.changes.outputs.release == 'true'
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: DeterminateSystems/nix-installer-action@33c9ab3ef95cd57c164d9d6eb1f9a46338538d41
+      - name: Check vendor hash
+        continue-on-error: ${{ needs.changes.outputs.release != 'true' }}
+        run: |
+          set -euo pipefail
+          make nix-vendor-hash
+          if ! git diff --quiet -- flake.nix; then
+            echo "::error::flake.nix vendorHash is stale; let the vendor hash PR land before releasing."
+            git diff -- flake.nix
+            exit 1
+          fi
+
+  schema-parity:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Read the existing Village fixture pin
+        id: pin
+        run: |
+          set -euo pipefail
+          ref="$(yq -e '.expected_village_ref' internal/e2e/testdata/workflows/e2e_contract.yaml)"
+          [[ "$ref" =~ ^[0-9a-f]{40}$ ]]
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+      - name: Checkout Village
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: peasant-labs/village
+          ref: ${{ steps.pin.outputs.ref }}
+          path: _village
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Verify schema pin parity
+        env:
+          VILLAGE_REPO: ${{ github.workspace }}/_village
+        run: make e2e-schema-parity
+
+  e2e:
+    needs: [changes, release-content, vendor-hash]
+    if: needs.changes.outputs.release == 'true'
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: ./.github/workflows/e2e.yml
+
+  release-validate:
+    needs: [changes, release-content, vendor-hash]
+    if: needs.changes.outputs.release == 'true'
+    permissions:
+      contents: read
+      pull-requests: read
+    secrets:
+      RUNNER_STATUS_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
+    uses: ./.github/workflows/release-validate.yml
+
   # Route the architecture-neutral jobs to the self-hosted MicroVM pool, with a
   # Blacksmith amd64 fallback when the pool is unavailable. Routing comes from
   # the shared runner-router reusable workflow; every routed job reads the label
@@ -125,10 +218,10 @@ jobs:
   # arm64 and stay on their arm64 runner. `check-arm64` is release-only and runs
   # on the arm64 Blacksmith runner directly.
   determine-runner:
-    if: >-
-      github.event_name != 'pull_request' ||
-      !startsWith(github.event.pull_request.title, 'release(') ||
-      github.workflow == 'Release PR'
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    permissions:
+      contents: read
     uses: peasant-labs/infra/.github/workflows/runner-router.yml@71e687cef7eede9a63659be98ce9adac3c563398
     with:
       fallback: '["blacksmith-2vcpu-ubuntu-2404"]'
@@ -156,6 +249,7 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
@@ -172,24 +266,20 @@ jobs:
           -head "${{ github.sha }}"
           -repo "${{ github.repository }}"
 
-  # Exactly-once contract: every job below carries the same guard so the
-  # path-filtered standalone run skips release(...) PRs, where release-pr.yml
-  # calls this workflow as the single authority. Inside a called reusable
-  # workflow the github context belongs to the caller, so github.workflow is
-  # 'Release PR' for that copy and 'Tests' for the standalone one. Keep the
-  # guard on EVERY job: one unguarded job re-creates the cancellation race.
+  # Push evidence may skip the post-merge check only when it proves the
+  # previously tested tree. Group and PR builds use the path decision above.
   check:
     name: make check
     # The probe governs only the push runs; a skipped or failed probe runs the
     # gate, and the release-PR guard stays intact for every event.
-    needs: [determine-runner, post-merge-evidence]
+    needs: [changes, determine-runner, post-merge-evidence]
+    permissions:
+      contents: read
     if: >-
       !cancelled() &&
       (needs.post-merge-evidence.result != 'success' ||
        needs.post-merge-evidence.outputs.skip != 'true') &&
-      (github.event_name != 'pull_request' ||
-       !startsWith(github.event.pull_request.title, 'release(') ||
-       github.workflow == 'Release PR')
+      needs.changes.outputs.code == 'true'
     # Routed to the x86_64 pool. `make check` needs only the Go toolchain, a C
     # compiler for `go vet`/cgo, and the ast-grep binary. It does not need the
     # Nix devShell. The pool hands a lone
@@ -200,14 +290,8 @@ jobs:
     # The race detector is disabled on this gate for now: the release race suite
     # does not fit the 30-minute budget. cmd/peasant alone is an 18-minute race
     # run and the full suite needs ~40 minutes, so the gate runs the suite
-    # without the detector. Re-enable by restoring the release-only predicate
-    # that used to live here --
-    #   (startsWith(github.event.pull_request.title, 'release(') ||
-    #    startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch')
-    #    && '1' || '0'
-    # -- once the test-performance work in #389 lands. The Makefile default is
-    # RACE=0 everywhere now too; race is opt-in (`make check RACE=1`); see
-    # CONTRIBUTING.md.
+    # without the detector until the test-performance work in #389 lands.
+    # Race is opt-in locally (`make check RACE=1`); see CONTRIBUTING.md.
     # TMPDIR=/tmp is load-bearing on the pool, not a workaround. The pool
     # exports its work dir as TMPDIR and that dir lives under the desktop user's
     # home (~/.local/share/github-runner-containers/work/...), so every test temp
@@ -240,6 +324,7 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
@@ -363,20 +448,13 @@ jobs:
   # release. Narrowing it trades arm64 coverage for cost, so the tradeoff belongs
   # in the PR description, not silently in this list.
   #
-  # Release only, same policy as the cgo0 job: a release PR (title starts with
-  # "release(", reached through release-pr.yml's call — the standalone copy
-  # skips), a release tag, or an on-demand dispatch. Ordinary feature PRs and
-  # post-merge pushes to develop/main skip this lane. The x86_64 `make check`
-  # gate above still runs on every PR; only this arm64 coverage is release-gated.
+  # Release-group only, after content and vendor-hash checks.
   check-arm64:
     name: make check (arm64 subset)
-    needs: determine-runner
-    if: >-
-      (startsWith(github.event.pull_request.title, 'release(') ||
-       startsWith(github.ref, 'refs/tags/') ||
-       github.event_name == 'workflow_dispatch') &&
-      (!startsWith(github.event.pull_request.title, 'release(') ||
-       github.workflow == 'Release PR')
+    needs: [changes, determine-runner, release-content, vendor-hash]
+    if: needs.changes.outputs.release == 'true'
+    permissions:
+      contents: read
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     # 20 minutes = the measured arm64 subset job wall (9m54s-10m31s on a 2-vCPU
     # Blacksmith runner) plus ~2x headroom. This lane is measured and reported,
@@ -397,6 +475,7 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@33c9ab3ef95cd57c164d9d6eb1f9a46338538d41 # main
@@ -501,20 +580,18 @@ jobs:
   # candidate as separate trees and probes both. On a 2-vCPU runner that is
   # ~15 minutes, so it gets its own job and its own budget in parallel with
   # `make check`: serialized inside `check` it consumed half of that job's 30
-  # minutes and starved the -race suite. Same predicate as the old step (PRs
-  # only) plus the release-PR guard above.
+  # minutes and starved the -race suite. It runs for PR and group changes.
   harvester-version-guard:
     name: harvester version guard
-    if: >-
-      github.event_name == 'pull_request' &&
-      (!startsWith(github.event.pull_request.title, 'release(') ||
-       github.workflow == 'Release PR')
+    if: needs.changes.outputs.code == 'true' && (github.event_name == 'pull_request' || github.event_name == 'merge_group')
     # Routed to the container pool. The guard needs no Nix: it shells out only
     # to git, tar, and `go test -race` (see scripts/harvester-version-guard),
     # and the pool image already carries git, tar, and the C compiler the race
     # detector requires. setup-go supplies the toolchain `nix develop` used to,
     # and the Makefile target stays the single source of the guard invocation.
-    needs: determine-runner
+    needs: [changes, determine-runner]
+    permissions:
+      contents: read
     runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     timeout-minutes: 30
     steps:
@@ -522,6 +599,7 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0 # The guard archives and compiles the exact base revision.
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
@@ -548,7 +626,7 @@ jobs:
 
       - name: Require harvester version bumps for changed behavior
         env:
-          GUARD_BASE: ${{ github.event.pull_request.base.sha }}
+          GUARD_BASE: ${{ github.event.merge_group.base_sha || github.event.pull_request.base.sha }}
         run: make check-harvester-versions BASE="$GUARD_BASE" CANDIDATE=HEAD
 
   # CGO=0 build mode gate. The release binaries are built CGO_ENABLED=0 (static,
@@ -562,21 +640,13 @@ jobs:
   # CGO_ENABLED=0 is a contradiction.
   cgo0:
     name: CGO=0 consumer/e2e + module-zip proxy
-    # Release only, same policy as the podman e2e job: a release PR (title starts
-    # with "release(", reached through release-pr.yml's call — the standalone
-    # copy skips), a release tag, or an on-demand dispatch. Ordinary feature PRs
-    # and post-merge pushes to develop/main skip this. make check, the real web
-    # build, and the lockfile check keep running on every PR and push; only this
-    # consumer/e2e job is release-gated.
-    if: >-
-      (startsWith(github.event.pull_request.title, 'release(') ||
-       startsWith(github.ref, 'refs/tags/') ||
-       github.event_name == 'workflow_dispatch') &&
-      (!startsWith(github.event.pull_request.title, 'release(') ||
-       github.workflow == 'Release PR')
+    # Release-group only, after content and vendor-hash checks.
+    if: needs.changes.outputs.release == 'true'
     # Routed to the x86_64 pool: Go handles build/test/module ZIP installation.
     # No Nix devShell is required.
-    needs: determine-runner
+    needs: [changes, determine-runner, release-content, vendor-hash]
+    permissions:
+      contents: read
     runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     timeout-minutes: 20
     steps:
@@ -584,6 +654,7 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
@@ -634,11 +705,10 @@ jobs:
   # //go:embed all:web/out directive so `go list ./cmd/peasant` can load.
   third-party-notices:
     name: third-party license notices
-    if: >-
-      github.event_name != 'pull_request' ||
-      !startsWith(github.event.pull_request.title, 'release(') ||
-      github.workflow == 'Release PR'
-    needs: determine-runner
+    if: needs.changes.outputs.code == 'true'
+    needs: [changes, determine-runner]
+    permissions:
+      contents: read
     runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     timeout-minutes: 15
     steps:
@@ -646,6 +716,7 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
@@ -677,11 +748,10 @@ jobs:
   # regenerating the lockfile.
   web-lockfiles-in-sync:
     name: web lockfiles in sync
-    if: >-
-      github.event_name != 'pull_request' ||
-      !startsWith(github.event.pull_request.title, 'release(') ||
-      github.workflow == 'Release PR'
-    needs: determine-runner
+    if: needs.changes.outputs.code == 'true'
+    needs: [changes, determine-runner]
+    permissions:
+      contents: read
     runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     timeout-minutes: 15
     steps:
@@ -689,6 +759,7 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Set up pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
@@ -710,11 +781,10 @@ jobs:
   # (not the web-stub notice). Artifact workflows enforce the same invariant.
   web-pnpm-build:
     name: web real pnpm build (no stub fallback)
-    if: >-
-      github.event_name != 'pull_request' ||
-      !startsWith(github.event.pull_request.title, 'release(') ||
-      github.workflow == 'Release PR'
-    needs: determine-runner
+    if: needs.changes.outputs.code == 'true'
+    needs: [changes, determine-runner]
+    permissions:
+      contents: read
     runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     timeout-minutes: 20
     steps:
@@ -722,6 +792,7 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Set up pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
@@ -785,11 +856,10 @@ jobs:
   # outage cannot fail it.
   home-phone-gate:
     name: mounted Home table scroll at phone width
-    if: >-
-      github.event_name != 'pull_request' ||
-      !startsWith(github.event.pull_request.title, 'release(') ||
-      github.workflow == 'Release PR'
-    needs: [determine-runner, web-pnpm-build]
+    if: needs.changes.outputs.code == 'true'
+    needs: [changes, determine-runner, web-pnpm-build]
+    permissions:
+      contents: read
     runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     timeout-minutes: 10
     container:
@@ -807,6 +877,7 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Set up pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
@@ -839,10 +910,10 @@ jobs:
 
   windows:
     name: windows-latest
-    if: >-
-      github.event_name != 'pull_request' ||
-      !startsWith(github.event.pull_request.title, 'release(') ||
-      github.workflow == 'Release PR'
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    permissions:
+      contents: read
     runs-on: windows-latest
     timeout-minutes: 20
     env:
@@ -852,6 +923,7 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
@@ -897,3 +969,26 @@ jobs:
         run: |
           go build -o peasant.exe ./cmd/peasant
           ./peasant.exe version
+
+  merge-gate:
+    name: merge-gate
+    needs: [changes, determine-runner, post-merge-evidence, check, check-arm64, harvester-version-guard, cgo0, third-party-notices, web-lockfiles-in-sync, web-pnpm-build, home-phone-gate, windows, release-content, vendor-hash, schema-parity, e2e, release-validate]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Require successful or intentionally skipped jobs
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          RELEASE: ${{ needs.changes.outputs.release }}
+        run: |
+          set -euo pipefail
+          jq -e 'all(.[]; .result == "success" or .result == "skipped")' <<< "$RESULTS"
+          test "$(jq -r '.changes.result' <<< "$RESULTS")" = success
+          if [ "$RELEASE" = true ]; then
+            for job in release-content vendor-hash check-arm64 cgo0 e2e release-validate; do
+              test "$(jq -r --arg job "$job" '.[$job].result' <<< "$RESULTS")" = success
+            done
+          fi

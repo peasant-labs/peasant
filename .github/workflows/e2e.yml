@@ -3,16 +3,8 @@ name: E2E
 # Heavy full-stack push smoke test: `make e2e` provisions an ephemeral stack with
 # podman (Postgres + RustFS + the real village ./cmd/server) and drives the real
 # peasant CLI through ingest → village push (skip-gate + retraction) → the village
-# secret-scan. It is expensive, so the job is release-gated (see its `if`): it
-# runs on release PRs (release-pr.yml calls this workflow, its title starts with
-# "release("), at release-tag time (release.yml calls this workflow on a
-# refs/tags/v* push), and on-demand. It does NOT run on ordinary feature PRs or
-# on post-merge pushes to develop/main -- an integration run on every merge is
-# more than the CI budget allows. The pull_request trigger below still evaluates
-# so the check appears (as skipped) on feature PRs. On release PRs the standalone
-# run's job skips and the release-pr.yml-called copy is the single authority
-# (inside a called reusable workflow github.workflow is the caller's name), so
-# the suite executes at most once per push.
+# secret-scan. It runs on the classified release merge group, at release-tag
+# time, and on demand. Ordinary PRs and post-merge branch pushes skip it.
 on:
   pull_request:
     branches: [develop]
@@ -35,14 +27,10 @@ on:
   workflow_dispatch:
   workflow_call:
 
-# Cancel superseded runs on the same ref to save minutes. Scoped by the workflow
-# name because the release-pr.yml-called copy runs with the caller's github
-# context; a shared group would let the two copies cancel each other. On a
-# release PR the group is also scoped to the head SHA, so a stale labeled run
-# cannot cancel the current head's gate.
+# Only PR runs cancel superseded runs; merge groups use separate ref keys.
 concurrency:
-  group: e2e-${{ github.workflow }}-${{ github.ref }}-${{ startsWith(github.event.pull_request.title, 'release(') && github.event.pull_request.head.sha || 'shared' }}
-  cancel-in-progress: true
+  group: e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   # The disposable Village checkout the harness provisions. Two invariants ride
@@ -61,21 +49,56 @@ env:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
+  entry:
+    if: github.event_name == 'merge_group'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      kind: ${{ steps.classify.outputs.kind }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: peasant-labs/infra
+          ref: bcdaa02f9defd528b4dd9cb3077238573e709749
+          path: infra-tool
+          sparse-checkout: tools/release
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: infra-tool/tools/release/go.mod
+          cache: false
+      - name: Build release-intent
+        env:
+          GOWORK: "off"
+        run: go build -C infra-tool/tools/release -o "${RUNNER_TEMP}/release-intent" ./cmd/release-intent
+      - name: Resolve and classify the entry
+        id: classify
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          export PATH="$RUNNER_TEMP:$PATH"
+          bash scripts/release-group-entry
+
   e2e:
     name: full-stack push e2e (podman)
-    # Release only: a release PR (title starts with "release(", reached through
-    # release-pr.yml's call — the standalone copy skips so the suite runs once),
-    # a release tag (release.yml calls this workflow on a refs/tags/v* push), or
-    # an on-demand dispatch. Ordinary feature PRs and post-merge pushes to
-    # develop/main evaluate this to false and skip. Skipped rather than absent,
-    # so a required-check config stays satisfied.
+    # A release group is identified by the resolver, not by its PR title.
+    needs: entry
     if: >-
-      startsWith(github.ref, 'refs/tags/') ||
-      github.event_name == 'workflow_dispatch' ||
-      (startsWith(github.event.pull_request.title, 'release(') &&
-       github.workflow == 'Release PR')
+      !cancelled() &&
+      (startsWith(github.ref, 'refs/tags/') ||
+       github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'merge_group' && needs.entry.result == 'success' &&
+        needs.entry.outputs.kind == 'release'))
     # This job is deliberately NOT routed through the determine-runner pool
     # selector the other x86_64 jobs use. The self-hosted container pool cannot
     # host it: rootless podman and the disposable Village stack do not come up
@@ -86,9 +109,13 @@ jobs:
     # be an arm64 one.
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 45
+    permissions:
+      contents: read
     steps:
       - name: Checkout peasant
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
 
       - name: Checkout village (for ./cmd/server + ./cmd/village-setup-demo)
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -96,6 +123,7 @@ jobs:
           repository: peasant-labs/village
           ref: ${{ env.VILLAGE_REF }}
           path: _village
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5

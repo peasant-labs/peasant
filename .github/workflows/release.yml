@@ -1,22 +1,12 @@
 name: Release
 
-# Tag-triggered binary release pipeline. The tag is pushed by release-pr.yml's
+# Tag-triggered binary release pipeline. The tag is pushed by release-batch.yml's
 # App token (the default GITHUB_TOKEN cannot push a tag that re-triggers a
 # workflow), so this runs automatically when a release PR merges.
 #
 # The `v*` filter matches Peasant release tags (v0.1.0, v0.1.0-rc1).
 # release-guard parse-tag is the defense-in-depth re-check inside the guard job.
 on:
-  # Instantiate the complete caller/reusable-workflow graph on relevant PRs so
-  # GitHub validates permission propagation before an immutable tag exists. The
-  # guard job is push-only, so every production job skips after static validation.
-  pull_request:
-    branches: [develop]
-    paths:
-      - ".github/workflows/release.yml"
-      - ".github/workflows/e2e.yml"
-      - ".github/workflows/release-e2e.yml"
-      - ".github/workflows/release-validate.yml"
   push:
     tags:
       - "v*"
@@ -55,6 +45,9 @@ jobs:
       contents: read
     env:
       TAG: ${{ github.ref_name }}
+    outputs:
+      prerelease: ${{ steps.parse.outputs.kind == 'rc' }}
+      latest: ${{ steps.parse.outputs.kind == 'final' }}
     steps:
       - name: Verify release tag actor
         env:
@@ -64,7 +57,7 @@ jobs:
           EXPECTED_RELEASE_ACTOR_ID: "291504229"
         run: |
           if [ "$RELEASE_ACTOR" != "$EXPECTED_RELEASE_ACTOR" ] || [ "$RELEASE_ACTOR_ID" != "$EXPECTED_RELEASE_ACTOR_ID" ]; then
-            echo "::error::release tag ${TAG} was pushed by ${RELEASE_ACTOR} (${RELEASE_ACTOR_ID}), not the peasant-labs-releaser App. Create releases only by merging a protected release PR."
+            echo "::error::release tag ${TAG} was pushed by ${RELEASE_ACTOR} (${RELEASE_ACTOR_ID}), not the peasant-labs-releaser App. Use the release batch to tag a fresh queued release."
             exit 1
           fi
 
@@ -73,6 +66,7 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
@@ -83,6 +77,41 @@ jobs:
       - name: Parse + classify the tag
         id: parse
         run: go run github.com/peasant-labs/schema/cmd/release-guard parse-tag "$TAG"
+
+  verify-tag:
+    name: verify the tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - name: Check out release-intent
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: peasant-labs/infra
+          ref: bcdaa02f9defd528b4dd9cb3077238573e709749
+          path: infra-tool
+          sparse-checkout: tools/release
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: infra-tool/tools/release/go.mod
+          cache: false
+      - name: Build release-intent
+        env:
+          GOWORK: "off"
+        run: go build -C infra-tool/tools/release -o "${RUNNER_TEMP}/release-intent" ./cmd/release-intent
+      - name: Verify the tag is on the default branch
+        run: '"${RUNNER_TEMP}/release-intent" verify-tag --tag "${GITHUB_REF_NAME}" --branch "origin/${DEFAULT_BRANCH}"'
 
   nix-vendor-hash:
     name: assert nix vendorHash current
@@ -96,6 +125,7 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@33c9ab3ef95cd57c164d9d6eb1f9a46338538d41 # main
@@ -115,6 +145,7 @@ jobs:
     needs: [guard, nix-vendor-hash]
     permissions:
       contents: read
+      pull-requests: read
     uses: ./.github/workflows/e2e.yml
 
   release-e2e:
@@ -124,25 +155,24 @@ jobs:
       contents: read
     # The called workflow's determine-runner job reads secrets.RUNNER_STATUS_TOKEN;
     # secrets do not cross a reusable-workflow call unless passed explicitly.
-    secrets: inherit
+    secrets:
+      RUNNER_STATUS_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
     uses: ./.github/workflows/release-e2e.yml
 
-  # Build + publish: one Linux runner cross-compiles all four targets (pure-Go,
-  # CGO_ENABLED=0), then goreleaser produces archives + checksums + deb/rpm and
-  # creates the GitHub (pre)release. The Homebrew cask push is skip_upload:"auto"
-  # (final tags only, never rc); the AUR push stays skip_upload:"true" (no-op).
-  release:
-    name: release (goreleaser)
-    needs: [determine-runner, guard, nix-vendor-hash, e2e, release-e2e]
+  # Build without a write token. The publish job receives only the built files.
+  build:
+    name: build release artifacts
+    needs: [determine-runner, guard, verify-tag, nix-vendor-hash, e2e, release-e2e]
     runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     timeout-minutes: 30
     permissions:
-      contents: write # create the GitHub Release and upload assets
+      contents: read
     steps:
       - name: Checkout repository (full history for changelog)
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
@@ -177,15 +207,6 @@ jobs:
             exit 1
           fi
 
-      - name: Mint App token for Homebrew tap
-        id: tap_tok
-        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
-        with:
-          app-id: ${{ secrets.PEASANT_RELEASER_APP_ID }}
-          private-key: ${{ secrets.PEASANT_RELEASER_APP_PRIVATE_KEY }}
-          owner: peasant-labs
-          repositories: homebrew-tap
-
       - name: Install patched GoReleaser v2.17.1
         run: |
           scripts/install-goreleaser "$RUNNER_TEMP/goreleaser-bin"
@@ -193,24 +214,74 @@ jobs:
       - name: Run goreleaser
         env:
           TAG: ${{ github.ref_name }}
-          GITHUB_TOKEN: ${{ github.token }}
-          # AUR_KEY is a placeholder: the AUR push stays skip_upload:"true", so it
-          # is never used until AUR publishing is separately approved. The tap
-          # token IS used — the Homebrew cask push is skip_upload:"auto" and writes
-          # to the tap on final tags — and is minted from the GitHub App above.
-          AUR_KEY: ${{ secrets.AUR_KEY || 'unset-publisher-disabled' }}
-          TAP_GITHUB_TOKEN: ${{ steps.tap_tok.outputs.token }}
+          AUR_KEY: "publisher-disabled"
         run: |
           set -euo pipefail
           PEASANT_RELEASE_HEADER="$(go run ./scripts/release-header -tag "$TAG")"
           export PEASANT_RELEASE_HEADER
-          "$RUNNER_TEMP/goreleaser-bin/goreleaser" release --clean
+          "$RUNNER_TEMP/goreleaser-bin/goreleaser" release --clean --skip=publish
+          printf '%s\n' "$PEASANT_RELEASE_HEADER" > dist/release-notes.md
+
+      - name: Verify release checksums
+        run: |
+          set -euo pipefail
+          test -s dist/checksums.txt
+          (cd dist && sha256sum --check checksums.txt)
+
+      - name: Hand release artifacts to the publisher
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-dist
+          path: dist
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: publish GitHub Release
+    needs: [guard, verify-tag, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Download the release artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-dist
+          path: dist
+      - name: Look for an existing release
+        id: view
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release view "$TAG" --repo "$GITHUB_REPOSITORY"
+      - name: Create the release for the existing tag
+        id: create
+        if: steps.view.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ needs.guard.outputs.prerelease }}
+          LATEST: ${{ needs.guard.outputs.latest }}
+        run: gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" --notes-file dist/release-notes.md --prerelease="$PRERELEASE" --latest="$LATEST"
+      - name: Upload the release assets
+        if: steps.view.outcome == 'success' || steps.create.outcome == 'success'
+        uses: softprops/action-gh-release@5be0e66d93ac7ed76da52eca8bb058f665c3a5fe # v2.4.2
+        with:
+          tag_name: ${{ github.ref_name }}
+          repository: ${{ github.repository }}
+          files: dist/*
+          fail_on_unmatched_files: true
+          overwrite_files: true
+          prerelease: ${{ needs.guard.outputs.prerelease }}
+          make_latest: ${{ needs.guard.outputs.latest }}
 
   # Post-publish smoke: download the released linux archives on NATIVE runners
   # (no QEMU) and assert the binary is static and reports the tag version.
   smoke:
     name: smoke (${{ matrix.arch }})
-    needs: [determine-runner, release]
+    needs: [determine-runner, publish]
     strategy:
       fail-fast: false
       matrix:
@@ -304,7 +375,7 @@ jobs:
   # there is no arch matrix.
   windows-smoke:
     name: windows smoke (amd64)
-    needs: release
+    needs: publish
     runs-on: windows-latest
     timeout-minutes: 15
     permissions:
@@ -428,15 +499,12 @@ jobs:
             if ($LASTEXITCODE -ne 0) { Write-Host "::warning::web stop exited $LASTEXITCODE" }
           }
 
-  # Post-publish macOS smoke: on FINAL tags only, install the just-published cask
-  # from the live tap and assert it runs + reports the tag version. This exercises
-  # the real tap push end-to-end — homebrew_casks skip_upload:"auto" writes the
-  # cask to peasant-labs/homebrew-tap on finals (and never on rc), so this job is
-  # gated to non-rc pushes. goreleaser commits the cask inside the `release` job
-  # before it exits, so a fresh `brew tap` clone (needs: release) observes it.
+  # Post-publish macOS smoke: on final tags, install from the live tap. The tap
+  # publisher is separate, so a stale tap fails this smoke rather than silently
+  # certifying an older package as the current release.
   macos-cask-smoke:
     name: macos cask smoke (final only)
-    needs: release
+    needs: publish
     if: github.event_name == 'push' && !contains(github.ref_name, '-rc')
     runs-on: macos-15
     timeout-minutes: 20
@@ -474,7 +542,9 @@ jobs:
     if: contains(github.ref_name, '-rc')
     permissions:
       contents: read
+      pull-requests: read
     # The called workflow's determine-runner job reads secrets.RUNNER_STATUS_TOKEN;
     # secrets do not cross a reusable-workflow call unless passed explicitly.
-    secrets: inherit
+    secrets:
+      RUNNER_STATUS_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
     uses: ./.github/workflows/release-validate.yml

@@ -39,10 +39,17 @@ type PreTestCommand struct {
 	Fragment string      `yaml:"fragment"`
 }
 
+// MakefileSource anchors a standalone check to its target and exact recipe line.
+type MakefileSource struct {
+	Target   string `yaml:"target"`
+	Fragment string `yaml:"fragment"`
+}
+
 // PreTestFixture is the embedded pre-test command list.
 type PreTestFixture struct {
 	RequiredNames []string         `yaml:"required_names"`
 	Steps         []PreTestCommand `yaml:"steps"`
+	WorkflowCheck MakefileSource   `yaml:"workflow_check"`
 }
 
 // LoadPreTestFixture decodes exactly one strict YAML document and validates the
@@ -104,6 +111,9 @@ func validatePreTestFixture(file PreTestFixture) error {
 			return fmt.Errorf("required pre-test step %q is missing from the fixture", want)
 		}
 	}
+	if file.WorkflowCheck.Target != workflowCheckTarget || file.WorkflowCheck.Fragment == "" {
+		return fmt.Errorf("workflow check must name target %q and its exact recipe line", workflowCheckTarget)
+	}
 	return nil
 }
 
@@ -120,6 +130,9 @@ func PreTestCommands() ([]PreTestCommand, error) {
 // checkTarget is the Makefile target whose execution runs the pre-test steps:
 // its direct prerequisites first, then its own recipe.
 const checkTarget = "check"
+
+// workflowCheckTarget is separate from the measured make check steps.
+const workflowCheckTarget = "check-workflows"
 
 // makefileTarget is one parsed Makefile target: its direct prerequisites and the
 // physical lines of its recipe, with the leading tab stripped.
@@ -187,12 +200,30 @@ func recipeContains(recipe []string, fragment string) bool {
 // steps must appear, fragment by fragment, in the same order the `check` target
 // executes them: its direct prerequisites in order, then its own recipe. A
 // dropped, renamed, or reordered recipe line therefore fails loudly instead of
-// the fixture measuring a step the Makefile no longer runs.
+// the fixture measuring a step the Makefile no longer runs. The separate
+// workflow check is pinned to an exact recipe line in its own target.
 func validatePreTestSources(file PreTestFixture, makefile []byte) error {
 	targets := parseMakefileTargets(makefile)
 	check, ok := targets[checkTarget]
 	if !ok {
 		return fmt.Errorf("Makefile has no %q target", checkTarget)
+	}
+	if file.WorkflowCheck.Target != workflowCheckTarget || file.WorkflowCheck.Fragment == "" {
+		return fmt.Errorf("workflow check must name target %q and its exact recipe line", workflowCheckTarget)
+	}
+	workflow, ok := targets[file.WorkflowCheck.Target]
+	if !ok {
+		return fmt.Errorf("workflow check target %q does not exist", file.WorkflowCheck.Target)
+	}
+	workflowFound := false
+	for _, line := range workflow.Recipe {
+		if strings.TrimSpace(line) == file.WorkflowCheck.Fragment {
+			workflowFound = true
+			break
+		}
+	}
+	if !workflowFound {
+		return fmt.Errorf("workflow check: exact line %q does not appear in Makefile target %q", file.WorkflowCheck.Fragment, file.WorkflowCheck.Target)
 	}
 
 	type execLine struct {
@@ -201,6 +232,9 @@ func validatePreTestSources(file PreTestFixture, makefile []byte) error {
 	}
 	var exec []execLine
 	for _, pre := range check.Prereqs {
+		if pre == workflowCheckTarget {
+			return fmt.Errorf("%s must not be a prerequisite of %s", workflowCheckTarget, checkTarget)
+		}
 		t, ok := targets[pre]
 		if !ok {
 			return fmt.Errorf("%s prerequisite %q is not a Makefile target", checkTarget, pre)
@@ -210,6 +244,9 @@ func validatePreTestSources(file PreTestFixture, makefile []byte) error {
 		}
 	}
 	for _, line := range check.Recipe {
+		if !strings.HasPrefix(strings.TrimSpace(line), "#") && strings.Contains(line, workflowCheckTarget) {
+			return fmt.Errorf("%s must not run %s in its recipe", checkTarget, workflowCheckTarget)
+		}
 		exec = append(exec, execLine{target: checkTarget, line: line})
 	}
 

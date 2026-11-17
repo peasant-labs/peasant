@@ -2,6 +2,9 @@ name: Release E2E
 
 on:
   workflow_call:
+    secrets:
+      RUNNER_STATUS_TOKEN:
+        required: false
   workflow_dispatch:
 
 concurrency:
@@ -19,6 +22,8 @@ jobs:
   # Blacksmith amd64 fallback when the pool is unavailable. Routing comes from
   # the shared runner-router reusable workflow.
   determine-runner:
+    permissions:
+      contents: read
     uses: peasant-labs/infra/.github/workflows/runner-router.yml@71e687cef7eede9a63659be98ce9adac3c563398
     with:
       fallback: '["blacksmith-4vcpu-ubuntu-2404"]'
@@ -33,11 +38,14 @@ jobs:
     needs: determine-runner
     runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     timeout-minutes: 90
+    permissions:
+      contents: read
     steps:
       - name: Checkout peasant
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Checkout village (for ./cmd/server + ./cmd/village-setup-demo)
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -45,6 +53,7 @@ jobs:
           repository: peasant-labs/village
           ref: ${{ env.VILLAGE_REF }}
           path: _village
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
@@ -96,7 +105,6 @@ jobs:
           "$RUNNER_TEMP/goreleaser-bin/goreleaser" release --snapshot --clean
         env:
           AUR_KEY: "snapshot-unused"
-          TAP_GITHUB_TOKEN: "snapshot-unused"
 
       - name: Run release per-distro e2e driver
         env:

@@ -178,21 +178,9 @@ func TestMountedReleaseHeader(t *testing.T) {
 	}
 	root := filepath.Join("..", "..")
 	release := readWorkflow(t, filepath.Join(root, ".github", "workflows", "release.yml"))
-	pr := readWorkflow(t, filepath.Join(root, ".github", "workflows", "release-pr.yml"))
-	publish, _ := findStep(t, release, "release", "Run goreleaser")
-	validate, validateIndex := findStep(t, pr, "validate", "Check the release changelog section")
-	_, titleIndex := findStep(t, pr, "validate", "Validate release PR title grammar")
-	pretag, checkIndex := findStep(t, pr, "tag", "Check the tagged commit's changelog section")
-	_, hashIndex := findStep(t, pr, "tag", "Update Nix vendor hash before tagging")
-	_, tagIndex := findStep(t, pr, "tag", "Push annotated tag (hard-fail if it exists)")
-	if hashIndex >= checkIndex || checkIndex >= tagIndex {
-		t.Fatal("tagged changelog must be checked after the hash update and before the tag push")
-	}
-	if titleIndex >= validateIndex {
-		t.Fatal("release PR changelog must be checked after parsing the title")
-	}
-	if publish.Env["TAG"] != "${{ github.ref_name }}" || validate.Env["VERSION"] != "${{ steps.title.outputs.version }}" || pretag.Env["VERSION"] != "${{ steps.title.outputs.version }}" {
-		t.Fatal("release steps must use the release tag or the parsed PR version")
+	publish, _ := findStep(t, release, "build", "Run goreleaser")
+	if publish.Env["TAG"] != "${{ github.ref_name }}" {
+		t.Fatal("release build must use the triggering tag")
 	}
 
 	configBytes, err := os.ReadFile(filepath.Join(root, ".goreleaser.yml"))
@@ -234,9 +222,9 @@ func TestMountedReleaseHeader(t *testing.T) {
 			runner := filepath.Join(dir, "runner")
 			capture := filepath.Join(dir, "published-header")
 			argsFile := filepath.Join(dir, "publisher-args")
-			stub := "#!/bin/sh\nprintf '%s' \"$PEASANT_RELEASE_HEADER\" > \"$CAPTURE\"\nprintf '%s\\n' \"$@\" > \"$ARGS_FILE\"\n"
+			stub := "#!/bin/sh\nmkdir -p dist\nprintf '%s' \"$PEASANT_RELEASE_HEADER\" > \"$CAPTURE\"\nprintf '%s\\n' \"$@\" > \"$ARGS_FILE\"\n"
 			writeTestFile(t, filepath.Join(runner, "goreleaser-bin", "goreleaser"), stub, 0o700)
-			for _, step := range []workflowStep{validate, pretag, publish} {
+			for _, step := range []workflowStep{publish} {
 				cmd := exec.Command("bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", step.Run)
 				cmd.Dir = dir
 				cmd.Env = append(os.Environ(), "TAG="+c.Tag, "VERSION="+c.Tag, "RUNNER_TEMP="+runner, "CAPTURE="+capture, "ARGS_FILE="+argsFile, "GOWORK=off")
@@ -262,8 +250,12 @@ func TestMountedReleaseHeader(t *testing.T) {
 				t.Fatalf("publisher header = %q, error = %v; want %q", header, err, c.Header)
 			}
 			args, err := os.ReadFile(argsFile)
-			if err != nil || string(args) != "release\n--clean\n" {
+			if err != nil || string(args) != "release\n--clean\n--skip=publish\n" {
 				t.Fatalf("publisher arguments = %q, error = %v", args, err)
+			}
+			notes, err := os.ReadFile(filepath.Join(dir, "dist", "release-notes.md"))
+			if err != nil || strings.TrimSuffix(string(notes), "\n") != c.Header {
+				t.Fatalf("release notes = %q, error = %v; want %q", notes, err, c.Header)
 			}
 			if c.Body != "" {
 				var rendered bytes.Buffer

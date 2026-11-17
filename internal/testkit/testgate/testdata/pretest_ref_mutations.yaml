@@ -3,7 +3,8 @@
 # Each case mutates a copy of the embedded fixture and asserts
 # validatePreTestSources rejects it, proving the source check is not vacuous: a
 # fragment absent from its declared target, a target that does not exist, a
-# fragment placed in the wrong target, and a reordered step must each fail.
+# fragment placed in the wrong target, a reordered step, and a changed or
+# misplaced standalone workflow check must each fail.
 #
 # required_names keeps a mutation case from being deleted silently.
 required_names:
@@ -11,6 +12,10 @@ required_names:
   - target-absent
   - fragment-wrong-target
   - step-reordered
+  - workflow-wrong-target
+  - workflow-fragment-truncated
+  - workflow-prerequisite-of-check
+  - workflow-in-check-recipe
 
 mutations:
   - name: fragment-absent
@@ -28,4 +33,20 @@ mutations:
   - name: step-reordered
     step: ast-grep-scan
     op: swap
-    with: release-guard
+    with: projection-negative-scope
+  - name: workflow-wrong-target
+    step: check-workflows
+    op: set-target
+    value: check
+  - name: workflow-fragment-truncated
+    step: check-workflows
+    op: set-fragment
+    value: check-workflows
+  - name: workflow-prerequisite-of-check
+    op: replace-makefile
+    value: "check: fmt-check lint docs-cli-check"
+    with: "check: fmt-check lint docs-cli-check check-workflows"
+  - name: workflow-in-check-recipe
+    op: replace-makefile
+    value: "ast-grep scan --error=unused-suppression --config sgconfig.yml ."
+    with: "$(MAKE) check-workflows; ast-grep scan --error=unused-suppression --config sgconfig.yml ."

@@ -1,5 +1,67 @@
 # Peasant Release Runbook
 
+## Current release procedure
+
+PR titles carry intent, not versions: `fix(cli)[patch]: handle a missing file`
+and `feat(web)[minor]: show progress` are releasing examples. The
+`title-guard` checks the live title on PR events and merge groups. Content PRs
+must not edit `CHANGELOG.md`, including its `[Unreleased]` block. The first
+generated release section preserves that block's entries.
+
+The release job plans from `develop`. With `RELEASE_BATCH_MODE=tag`, it keeps
+one bot PR on `automation/release`, computes its version, and arms it only
+when the merge queue permits. The release PR's merge-group build checks its
+content and Nix vendor hash before running full-stack e2e and the packaging
+validation matrix. `merge-gate` also requires schema parity against the
+Village ref in the existing workflow-contract fixture. If a release gate
+fails, the PR is ejected without landing or tagging; retry the release-batch
+dispatch for a transient failure, or merge a normal fix and let the bot
+rebuild the release PR.
+
+After the release PR lands, `release-batch.yml` verifies its content again and
+pushes the annotated tag on that commit. A tag triggers `release.yml`: the
+actor and tag are checked, `release-intent verify-tag` proves that the tag is
+reachable from `develop`, and the Nix, e2e, installed-package, and smoke gates
+remain. The credential-free build runs GoReleaser with `--skip=publish`,
+checks `dist/checksums.txt`, and hands `release-dist` to the confined GitHub
+Release publisher. The publisher can retry a partial asset upload. It does
+not publish to the Homebrew tap or AUR. The live Homebrew cask publisher must
+be adopted separately; until then the existing final-tag cask smoke can fail
+because the tap still points to an older release.
+
+The vendor-hash workflow computes a change without an App credential and, if
+needed, opens or updates `chore(nix): update vendor hash` on
+`automation/vendor-hash` with auto-merge. It does not push `develop`. The
+ordinary PR hash check is a report; the release PR's group build makes it a
+hard gate. No workflow repairs the hash after a tag.
+
+For a forced release use the `cut-release` dispatch with `patch` or `minor`;
+it creates an empty bot PR and the queue drives the normal release. Never
+create, move, or delete tags by hand. A failed publication burns its tag; fix
+forward. `make check-workflows` builds the infra tool at the SHA in
+`title-guard.yml` and checks the full workflow directory.
+
+### One-time cutover
+
+Before merging adoption, set `squash_merge_commit_title=PR_TITLE`. Enable
+`allow_auto_merge`, create an exact-`develop` Merge queue ruleset with the
+`merge-gate` and `title-guard` required contexts, and compare its read-back
+with `release-intent check-workflows --print-required`. Retitle queued PRs
+only after removing them from the queue, and drop changelog edits from content
+PRs. Run release-batch in plan-only mode first and inspect its output and
+absence of writes; enable `RELEASE_BATCH_MODE=tag` only after that group has
+been checked. The release App needs contents and pull-request write access;
+its client ID is `PEASANT_RELEASER_CLIENT_ID` and its private key remains
+`PEASANT_RELEASER_APP_PRIVATE_KEY`.
+
+## Historical procedure and publication records
+
+The material below records the former title-driven, manually versioned release
+procedure and earlier publication rollout. Its release steps and credential
+claims are historical, **not instructions for the current workflows**. Use
+the current procedure above; the immutable artifact names in the appendix
+remain the distribution contract.
+
 This runbook is the operator's guide for cutting Peasant releases and for the
 external package-publication rollout. It documents the release ceremony, the
 secrets/permissions inventory, the publication checklist, and the
