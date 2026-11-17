@@ -6,6 +6,11 @@ All notable changes to Peasant are recorded here. The format follows
 GitHub Releases, which hold the signed artifacts and checksums. A version that
 was tagged but not published links to its tag instead.
 
+## [0.18.2] - 2026-11-17
+
+- cut a release (#1060)
+- treat an already-gone web server as stopped (#1064)
+
 ## [0.18.1] - 2026-11-17
 
 - cut a release (#1057)
