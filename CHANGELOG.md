@@ -8,6 +8,8 @@ was tagged but not published links to its tag instead.
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-11-16
+
 ### Added
 - `peasant migrate --schema-only` upgrades the store schema and stops before
   converting sessions.
@@ -1354,6 +1356,7 @@ Second public release. See the
 Initial public release. See the
 [v0.1.0 release](https://github.com/peasant-labs/peasant/releases/tag/v0.1.0).
 
+[0.18.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.18.0
 [0.17.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.17.0
 [0.16.2]: https://github.com/peasant-labs/peasant/releases/tag/v0.16.2
 [0.16.1]: https://github.com/peasant-labs/peasant/releases/tag/v0.16.1

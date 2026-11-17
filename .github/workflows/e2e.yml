@@ -45,7 +45,7 @@ env:
   #      the fail-closed assertion in this workflow turns that into a red gate.
   # Bump this ref and the schema module pin together; keep release-e2e.yml and
   # internal/e2e/testdata/workflows/e2e_contract.yaml in lockstep.
-  VILLAGE_REF: 88f38cd872b0983bb631ad606c733d908afc126c
+  VILLAGE_REF: 9137d351e9d381d3ba33d104bc3d681c7f1bd8a7
 
 permissions:
   contents: read
@@ -68,7 +68,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: peasant-labs/infra
-          ref: 87d75184b1eba3ba28c716b317ce060751a151c5
+          ref: bcdaa02f9defd528b4dd9cb3077238573e709749
           path: infra-tool
           sparse-checkout: tools/release
           persist-credentials: false

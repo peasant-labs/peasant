@@ -127,6 +127,8 @@ func TestPullRoundTripE2E(t *testing.T) {
 	}
 	assertV39AssociationFixture(t, user1DB, associationFixture)
 
+	runPeasant(t, peasantBin, user1XDG, "migrate", "--schema-only", "--confirm")
+
 	sessionIDs := readSessionIDs(t, user1DB)
 	if len(sessionIDs) != ExpectedTranscriptCount {
 		t.Fatalf("ingested %d sessions, want %d (see Expected*Transcripts in fixture.go)", len(sessionIDs), ExpectedTranscriptCount)
@@ -134,9 +136,8 @@ func TestPullRoundTripE2E(t *testing.T) {
 	for _, sid := range sessionIDs {
 		runPeasant(t, peasantBin, user1XDG, "annotate", "create", sid, systemAnnotationType, systemAnnotationVal)
 	}
-	// The first annotation command above is the current CLI's first open of this
-	// database. Assert its ordinary V40/V41 upgrade created the anchor and made
-	// the already-pushed session eligible before adding the target annotation.
+	// Assert the explicit V40/V41 upgrade created the anchor and made the
+	// already-pushed session eligible before adding the target annotation.
 	associationID := assertMigratedAssociationReplay(t, user1DB, associationFixture, 0)
 	createAssociationRoundTripAnnotation(t, user1DB, associationID, associationFixture)
 	// This deliberately reconstructed pre-content database has only previews.

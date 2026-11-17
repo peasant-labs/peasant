@@ -1,4 +1,4 @@
-expected_village_ref: 88f38cd872b0983bb631ad606c733d908afc126c
+expected_village_ref: 9137d351e9d381d3ba33d104bc3d681c7f1bd8a7
 queue_adoption:
   required_gate_jobs:
     - changes
