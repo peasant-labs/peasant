@@ -94,6 +94,18 @@
   fallback: reindex-stored
   reason: indexer_behind
   lane: stored-index
+- id: claude-indexer-27-managed
+  harness: claude-code
+  kind: transcript-indexer
+  from: 26
+  to: 27
+  change_scope: index-only
+  input: stored-transcript
+  output_proof: []
+  precheck: none
+  fallback: reindex-stored
+  reason: indexer_behind
+  lane: stored-index
 - id: claude-format-1
   harness: claude-code
   kind: index-format
@@ -159,6 +171,18 @@
   kind: transcript-indexer
   from: 19
   to: 20
+  change_scope: index-only
+  input: stored-transcript
+  output_proof: []
+  precheck: none
+  fallback: reindex-stored
+  reason: indexer_behind
+  lane: stored-index
+- id: opencode-indexer-21-managed
+  harness: opencode
+  kind: transcript-indexer
+  from: 20
+  to: 21
   change_scope: index-only
   input: stored-transcript
   output_proof: []
