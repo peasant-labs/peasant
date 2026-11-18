@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -16,9 +17,51 @@ import (
 // message's first record that holds the reply's prose, with its thinking and
 // tool calls as depth-1 children at their own stream positions.
 
-// claudeReplyProseSeparator joins the text blocks of one reply. Each text
-// block is a paragraph of its own.
-const claudeReplyProseSeparator = "\n\n"
+// claudeMessageUsage accumulates the token usage of a transcript counted once
+// per API message. Every record of one message carries a snapshot of that
+// message's usage, so summing the records would count it once per record.
+// Within one message each field takes the last record that carries it (a
+// present, non-zero count); a record without a message id is its own message.
+// The stored reply entry merges its records by the same rule, so the session
+// totals equal the sum of the reply entries.
+type claudeMessageUsage struct {
+	byMessage map[string]int
+	in, out   []int
+}
+
+// observe records one record's input and output token counts.
+func (u *claudeMessageUsage) observe(messageID string, tokensIn, tokensOut int) {
+	slot := len(u.in)
+	if messageID != "" {
+		if u.byMessage == nil {
+			u.byMessage = make(map[string]int)
+		}
+		if existing, seen := u.byMessage[messageID]; seen {
+			slot = existing
+		} else {
+			u.byMessage[messageID] = slot
+		}
+	}
+	if slot == len(u.in) {
+		u.in, u.out = append(u.in, 0), append(u.out, 0)
+	}
+	if tokensIn > 0 {
+		u.in[slot] = tokensIn
+	}
+	if tokensOut > 0 {
+		u.out[slot] = tokensOut
+	}
+}
+
+// totals is the session's input and output tokens, each message counted once.
+func (u *claudeMessageUsage) totals() (int, int) {
+	tokensIn, tokensOut := 0, 0
+	for i := range u.in {
+		tokensIn += u.in[i]
+		tokensOut += u.out[i]
+	}
+	return tokensIn, tokensOut
+}
 
 // claudeEntrySource names where one grouped entry came from in the ungrouped
 // record stream: the ordinal of its source record among the ungrouped depth-0
@@ -64,10 +107,17 @@ type claudeUngroupedRecord struct {
 //     the last one recorded; the source size is the sum of the records.
 //
 // Entry indexes are renumbered densely over the removed entries, keeping any
-// gap the ungrouped stream already had, and every parent index follows.
-func groupClaudeReplies(entries []schema.SessionEntry, messageIDs map[int]string, fullContent bool) ([]schema.SessionEntry, []claudeEntrySource) {
+// gap the ungrouped stream already had, and every parent index follows. The
+// renumbering walks the stream in order, so it requires ascending entry
+// indexes and refuses any other input.
+func groupClaudeReplies(entries []schema.SessionEntry, messageIDs map[int]string, fullContent bool) ([]schema.SessionEntry, []claudeEntrySource, error) {
 	if len(entries) == 0 {
-		return entries, nil
+		return entries, nil, nil
+	}
+	for i := 1; i < len(entries); i++ {
+		if entries[i].EntryIndex <= entries[i-1].EntryIndex {
+			return nil, nil, fmt.Errorf("ingest.groupClaudeReplies: entry index %d at position %d does not follow %d; replies are grouped and renumbered in stream order, so the parsed entries must be ascending; report this as a parser defect with the session id", entries[i].EntryIndex, i, entries[i-1].EntryIndex)
+		}
 	}
 	records := make([]claudeUngroupedRecord, 0, len(entries))
 	recordOf := make([]int, len(entries))
@@ -118,7 +168,10 @@ func groupClaudeReplies(entries []schema.SessionEntry, messageIDs map[int]string
 	drop := make([]bool, len(entries))
 	replies := make(map[int]schema.SessionEntry, len(members))
 	for reply, group := range members {
-		merged, dropped := mergeClaudeReply(entries, records, group, fullContent)
+		merged, dropped, err := mergeClaudeReply(entries, records, group, fullContent)
+		if err != nil {
+			return nil, nil, err
+		}
 		replies[reply] = merged
 		for _, position := range dropped {
 			drop[position] = true
@@ -159,14 +212,14 @@ func groupClaudeReplies(entries []schema.SessionEntry, messageIDs map[int]string
 		out = append(out, entry)
 		sources = append(sources, claudeEntrySource{record: r, block: blockOf[i]})
 	}
-	return out, sources
+	return out, sources, nil
 }
 
 // mergeClaudeReply builds one reply's depth-0 entry from its member records
 // and reports the positions of the entries the reply absorbs: the depth-0
 // entries of every member after the first, and the children whose content the
 // reply's own entry now holds.
-func mergeClaudeReply(entries []schema.SessionEntry, records []claudeUngroupedRecord, group []int, fullContent bool) (schema.SessionEntry, []int) {
+func mergeClaudeReply(entries []schema.SessionEntry, records []claudeUngroupedRecord, group []int, fullContent bool) (schema.SessionEntry, []int, error) {
 	reply := entries[records[group[0]].position]
 	var dropped []int
 	var prose, thinking []string
@@ -179,13 +232,20 @@ func mergeClaudeReply(entries []schema.SessionEntry, records []claudeUngroupedRe
 		carrier := entries[record.position]
 		if n > 0 {
 			dropped = append(dropped, record.position)
-			if retained, err := RetainedUnknownOf(carrier); err == nil && len(retained) > 0 {
-				// The records were validated when they were attached to the
-				// member, so attaching them to the reply cannot fail on them.
-				_ = AttachRetainedUnknown(&reply, retained)
+			retained, err := RetainedUnknownOf(carrier)
+			if err == nil {
+				err = AttachRetainedUnknown(&reply, retained)
 			}
-			if carrier.TokensIn != nil || carrier.TokensOut != nil {
-				reply.TokensIn, reply.TokensOut = carrier.TokensIn, carrier.TokensOut
+			if err != nil {
+				return schema.SessionEntry{}, nil, fmt.Errorf("ingest.mergeClaudeReply: the retained evidence of record entry %d could not move to its reply at entry %d; the evidence would be lost; report this with the session id: %w", carrier.EntryIndex, reply.EntryIndex, err)
+			}
+			// Each usage field takes the last record that carries it, the
+			// rule claudeMessageUsage applies to the session totals.
+			if carrier.TokensIn != nil {
+				reply.TokensIn = carrier.TokensIn
+			}
+			if carrier.TokensOut != nil {
+				reply.TokensOut = carrier.TokensOut
 			}
 			if carrier.StopReason != nil {
 				reply.StopReason = carrier.StopReason
@@ -244,7 +304,7 @@ func mergeClaudeReply(entries []schema.SessionEntry, records []claudeUngroupedRe
 	} else {
 		reply.ToolNamesCSV = nil
 	}
-	joined := strings.Join(prose, claudeReplyProseSeparator)
+	joined := strings.Join(prose, replyProseSeparator)
 	hasProse := strings.TrimSpace(joined) != ""
 	reply.EntryType = assistantEntryType(hasProse, reply.HasToolUse, reply.HasThinking)
 	switch {
@@ -253,12 +313,12 @@ func mergeClaudeReply(entries []schema.SessionEntry, records []claudeUngroupedRe
 	case !reply.HasToolUse && len(thinking) > 0:
 		// A thinking-only reply is a standalone thinking turn: the thinking
 		// is its content, and its thinking blocks are not repeated below it.
-		reply.ContentPreview = claudeReplyPreview(strings.Join(thinking, claudeReplyProseSeparator), fullContent)
+		reply.ContentPreview = claudeReplyPreview(strings.Join(thinking, replyProseSeparator), fullContent)
 		dropped = append(dropped, thinkingChildren...)
 	default:
 		reply.ContentPreview = nil
 	}
-	return reply, dropped
+	return reply, dropped, nil
 }
 
 // claudeProseChild reports whether a decomposed child is one of the reply's

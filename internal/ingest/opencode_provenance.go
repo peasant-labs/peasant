@@ -624,12 +624,12 @@ func classifyOpenCodeAssistant(msg OpenCodeProvenanceMessage, attr OpenCodeMessa
 		case firstText >= 0:
 			carrierKey, err = openCodeNativeKey(msg.Shape, msg.MessageID, "part-"+partIDs[firstText])
 			carrier.EntryType = assistantEntryType(true, hasTools, firstReasoning >= 0)
-			carrier.Content = strings.Join(prose, openCodeReplyProseSeparator)
+			carrier.Content = strings.Join(prose, replyProseSeparator)
 			carrier.Provenance = agentOutput()
 		case thinkingOnly:
 			carrierKey, err = openCodeNativeKey(msg.Shape, msg.MessageID, "part-"+partIDs[firstReasoning])
 			carrier.EntryType = schema.EntryTypeThinking
-			carrier.Content = strings.Join(reasoning, openCodeReplyProseSeparator)
+			carrier.Content = strings.Join(reasoning, replyProseSeparator)
 			carrier.Provenance = agentOutput()
 		default:
 			// A message with tool calls and no prose holds no words of its
@@ -763,10 +763,6 @@ const (
 	openCodePartKindReasoning = "reasoning"
 	openCodePartKindTool      = "tool"
 )
-
-// openCodeReplyProseSeparator joins the text parts of one reply. Each part is
-// a paragraph of its own.
-const openCodeReplyProseSeparator = "\n\n"
 
 // classifyOpenCodeHistoricalMessage classifies legacy and semantic shapes with
 // their existing reader's authority: roles and synthetic flags decide, and

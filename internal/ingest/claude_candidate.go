@@ -313,7 +313,10 @@ func claudeClassifiedBlocks(sessionID SessionID, records claudeSourceRecords) ([
 		recordKeys = append(recordKeys, key)
 	}
 
-	grouped, sources := groupClaudeReplies(entries, records.messageIDs, true)
+	grouped, sources, err := groupClaudeReplies(entries, records.messageIDs, true)
+	if err != nil {
+		return nil, err
+	}
 	carrierKeys := make(map[int]string, len(recordKeys))
 	hasToolResultContent := make(map[int]bool)
 	for i, entry := range grouped {

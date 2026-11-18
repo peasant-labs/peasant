@@ -965,7 +965,7 @@ func joinedOpenCodeSemanticText(parts []openCodeSemanticPart) string {
 			texts = append(texts, part.Data.Text)
 		}
 	}
-	return strings.Join(texts, openCodeReplyProseSeparator)
+	return strings.Join(texts, replyProseSeparator)
 }
 
 func (idx *OpenCodeIndexer) openCodePartEntry(sessionID SessionID, part openCodeSemanticPart, parentIndex, entryIndex int, parentRole schema.Role, parentContent *string) (schema.SessionEntry, bool) {

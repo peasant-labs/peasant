@@ -166,7 +166,10 @@ func (idx *ClaudeIndexer) parseJSONLWithCompletion(ctx context.Context, sessionI
 // records of one API message grouped into one reply (groupClaudeReplies).
 func (idx *ClaudeIndexer) parseClaudeRecords(ctx context.Context, sessionID SessionID, data []byte, completion *indexCompletion, strict bool) ([]schema.SessionEntry, error) {
 	parsed, err := idx.parseClaudeSourceRecords(ctx, sessionID, data, completion, strict)
-	entries, _ := groupClaudeReplies(parsed.entries, parsed.messageIDs, idx.fullContent)
+	entries, _, groupErr := groupClaudeReplies(parsed.entries, parsed.messageIDs, idx.fullContent)
+	if groupErr != nil {
+		return nil, groupErr
+	}
 	return entries, err
 }
 

@@ -3,64 +3,118 @@
 # depth-0 assistant entry at the first record, holding the prose, with the
 # thinking and tool calls as depth-1 children at their own positions.
 #
-# Each case runs the stored indexer (full depth) over `jsonl` and lists every
-# stored entry in order. `parent` is -1 for a depth-0 entry. `tokensOut` and
-# `stopReason` are empty when the entry records none. Sizes are summed over a
-# reply's records: each `rawBytes` row names a reply entry and the line of its
-# first record, and the entry's stored size must be the summed trimmed length
-# of every line that carries that record's message id.
+# Each case runs the stored indexer (full depth unless fullDepthOff) over
+# `jsonl` and lists every stored entry in order, with literal values: `parent`
+# is -1 for a depth-0 entry, `uuid` and `timestamp` are the entry's source
+# identity and time, `rawBytes` is the stored source size (the summed trimmed
+# length of the reply's records). An omitted field is asserted empty. An image
+# child's note is not asserted (`contentAny`).
+#
+# `keys`, when present, is the managed generation's native key for every
+# stored entry in order: a reply keeps its first record's key and every child
+# keeps its own record's key and block ordinal. `sessionTokens`, when present,
+# is the session total ExtractMetadata states; it must also equal the sum of
+# the reply entries' tokens.
 cases:
   - name: records-of-one-message-group-into-one-reply
     jsonl:
-      - '{"type":"user","uuid":"u1","message":{"role":"user","content":"tidy the module"}}'
-      - '{"type":"assistant","uuid":"a1","message":{"id":"msg_1","role":"assistant","content":[{"type":"thinking","thinking":"start with go.mod"}],"usage":{"input_tokens":3,"output_tokens":4}}}'
-      - '{"type":"assistant","uuid":"a2","message":{"id":"msg_1","role":"assistant","content":[{"type":"text","text":"Tidying now."}],"usage":{"input_tokens":3,"output_tokens":7}}}'
-      - '{"type":"assistant","uuid":"a3","message":{"id":"msg_1","role":"assistant","content":[{"type":"tool_use","id":"toolu_t","name":"Bash","input":{"command":"go mod tidy"}}],"usage":{"input_tokens":3,"output_tokens":9}},"stop_reason":"max_tokens"}'
-    rawBytes: [{entry: 1, line: 1}]
+      - '{"type":"user","uuid":"u1","timestamp":"2026-01-02T10:00:00Z","message":{"role":"user","content":"tidy the module"}}'
+      - '{"type":"assistant","uuid":"a1","timestamp":"2026-01-02T10:00:01Z","message":{"id":"msg_1","role":"assistant","content":[{"type":"thinking","thinking":"start with go.mod"}],"usage":{"input_tokens":3,"cache_read_input_tokens":40,"output_tokens":4}}}'
+      - '{"type":"assistant","uuid":"a2","timestamp":"2026-01-02T10:00:02Z","message":{"id":"msg_1","role":"assistant","content":[{"type":"text","text":"Tidying now."}],"usage":{"input_tokens":3,"cache_read_input_tokens":40,"output_tokens":7}}}'
+      - '{"type":"assistant","uuid":"a3","timestamp":"2026-01-02T10:00:03Z","message":{"id":"msg_1","role":"assistant","content":[{"type":"tool_use","id":"toolu_t","name":"Bash","input":{"command":"go mod tidy"}}],"usage":{"input_tokens":3,"cache_read_input_tokens":40,"output_tokens":9}},"stop_reason":"max_tokens"}'
+    sessionTokens: {tokensIn: 43, tokensOut: 9}
+    keys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:u1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:a1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:a1:0"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:a3:0"
     entries:
-      - {index: 0, depth: 0, parent: -1, role: user, entryType: text, content: "tidy the module"}
-      - {index: 1, depth: 0, parent: -1, role: assistant, entryType: text, content: "Tidying now.", toolNames: Bash, tokensOut: 9, stopReason: max_tokens}
-      - {index: 2, depth: 1, parent: 1, role: assistant, entryType: thinking, content: "start with go.mod"}
-      - {index: 3, depth: 1, parent: 1, role: assistant, entryType: tool_use, toolNames: Bash}
+      - {index: 0, depth: 0, parent: -1, uuid: "u1", timestamp: "2026-01-02T10:00:00Z", role: "user", entryType: "text", content: "tidy the module", rawBytes: 116}
+      - {index: 1, depth: 0, parent: -1, uuid: "a1", timestamp: "2026-01-02T10:00:01Z", role: "assistant", entryType: "text", content: "Tidying now.", toolNames: "Bash", tokensIn: 43, tokensOut: 9, stopReason: "max_tokens", rawBytes: 790}
+      - {index: 2, depth: 1, parent: 1, role: "assistant", entryType: "thinking", content: "start with go.mod"}
+      - {index: 3, depth: 1, parent: 1, role: "assistant", entryType: "tool_use", toolNames: "Bash"}
 
   - name: a-message-resumed-after-another-message-joins-its-reply
     jsonl:
-      - '{"type":"assistant","uuid":"a1","message":{"id":"msg_a","role":"assistant","content":[{"type":"text","text":"Reading both files."}]}}'
-      - '{"type":"assistant","uuid":"b1","message":{"id":"msg_b","role":"assistant","content":[{"type":"text","text":"A second reply."}]}}'
-      - '{"type":"assistant","uuid":"a2","message":{"id":"msg_a","role":"assistant","content":[{"type":"tool_use","id":"toolu_r","name":"Read","input":{"path":"a.go"}}]}}'
+      - '{"type":"assistant","uuid":"a1","message":{"id":"msg_a","role":"assistant","content":[{"type":"text","text":"Reading both files."}],"usage":{"input_tokens":5,"output_tokens":2}}}'
+      - '{"type":"assistant","uuid":"b1","message":{"id":"msg_b","role":"assistant","content":[{"type":"text","text":"A second reply."}],"usage":{"input_tokens":6,"output_tokens":3}}}'
+      - '{"type":"assistant","uuid":"a2","message":{"id":"msg_a","role":"assistant","content":[{"type":"tool_use","id":"toolu_r","name":"Read","input":{"path":"a.go"}}],"usage":{"input_tokens":5,"output_tokens":8}}}'
       - '{"type":"user","uuid":"t1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_r","content":"package a"}]}}'
-    rawBytes: [{entry: 0, line: 0}]
+    sessionTokens: {tokensIn: 11, tokensOut: 11}
+    keys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:a1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:b1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:a2:0"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:t1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:t1:0"
     entries:
-      - {index: 0, depth: 0, parent: -1, role: assistant, entryType: text, content: "Reading both files.", toolNames: Read}
-      - {index: 1, depth: 0, parent: -1, role: assistant, entryType: text, content: "A second reply."}
-      - {index: 2, depth: 1, parent: 0, role: assistant, entryType: tool_use, toolNames: Read}
-      - {index: 3, depth: 0, parent: -1, role: tool, entryType: tool_result}
-      - {index: 4, depth: 1, parent: 3, role: tool, entryType: tool_result, content: "package a"}
+      - {index: 0, depth: 0, parent: -1, uuid: "a1", role: "assistant", entryType: "text", content: "Reading both files.", toolNames: "Read", tokensIn: 5, tokensOut: 8, rawBytes: 384}
+      - {index: 1, depth: 0, parent: -1, uuid: "b1", role: "assistant", entryType: "text", content: "A second reply.", tokensIn: 6, tokensOut: 3, rawBytes: 174}
+      - {index: 2, depth: 1, parent: 0, role: "assistant", entryType: "tool_use", toolNames: "Read"}
+      - {index: 3, depth: 0, parent: -1, uuid: "t1", role: "tool", entryType: "tool_result", rawBytes: 134}
+      - {index: 4, depth: 1, parent: 3, role: "tool", entryType: "tool_result", content: "package a"}
 
   - name: every-text-block-is-the-reply-prose
     jsonl:
       - '{"type":"assistant","uuid":"a1","message":{"id":"msg_p","role":"assistant","content":[{"type":"text","text":"First paragraph."}]}}'
       - '{"type":"assistant","uuid":"a2","message":{"id":"msg_p","role":"assistant","content":[{"type":"text","text":"Second paragraph."}]}}'
-    rawBytes: [{entry: 0, line: 0}]
+    keys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:a1"
     entries:
-      - {index: 0, depth: 0, parent: -1, role: assistant, entryType: text, content: "First paragraph.\n\nSecond paragraph."}
+      - {index: 0, depth: 0, parent: -1, uuid: "a1", role: "assistant", entryType: "text", content: "First paragraph.\n\nSecond paragraph.", rawBytes: 261}
 
   - name: a-thinking-only-reply-holds-its-thinking
     jsonl:
       - '{"type":"assistant","uuid":"a1","message":{"id":"msg_t","role":"assistant","content":[{"type":"thinking","thinking":"first thought"}]}}'
       - '{"type":"assistant","uuid":"a2","message":{"id":"msg_t","role":"assistant","content":[{"type":"thinking","thinking":"second thought"}]}}'
-    rawBytes: [{entry: 0, line: 0}]
+    keys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:a1"
     entries:
-      - {index: 0, depth: 0, parent: -1, role: assistant, entryType: thinking, content: "first thought\n\nsecond thought"}
+      - {index: 0, depth: 0, parent: -1, uuid: "a1", role: "assistant", entryType: "thinking", content: "first thought\n\nsecond thought", rawBytes: 271}
+
+  - name: a-tool-only-reply-has-no-content
+    jsonl:
+      - '{"type":"assistant","uuid":"a1","message":{"id":"msg_o","role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Glob","input":{"pattern":"*.go"}}],"usage":{"input_tokens":2,"output_tokens":1}}}'
+      - '{"type":"assistant","uuid":"a2","message":{"id":"msg_o","role":"assistant","content":[{"type":"tool_use","id":"toolu_2","name":"Grep","input":{"pattern":"main"}}],"usage":{"input_tokens":0,"output_tokens":5}}}'
+    sessionTokens: {tokensIn: 2, tokensOut: 5}
+    keys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:a1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:a1:0"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:a2:0"
+    entries:
+      - {index: 0, depth: 0, parent: -1, uuid: "a1", role: "assistant", entryType: "tool_use", toolNames: "Glob,Grep", tokensIn: 2, tokensOut: 5, rawBytes: 418}
+      - {index: 1, depth: 1, parent: 0, role: "assistant", entryType: "tool_use", toolNames: "Glob"}
+      - {index: 2, depth: 1, parent: 0, role: "assistant", entryType: "tool_use", toolNames: "Grep"}
+
+  - name: a-reply-with-an-image-keeps-its-text-blocks
+    jsonl:
+      - '{"type":"assistant","uuid":"a1","message":{"id":"msg_i","role":"assistant","content":[{"type":"text","text":"Here is the chart."},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="}}]}}'
+      - '{"type":"assistant","uuid":"a2","message":{"id":"msg_i","role":"assistant","content":[{"type":"text","text":"It shows one point."}]}}'
+    entries:
+      - {index: 0, depth: 0, parent: -1, uuid: "a1", role: "assistant", entryType: "text", content: "Here is the chart.\n\nIt shows one point.", rawBytes: 440}
+      - {index: 1, depth: 1, parent: 0, role: "assistant", entryType: "text", content: "Here is the chart."}
+      - {index: 2, depth: 1, parent: 0, role: "assistant", entryType: "image", contentAny: true}
+      - {index: 3, depth: 1, parent: 0, role: "assistant", entryType: "text", content: "It shows one point."}
+
+  - name: full-depth-off-still-groups-the-reply
+    fullDepthOff: true
+    jsonl:
+      - '{"type":"assistant","uuid":"a1","message":{"id":"msg_f","role":"assistant","content":[{"type":"thinking","thinking":"plan it"}]}}'
+      - '{"type":"assistant","uuid":"a2","message":{"id":"msg_f","role":"assistant","content":[{"type":"text","text":"Planned."}]}}'
+      - '{"type":"assistant","uuid":"a3","message":{"id":"msg_f","role":"assistant","content":[{"type":"tool_use","id":"toolu_f","name":"Read","input":{"path":"plan.md"}}]}}'
+    entries:
+      - {index: 0, depth: 0, parent: -1, uuid: "a1", role: "assistant", entryType: "text", content: "Planned.", toolNames: "Read", rawBytes: 415}
 
   - name: records-without-a-message-id-stay-separate-replies
     jsonl:
       - '{"type":"assistant","uuid":"a1","message":{"role":"assistant","content":[{"type":"text","text":"One."}]}}'
       - '{"type":"assistant","uuid":"a2","message":{"role":"assistant","content":[{"type":"text","text":"Two."}]}}'
-    rawBytes: []
+    keys:
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:a1"
+      - "claude:99d59925-36bc-424c-a789-8be54d9702ba:a2"
     entries:
-      - {index: 0, depth: 0, parent: -1, role: assistant, entryType: text, content: "One."}
-      - {index: 1, depth: 0, parent: -1, role: assistant, entryType: text, content: "Two."}
+      - {index: 0, depth: 0, parent: -1, uuid: "a1", role: "assistant", entryType: "text", content: "One.", rawBytes: 105}
+      - {index: 1, depth: 0, parent: -1, uuid: "a2", role: "assistant", entryType: "text", content: "Two.", rawBytes: 105}
 
   - name: a-malformed-line-keeps-its-gap
     jsonl:
@@ -68,8 +122,7 @@ cases:
       - '{"type":broken}'
       - '{"type":"assistant","uuid":"a2","message":{"id":"msg_g","role":"assistant","content":[{"type":"text","text":"Done."}]}}'
       - '{"type":"user","uuid":"u1","message":{"role":"user","content":"thanks"}}'
-    rawBytes: [{entry: 0, line: 0}]
     entries:
-      - {index: 0, depth: 0, parent: -1, role: assistant, entryType: text, content: "Done."}
-      - {index: 1, depth: 1, parent: 0, role: assistant, entryType: thinking, content: "plan"}
-      - {index: 3, depth: 0, parent: -1, role: user, entryType: text, content: "thanks"}
+      - {index: 0, depth: 0, parent: -1, uuid: "a1", role: "assistant", entryType: "text", content: "Done.", rawBytes: 245}
+      - {index: 1, depth: 1, parent: 0, role: "assistant", entryType: "thinking", content: "plan"}
+      - {index: 3, depth: 0, parent: -1, uuid: "u1", role: "user", entryType: "text", content: "thanks", rawBytes: 72}
