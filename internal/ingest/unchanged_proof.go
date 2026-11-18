@@ -1,9 +1,27 @@
 package ingest
 
 import (
+	"context"
 	"fmt"
 	"slices"
 )
+
+// ManagedGenerationUnchangedProof names the captured input and index target.
+type ManagedGenerationUnchangedProof struct {
+	SessionID     SessionID
+	Metadata      UnifiedMetadata
+	InputDigest   string
+	IndexerTarget int
+	FormatTarget  int
+	Expected      *SessionIndexState
+}
+
+// ManagedGenerationUnchangedProver is the store boundary for a read-only
+// proof and its separately revalidated settlement.
+type ManagedGenerationUnchangedProver interface {
+	ProveCapturedGenerationUnchanged(context.Context, ManagedGenerationUnchangedProof) (UnchangedProof, error)
+	SettleCapturedGenerationUnchanged(context.Context, ManagedGenerationUnchangedProof) (ManagedGenerationRefreshOutcome, error)
+}
 
 // UnchangedProofMismatch identifies why an equality proof could not be made.
 // It is not a claim that the generation changed.

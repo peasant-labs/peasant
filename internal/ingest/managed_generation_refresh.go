@@ -1,6 +1,47 @@
 package ingest
 
-import "context"
+import (
+	"context"
+	"fmt"
+	"time"
+)
+
+func (p *Pipeline) unchangedProofRequest(input *CapturedIndexInput) (ManagedGenerationUnchangedProof, error) {
+	if input == nil || input.metadata == nil || input.expected == nil {
+		return ManagedGenerationUnchangedProof{}, fmt.Errorf("ingest: cannot prove unchanged generation: captured metadata or index state is missing; use the ordinary parse")
+	}
+	target := p.sessionVersionTarget(input.session)
+	return ManagedGenerationUnchangedProof{SessionID: input.session.SessionID, Metadata: *input.metadata, InputDigest: input.inputHash, IndexerTarget: target.IndexerVersion, FormatTarget: target.IndexVersion, Expected: input.expected}, nil
+}
+
+func (p *Pipeline) proveManagedGenerationUnchanged(ctx context.Context, input *CapturedIndexInput) (UnchangedProof, error) {
+	prover, ok := p.metricsStore.(ManagedGenerationUnchangedProver)
+	if !ok {
+		return UnchangedProof{}, fmt.Errorf("ingest: store cannot prove an unchanged generation; use the ordinary parse")
+	}
+	request, err := p.unchangedProofRequest(input)
+	if err != nil {
+		return UnchangedProof{}, err
+	}
+	return prover.ProveCapturedGenerationUnchanged(ctx, request)
+}
+
+func (p *Pipeline) settleManagedGenerationUnchanged(ctx context.Context, input *CapturedIndexInput, lane *storeWriteLane) (ManagedGenerationRefreshOutcome, time.Duration, error) {
+	prover, ok := p.metricsStore.(ManagedGenerationUnchangedProver)
+	if !ok {
+		return ManagedGenerationRefreshOutcome{}, 0, fmt.Errorf("ingest: store cannot settle an unchanged generation; use the ordinary parse")
+	}
+	request, err := p.unchangedProofRequest(input)
+	if err != nil {
+		return ManagedGenerationRefreshOutcome{}, 0, err
+	}
+	start := time.Now()
+	var outcome ManagedGenerationRefreshOutcome
+	p.runStoreWrite(lane, StageIndex, func() {
+		outcome, err = prover.SettleCapturedGenerationUnchanged(ctx, request)
+	})
+	return outcome, time.Since(start), err
+}
 
 // ManagedGenerationRefreshDisposition is the closed set of outcomes a
 // metadata-only managed-generation refresh reports.

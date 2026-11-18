@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -24,7 +25,55 @@ var (
 	_ ingest.NativePriorCaptureAuthorityReader = (*Store)(nil)
 	_ ingest.ContentSweeper                    = (*Store)(nil)
 	_ ingest.ManagedGenerationRefresher        = (*Store)(nil)
+	_ ingest.ManagedGenerationUnchangedProver  = (*Store)(nil)
 )
+
+func (s *Store) capturedUnchangedRequest(ctx context.Context, request ingest.ManagedGenerationUnchangedProof) (ManagedGenerationUnchangedProof, bool, error) {
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return ManagedGenerationUnchangedProof{}, false, err
+	}
+	active, err := readActiveGenerationOnConn(conn, request.SessionID)
+	s.pool.Put(conn)
+	if err != nil {
+		return ManagedGenerationUnchangedProof{}, false, err
+	}
+	if active == nil || *active == "" {
+		return ManagedGenerationUnchangedProof{}, false, nil
+	}
+	return ManagedGenerationUnchangedProof{
+		SessionID: request.SessionID, GenerationID: *active, Metadata: request.Metadata,
+		InputDigest: request.InputDigest, IndexerTarget: request.IndexerTarget,
+		FormatTarget: request.FormatTarget, Expected: request.Expected, UpdatedAtMs: time.Now().UnixMilli(),
+	}, true, nil
+}
+
+func (s *Store) ProveCapturedGenerationUnchanged(ctx context.Context, request ingest.ManagedGenerationUnchangedProof) (ingest.UnchangedProof, error) {
+	proof, found, err := s.capturedUnchangedRequest(ctx, request)
+	if err != nil {
+		return ingest.UnchangedProof{}, err
+	}
+	if !found {
+		return ingest.UnchangedProof{Mismatch: ingest.UnchangedNotProvenActive}, nil
+	}
+	return s.ProveManagedGenerationUnchanged(ctx, proof)
+}
+
+func (s *Store) SettleCapturedGenerationUnchanged(ctx context.Context, request ingest.ManagedGenerationUnchangedProof) (ingest.ManagedGenerationRefreshOutcome, error) {
+	proof, found, err := s.capturedUnchangedRequest(ctx, request)
+	if err != nil {
+		return ingest.ManagedGenerationRefreshOutcome{}, err
+	}
+	if !found {
+		return ingest.ManagedGenerationRefreshOutcome{}, &ingest.StaleIndexWorkError{SessionID: request.SessionID}
+	}
+	result, err := s.SettleManagedGenerationUnchanged(ctx, proof)
+	if err != nil {
+		return ingest.ManagedGenerationRefreshOutcome{}, err
+	}
+	disposition, err := ingestManagedGenerationRefreshDisposition(result.Disposition)
+	return ingest.ManagedGenerationRefreshOutcome{GenerationID: result.GenerationID, Disposition: disposition}, err
+}
 
 // RefreshManagedGenerationWithoutParse translates the ingest-owned
 // metadata-only refresh request to the store's immutable request and back.
