@@ -13,9 +13,17 @@ was tagged but not published links to its tag instead.
 
 ## [0.18.1] - 2026-11-17
 
+This version was tagged but never published as a GitHub release. The release
+job failed checksum verification because the Windows archive was missing, so
+its changes first shipped to users in 0.18.2.
+
 - cut a release (#1057)
 
 ## [0.18.0] - 2026-11-16
+
+This version was tagged but never published as a GitHub release. The release
+job failed at the cross-repo schema-parity gate before any artifact was built,
+so its changes first shipped to users in 0.18.2.
 
 ### Added
 - `peasant migrate --schema-only` upgrades the store schema and stops before
@@ -1363,7 +1371,9 @@ Second public release. See the
 Initial public release. See the
 [v0.1.0 release](https://github.com/peasant-labs/peasant/releases/tag/v0.1.0).
 
-[0.18.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.18.0
+[0.18.2]: https://github.com/peasant-labs/peasant/releases/tag/v0.18.2
+[0.18.1]: https://github.com/peasant-labs/peasant/tree/v0.18.1
+[0.18.0]: https://github.com/peasant-labs/peasant/tree/v0.18.0
 [0.17.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.17.0
 [0.16.2]: https://github.com/peasant-labs/peasant/releases/tag/v0.16.2
 [0.16.1]: https://github.com/peasant-labs/peasant/releases/tag/v0.16.1
