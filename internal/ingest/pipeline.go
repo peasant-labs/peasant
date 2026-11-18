@@ -220,6 +220,8 @@ type PipelineConfig struct {
 	// entry point passes one; the pipeline stores its stage totals with the
 	// audit row. Nil records nothing and stores no stage row.
 	IndexProfiler *IndexProfiler
+	// Validator is the optional managed-generation validator; nil skips it.
+	Validator ManagedGenerationValidator
 	// Progress receives ProgressEvents from each pipeline stage.
 	// Nil means no progress reporting.
 	Progress *ProgressState
@@ -2324,34 +2326,13 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 			if proofErr != nil {
 				forceParse = true
 			}
-			validationEligible := declared != strictIndexFormat &&
-				input.expected.IndexVersion != nil && *input.expected.IndexVersion == declared &&
-				input.expected.ActiveGenerationID != "" && input.metadata.ContentHash != ""
-			if proofErr == nil && !proof.Proven && validationEligible {
-				if validator, ok := p.metricsStore.(ManagedGenerationValidator); ok {
-					request, requestErr := p.unchangedProofRequest(input)
-					if requestErr == nil {
-						start := time.Now()
-						validation, validationErr := validator.ValidateManagedGenerationUnchanged(ctx, ManagedGenerationValidationRequest{
-							SessionID: request.SessionID, GenerationID: request.Expected.ActiveGenerationID,
-							Metadata: request.Metadata, InputDigest: request.InputDigest,
-							IndexerTarget: request.IndexerTarget, FormatTarget: request.FormatTarget, Expected: request.Expected,
-						})
-						unsupported := 0
-						if validationErr == nil && validation.Outcome == ValidationUnsupported {
-							unsupported = 1
-						}
-						p.config.IndexProfiler.RecordStage(StageRefreshValidate, time.Since(start), unsupported, 1)
-						slog.Info(logPrefix+": refresh validation", "session_id", im.session.SessionID, "outcome", validation.Outcome, "mismatch", validation.Mismatch, "detail", validation.Detail, "error", validationErr)
-						if validationErr == nil && validation.Outcome == ValidationProven && validation.Mismatch == UnchangedMismatchNone {
-							proof.Proven = true
-						} else {
-							forceParse = true
-						}
-					} else {
-						forceParse = true
-					}
-				} else {
+			if proofErr == nil && !proof.Proven {
+				validation := p.validateRefresh(ctx, input)
+				switch validation.Outcome {
+				case ValidationProven:
+					proof.Proven = true
+				case ValidationNotProven:
+					proof.Mismatch = validation.Mismatch
 					forceParse = true
 				}
 			}

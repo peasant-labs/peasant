@@ -7,5 +7,5 @@ cases:
   - name: undeclared-mismatch-does-not-report
     declared: false
     diagnostic: false
-    builds: 1
-    copies: 0
+    builds: 0
+    copies: 1

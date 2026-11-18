@@ -12,6 +12,6 @@ var _ ingest.ManagedGenerationValidator = (*Store)(nil)
 func (s *Store) ValidateManagedGenerationUnchanged(context.Context, ingest.ManagedGenerationValidationRequest) (ingest.ManagedGenerationValidationResult, error) {
 	return ingest.ManagedGenerationValidationResult{
 		Outcome: ingest.ValidationUnsupported,
-		Detail:  "this build has no parallel validator; the parse fallback runs",
+		Detail:  "this build has no parallel validator; the existing refresh fallback runs",
 	}, nil
 }

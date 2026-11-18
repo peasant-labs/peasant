@@ -43,8 +43,10 @@ const (
 	// StageRefreshProof counts attempted equality proofs; Done is the number
 	// proven and Total is the number attempted.
 	StageRefreshProof Stage = "refresh_proof"
-	// StageRefreshValidate counts unsupported validations in Done and attempts in Total.
+	// StageRefreshValidate counts attempts in Total, not completed work in Done.
 	StageRefreshValidate Stage = "refresh_validate"
+	// StageRefreshValidateUnsupported counts unsupported results in Total.
+	StageRefreshValidateUnsupported Stage = "refresh_validate_unsupported"
 	// StageIndexLog covers index_log persistence after INDEX work completes.
 	StageIndexLog Stage = "INDEX LOG"
 	// StageAudit covers the final ingest_log write.
@@ -63,6 +65,7 @@ var IndexProfileStageOrder = []Stage{
 	StageContent,
 	StageRefreshProof,
 	StageRefreshValidate,
+	StageRefreshValidateUnsupported,
 	StageIndex,
 	StageIndexLog,
 	StageCompute,
@@ -128,7 +131,7 @@ func FoldProfileStages(segments []IndexProfileStage) []IndexProfileStage {
 		totals[at].Duration += segment.Duration
 		totals[at].Bytes += segment.Bytes
 		totals[at].LaneWait += segment.LaneWait
-		if segment.Stage == StageRefreshProof || segment.Stage == StageRefreshValidate {
+		if segment.Stage == StageRefreshProof || segment.Stage == StageRefreshValidate || segment.Stage == StageRefreshValidateUnsupported {
 			totals[at].Done += segment.Done
 			totals[at].Total += segment.Total
 		} else {

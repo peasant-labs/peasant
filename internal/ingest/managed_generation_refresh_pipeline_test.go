@@ -164,26 +164,31 @@ func TestManagedGenerationValidationPipelineSeam(t *testing.T) {
 		if counted.validationRequest.SessionID != id || counted.validationRequest.GenerationID != generationID {
 			t.Fatalf("validation request session %s generation %q, want %s %q", counted.validationRequest.SessionID, counted.validationRequest.GenerationID, id, generationID)
 		}
-		if result == nil || result.Outcome == ingest.ValidationNotProven {
+		if result == nil {
+			if counted.calls.Load() != 1 || builds.Load() != 0 || counted.settles.Load() != 0 {
+				t.Fatalf("unsupported validation: copies %d builds %d settles %d", counted.calls.Load(), builds.Load(), counted.settles.Load())
+			}
+		} else if result.Outcome == ingest.ValidationNotProven {
 			if builds.Load() != 1 || counted.settles.Load() != 0 {
 				t.Fatalf("unproven validation: builds %d settles %d", builds.Load(), counted.settles.Load())
-			}
-			if result == nil {
-				found := false
-				for _, stage := range profiler.StageTotals() {
-					if stage.Stage == ingest.StageRefreshValidate {
-						found = stage.Total == 1 && stage.Done == 1
-					}
-				}
-				if !found {
-					t.Fatal("unsupported validation was not counted")
-				}
 			}
 		} else if builds.Load() != 0 || counted.settles.Load() != 1 {
 			t.Fatalf("proven validation: builds %d settles %d", builds.Load(), counted.settles.Load())
 		}
+		found, unsupported := false, false
+		for _, stage := range profiler.StageTotals() {
+			if stage.Stage == ingest.StageRefreshValidate {
+				found = stage.Total == 1 && stage.Done == 0
+			}
+			if stage.Stage == ingest.StageRefreshValidateUnsupported {
+				unsupported = stage.Total == 1 && stage.Done == 0
+			}
+		}
+		if !found || unsupported != (result == nil) {
+			t.Fatalf("validation profile attempts=%t unsupported=%t", found, unsupported)
+		}
 	}
-	t.Run("unsupported parses", func(t *testing.T) { run(t, nil) })
+	t.Run("unsupported copies", func(t *testing.T) { run(t, nil) })
 	t.Run("proven settles", func(t *testing.T) {
 		run(t, &ingest.ManagedGenerationValidationResult{Outcome: ingest.ValidationProven})
 	})
@@ -291,20 +296,26 @@ func TestManagedGenerationUnchangedProofPipelineRoutes(t *testing.T) {
 				t.Fatal("expected one metadata file")
 			}
 			counted, _, profiler, _, _, builds, _ := run(t, db, source, output, empty, "")
-			if counted.proofs.Load() != 1 || counted.proof.Proven || counted.proof.Mismatch != ingest.UnchangedNotProvenMetadata || counted.settles.Load() != 0 || counted.calls.Load() != 0 || builds.Load() != 1 {
+			if counted.proofs.Load() != 1 || counted.proof.Proven || counted.proof.Mismatch != ingest.UnchangedNotProvenMetadata || counted.settles.Load() != 0 || counted.calls.Load() != 1 || builds.Load() != 0 {
 				t.Fatalf("proof %+v attempts %d settles %d copies %d builds %d", counted.proof, counted.proofs.Load(), counted.settles.Load(), counted.calls.Load(), builds.Load())
 			}
 			assertProfile(t, profiler, 0)
 		},
 		"copy-refused": func(t *testing.T) {
-			source, output, empty, _, db, expected := setup(t)
+			source, output, empty, id, db, expected := setup(t)
 			stored := ingest.GenerationTargets(ingest.HarvesterVersionRegistry)[ingest.HarnessClaudeCode].AdapterVersion - 1
 			if managedRefreshPipelineChangeMetadata(t, output, stored, managedRefreshPipelineForcedProject) != 1 {
 				t.Fatal("expected one metadata file")
 			}
-			counted, fs, profiler, _, _, builds, transcript := run(t, db, source, output, empty, "copy-refused")
-			if counted.proofs.Load() != 1 || counted.proof.Mismatch != ingest.UnchangedNotProvenMetadata || counted.settles.Load() != 0 || counted.calls.Load() != 0 || builds.Load() != 1 || !bytes.Equal(*transcript, expected) || fs.reads.Load() != 0 {
+			counted, fs, profiler, result, _, builds, transcript := run(t, db, source, output, empty, "copy-refused")
+			if counted.proofs.Load() != 1 || counted.proof.Mismatch != ingest.UnchangedNotProvenMetadata || counted.settles.Load() != 0 || counted.calls.Load() != 1 || builds.Load() != 1 || !bytes.Equal(*transcript, expected) || fs.reads.Load() != 0 {
 				t.Fatalf("proof %+v attempts %d settles %d copies %d builds %d stored bytes match %t native reads %d", counted.proof, counted.proofs.Load(), counted.settles.Load(), counted.calls.Load(), builds.Load(), bytes.Equal(*transcript, expected), fs.reads.Load())
+			}
+			if len(result.IndexLog) != 1 || result.IndexLog[0].WriteDuration == nil || *result.IndexLog[0].WriteDuration < 0 {
+				t.Fatalf("parse fallback did not record a non-negative write duration: %+v", result.IndexLog)
+			}
+			if pending := managedRefreshPipelineInt(t, db, `SELECT content_sweep_pending FROM sessions WHERE session_id = ?`, id); pending != 0 {
+				t.Fatalf("parsed session sweep flag = %d, want zero after run cleanup", pending)
 			}
 			assertProfile(t, profiler, 0)
 		},
@@ -502,7 +513,7 @@ func TestManagedGenerationRefreshPipelineLanes(t *testing.T) {
 			}
 			empty := filepath.Join(root, "empty")
 			mustMkdir(t, empty)
-			counted := &countedManagedRefreshStore{Store: base}
+			counted := &proofCountingRefreshStore{countedManagedRefreshStore: &countedManagedRefreshStore{Store: base}}
 			var parses atomic.Int64
 			result := runManagedRefreshPipelineCounting(t, counted, empty, output, &parses)
 			if result.Summary.Errors != 0 || result.Census == nil || len(result.Census.Rows) != 1 {
@@ -514,8 +525,8 @@ func TestManagedGenerationRefreshPipelineLanes(t *testing.T) {
 			if c.Refresh && (counted.calls.Load() != 1 || parses.Load() != 0) {
 				t.Fatalf("refresh calls %d, parses %d; want 1 and 0", counted.calls.Load(), parses.Load())
 			}
-			if !c.Refresh && (counted.calls.Load() != 0 || parses.Load() == 0) {
-				t.Fatalf("refresh calls %d, parses %d; want 0 and positive", counted.calls.Load(), parses.Load())
+			if !c.Refresh && (counted.calls.Load() != 0 || parses.Load() == 0 || counted.settles.Load() != 0) {
+				t.Fatalf("refresh calls %d, parses %d, settles %d; want 0, positive, 0", counted.calls.Load(), parses.Load(), counted.settles.Load())
 			}
 		})
 	}
@@ -528,7 +539,7 @@ func TestManagedGenerationRefreshPipelineLanes(t *testing.T) {
 
 // TestManagedGenerationMetadataRefreshRunsThroughThePipeline is the production
 // path for a changed metadata context on an adapter bump. The stored metadata
-// extraction falls back to parsing when validation is unsupported. A following
+// extraction is followed by a copy refresh without parsing. A following
 // transcript change takes the ordinary native parse again.
 func TestManagedGenerationMetadataRefreshRunsThroughThePipeline(t *testing.T) {
 	root := t.TempDir()
@@ -575,13 +586,13 @@ func TestManagedGenerationMetadataRefreshRunsThroughThePipeline(t *testing.T) {
 	emptySource := filepath.Join(root, "empty-source")
 	mustMkdir(t, emptySource)
 	var parses atomic.Int64
-	refresher := &countedManagedRefreshStore{Store: db, forgeCounts: true}
+	refresher := &proofCountingRefreshStore{countedManagedRefreshStore: &countedManagedRefreshStore{Store: db, forgeCounts: true}}
 	refreshed := runManagedRefreshPipelineCounting(t, refresher, emptySource, output, &parses)
-	if refresher.calls.Load() != 0 {
-		t.Fatalf("copy refresh requests = %d, want zero", refresher.calls.Load())
+	if refresher.calls.Load() != int64(len(sessionIDs)) {
+		t.Fatalf("copy refresh requests = %d, want %d", refresher.calls.Load(), len(sessionIDs))
 	}
-	if parses.Load() != int64(len(sessionIDs)) {
-		t.Fatalf("metadata refresh invoked parser %d times, want %d", parses.Load(), len(sessionIDs))
+	if parses.Load() != 0 {
+		t.Fatalf("metadata refresh invoked parser %d times, want zero", parses.Load())
 	}
 	assertManagedRefreshRowsEqual(t, "parse counts", initialCounts, managedRefreshPipelineRows(t, db, `SELECT c.turn_count || ':' || c.conversation_turn_count || ':' || c.input_submission_count || ':' || s.input_submission_count FROM sessions s JOIN session_captured_stats c USING (session_id) WHERE s.session_id = ?`, sessionIDs[0]))
 	if refreshed.Summary.Errors != 0 || refreshed.Summary.New != 0 || refreshed.Summary.Unchanged != 0 {
@@ -590,8 +601,8 @@ func TestManagedGenerationMetadataRefreshRunsThroughThePipeline(t *testing.T) {
 	if refreshed.Summary.Updated != len(sessionIDs) {
 		t.Fatalf("metadata-only refresh updated %d sessions, want %d", refreshed.Summary.Updated, len(sessionIDs))
 	}
-	if refreshed.Summary.Indexed != len(sessionIDs) {
-		t.Fatalf("metadata refresh indexed %d sessions, want %d", refreshed.Summary.Indexed, len(sessionIDs))
+	if refreshed.Summary.Indexed != 0 {
+		t.Fatalf("metadata refresh indexed %d sessions, want zero", refreshed.Summary.Indexed)
 	}
 	if refreshed.Census == nil || refreshed.Census.Sessions() != len(sessionIDs) {
 		t.Fatalf("refresh census = %+v, want %d sessions", refreshed.Census, len(sessionIDs))
@@ -605,11 +616,14 @@ func TestManagedGenerationMetadataRefreshRunsThroughThePipeline(t *testing.T) {
 		t.Fatalf("metadata-only refresh produced %d index rows, want one per session", len(refreshed.IndexLog))
 	}
 	for _, entry := range refreshed.IndexLog {
-		if entry.Outcome != ingest.IndexOutcomeIndexed && entry.Outcome != ingest.IndexOutcomeReindexed {
-			t.Fatalf("refresh index outcome for session %s = %q, want indexed", entry.SessionID, entry.Outcome)
+		if entry.Outcome != ingest.IndexOutcomeSkipped {
+			t.Fatalf("refresh index outcome for session %s = %q, want skipped", entry.SessionID, entry.Outcome)
 		}
-		if entry.ParseDuration == nil || *entry.ParseDuration <= 0 {
-			t.Fatalf("refresh did not parse session %s", entry.SessionID)
+		if entry.ParseDuration != nil && *entry.ParseDuration > 0 {
+			t.Fatalf("refresh parsed session %s", entry.SessionID)
+		}
+		if entry.WriteDuration == nil || *entry.WriteDuration <= 0 {
+			t.Fatalf("refresh reported no generation write time for session %s", entry.SessionID)
 		}
 	}
 	for _, sid := range sessionIDs {
@@ -621,14 +635,17 @@ func TestManagedGenerationMetadataRefreshRunsThroughThePipeline(t *testing.T) {
 			t.Fatalf("refreshed generation of session %s records project %q, want %q", sid, name, managedRefreshPipelineForcedProject)
 		}
 	}
-	// The fallback parse retains entries, aliases and sections.
+	// The copy refresh retains entries, aliases and sections without parsing.
 	refreshedEntries := managedRefreshPipelineRows(t, db, `SELECT partition_id || ':' || entry_index || ':' || source_entry_ref || ':' || body_digest FROM session_generation_entries WHERE session_id = ? AND generation_id = ? ORDER BY partition_id, entry_index`, sessionIDs[0], managedRefreshPipelineActiveGeneration(t, db, sessionIDs[0]))
 	refreshedAliases := managedRefreshPipelineRows(t, db, `SELECT native_key || ':' || source_entry_ref FROM session_projection_aliases WHERE session_id = ? AND generation_id = ? ORDER BY native_key`, sessionIDs[0], managedRefreshPipelineActiveGeneration(t, db, sessionIDs[0]))
 	refreshedSections := managedRefreshPipelineRows(t, db, `SELECT partition_id || ':' || COALESCE(earlier_state, '') FROM session_projection_sections WHERE session_id = ? AND generation_id = ? ORDER BY partition_id`, sessionIDs[0], managedRefreshPipelineActiveGeneration(t, db, sessionIDs[0]))
 	assertManagedRefreshRowsEqual(t, "entries", initialEntries, refreshedEntries)
 	assertManagedRefreshRowsEqual(t, "aliases", initialAliases, refreshedAliases)
 	assertManagedRefreshRowsEqual(t, "sections", initialSections, refreshedSections)
-	// A sweep removes the superseded source even if the run already swept it.
+	// The copy refresh flags its superseded source for sweep.
+	if pending := managedRefreshPipelineInt(t, db, `SELECT content_sweep_pending FROM sessions WHERE session_id = ?`, sessionIDs[0]); pending != 1 {
+		t.Fatalf("refreshed session sweep flag = %d, want 1", pending)
+	}
 	refreshedAuthority := managedRefreshPipelineActiveGeneration(t, db, sessionIDs[0])
 	if err := db.SweepSessionForHarvest(t.Context(), sessionIDs[0]); err != nil {
 		t.Fatalf("sweep the superseded generation: %v", err)
@@ -650,6 +667,9 @@ func TestManagedGenerationMetadataRefreshRunsThroughThePipeline(t *testing.T) {
 	}
 	if changed.Summary.Errors != 0 || changed.Summary.Indexed != 1 {
 		t.Fatalf("changed-source run summary = %+v, want one re-indexed session and no errors", changed.Summary)
+	}
+	if refresher.settles.Load() != 0 {
+		t.Fatalf("changed-source parse attempted %d unchanged settlements, want zero", refresher.settles.Load())
 	}
 	if active := managedRefreshPipelineActiveGeneration(t, db, sessionIDs[0]); active == refreshedAuthority {
 		t.Fatal("a changed transcript left the old generation active; want a new parsed generation")
@@ -797,6 +817,9 @@ func runManagedRefreshPipelineInstrumented(t *testing.T, db managedRefreshPipeli
 func runManagedRefreshPipelineWithAdapters(t *testing.T, db managedRefreshPipelineStore, source, output string, calls, builds *atomic.Int64, transcript *[]byte, fs ingest.FileSystem, profiler *ingest.IndexProfiler, adapters map[ingest.Harness]ingest.AdapterFactory) *ingest.PipelineResult {
 	t.Helper()
 	cfg := makePipelineConfig(output)
+	if validator, ok := db.(ingest.ManagedGenerationValidator); ok {
+		cfg.Validator = validator
+	}
 	cfg.Sources = map[ingest.Harness]ingest.SourceConfig{
 		ingest.HarnessClaudeCode: {Paths: []ingest.ResolvedPath{ingest.ResolvedPath(source)}, Enabled: true},
 	}
