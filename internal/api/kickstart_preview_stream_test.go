@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,6 +29,27 @@ import (
 
 //go:embed testdata/kickstart_preview_stream.yaml
 var streamFixture []byte
+
+type gatedPreviewFS struct {
+	*ingest.OSFileSystem
+	armed   atomic.Bool
+	reached chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+var _ ingest.FileSystem = (*gatedPreviewFS)(nil)
+var _ ingest.RangeReadableFileSystem = (*gatedPreviewFS)(nil)
+
+func (fs *gatedPreviewFS) ReadFileRange(path string, offset, length int64) ([]byte, error) {
+	if length > 4096 && fs.armed.CompareAndSwap(true, false) {
+		close(fs.reached)
+		<-fs.release
+	}
+	return fs.OSFileSystem.ReadFileRange(path, offset, length)
+}
+
+func (fs *gatedPreviewFS) unblock() { fs.once.Do(func() { close(fs.release) }) }
 
 func TestKickstartPreviewStream(t *testing.T) {
 	var fixture struct {
@@ -109,7 +132,17 @@ func TestKickstartPreviewStream(t *testing.T) {
 			const sourceID = "11111111-2222-4333-8444-555555555555"
 			expire := make(chan func(), 1)
 			env := kickstartEnv{}
-			if tc.Operation == "rescan" {
+			gated := strings.HasPrefix(tc.Operation, "gated-")
+			rescan := tc.Operation == "rescan" || tc.Operation == "gated-rescan"
+			var gatedFS *gatedPreviewFS
+			if gated {
+				gatedFS = &gatedPreviewFS{OSFileSystem: &ingest.OSFileSystem{}, reached: make(chan struct{}), release: make(chan struct{})}
+				env.previewFS = gatedFS
+				env.now = func() time.Time { return time.Unix(1, 0) }
+				env.afterFunc = func(time.Duration, func()) func() bool { return func() bool { return true } }
+				defer gatedFS.unblock()
+			}
+			if rescan {
 				env.ctx = ctx
 				env.configPath = filepath.Join(t.TempDir(), "config.yaml")
 				env.newID = func() string { return "setup" }
@@ -126,7 +159,7 @@ func TestKickstartPreviewStream(t *testing.T) {
 				}
 			}
 			st := newKickstartSessions(env)
-			if tc.Operation == "rescan" {
+			if rescan {
 				if _, err := st.open(ctx, onboarding.ScopeFull); err != nil {
 					t.Fatal(err)
 				}
@@ -135,7 +168,7 @@ func TestKickstartPreviewStream(t *testing.T) {
 				st.byID["setup"] = &kickstartSession{id: "setup"}
 			}
 			st.mu.Lock()
-			if tc.Operation == "rescan" {
+			if rescan {
 				delete(st.byScope, onboarding.ScopeFull)
 			}
 			st.byID["setup"].forest = onboarding.Forest{Nodes: []onboarding.Node{{ID: "row", Kind: onboarding.NodeKindSession, SessionID: sourceID}}}
@@ -451,6 +484,73 @@ func TestKickstartPreviewStream(t *testing.T) {
 						}
 					}
 					state = next
+				}
+			case "gated-close", "gated-reopen", "gated-rescan":
+				hub.previews.mu.Lock()
+				var held *webPreview
+				for _, candidate := range hub.previews.captures {
+					if candidate.id == state.CaptureID {
+						held = candidate
+					}
+				}
+				if held == nil {
+					hub.previews.mu.Unlock()
+					t.Fatal("opened capture is missing")
+				}
+				var releases atomic.Int32
+				cancel := held.cancel
+				held.cancel = func() { releases.Add(1); cancel() }
+				hub.previews.mu.Unlock()
+				gatedFS.armed.Store(true)
+				write(ClientMessage{Type: schema.MsgKickstartPreview, Preview: &schema.LocalKickstartPreviewRequest{Op: schema.LocalKickstartPreviewMore, RequestID: "next", SessionID: "setup", CaptureID: state.CaptureID, After: state.Seq}})
+				select {
+				case <-gatedFS.reached:
+				case <-ctx.Done():
+					t.Fatal("continuation did not reach the range read")
+				}
+				switch tc.Operation {
+				case "gated-close":
+					write(ClientMessage{Type: schema.MsgKickstartPreview, Preview: &schema.LocalKickstartPreviewRequest{Op: schema.LocalKickstartPreviewClose, RequestID: "close", SessionID: "setup", CaptureID: state.CaptureID}})
+				case "gated-reopen":
+					write(ClientMessage{Type: schema.MsgKickstartPreview, Preview: &schema.LocalKickstartPreviewRequest{Op: schema.LocalKickstartPreviewOpen, RequestID: "replacement", SessionID: "setup", NodeID: "row"}})
+				case "gated-rescan":
+					st.mu.Lock()
+					session := st.byID["setup"]
+					generation := session.scanGen
+					st.mu.Unlock()
+					st.finishScan(session, generation, kickstartScanResult{})
+				}
+				closed := read()
+				if closed.Kind != schema.LocalKickstartPreviewClosed || closed.CaptureID != state.CaptureID || closed.Seq != state.Seq+1 {
+					t.Fatal("old capture did not close in sequence")
+				}
+				gatedFS.unblock()
+				if tc.Operation == "gated-reopen" {
+					opened := read()
+					first := read()
+					if opened.Kind != schema.LocalKickstartPreviewOpened || opened.CaptureID == state.CaptureID || first.Kind != schema.LocalKickstartPreviewSegmentEvent || first.CaptureID != opened.CaptureID {
+						t.Fatal("replacement frames did not follow the old close")
+					}
+				}
+				// Acquiring the parse slot is a barrier: the late read returned and
+				// its worker has finished before the following socket barrier.
+				select {
+				case hub.previews.worker <- struct{}{}:
+				case <-ctx.Done():
+					t.Fatal("late read did not release the parse worker")
+				}
+				<-hub.previews.worker
+				write(ClientMessage{Type: MsgDashboard})
+				_, data, err := conn.Read(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var barrier ServerMessage
+				if err := json.Unmarshal(data, &barrier); err != nil || barrier.Type != MsgError {
+					t.Fatal("a late preview frame was delivered after close")
+				}
+				if releases.Load() != 1 {
+					t.Fatalf("capture released %d times, want once", releases.Load())
 				}
 			default:
 				t.Fatalf("unknown fixture operation %q", tc.Operation)

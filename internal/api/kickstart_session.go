@@ -146,6 +146,8 @@ type kickstartEnv struct {
 	repositories ingest.RepositoryIdentityResolver
 	// reader reads a session's first transcript page for a preview.
 	reader func(listings []onboarding.SessionListing) kickstartPreviewReader
+	// previewFS supplies the discovered source to the socket capture.
+	previewFS ingest.FileSystem
 	// writeRetention writes Claude Code's cleanupPeriodDays after a save. Nil
 	// writes the real Claude settings file.
 	writeRetention func(days int) error
@@ -220,6 +222,9 @@ func (e kickstartEnv) withDefaults() kickstartEnv {
 		e.reader = func(listings []onboarding.SessionListing) kickstartPreviewReader {
 			return discovery.NewSourceReader(&ingest.OSFileSystem{}, &ingest.ExecGitResolver{}, listings)
 		}
+	}
+	if e.previewFS == nil {
+		e.previewFS = &ingest.OSFileSystem{}
 	}
 	return e
 }

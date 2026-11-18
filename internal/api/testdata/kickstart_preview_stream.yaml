@@ -21,6 +21,9 @@ requiredNames:
   - final-frame-repeats-sent-refs-unchanged
   - preview-close-carries-no-source-or-path
   - preview-cut-carries-no-source-or-path
+  - gated-read-close-discards-late-result
+  - gated-read-replacement-orders-frames
+  - gated-read-rescan-discards-late-result
 cases:
   - name: open-sends-first-segment-unasked
     transcript: |
@@ -43,3 +46,6 @@ cases:
   - {name: final-frame-repeats-sent-refs-unchanged, long: true, operation: finish-without-segment}
   - {name: preview-close-carries-no-source-or-path, long: true, operation: close}
   - {name: preview-cut-carries-no-source-or-path, long: true, operation: finish-without-segment}
+  - {name: gated-read-close-discards-late-result, long: true, operation: gated-close}
+  - {name: gated-read-replacement-orders-frames, long: true, operation: gated-reopen}
+  - {name: gated-read-rescan-discards-late-result, long: true, operation: gated-rescan}

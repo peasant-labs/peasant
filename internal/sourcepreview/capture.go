@@ -302,7 +302,15 @@ func (c *Capture) stepFileRanged(ctx context.Context) (Page, error) {
 		} else if info, err := c.reader.fs.Stat(path); err == nil {
 			c.identity = info
 		}
+		if err := ctx.Err(); err != nil {
+			return Page{}, captureError(CloseClosed, err, "")
+		}
+		// An in-flight range read cannot be interrupted; discard its result
+		// after close instead of adding it to the prefix or parsing it.
 		slice, err := c.slicer.MaterializeTranscriptSliceWithin(ctx, c.session, budget, c.cursor, ingest.TranscriptSliceLimits{RecordCeilingBytes: ceiling})
+		if err := ctx.Err(); err != nil {
+			return Page{}, captureError(CloseClosed, err, "")
+		}
 		var oversized *ingest.RecordExceedsBudgetError
 		switch {
 		case errors.As(err, &oversized):
@@ -317,6 +325,9 @@ func (c *Capture) stepFileRanged(ctx context.Context) (Page, error) {
 				c.loaded = append(append(grown, c.loaded...), slice.Data...)
 			}
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return Page{}, captureError(CloseClosed, err, "")
 	}
 	entries, err := c.parse(ctx, c.loaded)
 	if err != nil {

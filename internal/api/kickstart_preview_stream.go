@@ -12,7 +12,6 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/discovery"
-	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/onboarding"
 	"github.com/peasant-labs/peasant/internal/sourcepreview"
 	"github.com/peasant-labs/peasant/internal/transcript"
@@ -126,7 +125,7 @@ func (r *previewRegistry) open(ctx context.Context, conn *Conn, req schema.Local
 		return
 	}
 	captureCtx, cancel := context.WithCancel(ctx)
-	p := &webPreview{conn: conn, sessionID: req.SessionID, requestID: req.RequestID, id: base64.RawURLEncoding.EncodeToString(id[:]), revision: strconv.FormatUint(r.revision.Add(1), 10), ctx: captureCtx, cancel: cancel, busy: true, last: time.Now()}
+	p := &webPreview{conn: conn, sessionID: req.SessionID, requestID: req.RequestID, id: base64.RawURLEncoding.EncodeToString(id[:]), revision: strconv.FormatUint(r.revision.Add(1), 10), ctx: captureCtx, cancel: cancel, busy: true, last: r.sessions.env.now()}
 	r.sessions.mu.Lock()
 	session, liveErr := r.sessions.liveLocked(req.SessionID)
 	if liveErr != nil || session.scanGen != target.scanGen {
@@ -177,7 +176,7 @@ func (r *previewRegistry) start(p *webPreview, listings []onboarding.SessionList
 	case <-p.ctx.Done():
 		return
 	}
-	reader := sourcepreview.NewReader(&ingest.OSFileSystem{}, listings)
+	reader := sourcepreview.NewReader(r.sessions.env.previewFS, listings)
 	capture, page, err := reader.Open(p.ctx, sessionID, sourcepreview.CaptureOptions{
 		FirstReadBytes: defaults.TranscriptInitialReadBytes, SliceReadBytes: defaults.TranscriptContinuationReadBytes,
 		SourceCapBytes: defaults.KickstartWebPreviewSourceCapBytes, TurnCap: defaults.KickstartWebPreviewTurnCap,
@@ -300,7 +299,7 @@ func (r *previewRegistry) send(p *webPreview, event schema.LocalKickstartPreview
 		p.seq = event.Seq
 		if !event.Directory.Complete {
 			p.busy = false
-			p.last = time.Now()
+			p.last = r.sessions.env.now()
 			p.stopIdle = r.sessions.env.afterFunc(defaults.KickstartWebPreviewIdle, func() {
 				r.mu.Lock()
 				defer r.mu.Unlock()
