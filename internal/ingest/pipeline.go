@@ -220,6 +220,16 @@ type PipelineConfig struct {
 	// entry point passes one; the pipeline stores its stage totals with the
 	// audit row. Nil records nothing and stores no stage row.
 	IndexProfiler *IndexProfiler
+	// DisableRefreshSkips runs an adapter refresh of a managed generation
+	// without its skips: no unchanged proof, no unchanged settle, and no
+	// metadata-only copy refresh. The refresh still takes the stored-metadata
+	// lane its decision names, and the index stage parses the stored
+	// transcript as it did before those skips existed. Every store capability
+	// stays wired; only the pipeline declines to use the three skips.
+	//
+	// It is a measurement baseline: it lets a harness time the skips against
+	// the work they avoid on the same prepared base. No command sets it.
+	DisableRefreshSkips bool
 	// Progress receives ProgressEvents from each pipeline stage.
 	// Nil means no progress reporting.
 	Progress *ProgressState

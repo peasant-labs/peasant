@@ -1,0 +1,13 @@
+# The refresh-skip baseline changes what the pipeline executes, not what it
+# decides. Each case runs the same prepared adapter bump twice: once with the
+# skips and once with PipelineConfig.DisableRefreshSkips. Counts are per run
+# over one session.
+cases:
+  - name: stamp-only-bump-settles-or-parses
+    changeContext: false
+    optimized: {proofs: 1, settles: 1, copies: 0, parses: 0}
+    baseline: {proofs: 0, settles: 0, copies: 0, parses: 1}
+  - name: context-change-copies-or-parses
+    changeContext: true
+    optimized: {proofs: 1, settles: 0, copies: 1, parses: 0}
+    baseline: {proofs: 0, settles: 0, copies: 0, parses: 1}

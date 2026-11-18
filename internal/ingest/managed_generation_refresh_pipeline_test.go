@@ -734,12 +734,22 @@ func runManagedRefreshPipelineInstrumented(t *testing.T, db managedRefreshPipeli
 
 func runManagedRefreshPipelineWithAdapters(t *testing.T, db managedRefreshPipelineStore, source, output string, calls, builds *atomic.Int64, transcript *[]byte, fs ingest.FileSystem, profiler *ingest.IndexProfiler, adapters map[ingest.Harness]ingest.AdapterFactory) *ingest.PipelineResult {
 	t.Helper()
+	return runManagedRefreshPipelineConfigured(t, db, source, output, calls, builds, transcript, fs, profiler, adapters, nil)
+}
+
+// runManagedRefreshPipelineConfigured lets a test change the pipeline config
+// after the shared defaults are set and before the pipeline is built.
+func runManagedRefreshPipelineConfigured(t *testing.T, db managedRefreshPipelineStore, source, output string, calls, builds *atomic.Int64, transcript *[]byte, fs ingest.FileSystem, profiler *ingest.IndexProfiler, adapters map[ingest.Harness]ingest.AdapterFactory, configure func(*ingest.PipelineConfig)) *ingest.PipelineResult {
+	t.Helper()
 	cfg := makePipelineConfig(output)
 	cfg.Sources = map[ingest.Harness]ingest.SourceConfig{
 		ingest.HarnessClaudeCode: {Paths: []ingest.ResolvedPath{ingest.ResolvedPath(source)}, Enabled: true},
 	}
 	cfg.StalenessThreshold = 0
 	cfg.IndexProfiler = profiler
+	if configure != nil {
+		configure(&cfg)
+	}
 	indexers := ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})
 	if calls != nil {
 		indexers[ingest.HarnessClaudeCode] = countingManagedRefreshIndexer{

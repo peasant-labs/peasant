@@ -125,7 +125,9 @@ type ManagedGenerationRefresher interface {
 // stored transcript and belongs to the stored-index lane, and --force or
 // --reindex are deliberate full rebuilds. A native-only adapter never reaches
 // the stored-metadata lane because decideRefresh routes it native, and a
-// strict format-1 target has no managed generation to refresh.
+// strict format-1 target has no managed generation to refresh. A measurement
+// baseline (PipelineConfig.DisableRefreshSkips) declines the candidate, so the
+// unchanged proof, its settle and the copy refresh all stay unused.
 //
 // The marker only says the refresh is worth attempting. The index stage checks
 // the captured proof and the store is the final authority; either can send the
@@ -134,7 +136,7 @@ func (p *Pipeline) managedGenerationRefreshLane(session DiscoveredSession, decis
 	if decision.Reason != RefreshReasonAdapterBehind && decision.Reason != RefreshReasonAdapterStampAbsent {
 		return false
 	}
-	if p.config.Force || p.config.Reindex {
+	if p.config.Force || p.config.Reindex || p.config.DisableRefreshSkips {
 		return false
 	}
 	if _, ok := p.metricsStore.(ManagedGenerationRefresher); !ok {
