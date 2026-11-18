@@ -78,17 +78,30 @@ func TestUndeclaredProducerTakesTheFullStep(t *testing.T) {
 				t.Fatalf("initial import: %+v", initial.Summary)
 			}
 			managedRefreshPipelineDowngrade(t, db, ingest.GenerationTargets(ingest.HarvesterVersionRegistry)[ingest.HarnessClaudeCode].AdapterVersion-1)
-			adapters := ingest.DefaultAdapterRegistry
-			if c.Undeclared {
-				adapters = maps.Clone(adapters)
-				adapters[ingest.HarnessClaudeCode] = func(fs ingest.FileSystem, git ingest.GitResolver, s salt.Salt) ingest.SourceAdapter {
-					return &withholdingClaudeAdapter{ClaudeAdapter: ingest.NewClaudeAdapter(fs, git, s)}
+			// The registered factory refuses missing dependencies, as a
+			// production factory that needs a real filesystem does. Reading a
+			// declaration from an adapter built without the pipeline's own
+			// dependencies fails here, not only in a wider suite. Errorf, not
+			// Fatalf: the factory runs on pipeline goroutines.
+			var missingDeps atomic.Int64
+			adapters := maps.Clone(ingest.DefaultAdapterRegistry)
+			adapters[ingest.HarnessClaudeCode] = func(fs ingest.FileSystem, git ingest.GitResolver, s salt.Salt) ingest.SourceAdapter {
+				if fs == nil || git == nil {
+					missingDeps.Add(1)
 				}
+				adapter := ingest.NewClaudeAdapter(fs, git, s)
+				if c.Undeclared {
+					return &withholdingClaudeAdapter{ClaudeAdapter: adapter}
+				}
+				return adapter
 			}
 			counted := &proofCountingRefreshStore{countedManagedRefreshStore: &countedManagedRefreshStore{Store: db}}
 			var parses, builds atomic.Int64
 			var transcript []byte
 			result := runManagedRefreshPipelineConfigured(t, counted, source, output, &parses, &builds, &transcript, &ingest.OSFileSystem{}, &ingest.IndexProfiler{}, adapters, nil)
+			if missingDeps.Load() != 0 {
+				t.Fatalf("the pipeline built the adapter %d times without its filesystem or git resolver", missingDeps.Load())
+			}
 			if result.Summary.Errors != 0 || result.Census == nil || len(result.Census.Rows) != 1 {
 				t.Fatalf("summary %+v census %+v", result.Summary, result.Census)
 			}
