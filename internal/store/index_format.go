@@ -157,7 +157,8 @@ CASE WHEN `+publicationBindingSQL+` THEN 1 ELSE 0 END,
 c.status,c.failure_code,
 s.latest_attempt_artifact_hash,s.latest_attempt_indexer_version,
 (SELECT g.adapter_version FROM session_generations g
-  WHERE g.session_id = s.session_id AND g.generation_id = s.latest_attempt_generation_id)
+  WHERE g.session_id = s.session_id AND g.generation_id = s.latest_attempt_generation_id),
+COALESCE(s.active_generation_id,'')
 FROM sessions s
 LEFT JOIN session_publication_metadata p ON p.session_id = s.session_id
 LEFT JOIN session_content_captures c ON c.session_id = s.session_id
@@ -186,6 +187,7 @@ WHERE s.session_id = ?`, &sqlitex.ExecOptions{
 				return fmt.Errorf("stored content capture failure code for session %s is not recognized: %w; indexing was refused before replacement; restore valid capture state", sessionID, codeErr)
 			}
 			state = &ingest.SessionIndexState{SessionID: sessionID, IndexerVersion: stmt.ColumnInt(0), Harness: harness}
+			state.ActiveGenerationID = stmt.ColumnText(14)
 			state.ContentFailureCode = failureCode
 			state.PublicationCaptureRevision = stmt.ColumnInt64(7)
 			state.PublicationBound = stmt.ColumnInt(8) == 1
