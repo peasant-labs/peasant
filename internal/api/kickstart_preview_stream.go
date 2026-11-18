@@ -299,14 +299,6 @@ func (r *previewRegistry) send(p *webPreview, event schema.LocalKickstartPreview
 		p.seq = event.Seq
 		if !event.Directory.Complete {
 			p.busy = false
-			p.last = r.sessions.env.now()
-			p.stopIdle = r.sessions.env.afterFunc(defaults.KickstartWebPreviewIdle, func() {
-				r.mu.Lock()
-				defer r.mu.Unlock()
-				if r.captures[p.conn] == p && !p.busy {
-					r.removeLocked(p, schema.LocalKickstartPreviewIdle, true)
-				}
-			})
 		}
 	}
 	r.mu.Unlock()
@@ -323,6 +315,15 @@ func (r *previewRegistry) send(p *webPreview, event schema.LocalKickstartPreview
 			delete(r.captures, p.conn)
 			p.cancel()
 			go p.capture.Close()
+		} else if event.Kind == schema.LocalKickstartPreviewSegmentEvent && r.captures[p.conn] == p && !p.busy && p.seq == event.Seq {
+			p.last = r.sessions.env.now()
+			p.stopIdle = r.sessions.env.afterFunc(defaults.KickstartWebPreviewIdle, func() {
+				r.mu.Lock()
+				defer r.mu.Unlock()
+				if r.captures[p.conn] == p && !p.busy && p.seq == event.Seq {
+					r.removeLocked(p, schema.LocalKickstartPreviewIdle, true)
+				}
+			})
 		}
 		r.mu.Unlock()
 	}
