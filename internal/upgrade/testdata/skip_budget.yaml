@@ -1,0 +1,20 @@
+# No StepAction in this revision declares a skip. Measurements are intentionally
+# absent until the skip planner and its profile stages are available.
+requiredNames: []
+budgets: []
+cases:
+  - name: winning-ratio
+    proof: 1
+    settle: 1
+    avoided: 3
+    valid: true
+  - name: break-even-ratio
+    proof: 1
+    settle: 1
+    avoided: 2
+    valid: false
+  - name: losing-ratio
+    proof: 2
+    settle: 1
+    avoided: 2
+    valid: false
