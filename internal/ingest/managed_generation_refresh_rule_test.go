@@ -29,6 +29,12 @@ type managedGenerationRefreshCase struct {
 	Want             bool   `yaml:"want"`
 }
 
+const (
+	refreshProofComplete   = "complete"
+	refreshProofIncomplete = "incomplete"
+	refreshProofMissing    = "missing"
+)
+
 type managedGenerationRefreshFixtureFamily struct {
 	Cases []managedGenerationRefreshCase `yaml:"cases"`
 }
@@ -120,10 +126,10 @@ func TestManagedGenerationRefreshRule(t *testing.T) {
 				ContentStatus: ContentCaptureComplete,
 			}
 			switch fixture.Proof {
-			case "", "complete":
-			case "incomplete":
+			case "", refreshProofComplete:
+			case refreshProofIncomplete:
 				state.IndexedAt = nil
-			case "missing":
+			case refreshProofMissing:
 				state.IndexedInputHash = nil
 			case "different":
 				value := other

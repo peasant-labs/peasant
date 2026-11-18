@@ -361,6 +361,11 @@ func BenchmarkManagedRefresh(b *testing.B) {
 	}
 }
 
+const (
+	managedRefreshSourceNative   = "native"
+	managedRefreshSourceRetained = "retained"
+)
+
 func runManagedRefreshSample(tb testing.TB, base, lane, out string, classify bool) managedRefreshSample {
 	tb.Helper()
 	shapeData, err := os.ReadFile(filepath.Join(base, managedRefreshShapeFile))
@@ -388,7 +393,7 @@ func runManagedRefreshSample(tb testing.TB, base, lane, out string, classify boo
 	output := filepath.Join(sampleDir, "output")
 	dbPath := filepath.Join(sampleDir, "db", "peasant.db")
 	source := filepath.Join(sampleDir, "empty-source")
-	if lane == "native" {
+	if lane == managedRefreshSourceNative {
 		source = filepath.Join(base, "source")
 	} else if err := os.MkdirAll(source, 0o700); err != nil {
 		tb.Fatal(err)
@@ -1077,9 +1082,9 @@ func managedRefreshLane(tb testing.TB) string {
 	tb.Helper()
 	lane := os.Getenv("PEASANT_MANAGED_REFRESH_LANE")
 	if lane == "" {
-		return "retained"
+		return managedRefreshSourceRetained
 	}
-	if lane != "retained" && lane != "native" {
+	if lane != managedRefreshSourceRetained && lane != managedRefreshSourceNative {
 		tb.Fatalf("PEASANT_MANAGED_REFRESH_LANE=%q is not retained or native", lane)
 	}
 	return lane

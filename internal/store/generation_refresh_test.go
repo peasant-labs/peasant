@@ -704,6 +704,7 @@ func assertRefreshSourceUnchanged(t *testing.T, s *Store) {
 }
 
 func TestManagedGenerationMetadataRefreshRefusesIdentityChanges(t *testing.T) {
+	const identityFieldHarness = "harness"
 	fixture := loadManagedRefreshIdentityFixture(t)
 	for _, testCase := range fixture.Cases {
 		t.Run(testCase.Name, func(t *testing.T) {
@@ -716,7 +717,7 @@ func TestManagedGenerationMetadataRefreshRefusesIdentityChanges(t *testing.T) {
 				refreshed.SessionID = schema.SessionID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
 			case "content_hash":
 				refreshed.ContentHash = strings.Repeat("9", 64)
-			case "harness":
+			case identityFieldHarness:
 				refreshed.ModelHarness = schema.HarnessCodex
 			case "source_format":
 				refreshed.Source.Format = schema.SourceFormatJSON
