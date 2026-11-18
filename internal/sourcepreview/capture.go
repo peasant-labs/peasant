@@ -224,6 +224,17 @@ func (c *Capture) unwatch() {
 	}
 }
 
+// Progress reports how much of the source the capture has consumed and the
+// source's total as measured when it was read, in bytes. A surface uses it to
+// say how much of a session a capture that can load more has loaded so far.
+// The total is zero for an origin read once, whole; a capture that ended
+// reports zero consumed.
+func (c *Capture) Progress() (consumed, total int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.consumed(), c.cursor.TotalBytes()
+}
+
 // RetainedBytes reports what the capture holds in memory between reads: the
 // loaded prefix and the digests of the turns it handed out. It is zero once the
 // capture is closed.

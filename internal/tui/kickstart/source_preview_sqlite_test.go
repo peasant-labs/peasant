@@ -27,12 +27,15 @@ type sourcePreviewSQLiteCase struct {
 	SourceFixture string                   `yaml:"source_fixture"`
 	Origin        ftue.SessionSourceOrigin `yaml:"origin"`
 	MinTurns      int                      `yaml:"min_turns"`
-	// PreviewBudgetBytes bounds the preview materialization. Zero previews the
-	// whole session, which is what a case without a bound asserts.
+	// PreviewBudgetBytes bounds each read of the preview capture. Zero keeps
+	// the terminal's read sizes.
 	PreviewBudgetBytes int64 `yaml:"preview_budget_bytes"`
-	// ExpectNoticeContains lists the phrases the truncation note must carry. An
-	// empty list means the preview must show no note at all.
+	// ExpectNoticeContains lists the phrases the note above the turns must
+	// carry. An empty list means the preview must show no note there.
 	ExpectNoticeContains []string `yaml:"expect_notice_contains"`
+	// ExpectEndNoticeContains lists the phrases the sentence below the turns
+	// must carry. An empty list means the preview must show none.
+	ExpectEndNoticeContains []string `yaml:"expect_end_notice_contains"`
 }
 
 type sourcePreviewSQLiteDoc struct {
@@ -126,14 +129,14 @@ func TestSourceTurns_PreviewsUningestedSQLiteSessionThroughMaterializer(t *testi
 			if listing.Source.Origin != c.Origin {
 				t.Fatalf("listing origin %q, want %q", listing.Source.Origin, c.Origin)
 			}
-			options := []kickstart.SourceTurnsOption{
+			opts := kickstart.TerminalCaptureOptions()
+			if c.PreviewBudgetBytes > 0 {
+				opts.FirstReadBytes, opts.SliceReadBytes = c.PreviewBudgetBytes, c.PreviewBudgetBytes
+			}
+			reader := kickstart.NewSourceTurns(&ingest.OSFileSystem{}, []ftue.SessionListing{listing},
 				kickstart.WithSourceTurnsGitResolver(testutil.NoGitResolver()),
 				kickstart.WithSourceTurnsSalt(salt.Salt{}),
-			}
-			if c.PreviewBudgetBytes > 0 {
-				options = append(options, kickstart.WithSourceTurnsPreviewBudget(c.PreviewBudgetBytes))
-			}
-			reader := kickstart.NewSourceTurns(&ingest.OSFileSystem{}, []ftue.SessionListing{listing}, options...)
+				kickstart.WithSourceTurnsCaptureOptions(opts))
 
 			turns, err := reader.Turns(listing.SessionID)
 			if err != nil {
@@ -142,18 +145,23 @@ func TestSourceTurns_PreviewsUningestedSQLiteSessionThroughMaterializer(t *testi
 			if len(turns) < c.MinTurns {
 				t.Fatalf("preview produced %d turns, want at least %d", len(turns), c.MinTurns)
 			}
-			notice := reader.Notice(listing.SessionID)
-			if len(c.ExpectNoticeContains) == 0 {
-				if notice != "" {
-					t.Fatalf("preview of a whole session showed the note %q, want none", notice)
-				}
-				return
-			}
-			for _, phrase := range c.ExpectNoticeContains {
-				if !strings.Contains(notice, phrase) {
-					t.Errorf("truncation note %q does not name %q", notice, phrase)
-				}
-			}
+			assertSQLitePreviewSentence(t, "above the turns", reader.Notice(listing.SessionID), c.ExpectNoticeContains)
+			assertSQLitePreviewSentence(t, "below the turns", reader.EndNotice(listing.SessionID), c.ExpectEndNoticeContains)
 		})
+	}
+}
+
+func assertSQLitePreviewSentence(t *testing.T, where, sentence string, phrases []string) {
+	t.Helper()
+	if len(phrases) == 0 {
+		if sentence != "" {
+			t.Errorf("the preview showed %q %s, want nothing there", sentence, where)
+		}
+		return
+	}
+	for _, phrase := range phrases {
+		if !strings.Contains(sentence, phrase) {
+			t.Errorf("the sentence %s is %q, which does not name %q", where, sentence, phrase)
+		}
 	}
 }

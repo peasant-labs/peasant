@@ -138,6 +138,14 @@ const (
 	KickstartWebPreviewIdle = 5 * time.Minute
 )
 
+// KickstartTerminalPreviewSourceCapBytes is the cumulative source bytes one
+// terminal kickstart preview may load before it stops with the cut notice. It
+// is the terminal's own bound, set apart from the web preview's so either can
+// change alone: the terminal capture holds the loaded prefix and re-parses it
+// on every read just as the web capture does, so its memory and re-parse work
+// grow with the prefix. The terminal sets no turn cap.
+const KickstartTerminalPreviewSourceCapBytes int64 = 32 << 20
+
 // SourcePreviewHoldbackBytes is the most a capture holds back while waiting for
 // tool results. Past it, the oldest held turns are emitted with their calls
 // still pending, so a session that never answers a call cannot stall the
