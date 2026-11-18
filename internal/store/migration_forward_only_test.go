@@ -63,7 +63,6 @@ func TestMigrationForwardOnlyNamedCase(t *testing.T) {
 	if err := conn.Close(); err != nil {
 		t.Fatal(err)
 	}
-	// ast-grep-ignore: no-migrating-store-open-in-tests -- the refused open is the subject.
 	if _, err := Open(path); err == nil {
 		t.Fatal("opening a database from a newer schema version succeeded")
 	} else if !strings.Contains(err.Error(), "newer Peasant") {

@@ -424,7 +424,6 @@ func ownerTestPointerOrdinal(t *testing.T, s *store.Store, claims []store.OwnerC
 func TestLocalOwnerFileIsAdoptedAfterDatabaseRebuild(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "peasant.db")
-	// ast-grep-ignore: no-migrating-store-open-in-tests -- this test deletes the database and reopens the real migration path to prove owner adoption.
 	first, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatalf("open first store: %v", err)
@@ -441,7 +440,6 @@ func TestLocalOwnerFileIsAdoptedAfterDatabaseRebuild(t *testing.T) {
 			t.Fatalf("remove rebuilt database %s: %v", dbPath+suffix, err)
 		}
 	}
-	// ast-grep-ignore: no-migrating-store-open-in-tests -- the reopen after deleting the database is the subject: it must adopt the owner file.
 	second, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatalf("open rebuilt store: %v", err)
@@ -676,7 +674,6 @@ func TestOwnerFileMismatchRefused(t *testing.T) {
 	if err := os.WriteFile(filePath, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// ast-grep-ignore: no-migrating-store-open-in-tests -- the refused open is the subject.
 	if _, err := store.Open(path); err == nil {
 		t.Fatal("a mismatched owner file was accepted")
 	} else {
