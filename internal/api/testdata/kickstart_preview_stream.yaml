@@ -24,6 +24,7 @@ requiredNames:
   - gated-read-close-discards-late-result
   - gated-read-replacement-orders-frames
   - gated-read-rescan-discards-late-result
+  - refused-open-keeps-existing-preview
 cases:
   - name: open-sends-first-segment-unasked
     transcript: |
@@ -49,3 +50,4 @@ cases:
   - {name: gated-read-close-discards-late-result, long: true, operation: gated-close}
   - {name: gated-read-replacement-orders-frames, long: true, operation: gated-reopen}
   - {name: gated-read-rescan-discards-late-result, long: true, operation: gated-rescan}
+  - {name: refused-open-keeps-existing-preview, long: true, operation: refuse-reopen}

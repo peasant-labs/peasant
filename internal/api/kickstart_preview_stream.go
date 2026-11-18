@@ -24,6 +24,7 @@ type previewRegistry struct {
 	captures map[*Conn]*webPreview
 	worker   chan struct{}
 	revision atomic.Uint64
+	newID    func() (string, error)
 }
 
 type webPreview struct {
@@ -46,7 +47,15 @@ type webPreview struct {
 }
 
 func newPreviewRegistry(sessions *kickstartSessions) *previewRegistry {
-	return &previewRegistry{sessions: sessions, captures: make(map[*Conn]*webPreview), worker: make(chan struct{}, defaults.KickstartWebPreviewParseWorkers)}
+	return &previewRegistry{sessions: sessions, captures: make(map[*Conn]*webPreview), worker: make(chan struct{}, defaults.KickstartWebPreviewParseWorkers), newID: newPreviewCaptureID}
+}
+
+func newPreviewCaptureID() (string, error) {
+	var id [16]byte
+	if _, err := rand.Read(id[:]); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(id[:]), nil
 }
 
 func (h *Hub) previewDispatch(ctx context.Context, conn *Conn, request *schema.LocalKickstartPreviewRequest) {
@@ -118,14 +127,13 @@ func (r *previewRegistry) open(ctx context.Context, conn *Conn, req schema.Local
 		r.refuse(ctx, conn, req, schema.LocalKickstartPreviewNotSessionRow, "", "this row is not a session; use the repository preview instead")
 		return
 	}
-	previous := r.remove(conn, schema.LocalKickstartPreviewReplaced, true)
-	var id [16]byte
-	if _, err := rand.Read(id[:]); err != nil {
+	id, err := r.newID()
+	if err != nil {
 		r.refuse(ctx, conn, req, schema.LocalKickstartPreviewUnavailable, "", "the preview could not start securely; try again")
 		return
 	}
 	captureCtx, cancel := context.WithCancel(ctx)
-	p := &webPreview{conn: conn, sessionID: req.SessionID, requestID: req.RequestID, id: base64.RawURLEncoding.EncodeToString(id[:]), revision: strconv.FormatUint(r.revision.Add(1), 10), ctx: captureCtx, cancel: cancel, busy: true, last: r.sessions.env.now()}
+	p := &webPreview{conn: conn, sessionID: req.SessionID, requestID: req.RequestID, id: id, revision: strconv.FormatUint(r.revision.Add(1), 10), ctx: captureCtx, cancel: cancel, busy: true, last: r.sessions.env.now()}
 	r.sessions.mu.Lock()
 	session, liveErr := r.sessions.liveLocked(req.SessionID)
 	if liveErr != nil || session.scanGen != target.scanGen {
@@ -135,7 +143,8 @@ func (r *previewRegistry) open(ctx context.Context, conn *Conn, req schema.Local
 		return
 	}
 	r.mu.Lock()
-	if len(r.captures) >= defaults.KickstartWebPreviewLiveCaptures {
+	existing := r.captures[conn]
+	if existing == nil && len(r.captures) >= defaults.KickstartWebPreviewLiveCaptures {
 		var oldest *webPreview
 		for _, candidate := range r.captures {
 			if !candidate.busy && (oldest == nil || candidate.last.Before(oldest.last)) {
@@ -150,6 +159,10 @@ func (r *previewRegistry) open(ctx context.Context, conn *Conn, req schema.Local
 			return
 		}
 		r.removeLocked(oldest, schema.LocalKickstartPreviewEvicted, true)
+	}
+	var previous <-chan struct{}
+	if existing != nil {
+		previous = r.removeLocked(existing, schema.LocalKickstartPreviewReplaced, true)
 	}
 	r.captures[conn] = p
 	r.mu.Unlock()

@@ -176,6 +176,21 @@ func TestKickstartPreviewStream(t *testing.T) {
 			st.mu.Unlock()
 			hub := NewHub(&mockDataProvider{})
 			hub.attachKickstart(st)
+			idReached, idRelease := make(chan struct{}), make(chan struct{})
+			if tc.Operation == "refuse-reopen" {
+				var count atomic.Int32
+				hub.previews.newID = func() (string, error) {
+					if count.Add(1) == 2 {
+						close(idReached)
+						select {
+						case <-idRelease:
+						case <-ctx.Done():
+							return "", ctx.Err()
+						}
+					}
+					return newPreviewCaptureID()
+				}
+			}
 			go hub.Run(ctx)
 			server := httptest.NewServer(http.HandlerFunc(hub.HandleUpgrade))
 			defer server.Close()
@@ -461,6 +476,25 @@ func TestKickstartPreviewStream(t *testing.T) {
 				closed := read()
 				if closed.Kind != schema.LocalKickstartPreviewClosed || closed.Reason != schema.LocalKickstartPreviewRescanned || closed.CaptureID != state.CaptureID {
 					t.Fatal("finished scan did not close its capture")
+				}
+			case "refuse-reopen":
+				write(ClientMessage{Type: schema.MsgKickstartPreview, Preview: &schema.LocalKickstartPreviewRequest{Op: schema.LocalKickstartPreviewOpen, RequestID: "refused", SessionID: "setup", NodeID: "row"}})
+				select {
+				case <-idReached:
+				case <-ctx.Done():
+					t.Fatal("replacement did not reach its admission gate")
+				}
+				st.mu.Lock()
+				st.byID["setup"].scanGen++
+				st.mu.Unlock()
+				close(idRelease)
+				refused := read()
+				if refused.Kind != schema.LocalKickstartPreviewClosed || refused.Reason != schema.LocalKickstartPreviewRescanned || refused.RequestID != "refused" {
+					t.Fatal("changed setup did not refuse the replacement")
+				}
+				write(ClientMessage{Type: schema.MsgKickstartPreview, Preview: &schema.LocalKickstartPreviewRequest{Op: schema.LocalKickstartPreviewMore, RequestID: "next", SessionID: "setup", CaptureID: state.CaptureID, After: state.Seq}})
+				if next := read(); next.Kind != schema.LocalKickstartPreviewSegmentEvent || next.CaptureID != state.CaptureID {
+					t.Fatal("refused replacement lost the existing capture")
 				}
 			case "finish-without-segment":
 				for !state.Directory.Complete {
