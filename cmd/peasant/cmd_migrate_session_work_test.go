@@ -87,6 +87,7 @@ func TestMigrateDryRunSessionWork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	golden = bytes.ReplaceAll(golden, []byte("\r\n"), []byte("\n"))
 	if !bytes.Equal(formatted.Bytes(), golden) {
 		t.Fatalf("session work golden mismatch:\n%s", formatted.String())
 	}
