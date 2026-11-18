@@ -809,7 +809,7 @@ jobs:
       # NO `|| make web-stub`: a failing real build must fail the job, not fall
       # through to a stub dashboard that lets the job pass green.
       - name: Lint web source
-        run: pnpm --dir web install --frozen-lockfile && pnpm --dir web lint && pnpm --dir web test:unstring-guard
+        run: pnpm --dir web install --frozen-lockfile && pnpm --dir web lint && pnpm --dir web test:unstring-guard && pnpm --dir web test:directive-guard
 
       - name: make web (real pnpm build)
         run: make web

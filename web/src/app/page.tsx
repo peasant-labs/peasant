@@ -1,6 +1,6 @@
-import { LocalPublicationState as SchemaLocalPublicationState, LocalSyncPublicationFilter as SchemaLocalSyncPublicationFilter } from '@peasant-labs/schema';
 "use client";
 
+import { LocalPublicationState as SchemaLocalPublicationState, LocalSyncPublicationFilter as SchemaLocalSyncPublicationFilter } from '@peasant-labs/schema';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Layers, Search, SlidersHorizontal, X } from 'lucide-react';
 import { Button, FeedbackPanel, PublishStateLabel } from '@/lib/ft-ui';

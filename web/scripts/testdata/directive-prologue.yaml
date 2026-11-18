@@ -1,0 +1,21 @@
+cases:
+  - name: client-first
+    source: '"use client"; import x from "x";'
+  - name: server-first-with-comments
+    source: "/* comment */\n'use server';\nexport const x = 1;"
+  - name: absent
+    source: 'import x from "x"; export default x;'
+  - name: string-data
+    source: 'const x = "use client";'
+  - name: client-after-import
+    rejected: true
+    source: 'import x from "x"; "use client";'
+  - name: server-after-statement
+    rejected: true
+    source: 'const x = 1; "use server";'
+  - name: nested-directive
+    rejected: true
+    source: 'function f() { "use client"; }'
+  - name: second-directive
+    rejected: true
+    source: '"use client"; "use server";'

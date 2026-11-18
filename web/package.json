@@ -11,7 +11,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "node scripts/assert-unstring-eslint-enabled.mjs && eslint src --quiet",
+    "lint": "node scripts/assert-unstring-eslint-enabled.mjs && node scripts/assert-directive-prologue.mjs && eslint src --quiet",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:journey:support": "node --test scripts/journey/lifecycle.test.mjs scripts/journey/server-sandbox.test.mjs scripts/journey/provenance.test.mjs scripts/journey/selection.test.mjs scripts/journey/compiled-mutation.test.mjs scripts/journey/kickstart-journey.test.mjs",
@@ -44,7 +44,8 @@
     "shell:gate": "pnpm boot:shell && pnpm shell:offline",
     "visual:publish-states": "node scripts/visual/publish-states-shoot.mjs",
     "visual:transcript-segments": "node scripts/visual/transcript-segments-shoot.mjs",
-    "test:unstring-guard": "node scripts/test-unstring-eslint-enabled.mjs"
+    "test:unstring-guard": "node scripts/test-unstring-eslint-enabled.mjs",
+    "test:directive-guard": "node scripts/test-directive-prologue.mjs"
   },
   "dependencies": {
     "@peasant-labs/fairtrade": "0.0.71",

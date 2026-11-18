@@ -1,0 +1,9 @@
+requiredCaseNames:
+  - client-first
+  - server-first-with-comments
+  - absent
+  - string-data
+  - client-after-import
+  - server-after-statement
+  - nested-directive
+  - second-directive
