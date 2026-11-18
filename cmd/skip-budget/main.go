@@ -1,9 +1,21 @@
 //go:build skipbudget
 
-// Command skip-budget lists the matrix and runs the new-session smoke case.
+// Command skip-budget measures each planned refresh skip against the work it
+// avoids on the same prepared synthetic base, and writes one report per case.
+//
+// Every case cleans and writes under <root>/<case>/: it prepares its base
+// once, then runs the skip arm and the baseline arm once per round on a fresh
+// copy of that base, alternating their order. The default shape is the
+// budget matrix, 240 sessions x 1000 entries over 5 rounds; run it only on a
+// quiet machine. A smaller shape is a smoke run and its report says so.
+//
+//	go run -tags skipbudget ./cmd/skip-budget -list
+//	go run -tags skipbudget ./cmd/skip-budget -case C1,C2,C3,C5,C6 -base "$(git merge-base HEAD origin/develop)"
+//	go run -tags skipbudget ./cmd/skip-budget -case C1 -base <rev> -sessions 2 -entries 10
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -18,9 +30,9 @@ import (
 )
 
 type matrixCase struct {
-	Name    string `json:"name"`
-	Shape   string `json:"shape"`
-	DataDir string `json:"dataDir"`
+	Name    upgrade.MeasurementCase `json:"name"`
+	Shape   string                  `json:"shape"`
+	DataDir string                  `json:"dataDir"`
 }
 
 type report struct {
@@ -30,7 +42,7 @@ type report struct {
 
 type smokeReport struct {
 	Provenance upgrade.BudgetProvenance `json:"provenance"`
-	Case       string                   `json:"case"`
+	Case       upgrade.MeasurementCase  `json:"case"`
 	SamplesMs  []int64                  `json:"samplesMs"`
 	MedianMs   int64                    `json:"medianMs"`
 	MinMs      int64                    `json:"minMs"`
@@ -38,51 +50,88 @@ type smokeReport struct {
 	Note       string                   `json:"note"`
 }
 
+const defaultRoot = "/tmp/opencode/peasant-1034"
+
 func main() {
 	list := flag.Bool("list", false, "print the planned cases without running them")
-	caseName := flag.String("case", "", "case to run (C4 only)")
+	caseList := flag.String("case", "", "comma-separated cases to run: C1, C2, C3, C4, C5, C6")
 	base := flag.String("base", "", "comparison base revision")
+	root := flag.String("root", defaultRoot, "absolute directory that holds one directory per case")
+	sessions := flag.Int("sessions", matrixSessions, "synthetic sessions per case (C4 always uses 2)")
+	entries := flag.Int("entries", matrixEntries, "entries per session (C4 always uses 10)")
+	rounds := flag.Int("rounds", 5, "rounds per case; each round runs both arms once")
 	flag.Parse()
 	cases := []matrixCase{
-		{Name: "C1", Shape: "stamp-only adapter bump: 240 x 1000"},
-		{Name: "C2", Shape: "forced context change: 240 x 1000"},
-		{Name: "C3", Shape: "indexer bump: 240 x 1000"},
-		{Name: "C4", Shape: "new session: 2 x 10"},
-		{Name: "C5", Shape: "legacy row: C1 without seal"},
-		{Name: "C6", Shape: "unknown producer: test build"},
+		{Name: upgrade.MeasurementCaseStampOnly, Shape: "stamp-only adapter bump: proof and settle vs parse"},
+		{Name: upgrade.MeasurementCaseContextChange, Shape: "forced context change: copy refresh vs parse and install"},
+		{Name: upgrade.MeasurementCaseIndexerBump, Shape: "indexer bump: stored-index lane vs native"},
+		{Name: upgrade.MeasurementCaseNewSession, Shape: "new session: 2 x 10"},
+		{Name: upgrade.MeasurementCaseLegacyRow, Shape: "legacy row: stamp-only bump without the seal"},
+		{Name: upgrade.MeasurementCaseUndeclaredProducer, Shape: "undeclared producer: the full step the plan names"},
 	}
 	for i := range cases {
-		cases[i].DataDir = filepath.Join("/tmp/opencode/peasant-1034", cases[i].Name)
+		cases[i].DataDir = filepath.Join(*root, string(cases[i].Name))
 	}
-	if !*list {
-		if *caseName != "C4" || strings.TrimSpace(*base) == "" || strings.ContainsAny(*base, " \t\n") {
-			fmt.Fprintln(os.Stderr, "skip-budget: select -case C4 and supply a base revision without whitespace; other cases are not implemented")
-			os.Exit(2)
-		}
-		command := "go run -tags skipbudget ./cmd/skip-budget -case C4 -base " + *base
-		if err := runSmoke(cases[3].DataDir, *base, command); err != nil {
-			fmt.Fprintf(os.Stderr, "skip-budget: C4 failed: %v\n", err)
+	if *list {
+		if err := json.NewEncoder(os.Stdout).Encode(report{Cases: cases}); err != nil {
+			fmt.Fprintf(os.Stderr, "skip-budget: writing matrix to stdout failed: %v\n", err)
 			os.Exit(1)
 		}
 		return
 	}
-	if err := json.NewEncoder(os.Stdout).Encode(report{Cases: cases}); err != nil {
-		fmt.Fprintf(os.Stderr, "skip-budget: writing matrix to stdout failed: %v\n", err)
-		os.Exit(1)
+	if strings.TrimSpace(*base) == "" || strings.ContainsAny(*base, " \t\n") {
+		fail(2, "supply -base with the comparison base revision, without whitespace")
+	}
+	if *sessions < 1 || *entries < 2 || *rounds < 1 {
+		fail(2, "-sessions and -rounds must be positive and -entries at least 2")
+	}
+	var selected []upgrade.MeasurementCase
+	for _, raw := range strings.Split(*caseList, ",") {
+		c, err := upgrade.NewMeasurementCase(strings.TrimSpace(raw))
+		if err != nil {
+			fail(2, err.Error())
+		}
+		selected = append(selected, c)
+	}
+	head, err := exec.Command("git", "rev-parse", "HEAD").Output()
+	if err != nil {
+		fail(1, fmt.Sprintf("read branch head: %v; run from the repository checkout", err))
+	}
+	status, err := exec.Command("git", "status", "--porcelain", "--untracked-files=no").Output()
+	if err != nil {
+		fail(1, fmt.Sprintf("read worktree state: %v", err))
+	}
+	opts := harnessOptions{root: *root, sessions: *sessions, entries: *entries, rounds: *rounds,
+		head: strings.TrimSpace(string(head)), base: *base, command: strings.Join(append([]string{"go run -tags skipbudget ./cmd/skip-budget"}, os.Args[1:]...), " "),
+		dirty: len(strings.TrimSpace(string(status))) != 0}
+	specs := caseSpecs()
+	ctx := context.Background()
+	for _, c := range selected {
+		if c == upgrade.MeasurementCaseNewSession {
+			dir, err := cleanCaseDir(*root, c)
+			if err == nil {
+				err = runSmoke(dir, opts)
+			}
+			if err != nil {
+				fail(1, fmt.Sprintf("%s failed: %v", c, err))
+			}
+			continue
+		}
+		path, err := runCase(ctx, specs[c], opts)
+		if err != nil {
+			fail(1, fmt.Sprintf("%s failed: %v", c, err))
+		}
+		fmt.Println(path)
 	}
 }
 
-func runSmoke(dir, base, command string) error {
-	head, err := exec.Command("git", "rev-parse", "HEAD").Output()
-	if err != nil {
-		return fmt.Errorf("read branch head: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(dir), 0o700); err != nil {
-		return err
-	}
-	if err := os.Mkdir(dir, 0o700); err != nil {
-		return fmt.Errorf("create isolated case directory %s (remove or archive an earlier run first): %w", dir, err)
-	}
+func fail(code int, message string) {
+	fmt.Fprintln(os.Stderr, "skip-budget: "+message)
+	os.Exit(code)
+}
+
+// runSmoke times the new-session full step: a fresh 2 x 10 import, five times.
+func runSmoke(dir string, opts harnessOptions) error {
 	tmp := filepath.Join(dir, "tmp")
 	if err := os.Mkdir(tmp, 0o700); err != nil {
 		return err
@@ -115,8 +164,8 @@ func runSmoke(dir, base, command string) error {
 	}
 	sorted := slices.Clone(samples)
 	slices.Sort(sorted)
-	r := smokeReport{Provenance: upgrade.BudgetProvenance{Head: strings.TrimSpace(string(head)), Base: base, Command: command, Date: time.Now().UTC().Format(time.RFC3339), Samples: len(samples)},
-		Case: "C4", SamplesMs: samples, MedianMs: sorted[len(sorted)/2], MinMs: sorted[0], MaxMs: sorted[len(sorted)-1],
+	r := smokeReport{Provenance: upgrade.BudgetProvenance{Head: opts.head, Base: opts.base, Command: opts.command, Date: time.Now().UTC().Format(time.RFC3339), Samples: len(samples)},
+		Case: upgrade.MeasurementCaseNewSession, SamplesMs: samples, MedianMs: sorted[len(sorted)/2], MinMs: sorted[0], MaxMs: sorted[len(sorted)-1],
 		Note: "Initial new-session pipeline wall time; smoke evidence only, not a skip budget."}
 	data, err := json.MarshalIndent(r, "", "  ")
 	if err != nil {
