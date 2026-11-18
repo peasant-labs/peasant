@@ -15,5 +15,10 @@ requiredNames:
   - forged-metadata-hash
   - redaction-content
   - indexer-behind
-  - input-proof-missing
+  - input-proof-differs
+  - missing-index-input-proof-is-not-proven
   - seal-missing
+settleRequiredNames:
+  - settle-commits-at-most-two-wal-frames
+  - settle-writes-only-stats-and-binding
+  - unchanged-path-reads-zero-entry-mapping-and-title-ref-rows

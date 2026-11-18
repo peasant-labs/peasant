@@ -1,0 +1,3 @@
+cases:
+  - name: second-run-decides-none
+    baseline: adapter-behind-refreshes-metadata-from-the-stored-copy

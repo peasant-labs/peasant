@@ -3,11 +3,15 @@ package store
 import (
 	"context"
 	_ "embed"
+	"fmt"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/testkit/wal"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
@@ -26,26 +30,46 @@ type unchangedProofCase struct {
 	Mismatch string `yaml:"mismatch"`
 }
 
-func LoadUnchangedProofFixtures(t *testing.T) []unchangedProofCase {
+type unchangedProofFixtures struct {
+	Cases       []unchangedProofCase  `yaml:"cases"`
+	SettleCases []unchangedSettleCase `yaml:"settleCases"`
+	ReadColumns []string              `yaml:"readColumns"`
+}
+
+type unchangedSettleCase struct {
+	Name            string   `yaml:"name"`
+	MaxCommitFrames int      `yaml:"maxCommitFrames"`
+	ChangedTables   []string `yaml:"changedTables"`
+}
+
+func LoadUnchangedProofFixtures(t *testing.T) unchangedProofFixtures {
 	t.Helper()
-	var f struct {
-		Cases []unchangedProofCase `yaml:"cases"`
-	}
+	var f unchangedProofFixtures
 	if err := yaml.Unmarshal(unchangedProofYAML, &f); err != nil {
 		t.Fatal(err)
 	}
-	required, err := decodeRecoveryRequiredNames(unchangedProofManifestYAML)
-	if err != nil {
+	var manifest struct {
+		RequiredNames       []string `yaml:"requiredNames"`
+		SettleRequiredNames []string `yaml:"settleRequiredNames"`
+	}
+	if err := yaml.Unmarshal(unchangedProofManifestYAML, &manifest); err != nil {
 		t.Fatal(err)
 	}
 	var names []string
 	for _, c := range f.Cases {
 		names = append(names, c.Name)
 	}
-	if err = validateRecoveryRequiredNames(required, names, "unchanged proof"); err != nil {
+	if err := validateRecoveryRequiredNames(manifest.RequiredNames, names, "unchanged proof"); err != nil {
 		t.Fatal(err)
 	}
-	return f.Cases
+	var settleNames []string
+	for _, c := range f.SettleCases {
+		settleNames = append(settleNames, c.Name)
+	}
+	if err := validateRecoveryRequiredNames(manifest.SettleRequiredNames, settleNames, "unchanged settlement"); err != nil {
+		t.Fatal(err)
+	}
+	return f
 }
 
 func unchangedProofSetup(t *testing.T) (*Store, ManagedGenerationUnchangedProof) {
@@ -82,14 +106,74 @@ func unchangedProofSetup(t *testing.T) (*Store, ManagedGenerationUnchangedProof)
 }
 
 func TestManagedGenerationUnchangedSettle(t *testing.T) {
+	fixture := LoadUnchangedProofFixtures(t)
+	var maxCommits int
+	var changedTables []string
+	for _, c := range fixture.SettleCases {
+		switch c.Name {
+		case "settle-commits-at-most-two-wal-frames":
+			maxCommits = c.MaxCommitFrames
+		case "settle-writes-only-stats-and-binding":
+			changedTables = c.ChangedTables
+		}
+	}
+	if maxCommits < 1 || len(changedTables) == 0 {
+		t.Fatal("settlement fixture does not define its commit budget and changed tables")
+	}
 	s, p := unchangedProofSetup(t)
 	conn, err := s.pool.Take(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A refreshed publication capture is newer than the index binding and
+	// the content capture; settle must move both bindings to this revision.
+	err = sqlitex.Execute(conn, `INSERT INTO session_publication_metadata(session_id,capture_revision,schema_version,metadata_json,metadata_hash,content_hash,captured_at) VALUES(?,2,12,'{}',?,?,1)`, &sqlitex.ExecOptions{Args: []any{string(p.SessionID), strings.Repeat("a", 64), strings.Repeat("b", 64)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = sqlitex.Execute(conn, `UPDATE sessions SET cwd_provenance_kind='source_absent',publication_capture_revision=2,indexed_publication_capture_revision=1,adapter_version=4 WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(p.SessionID)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = sqlitex.Execute(conn, `INSERT INTO session_content_captures(session_id,status,source_authority,transcript_origin,capture_format,entry_count,content_row_count,full_capture_sha256,captured_at_ms,publication_capture_revision) VALUES(?,'complete','new_ingest',0,'full',0,0,?,1,1) ON CONFLICT(session_id) DO UPDATE SET publication_capture_revision=1`, &sqlitex.ExecOptions{Args: []any{string(p.SessionID), strings.Repeat("b", 64)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dbPath string
+	if err = sqlitex.Execute(conn, `PRAGMA database_list`, &sqlitex.ExecOptions{ResultFunc: func(st *sqlite.Stmt) error {
+		if st.ColumnText(1) == "main" {
+			dbPath = st.ColumnText(2)
+		}
+		return nil
+	}}); err != nil || dbPath == "" {
+		t.Fatalf("database path = %q, error = %v", dbPath, err)
+	}
+	// Temporary triggers count actual affected rows, not table-size deltas.
+	if err = sqlitex.Execute(conn, `CREATE TEMP TABLE observed_writes (table_name TEXT NOT NULL)`, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"session_generations", "session_generation_entries", "session_generation_title_refs", "session_generation_content", "session_captured_stats", "session_content_captures"} {
+		for _, operation := range []string{"INSERT", "UPDATE", "DELETE"} {
+			query := fmt.Sprintf("CREATE TEMP TRIGGER watch_%s_%s AFTER %s ON main.%s BEGIN INSERT INTO observed_writes VALUES ('%s'); END", table, operation, operation, table, table)
+			if err = sqlitex.Execute(conn, query, nil); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	s.pool.Put(conn)
+	p.Expected, err = s.ReadIndexState(context.Background(), p.SessionID)
+	if err != nil || p.Expected == nil || p.Expected.PublicationCaptureRevision != 2 || p.Expected.PublicationBound {
+		t.Fatalf("pre-settle index state = %+v, error = %v", p.Expected, err)
+	}
+	conn, err = s.pool.Take(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
 	reads := map[string]int{}
+	accesses := map[string]bool{}
 	err = conn.SetAuthorizer(sqlite.AuthorizeFunc(func(action sqlite.Action) sqlite.AuthResult {
 		if action.Type() == sqlite.OpRead {
+			accesses[action.Table()+"."+action.Column()] = true
 			switch action.Table() {
 			case "session_generation_entries", "session_generation_title_refs", "session_generation_content":
 				reads[action.Table()]++
@@ -98,6 +182,10 @@ func TestManagedGenerationUnchangedSettle(t *testing.T) {
 		return sqlite.AuthResultOK
 	}))
 	s.pool.Put(conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := wal.CountWALCommitFrames(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,8 +199,67 @@ func TestManagedGenerationUnchangedSettle(t *testing.T) {
 	if err != nil || !result.Unchanged {
 		t.Fatalf("settlement = %+v, error = %v", result, err)
 	}
+	after, err := wal.CountWALCommitFrames(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if commits := after - before; commits < 1 || commits > maxCommits {
+		t.Fatalf("settle committed %d WAL transactions, want 1..%d", commits, maxCommits)
+	}
+	t.Logf("settle WAL commit frames = %d", after-before)
 	if len(reads) != 0 {
 		t.Fatalf("generation mapping reads: %v", reads)
+	}
+	var observed []string
+	for name := range accesses {
+		observed = append(observed, name)
+	}
+	sort.Strings(observed)
+	// SetAuthorizer invalidates cached prepared statements. Every read of a
+	// table column in every subsequently prepared statement (including trigger
+	// statements) is authorized here. Pinning the entire read-column set and
+	// observing zero authorizations for these three tables proves that no
+	// executed statement could read even one of their rows.
+	expectedReads := fixture.ReadColumns
+	if !slices.Equal(observed, expectedReads) {
+		t.Fatalf("prepared read-column set = %q, want %q", observed, expectedReads)
+	}
+	conn, err = s.pool.Take(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var written []string
+	err = sqlitex.Execute(conn, `SELECT table_name FROM observed_writes ORDER BY table_name`, &sqlitex.ExecOptions{ResultFunc: func(st *sqlite.Stmt) error {
+		written = append(written, st.ColumnText(0))
+		return nil
+	}})
+	s.pool.Put(conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(written, changedTables) {
+		t.Fatalf("affected table rows = %v, want %v", written, changedTables)
+	}
+	conn, err = s.pool.Take(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mirror int64
+	err = sqlitex.Execute(conn, `SELECT input_submission_count FROM sessions WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(p.SessionID)}, ResultFunc: func(st *sqlite.Stmt) error {
+		mirror = st.ColumnInt64(0)
+		return nil
+	}})
+	s.pool.Put(conn)
+	if err != nil || mirror != count {
+		t.Fatalf("input count mirror = %d, error = %v; want %d", mirror, err, count)
+	}
+	state, err := s.ReadIndexState(context.Background(), p.SessionID)
+	if err != nil || state == nil || !state.PublicationBound || state.PublicationCaptureRevision != 2 {
+		t.Fatalf("post-settle binding state = %+v, error = %v", state, err)
+	}
+	capture, found, err := s.GetSessionContentCapture(context.Background(), p.SessionID)
+	if err != nil || !found || capture.PublicationCaptureRevision != 2 {
+		t.Fatalf("post-settle capture = %+v, found = %t, error = %v", capture, found, err)
 	}
 	stats, err := s.ReadCapturedStats(context.Background(), p.SessionID)
 	if err != nil || stats.InputSubmissionCount == nil || *stats.InputSubmissionCount != count {
@@ -142,7 +289,7 @@ func TestManagedGenerationUnchangedSettleRefusesMovedPointer(t *testing.T) {
 }
 
 func TestManagedGenerationUnchangedProof(t *testing.T) {
-	for _, tc := range LoadUnchangedProofFixtures(t) {
+	for _, tc := range LoadUnchangedProofFixtures(t).Cases {
 		t.Run(tc.Name, func(t *testing.T) {
 			s, p := unchangedProofSetup(t)
 			switch tc.Mutation {
@@ -191,6 +338,20 @@ func TestManagedGenerationUnchangedProof(t *testing.T) {
 				p.IndexerTarget = 2
 			case "mutation-input":
 				p.InputDigest = strings.Repeat("d", 64)
+			case "null-input-proof":
+				conn, err := s.pool.Take(context.Background())
+				if err != nil {
+					t.Fatal(err)
+				}
+				err = sqlitex.Execute(conn, `UPDATE sessions SET indexed_input_hash=NULL WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(p.SessionID)}})
+				s.pool.Put(conn)
+				if err != nil {
+					t.Fatal(err)
+				}
+				p.Expected, err = s.ReadIndexState(context.Background(), p.SessionID)
+				if err != nil || p.Expected == nil || p.Expected.IndexedInputHash != nil {
+					t.Fatalf("expected NULL input proof: %+v, %v", p.Expected, err)
+				}
 			case "mutation-completeness", "mutation-source-evidence", "zero-metadata", "forged-metadata", "seal":
 				conn, err := s.pool.Take(context.Background())
 				if err != nil {
