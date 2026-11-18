@@ -126,6 +126,11 @@ const (
 	CloseBusy
 )
 
+// AllCloseReasons lists the capture close reasons in declaration order.
+func AllCloseReasons() []CloseReason {
+	return []CloseReason{CloseSourceChanged, CloseLateResult, CloseUnavailable, CloseNoTurns, CloseUnreadable, CloseClosed, CloseBusy}
+}
+
 // String returns the reason's stable spelling.
 func (r CloseReason) String() string {
 	switch r {

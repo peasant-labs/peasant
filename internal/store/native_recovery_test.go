@@ -354,8 +354,9 @@ func TestNativeRecoveryMatrix(t *testing.T) {
 			// are present exactly when a commit happened, never on authority
 			// alone.
 			present := rowPresent(t, s, sid, genID)
+			const rowsPresent = "present"
 			switch c.WantRows {
-			case "present":
+			case rowsPresent:
 				if !present {
 					t.Fatalf("candidate %q has no generation row; want committed rows", genID)
 				}

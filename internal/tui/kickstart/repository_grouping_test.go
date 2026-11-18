@@ -588,7 +588,8 @@ func TestProductionRepositoryResolverGroupsLinkedWorktreeSubmodulesByTopology(t 
 		t.Fatalf("real submodule topology roots=%d, want 4", len(roots))
 	}
 	grouped := repositoryRootByCohortKey(t, roots, linkedAIdentity.CohortKey.String())
-	if len(grouped.Children) != 1 || grouped.Children[0].Meta[settings.MetaBranch] != "main" || len(grouped.Children[0].Children) != 2 {
+	const primaryFixtureBranch = "main"
+	if len(grouped.Children) != 1 || grouped.Children[0].Meta[settings.MetaBranch] != primaryFixtureBranch || len(grouped.Children[0].Children) != 2 {
 		t.Fatalf("same-path linked submodules did not share one main branch: %#v", grouped.Children)
 	}
 	context, ok := source.ListingPreviewContext(grouped.ID)

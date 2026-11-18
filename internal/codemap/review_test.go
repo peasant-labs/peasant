@@ -24,6 +24,8 @@ import (
 //	session 4 — git_branch == feat/x only                        => candidate
 //	fxHashC   — in range, linked to no session                   => unrecorded
 
+const reviewFixtureMainBranch = "main"
+
 // TestReviewChanges_BindingAndFacts covers the list payload: the binding
 // rule per session class, task counts over changed files, structure deltas,
 // merged rows, and the default-branch commit strip.
@@ -44,7 +46,7 @@ func TestReviewChanges_BindingAndFacts(t *testing.T) {
 	if !payload.RepoFound {
 		t.Fatal("RepoFound = false, want true")
 	}
-	if payload.DefaultBranch != "main" {
+	if payload.DefaultBranch != reviewFixtureMainBranch {
 		t.Errorf("DefaultBranch = %q, want main", payload.DefaultBranch)
 	}
 
@@ -208,7 +210,7 @@ func TestChangeDetail_WorkAndFootnotes(t *testing.T) {
 	if payload.BaseRef != fxMergeBase {
 		t.Errorf("BaseRef = %q, want %q", payload.BaseRef, fxMergeBase)
 	}
-	if payload.DefaultBranch != "main" {
+	if payload.DefaultBranch != reviewFixtureMainBranch {
 		t.Errorf("DefaultBranch = %q", payload.DefaultBranch)
 	}
 

@@ -709,10 +709,9 @@ rules:
     internal/push/pipeline_test.go: 2
     internal/push/profile_test.go: 2
     internal/push/publication_omissions_test.go: 2
-    internal/push/published_provenance_envelope_test.go: 4
+    internal/push/published_provenance_envelope_test.go: 2
     internal/push/published_session_scope_test.go: 1
     internal/push/redaction_profile_test.go: 2
-    internal/sessionvisibility/policy_test.go: 6
     internal/sqliteforkaudit/audit.go: 1
     internal/store/annotation_store_test.go: 10
     internal/store/annotation_target_fixtures_test.go: 1
@@ -768,7 +767,6 @@ rules:
     internal/store/publication_metadata_test.go: 2
     internal/store/search_health_entry_test.go: 1
     internal/store/search_rebuild_test.go: 1
-    internal/store/search_recall_test.go: 4
     internal/store/session_lock_test.go: 1
     internal/store/stats_drop_guard_test.go: 1
     internal/store/stats_overflow_test.go: 1
@@ -1183,7 +1181,6 @@ rules:
     internal/ingest/opencode_provenance_test.go: 1
     internal/ingest/opencode_session_locator_test.go: 3
     internal/ingest/opencode_session_records_internal_test.go: 1
-    internal/ingest/pi_sanitize.go: 1
     internal/ingest/pipeline_opencode_synthetic_reindex_test.go: 1
     internal/ingest/thinking_level_extraction_test.go: 4
     internal/ingest/toolkind_indexer_test.go: 2

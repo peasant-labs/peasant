@@ -101,8 +101,9 @@ func sanitizePiValue(value any, rewrite func(string) (string, error)) (any, erro
 			if _, exists := out[k]; exists {
 				return nil, piEvidenceError(fmt.Errorf("redaction collided metadata object keys"))
 			}
-			if assistant && key == "deferred" && piDeferred(x) {
-				x = map[string]any{"deferred": true}
+			const piDeferredField = "deferred"
+			if assistant && key == piDeferredField && piDeferred(x) {
+				x = map[string]any{piDeferredField: true}
 			}
 			out[k], err = sanitizePiValue(x, rewrite)
 			if err != nil {

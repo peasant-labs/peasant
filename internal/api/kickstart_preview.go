@@ -39,6 +39,7 @@ type kickstartPreviewTarget struct {
 	repository discovery.PreviewContext
 	isRepo     bool
 	listings   []onboarding.SessionListing
+	scanGen    uint64
 }
 
 // previewTarget resolves one row of a session's forest. A row the forest does
@@ -57,7 +58,7 @@ func (st *kickstartSessions) previewTarget(id, nodeID string) (kickstartPreviewT
 		if node.ID != nodeID {
 			continue
 		}
-		target := kickstartPreviewTarget{node: node, listings: sess.listings}
+		target := kickstartPreviewTarget{node: node, listings: sess.listings, scanGen: sess.scanGen}
 		if node.Kind == onboarding.NodeKindProject || node.Kind == onboarding.NodeKindBranch {
 			target.repository, target.isRepo = discovery.PreviewContexts(sess.forest)[node.ID]
 		}
@@ -76,10 +77,7 @@ func (st *kickstartSessions) preview(ctx context.Context, id, nodeID string) (sc
 	lines := newPreviewLines()
 	switch {
 	case target.node.Kind == onboarding.NodeKindSession:
-		lines.label(target.node.Label, target.node.ID)
-		if err := st.sessionPreviewLines(ctx, target, lines); err != nil {
-			return schema.LocalKickstartPreview{}, err
-		}
+		lines.text("open this session in the local preview to read its transcript")
 	case target.isRepo:
 		// The first line names the project, so the row's own label is not
 		// repeated above it.

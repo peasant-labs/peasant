@@ -266,7 +266,8 @@ func TestScannerTreeSource_RepositoryRootAndBranchSpanHarnesses(t *testing.T) {
 	if project.Meta[settings.MetaProjectHarness] != "" {
 		t.Fatalf("cross-harness project root carries one misleading harness %q", project.Meta[settings.MetaProjectHarness])
 	}
-	if len(project.Children) != 1 || project.Children[0].Meta[settings.MetaBranch] != "main" {
+	const fixtureBranch = "main"
+	if len(project.Children) != 1 || project.Children[0].Meta[settings.MetaBranch] != fixtureBranch {
 		t.Fatalf("same branch across harnesses was not coalesced: %#v", project.Children)
 	}
 	sessions := project.Children[0].Children

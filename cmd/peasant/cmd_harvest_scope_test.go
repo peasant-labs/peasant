@@ -349,8 +349,9 @@ func (s *scopeSandbox) writeBrokenOpenCodeDatabase() string {
 
 func (s *scopeSandbox) applySetup(tc scopeGoldenCase) {
 	s.t.Helper()
+	const emptyScopeFixture = "empty"
 	switch tc.Setup {
-	case "empty":
+	case emptyScopeFixture:
 		s.writeConfig(true, false, "")
 	case "lookup_failed":
 		s.writeConfig(false, true, s.writeBrokenOpenCodeDatabase())

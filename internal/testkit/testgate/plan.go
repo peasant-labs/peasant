@@ -126,7 +126,8 @@ func ListTests(root string, patterns []string) (map[string][]string, time.Durati
 			Package string
 			Output  string
 		}
-		if json.Unmarshal(sc.Bytes(), &e) != nil || e.Action != "output" || e.Package == "" {
+		const testOutputAction = "output"
+		if json.Unmarshal(sc.Bytes(), &e) != nil || e.Action != testOutputAction || e.Package == "" {
 			continue
 		}
 		for _, line := range strings.Split(e.Output, "\n") {
