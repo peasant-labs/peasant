@@ -17,12 +17,13 @@ func TestHarvestAndKickstartCensusSummary(t *testing.T) {
 	var fixture struct {
 		RequiredNames []string `yaml:"requiredNames"`
 		Cases         []struct {
-			Name     string   `yaml:"name"`
-			Stored   bool     `yaml:"stored"`
-			Census   bool     `yaml:"census"`
-			Forecast bool     `yaml:"forecast"`
-			Contains []string `yaml:"contains"`
-			Absent   []string `yaml:"absent"`
+			Name           string   `yaml:"name"`
+			Stored         bool     `yaml:"stored"`
+			Census         bool     `yaml:"census"`
+			Forecast       bool     `yaml:"forecast"`
+			ReindexRouting bool     `yaml:"reindexRouting"`
+			Contains       []string `yaml:"contains"`
+			Absent         []string `yaml:"absent"`
 		} `yaml:"cases"`
 	}
 	if err := yaml.Unmarshal(refreshCensusSummaryYAML, &fixture); err != nil {
@@ -35,7 +36,7 @@ func TestHarvestAndKickstartCensusSummary(t *testing.T) {
 		}
 		seen[row.Name] = true
 		t.Run(row.Name, func(t *testing.T) {
-			result := &ingest.PipelineResult{CensusStored: row.Stored}
+			result := &ingest.PipelineResult{CensusStored: row.Stored, CensusForecastNeedsReindexRouting: row.ReindexRouting}
 			if row.Census {
 				result.Census = &ingest.RefreshCensus{Rows: []ingest.RefreshCensusRow{{Reason: ingest.OutcomeReasonRefreshNew, Lane: ingest.RefreshLaneNative, Sessions: 1, SourceBytes: 1024}}}
 			}

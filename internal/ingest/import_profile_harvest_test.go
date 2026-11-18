@@ -434,6 +434,24 @@ WHERE k.name = 'refresh' AND o.run_id = ?`, firstRun)
 				t.Fatalf("forecast rows %+v, real rows %+v", forecast.Census.Rows, actual.Census.Rows)
 			}
 		},
+		"reindex-dry-run-explains-why-census-is-unavailable": func(t *testing.T) {
+			before := bench.lastRun()
+			forecast, _ := bench.run(func(cfg *ingest.PipelineConfig) {
+				cfg.Reindex, cfg.Force, cfg.DryRun = true, true, true
+			})
+			if forecast.Census != nil || forecast.CensusStored || !forecast.CensusForecastNeedsReindexRouting || bench.lastRun() != before {
+				t.Fatalf("reindex dry run must report unavailable without storing a census: %+v", forecast)
+			}
+			if forecast.Summary.Updated == 0 {
+				t.Fatal("reindex dry run did not find the seeded sessions")
+			}
+			actual, _ := bench.run(func(cfg *ingest.PipelineConfig) {
+				cfg.Reindex, cfg.Force = true, true
+			})
+			if !actual.CensusStored || actual.Census == nil || actual.CensusForecastNeedsReindexRouting || actual.Census.Sessions() == 0 {
+				t.Fatalf("real reindex must still store its actual census: %+v", actual)
+			}
+		},
 		"cancelled-run-stores-the-profile-it-measured": func(t *testing.T) {
 			before := bench.lastRun()
 			ctx, cancel := context.WithCancel(t.Context())

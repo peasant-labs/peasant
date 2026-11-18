@@ -1534,8 +1534,12 @@ func printSummaryWithForecast(w io.Writer, result *ingest.PipelineResult, verbos
 	if forecast && census != nil {
 		fmt.Fprintln(w, "forecast (not stored; indexed bytes are not yet measured):")
 	}
-	for _, line := range ingestprogress.CensusLines(census) {
-		fmt.Fprintln(w, line)
+	if forecast && result.CensusForecastNeedsReindexRouting {
+		fmt.Fprintln(w, "refresh census unavailable: reindex dry-run stops before source routing and index decisions assign refresh reasons; run without --dry-run to record the actual census")
+	} else {
+		for _, line := range ingestprogress.CensusLines(census) {
+			fmt.Fprintln(w, line)
+		}
 	}
 	// The index line is printed whenever there is anything to say, INCLUDING when
 	// nothing was indexed because indexing failed.

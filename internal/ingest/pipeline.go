@@ -106,6 +106,9 @@ type PipelineResult struct {
 	// audit can leave a partial set of rows, so a terminal must not present the
 	// in-memory census as the stored one in that case.
 	CensusStored bool `json:"-"`
+	// CensusForecastNeedsReindexRouting means a reindex dry run stopped
+	// before the routing and index decisions that assign refresh reasons.
+	CensusForecastNeedsReindexRouting bool `json:"-"`
 	// WriteLane is the store-write lane's wait and busy totals for the run.
 	// Nil when the run had no profiler.
 	WriteLane *WriteLaneStats `json:"write_lane,omitempty"`
@@ -5726,9 +5729,10 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 
 	if p.config.DryRun {
 		result := &PipelineResult{
-			Duration:    time.Since(start),
-			Summary:     PipelineSummary{HarvesterVersions: maps.Clone(p.versionTargets()), MetadataVersion: int(CurrentSchemaVersion)},
-			ScopeReport: p.scopeReport,
+			Duration:                          time.Since(start),
+			Summary:                           PipelineSummary{HarvesterVersions: maps.Clone(p.versionTargets()), MetadataVersion: int(CurrentSchemaVersion)},
+			ScopeReport:                       p.scopeReport,
+			CensusForecastNeedsReindexRouting: true,
 		}
 		for _, t := range targeted {
 			result.Sessions = append(result.Sessions, SessionResult{
