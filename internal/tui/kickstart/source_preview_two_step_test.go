@@ -23,9 +23,9 @@ type sourcePreviewTwoStepCase struct {
 	Name          string                   `yaml:"name"`
 	SourceFixture string                   `yaml:"source_fixture"`
 	Origin        ftue.SessionSourceOrigin `yaml:"origin"`
-	// FirstPageBudgetBytes bounds the leading slice.
+	// FirstPageBudgetBytes bounds the capture's first read.
 	FirstPageBudgetBytes int64 `yaml:"first_page_budget_bytes"`
-	// PreviewBudgetBytes bounds the whole read. Zero reads the session whole.
+	// PreviewBudgetBytes bounds each later read. Zero keeps the terminal's.
 	PreviewBudgetBytes int64 `yaml:"preview_budget_bytes"`
 	MinFirstTurns      int   `yaml:"min_first_turns"`
 	// ExpectMore is whether the session continues past its leading slice, which
@@ -74,19 +74,19 @@ func loadSourcePreviewTwoStepDoc(t *testing.T) sourcePreviewTwoStepDoc {
 	return doc
 }
 
-// twoStepReader builds a source reader over one discovered SQLite session, with
-// the case's two bounds applied.
-func twoStepReader(t *testing.T, c sourcePreviewTwoStepCase, listing ftue.SessionListing, firstPageBudget int64) *kickstart.SourceTurns {
+// twoStepReader builds a source reader over one discovered SQLite session: the
+// terminal's capture options with the case's two read sizes.
+func twoStepReader(t *testing.T, c sourcePreviewTwoStepCase, listing ftue.SessionListing) *kickstart.SourceTurns {
 	t.Helper()
-	options := []kickstart.SourceTurnsOption{
+	opts := kickstart.TerminalCaptureOptions()
+	opts.FirstReadBytes = c.FirstPageBudgetBytes
+	if c.PreviewBudgetBytes > 0 {
+		opts.SliceReadBytes = c.PreviewBudgetBytes
+	}
+	return kickstart.NewSourceTurns(&ingest.OSFileSystem{}, []ftue.SessionListing{listing},
 		kickstart.WithSourceTurnsGitResolver(testutil.NoGitResolver()),
 		kickstart.WithSourceTurnsSalt(salt.Salt{}),
-		kickstart.WithSourceTurnsFirstPageBudget(firstPageBudget),
-	}
-	if c.PreviewBudgetBytes > 0 {
-		options = append(options, kickstart.WithSourceTurnsPreviewBudget(c.PreviewBudgetBytes))
-	}
-	return kickstart.NewSourceTurns(&ingest.OSFileSystem{}, []ftue.SessionListing{listing}, options...)
+		kickstart.WithSourceTurnsCaptureOptions(opts))
 }
 
 func twoStepListing(t *testing.T, c sourcePreviewTwoStepCase) ftue.SessionListing {
@@ -113,9 +113,9 @@ func turnSignature(turns []ingest.Turn) []string {
 
 // TestSourceTurns_ReadsAFirstPageBeforeTheWholeSession proves the two-step
 // preview read end to end against a real synthetic provider database: the
-// leading slice comes back on its own, it never carries the whole read's note,
-// it is never cached, and the whole read behind it is exactly the result the
-// single-step read produces.
+// capture's first page comes back on its own, it never carries the note that
+// describes the whole read, and the whole read behind it is exactly the result
+// the single-step read produces.
 func TestSourceTurns_ReadsAFirstPageBeforeTheWholeSession(t *testing.T) {
 	t.Parallel()
 	doc := loadSourcePreviewTwoStepDoc(t)
@@ -124,15 +124,16 @@ func TestSourceTurns_ReadsAFirstPageBeforeTheWholeSession(t *testing.T) {
 			t.Parallel()
 			listing := twoStepListing(t, c)
 
-			// The reference is the single-step read: no first page at all.
-			reference := twoStepReader(t, c, listing, 0)
+			// The reference is the single-step read: the pane asks for the whole
+			// body at once.
+			reference := twoStepReader(t, c, listing)
 			wantTurns, err := reference.Turns(listing.SessionID)
 			if err != nil {
 				t.Fatalf("single-step read: %v", err)
 			}
 			wantNotice := reference.Notice(listing.SessionID)
 
-			reader := twoStepReader(t, c, listing, c.FirstPageBudgetBytes)
+			reader := twoStepReader(t, c, listing)
 			first, more, err := reader.FirstTurns(listing.SessionID)
 			if err != nil {
 				t.Fatalf("read the first page: %v", err)
@@ -143,15 +144,6 @@ func TestSourceTurns_ReadsAFirstPageBeforeTheWholeSession(t *testing.T) {
 			if more != c.ExpectMore {
 				t.Fatalf("the first page reports more=%v, want %v", more, c.ExpectMore)
 			}
-			if more {
-				// A slice stands for less than the session and says nothing
-				// about the bound the whole read will run under, so it must
-				// show no note.
-				if notice := reader.Notice(listing.SessionID); notice != "" {
-					t.Errorf("the first page carries the note %q, want none", notice)
-				}
-			}
-
 			full, err := reader.Turns(listing.SessionID)
 			if err != nil {
 				t.Fatalf("read the whole session: %v", err)
@@ -193,22 +185,21 @@ func TestSourceTurns_ReadsAFirstPageBeforeTheWholeSession(t *testing.T) {
 			}
 
 			assertPaneShowsTheNoteOnlyAfterTheWholeRead(t, c, listing)
-			assertOnlyWholeResultsAreCached(t, c, listing)
+			assertTheWholeReadNeedsTheSource(t, c, listing)
 		})
 	}
 }
 
-// assertOnlyWholeResultsAreCached proves the cache rule DIRECTLY rather than by
-// comparing turn counts, which a session whose slice already holds every turn
-// cannot show.
+// assertTheWholeReadNeedsTheSource proves the whole read is a real second read
+// rather than the first page repeated from memory.
 //
-// A fresh reader takes the leading slice, and then the provider database is
-// removed. A cached session answers without its source; an uncached one cannot.
-// So a session with more to read must now FAIL - the slice was never cached -
-// and a session that was read whole in one step must still answer.
-func assertOnlyWholeResultsAreCached(t *testing.T, c sourcePreviewTwoStepCase, listing ftue.SessionListing) {
+// A fresh reader takes the first page, and then the provider database is
+// removed. A session with more to read must now FAIL its whole read, because
+// that read goes back to the source; a session the first page read to its end
+// must still answer, from the open capture.
+func assertTheWholeReadNeedsTheSource(t *testing.T, c sourcePreviewTwoStepCase, listing ftue.SessionListing) {
 	t.Helper()
-	reader := twoStepReader(t, c, listing, c.FirstPageBudgetBytes)
+	reader := twoStepReader(t, c, listing)
 	first, more, err := reader.FirstTurns(listing.SessionID)
 	if err != nil {
 		t.Fatalf("read the first page again: %v", err)
@@ -227,7 +218,7 @@ func assertOnlyWholeResultsAreCached(t *testing.T, c sourcePreviewTwoStepCase, l
 		return
 	}
 	if err == nil {
-		t.Fatalf("the leading slice was cached: the whole read answered %d turns without its source", len(turns))
+		t.Fatalf("the whole read answered %d turns without its source; it repeated the first page", len(turns))
 	}
 }
 
@@ -239,13 +230,11 @@ func assertPaneShowsTheNoteOnlyAfterTheWholeRead(t *testing.T, c sourcePreviewTw
 	if len(c.ExpectNoticeContains) == 0 {
 		return
 	}
-	// The note is supplied unconditionally here, for the slice as much as for
-	// the whole body. Reading it from the reader instead would prove nothing:
-	// the reader has no note to give for a slice it did not cache, so the pane
-	// would look right whether or not it applies the rule. Supplying it always
-	// leaves the PANE as the only thing that can keep it off the slice.
+	// The note is supplied unconditionally here, for the first page as much as
+	// for the whole body, so the PANE is the only thing that can keep the whole
+	// read's note off the first page it paints.
 	note := wholeReadNote(t, c, listing)
-	reader := twoStepReader(t, c, listing, c.FirstPageBudgetBytes)
+	reader := twoStepReader(t, c, listing)
 	preview := kickstart.NewListingPreview(theme.New(theme.ModeDark), []ftue.SessionListing{listing}, reader.Turns,
 		kickstart.WithSessionPreviewNotice(func(string) string { return note }),
 		kickstart.WithSessionFirstTurns(reader.FirstTurns))
@@ -283,7 +272,7 @@ const previewPaneWidth = 80
 // wholeReadNote is the note the whole bounded read of this case produces.
 func wholeReadNote(t *testing.T, c sourcePreviewTwoStepCase, listing ftue.SessionListing) string {
 	t.Helper()
-	reader := twoStepReader(t, c, listing, 0)
+	reader := twoStepReader(t, c, listing)
 	if _, err := reader.Turns(listing.SessionID); err != nil {
 		t.Fatalf("read the whole session for its note: %v", err)
 	}

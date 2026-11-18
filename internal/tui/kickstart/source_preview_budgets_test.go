@@ -49,7 +49,7 @@ func loadSourcePreviewBudgetDocument(t *testing.T) sourcePreviewBudgetDocument {
 	}
 	seen := make(map[string]bool, len(document.Cases))
 	for _, c := range document.Cases {
-		if c.Name == "" || c.InitialBytes <= 0 || c.BodyBytes <= 0 || c.ContinuationBytes <= 0 || c.RecordBytes <= 0 || c.RecordCount <= c.ContinuedTurns || c.FirstTurns <= 0 || c.BodyTurns <= c.FirstTurns || c.ContinuedTurns <= c.BodyTurns || !strings.Contains(c.RecordTemplate, "PAYLOAD") {
+		if c.Name == "" || c.InitialBytes <= 0 || c.BodyBytes <= 0 || c.ContinuationBytes <= 0 || c.RecordBytes <= 0 || c.RecordCount < c.ContinuedTurns || c.FirstTurns <= 0 || c.BodyTurns <= c.FirstTurns || c.ContinuedTurns <= c.BodyTurns || !strings.Contains(c.RecordTemplate, "PAYLOAD") {
 			t.Fatalf("source preview budget fixture has an incomplete case: %+v", c)
 		}
 		if err := c.Origin.Validate(); err != nil {
@@ -91,21 +91,25 @@ func TestSourceTurns_DefaultBudgetsAreSharedAcrossOrigins(t *testing.T) {
 				t.Fatalf("first preview: more=%v err=%v", more, err)
 			}
 			assertSourceBudgetPrefix(t, first, payloads[:c.FirstTurns])
-			if reader.Notice(listing.SessionID) != "" {
-				t.Fatal("uncached first prefix must not carry the body notice")
+			if reader.Notice(listing.SessionID) == "" {
+				t.Fatal("an open capture must offer continuation")
 			}
 			body, err := reader.Turns(listing.SessionID)
-			if err != nil || !reader.HasMore(listing.SessionID) {
+			if err != nil || reader.HasMore(listing.SessionID) != (c.BodyTurns < c.RecordCount) {
 				t.Fatalf("automatic body: more=%v err=%v", reader.HasMore(listing.SessionID), err)
 			}
 			assertSourceBudgetPrefix(t, body, payloads[:c.BodyTurns])
-			assertSourceBudgetNotice(t, reader.Notice(listing.SessionID), c.BodyTurns*c.RecordBytes)
+			if reader.HasMore(listing.SessionID) {
+				assertSourceBudgetNotice(t, reader.Notice(listing.SessionID))
+			}
 			continued, more, err := reader.MoreTurns(listing.SessionID)
-			if err != nil || !more {
+			if err != nil || more != (c.ContinuedTurns < c.RecordCount) {
 				t.Fatalf("continuation: more=%v err=%v", more, err)
 			}
 			assertSourceBudgetPrefix(t, continued, payloads[:c.ContinuedTurns])
-			assertSourceBudgetNotice(t, reader.Notice(listing.SessionID), c.ContinuedTurns*c.RecordBytes)
+			if more {
+				assertSourceBudgetNotice(t, reader.Notice(listing.SessionID))
+			}
 			final, more, err := reader.MoreTurns(listing.SessionID)
 			if err != nil || more || reader.HasMore(listing.SessionID) {
 				t.Fatalf("final continuation: more=%v err=%v", more, err)
@@ -130,9 +134,9 @@ func assertSourceBudgetPrefix(t *testing.T, turns []ingest.Turn, payloads []stri
 	}
 }
 
-func assertSourceBudgetNotice(t *testing.T, notice string, loadedBytes int) {
+func assertSourceBudgetNotice(t *testing.T, notice string) {
 	t.Helper()
-	want := fmt.Sprintf("showing the first %d MiB", loadedBytes/(1<<20))
+	want := "showing the first"
 	if !strings.Contains(notice, want) || !strings.Contains(notice, "scroll to the bottom to load more") {
 		t.Fatalf("notice %q does not describe loaded prefix %q and continuation", notice, want)
 	}

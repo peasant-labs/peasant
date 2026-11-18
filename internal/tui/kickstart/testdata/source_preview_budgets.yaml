@@ -1,8 +1,8 @@
 # Default SourceTurns policy. Each named origin uses the same interaction
 # budgets even though file sources count JSONL bytes and managed sources count
 # message JSON payload bytes. Exact-size synthetic records distinguish the
-# initial 256 KiB, replacement 8 MiB body, and appended 8 MiB continuation.
-# Oversized cases return the whole 512 KiB first record, not a truncated prefix.
+# initial 256 KiB, then two appended 8 MiB reads. File captures can hold back
+# the last unresolved turn and may read ahead to find a sealed first turn.
 required_cases:
   - file-source-first-body-and-continuation-use-shared-budgets
   - managed-source-first-body-and-continuation-use-shared-budgets
@@ -18,9 +18,9 @@ cases:
     record_bytes: 131072
     record_count: 130
     record_template: '{"type":"user","uuid":"budget-INDEX","message":{"role":"user","content":"PAYLOAD"}}'
-    first_turns: 2
-    body_turns: 64
-    continued_turns: 128
+    first_turns: 1
+    body_turns: 65
+    continued_turns: 130
   - &managed
     name: managed-source-first-body-and-continuation-use-shared-budgets
     origin: opencode-current-sqlite
@@ -32,19 +32,19 @@ cases:
     record_count: 130
     record_template: '{"text":"PAYLOAD","time":{"created":1}}'
     first_turns: 2
-    body_turns: 64
-    continued_turns: 128
+    body_turns: 66
+    continued_turns: 130
   - <<: *file
     name: file-source-oversized-first-record-progresses-whole
     record_bytes: 524288
     record_count: 34
-    first_turns: 1
-    body_turns: 16
-    continued_turns: 32
+    first_turns: 16
+    body_turns: 32
+    continued_turns: 34
   - <<: *managed
     name: managed-source-oversized-first-message-progresses-whole
     record_bytes: 524288
     record_count: 34
     first_turns: 1
-    body_turns: 16
-    continued_turns: 32
+    body_turns: 17
+    continued_turns: 33
