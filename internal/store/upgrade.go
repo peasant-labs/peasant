@@ -682,6 +682,18 @@ func Upgrade(ctx context.Context, dbPath string, opts UpgradeOptions) (report Up
 	if err := applyV23DataMigration(pool); err != nil {
 		return report, fmt.Errorf("store: upgrade %s: apply the opaque identifier data migration: %w; every schema step committed; run `peasant migrate --schema-only` again", dbPath, err)
 	}
+	// An explicit upgrade ends at the head schema, so the writable-open owner
+	// bootstrap runs here too: a store upgraded from V81 gets its owner row and
+	// its local-owner.json without waiting for the next open.
+	if conn, connErr := pool.Take(context.Background()); connErr != nil {
+		return report, fmt.Errorf("store: upgrade %s: take a connection for the local owner: %w; every schema step committed; reopen the store to create the owner", dbPath, connErr)
+	} else {
+		_, ownerErr := bootstrapLocalOwnerOnConn(conn, LocalOwnerFilePath(dbPath), time.Now().UnixMilli())
+		pool.Put(conn)
+		if ownerErr != nil {
+			return report, fmt.Errorf("store: upgrade %s: create or adopt the local owner: %w; every schema step committed", dbPath, ownerErr)
+		}
+	}
 	truncateWAL(pool)
 	return report, nil
 }

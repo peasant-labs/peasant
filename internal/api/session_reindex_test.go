@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/auth"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/filelock"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -20,6 +21,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
+	"github.com/peasant-labs/schema/route"
 )
 
 //go:embed testdata/session_reindex.yaml
@@ -152,6 +154,9 @@ func harvestLikeTheCLI(t *testing.T, dbPath string, cfg *config.Config) {
 	}
 }
 
+// unstring-allow: go-endpoint-literal — the one-session ingest route is not yet declared in the pinned schema route package.
+const sessionIngestPath = "/api/v1/sync/ingest/session?session_id="
+
 // TestSessionReindexRoute drives the mounted one-session re-index over a real
 // Claude Code source and SQLite: the run re-reads the session only, from a
 // stable view of a file still being written, answers within its bound, and
@@ -247,7 +252,7 @@ func TestSessionReindexRoute(t *testing.T) {
 				target = unrecorded
 			}
 			response := httptest.NewRecorder()
-			handler.handleSyncIngestSession(response, httptest.NewRequest(http.MethodPost, "/api/v1/sync/ingest/session?session_id="+target, nil))
+			handler.handleSyncIngestSession(response, httptest.NewRequest(http.MethodPost, sessionIngestPath+target, nil))
 			if response.Code != c.Status {
 				t.Fatalf("status = %d, want %d; body %s", response.Code, c.Status, response.Body.String())
 			}
@@ -296,7 +301,7 @@ func TestSessionReindexRoute(t *testing.T) {
 				return
 			}
 			scan := httptest.NewRecorder()
-			handler.handleSyncRedactions(scan, httptest.NewRequest(http.MethodGet, "/api/v1/sync/redactions?session_id="+sessionID, nil))
+			handler.handleSyncRedactions(scan, httptest.NewRequest(http.MethodGet, route.LocalGetSyncRedactions.Pattern()+"?session_id="+sessionID, nil))
 			if scan.Code != c.ScanStatus {
 				t.Fatalf("scan status = %d, want %d; body %s", scan.Code, c.ScanStatus, scan.Body.String())
 			}
@@ -308,5 +313,67 @@ func TestSessionReindexRoute(t *testing.T) {
 				t.Fatalf("scan found nothing in a session that names an email address: %s", scan.Body.String())
 			}
 		})
+	}
+}
+
+// TestAutoClaimSkipsWebOneSessionIngest proves the web one-session re-ingest of a
+// stored session claims nothing automatically, even though it runs Force=true
+// and the diff reports a new write.
+func TestAutoClaimSkipsWebOneSessionIngest(t *testing.T) {
+	t.Parallel()
+	fixture := loadSessionReindexFixture(t)
+	const sessionID = "9d4a3f2b-5e6c-4a1b-8d7e-2f3a4b5c6d7e"
+	hs := newTestXDGHomes(t)
+	root := t.TempDir()
+	cfg := config.BaseConfig()
+	cfg.Output.BasePath = filepath.Join(root, "managed")
+	for harness := range ingest.DefaultAdapterRegistry {
+		if provider, ok := cfg.Sources.Provider(harness); ok {
+			provider.Enabled = harness == ingest.HarnessClaudeCode
+		}
+	}
+	claude, _ := cfg.Sources.Provider(ingest.HarnessClaudeCode)
+	claude.Paths = []string{filepath.Join(root, "recordings")}
+	project := filepath.Join(root, "recordings", "-workspace")
+	if err := os.MkdirAll(project, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sessionPath := filepath.Join(project, sessionID+".jsonl")
+	if err := os.WriteFile(sessionPath, []byte(fixture.turns(sessionID, 0, 4)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	harvestLikeTheCLI(t, hs.dbPath(), cfg)
+
+	creds := auth.Credentials{
+		APIKey:     "fixture-api-key",
+		KeyID:      "fixture-key-id",
+		UserID:     "11111111-1111-4111-8111-111111111111",
+		Username:   "alice",
+		VillageURL: "https://village.example/team",
+	}
+	if err := auth.SaveCredentialsFrom(&creds, hs.Config); err != nil {
+		t.Fatal(err)
+	}
+	storeOptions, err := store.ManagedGenerationOptions(cfg.Output.BasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.Open(hs.dbPath(), storeOptions...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	handler := hs.handler(db, cfg)
+	response := httptest.NewRecorder()
+	handler.handleSyncIngestSession(response, httptest.NewRequest(http.MethodPost, sessionIngestPath+sessionID, nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("one-session ingest status = %d, want 200; body %s", response.Code, response.Body.String())
+	}
+	page, err := db.OwnerClaims(t.Context(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Claims) != 0 {
+		t.Fatalf("claims after the web one-session ingest = %+v, want none", page.Claims)
 	}
 }

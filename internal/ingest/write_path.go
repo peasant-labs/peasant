@@ -362,6 +362,7 @@ func (p *Pipeline) mirrorDrainedBatch(ctx context.Context, results []workerResul
 		for _, wr := range page {
 			outcome, ok := byID[wr.result.SessionID]
 			if ok && outcome.Err == nil && outcome.Mirrored {
+				wr.result.FirstStored = outcome.FirstStored
 				continue
 			}
 			cause := error(errArtifactNotMirrored)
@@ -510,7 +511,7 @@ func (p *Pipeline) reconcileScannedPairs(ctx context.Context, scanned []reindexT
 			}
 			continue
 		}
-		page = append(page, ArtifactMirrorRequest{Artifact: artifact})
+		page = append(page, ArtifactMirrorRequest{Artifact: artifact, SavedPairExisted: true})
 		if len(page) == MirrorPageSize {
 			flush()
 		}
@@ -530,5 +531,6 @@ func mirrorRequestFor(wr *workerResult) ArtifactMirrorRequest {
 		SchedulingParentResolved: wr.schedulingResolved,
 		SchedulingParentID:       wr.schedulingParentID,
 		TranscriptKept:           wr.transcriptKept,
+		SavedPairExisted:         wr.savedPairExisted,
 	}
 }

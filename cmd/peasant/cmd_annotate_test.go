@@ -8,6 +8,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 )
@@ -259,5 +260,76 @@ func TestCLI_AnnotateCreateProjectInvalidValue(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "not in permissible values") {
 		t.Errorf("expected 'not in permissible values' in error; got: %v", err)
+	}
+}
+
+// TestAnnotateCreateClaimsNewAnnotations proves `annotate create` points each
+// just-created human annotation at the signed-in account's latest claim entry,
+// reusing one entry instead of appending per annotation.
+func TestAnnotateCreateClaimsNewAnnotations(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	sessionID := testSessionUUID
+	seedTestSessionInto(t, dir, sessionID)
+	saveUserCommandCredentials(t, dir)
+
+	for i := 0; i < 2; i++ {
+		output, err := executeAnnotateCmd(t, dir, []string{"create", sessionID, testutil.TestTypeIDSessionApproval, "approve"})
+		if err != nil {
+			t.Fatalf("annotate create %d: %v\noutput: %s", i, err, output)
+		}
+	}
+
+	db, err := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(dir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	page, err := db.OwnerClaims(t.Context(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Claims) != 1 || page.Claims[0].Source != store.ClaimSourceAutomatic {
+		t.Fatalf("claims = %+v, want one reused automatic entry", page.Claims)
+	}
+	counts, err := db.OwnershipCounts(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts.ClaimedAnnotations != 2 || counts.UnclaimedAnnotations != 0 {
+		t.Fatalf("annotation counts = %+v, want both new annotations claimed", counts)
+	}
+}
+
+// TestAnnotateCreateProjectClaimsNewAnnotation proves `annotate create-project`
+// points the just-created project annotation at the signed-in account.
+func TestAnnotateCreateProjectClaimsNewAnnotation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	seedTestSessionInto(t, dir, testSessionUUID)
+	saveUserCommandCredentials(t, dir)
+
+	output, err := executeAnnotateCmd(t, dir, []string{"create-project", string(testutil.TestProjectHash), testutil.TestTypeIDSessionApproval, "approve"})
+	if err != nil {
+		t.Fatalf("annotate create-project: %v\noutput: %s", err, output)
+	}
+	db, err := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(dir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	page, err := db.OwnerClaims(t.Context(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Claims) != 1 || page.Claims[0].Source != store.ClaimSourceAutomatic {
+		t.Fatalf("claims = %+v, want one automatic entry", page.Claims)
+	}
+	counts, err := db.OwnershipCounts(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts.TotalAnnotations != 1 || counts.ClaimedAnnotations != 1 {
+		t.Fatalf("annotation counts = %+v, want the project annotation claimed", counts)
 	}
 }

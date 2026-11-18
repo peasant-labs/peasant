@@ -137,6 +137,17 @@ func (s *Store) MirrorArtifacts(ctx context.Context, requests []ingest.ArtifactM
 					continue
 				}
 			}
+			var rowExisted bool
+			if existsErr := sqlitex.ExecuteTransient(conn, `SELECT EXISTS(SELECT 1 FROM sessions WHERE session_id = ?)`, &sqlitex.ExecOptions{
+				Args: []any{string(sid)},
+				ResultFunc: func(stmt *sqlite.Stmt) error {
+					rowExisted = stmt.ColumnInt(0) != 0
+					return nil
+				},
+			}); existsErr != nil {
+				err = fmt.Errorf("mirror session %s: read the prior row: %w; no session in this batch was reconciled", sid, existsErr)
+				return results
+			}
 			var fatal bool
 			results[index].Err, fatal = s.mirrorArtifactSavepoint(conn, request)
 			if fatal {
@@ -144,6 +155,7 @@ func (s *Store) MirrorArtifacts(ctx context.Context, requests []ingest.ArtifactM
 				return results
 			}
 			results[index].Mirrored = results[index].Err == nil
+			results[index].FirstStored = results[index].Mirrored && !rowExisted && !request.SavedPairExisted
 			delete(pending, sid)
 			advanced = true
 		}

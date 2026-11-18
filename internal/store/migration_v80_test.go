@@ -20,11 +20,11 @@ VALUES (1, 1, '10000000-0000-4000-8000-000000000001', 301, 11);`, nil); err != n
 		}
 	})
 	plan := mustPlan(t, path)
-	if plan.From != 79 || plan.To != 81 {
-		t.Fatalf("upgrade plan = %+v; want an upgrade from 79 to 81", plan)
+	if plan.From != 79 || plan.To != 82 {
+		t.Fatalf("upgrade plan = %+v; want an upgrade from 79 to 82", plan)
 	}
-	if len(plan.Steps) != 2 || plan.Steps[0] != schemaStep(80) || plan.Steps[1] != emptySourceDiagnosticStep() {
-		t.Fatalf("upgrade plan = %+v; want the outcome step and the empty-ledger rebuild", plan)
+	if len(plan.Steps) != 3 || plan.Steps[0] != schemaStep(80) || plan.Steps[1] != emptySourceDiagnosticStep() || plan.Steps[2] != schemaStep(82) {
+		t.Fatalf("upgrade plan = %+v; want the outcome step, the empty-ledger rebuild, and the owner step", plan)
 	}
 	if _, err := Upgrade(t.Context(), path, UpgradeOptions{}); err != nil {
 		t.Fatalf("upgrade the existing store: %v", err)

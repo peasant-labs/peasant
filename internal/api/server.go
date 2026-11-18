@@ -239,6 +239,7 @@ func (s *Server) Listen(ctx context.Context) error {
 		annotationStore: s.cfg.Store,
 		hub:             s.hub,
 		spawn:           func(fn func(context.Context)) { s.spawnBackground(ctx, fn) },
+		configHome:      s.cfg.ConfigHome,
 	}
 	if s.cfg.Store != nil {
 		ah.typeReader = annotations.NewTypeReader(s.cfg.Store)

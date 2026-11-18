@@ -1,0 +1,9 @@
+# Paging family for the local claim log. Each case names the full log size and
+# the exact page sizes the newest-first cursor must produce. The final page is
+# short and carries no nextBefore; a full page carries the last entry's id.
+requiredNames:
+  - owner-claims-250-pages
+cases:
+  - name: owner-claims-250-pages
+    total: 250
+    pageSizes: [100, 100, 50]

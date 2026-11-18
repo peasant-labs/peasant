@@ -157,9 +157,13 @@ type workerResult struct {
 	// index input proof, which names those bytes.
 	transcriptKept        bool
 	commitCaptureComplete bool
-	capturedSource        *captureFileSystem
-	cwdProvenance         CWDProvenanceKind
-	eventSeq              int64
+	// savedPairExisted reports that this run found the pair already installed,
+	// so the mirror must not label the session first-stored even when the row is
+	// absent (a rebuild, a reindex, or a forced re-process).
+	savedPairExisted bool
+	capturedSource   *captureFileSystem
+	cwdProvenance    CWDProvenanceKind
+	eventSeq         int64
 	// acquiredEventSeq is the OpenCode change cursor a materialization actually
 	// observed for this session; nil preserves the stored cursor. origin is the
 	// session origin an adapter mined; nil preserves the stored verdict. The

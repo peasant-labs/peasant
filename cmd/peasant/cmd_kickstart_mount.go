@@ -342,9 +342,20 @@ func openKickstartStoreWithError(cmd *cobra.Command, ownedRoot string) (*store.S
 		return nil, func() {}, err
 	}
 	// The mount only reads. Kickstart upgraded the store before discovery,
-	// so this open finds a current store and writes nothing; a store that is
-	// still behind is refused by Open without a change.
-	db, err := store.Open(dbPath, options...)
+	// so this open finds a current store and writes nothing, not even the
+	// local owner the ordinary writable open would bootstrap. The store still
+	// needs its attachment reader, which the read-only open does not build, so
+	// the writable open is kept with the owner bootstrap suppressed. A store
+	// that is still behind is refused with the same actionable error as the
+	// other entry points.
+	version, err := store.SchemaVersionAt(dbPath)
+	if err != nil {
+		return nil, func() {}, fmt.Errorf("read the schema version of %s before the kickstart mount: %w; no files were changed", dbPath, err)
+	}
+	if head := store.CurrentSchemaVersion(); version < head {
+		return nil, func() {}, &store.SchemaBehindError{DBPath: dbPath, From: version, To: head}
+	}
+	db, err := store.Open(dbPath, append(options, store.WithSkipLocalOwnerBootstrap())...)
 	if err != nil {
 		return nil, func() {}, err
 	}

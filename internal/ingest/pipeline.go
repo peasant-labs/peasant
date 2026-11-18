@@ -184,6 +184,11 @@ type SessionResult struct {
 	// ExcludedBySelection marks a session the saved selection left out. Its
 	// Status stays DiffUnchanged for callers that only skip it.
 	ExcludedBySelection bool
+	// FirstStored is true only when the session had no sessions row and no
+	// saved pair under peasant-sync/ before this run. Automatic claiming reads
+	// this flag, never the diff status: a session first seen while active is
+	// claimed, and a forced or rebuilt re-process is not.
+	FirstStored bool
 	// Prevent the same invocation's stale-index sweep from bypassing a failed
 	// reconciliation. This is execution state, not a serialized success marker.
 	mirrorPending bool
@@ -387,6 +392,9 @@ type Pipeline struct {
 	// or stale. Both are reported once at the end of the rebuild.
 	rebuiltFromFiles int
 	rebuildStale     []SessionID
+	// claimer assigns local ownership of this run's new sessions. Nil keeps
+	// automatic claiming off (signed out, dry run, or a file-only run).
+	claimer SessionClaimer
 
 	// locationCache is pre-populated before the DIFF stage via BulkLookupSessionLocations.
 	// It maps SessionID → SessionLocation (host_slug + parent_id) for sessions already
@@ -4455,6 +4463,7 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry, wr
 	return workerResult{
 		transcriptKept:        kept.transcript,
 		commitCaptureComplete: commitCaptureComplete,
+		savedPairExisted:      metadataPath != "",
 		result:                result,
 		capturedSource:        capturedSource,
 		cwdProvenance:         publicationCWDProvenance(meta, session),
@@ -5339,6 +5348,11 @@ func (p *Pipeline) indexComputeAndFinalize(
 		}
 	}
 	p.recordIndexProfileStage(StageAudit, auditProfileStart, 1, 1)
+
+	// CLAIM — assign local ownership of the sessions this run wrote. Local,
+	// best-effort, and never fatal: the artifacts are already stored and a
+	// later claim can retry.
+	p.claimRunSessions(ctx, logPrefix, sessionResults)
 
 	return pipelineResult, nil
 }
