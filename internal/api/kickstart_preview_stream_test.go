@@ -28,8 +28,9 @@ var streamFixture []byte
 func TestKickstartPreviewStream(t *testing.T) {
 	var fixture struct {
 		Generated struct {
-			Pairs       int `yaml:"pairs"`
-			AnswerBytes int `yaml:"answerBytes"`
+			Pairs          int `yaml:"pairs"`
+			AnswerBytes    int `yaml:"answerBytes"`
+			OversizedBytes int `yaml:"oversizedBytes"`
 		} `yaml:"generated"`
 		RequiredNames []string `yaml:"requiredNames"`
 		Cases         []struct {
@@ -52,6 +53,9 @@ func TestKickstartPreviewStream(t *testing.T) {
 			defer cancel()
 			path := filepath.Join(t.TempDir(), "session.jsonl")
 			content := tc.Transcript
+			if tc.Operation == "bounded-turn" {
+				content = fmt.Sprintf("{\"type\":\"user\",\"uuid\":\"u1\",\"timestamp\":\"2026-01-01T00:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"%s\"}}\n", strings.Repeat("x", fixture.Generated.OversizedBytes))
+			}
 			if tc.Long {
 				var data strings.Builder
 				for i := range fixture.Generated.Pairs {
@@ -151,6 +155,9 @@ func TestKickstartPreviewStream(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				if len(data) > defaults.KickstartWebPreviewFrameCapBytes {
+					t.Fatal("server sent a frame over the cap")
+				}
 				var envelope struct {
 					Type schema.MessageType `json:"type"`
 					Data json.RawMessage    `json:"data"`
@@ -193,6 +200,10 @@ func TestKickstartPreviewStream(t *testing.T) {
 			case "short":
 				if state.Segments[0].ByteLength >= schema.TranscriptSegmentBudgetBytes {
 					t.Fatal("first source read did not send a short segment")
+				}
+			case "bounded-turn":
+				if len(state.Segments[0].Turns) != 1 || !state.Segments[0].Turns[0].Truncated {
+					t.Fatal("oversized turn was not sent alone and truncated")
 				}
 			case "more":
 				write(ClientMessage{Type: schema.MsgKickstartPreview, Preview: &schema.LocalKickstartPreviewRequest{Op: schema.LocalKickstartPreviewMore, RequestID: "next", SessionID: "setup", CaptureID: state.CaptureID, After: state.Seq}})

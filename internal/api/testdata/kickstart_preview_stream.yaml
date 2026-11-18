@@ -1,6 +1,7 @@
 generated:
   pairs: 6000
   answerBytes: 512
+  oversizedBytes: 5242880
 requiredNames:
   - open-sends-first-segment-unasked
   - more-sends-exactly-one-segment
@@ -12,6 +13,7 @@ requiredNames:
   - unreadable-source-errors-and-logs-carry-no-source-or-path
   - idle-expiry-frees-the-capture
   - setup-session-end-closes-the-capture
+  - oversized-turn-stays-within-frame-cap
 cases:
   - name: open-sends-first-segment-unasked
     transcript: |
@@ -26,3 +28,4 @@ cases:
   - {name: unreadable-source-errors-and-logs-carry-no-source-or-path, operation: missing-source}
   - {name: idle-expiry-frees-the-capture, long: true, operation: expire}
   - {name: setup-session-end-closes-the-capture, long: true, operation: end-setup}
+  - {name: oversized-turn-stays-within-frame-cap, operation: bounded-turn}
