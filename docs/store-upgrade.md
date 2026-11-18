@@ -377,8 +377,17 @@ database.
 The migration dry run also reports a read-only session-work census from the
 stored refresh evidence. It counts sessions by refresh lane and reason, and
 counts unknown evidence by name; it does not list session identities. Counts
-are not a duration estimate. A behind schema makes the census a lower bound:
+are not a duration estimate. The census is approximate even on a current
+schema: it does not read capture recovery, publication capture or binding,
+content pending, source comparison or state, latest attempt, stored pair, or
+permanent refusal evidence. An unknown harness remains undecided and contributes
+to neither lane nor reason counts. A behind schema makes the census a lower bound:
 upgrade the schema and repeat the dry run to see what further work it reveals.
+Pending search invalidation and recount effects are reported as unapplied:
+the search migration marks content sweep pending, which production maps to
+stored-index work; recount does not feed the refresh decision. Neither is
+simulated in this census, because the planner does not read content-pending
+evidence and recount is outside the decision.
 
 `peasant migrate --dry-run --json` emits one JSON document. In addition to the
 existing schema or conversion plan, its `session_work` object has these fields:
@@ -386,7 +395,11 @@ existing schema or conversion plan, its `session_work` object has these fields:
 - `available`: whether refresh evidence was read successfully.
 - `error`: the reason if evidence could not be read (omitted on success).
 - `lower_bound`: whether pending schema changes may reveal more work.
+- `approximate`: whether the census omits decision evidence.
+- `evidence_not_read`: evidence the census does not inspect.
+- `unapplied_effects`: pending migration effects not simulated in the census.
 - `sessions`: the number of stored sessions in the census.
+- `undecided`: sessions for which no refresh decision could be made.
 - `by_lane`, `by_reason`: maps from the planner's lane and reason names to counts.
 - `unknown`: a map from unavailable evidence names to counts; a session can
   contribute to more than one evidence count.

@@ -1,7 +1,24 @@
 {
   "available": true,
   "lower_bound": true,
+  "approximate": true,
+  "evidence_not_read": [
+    "capture_recovery",
+    "publication_capture",
+    "content_pending",
+    "publication_bound",
+    "source_compared",
+    "latest_attempt",
+    "source_state",
+    "stored_pair",
+    "permanent_refusal"
+  ],
+  "unapplied_effects": [
+    "search-invalidated",
+    "recount-owed"
+  ],
   "sessions": 1,
+  "undecided": 0,
   "by_lane": {
     "native": 1
   },

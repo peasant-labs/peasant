@@ -567,13 +567,17 @@ func schemaUpgradeJSON(plan store.UpgradePlan) schemaPlanJSON {
 // sessionWork is a census, not a list of session identities. An error means
 // the evidence could not be read and the numeric fields are not a census.
 type sessionWork struct {
-	Available  bool           `json:"available"`
-	Error      string         `json:"error,omitempty"`
-	LowerBound bool           `json:"lower_bound"`
-	Sessions   int            `json:"sessions"`
-	ByLane     map[string]int `json:"by_lane"`
-	ByReason   map[string]int `json:"by_reason"`
-	Unknown    map[string]int `json:"unknown"`
+	Available        bool                `json:"available"`
+	Error            string              `json:"error,omitempty"`
+	LowerBound       bool                `json:"lower_bound"`
+	Approximate      bool                `json:"approximate"`
+	EvidenceNotRead  []string            `json:"evidence_not_read"`
+	UnappliedEffects []store.StampEffect `json:"unapplied_effects"`
+	Sessions         int                 `json:"sessions"`
+	Undecided        int                 `json:"undecided"`
+	ByLane           map[string]int      `json:"by_lane"`
+	ByReason         map[string]int      `json:"by_reason"`
+	Unknown          map[string]int      `json:"unknown"`
 }
 
 func summarizeSessionWork(plan upgrade.RefreshPlan, err error) sessionWork {
@@ -583,6 +587,8 @@ func summarizeSessionWork(plan upgrade.RefreshPlan, err error) sessionWork {
 		return work
 	}
 	work.LowerBound, work.Sessions = plan.LowerBound, plan.Estimate.Sessions
+	work.Approximate, work.EvidenceNotRead, work.UnappliedEffects = plan.Approximate, plan.EvidenceNotRead, plan.UnappliedEffects
+	work.Undecided = plan.Estimate.Undecided
 	for lane, count := range plan.Estimate.ByLane {
 		work.ByLane[string(lane)] = count
 	}
@@ -601,6 +607,11 @@ func writeSessionWork(out io.Writer, work sessionWork) {
 		return
 	}
 	fmt.Fprintf(out, "session work: %d session(s)\n", work.Sessions)
+	fmt.Fprintf(out, "  undecided: %d\n", work.Undecided)
+	fmt.Fprintf(out, "  approximate: evidence not read: %s\n", strings.Join(work.EvidenceNotRead, ", "))
+	for _, effect := range work.UnappliedEffects {
+		fmt.Fprintf(out, "  pending migration effect not applied to census: %s\n", effect)
+	}
 	writeSessionWorkCounts(out, "lane", work.ByLane)
 	writeSessionWorkCounts(out, "reason", work.ByReason)
 	writeSessionWorkCounts(out, "unknown evidence", work.Unknown)

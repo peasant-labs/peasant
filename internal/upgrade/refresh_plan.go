@@ -3,10 +3,10 @@ package upgrade
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store"
 )
 
@@ -18,6 +18,10 @@ type RefreshPlan struct {
 	Estimate RefreshEstimate
 	// LowerBound means pending schema work can reveal additional work.
 	LowerBound bool
+	// Approximate remains true even on a current schema: not all evidence is read.
+	Approximate      bool
+	EvidenceNotRead  []string
+	UnappliedEffects []store.StampEffect
 }
 
 // SessionRefresh records the decision made for one stored session.
@@ -25,6 +29,7 @@ type SessionRefresh struct {
 	SessionID string
 	Harness   string
 	Decision  ingest.RefreshDecision
+	Decided   bool
 	// Effects lists pending migrations that change this session's evidence.
 	// A decision with a higher-priority reason can otherwise mask an index reset.
 	Effects []store.StampEffect
@@ -36,9 +41,10 @@ type RefreshUnknown struct{ SessionID, Evidence string }
 // RefreshEstimate counts decisions by their canonical lane and reason; it is
 // not a time prediction, since source contents and future discoveries are unknown.
 type RefreshEstimate struct {
-	Sessions int
-	ByLane   map[ingest.RefreshLane]int
-	ByReason map[ingest.RefreshReason]int
+	Sessions  int
+	Undecided int
+	ByLane    map[ingest.RefreshLane]int
+	ByReason  map[ingest.RefreshReason]int
 }
 
 // PlanRefresh reads the store without applying schema changes or writing files.
@@ -57,7 +63,39 @@ func PlanRefresh(ctx context.Context, path string) (RefreshPlan, error) {
 	if version != schema.From && !(version == 0 && len(rows) == 0 && len(schema.Steps) == 0) {
 		return RefreshPlan{}, fmt.Errorf("plan refresh %s: schema changed from %d to %d while reading; no changes were made; retry after other migrations finish", path, schema.From, version)
 	}
-	plan := RefreshPlan{Schema: schema, LowerBound: schema.From < schema.To, Estimate: RefreshEstimate{ByLane: map[ingest.RefreshLane]int{}, ByReason: map[ingest.RefreshReason]int{}}}
+	declarations, err := ProducerDeclarations()
+	if err != nil {
+		return RefreshPlan{}, fmt.Errorf("plan refresh producers: %w", err)
+	}
+	type targets struct {
+		adapter, indexer int
+		canExtract       bool
+	}
+	producers := make(map[string]targets)
+	for _, d := range declarations {
+		if d.Kind != ProducerKindAdapter && d.Kind != ProducerKindIndexer {
+			continue
+		}
+		version, err := strconv.Atoi(string(d.Current()))
+		if err != nil {
+			return RefreshPlan{}, fmt.Errorf("plan refresh producer %s: invalid target %q: %w", d.String(), d.Current(), err)
+		}
+		target := producers[d.Name]
+		if d.Kind == ProducerKindAdapter {
+			target.adapter, target.canExtract = version, d.Input == ProducerInputStoredTranscript
+		} else {
+			target.indexer = version
+		}
+		producers[d.Name] = target
+	}
+	plan := RefreshPlan{Schema: schema, LowerBound: schema.From < schema.To, Approximate: true,
+		EvidenceNotRead: []string{"capture_recovery", "publication_capture", "content_pending", "publication_bound", "source_compared", "latest_attempt", "source_state", "stored_pair", "permanent_refusal"},
+		Estimate:        RefreshEstimate{ByLane: map[ingest.RefreshLane]int{}, ByReason: map[ingest.RefreshReason]int{}}}
+	for _, step := range schema.Steps {
+		if step.StampEffect == store.StampEffectSearchInvalidated || step.StampEffect == store.StampEffectRecountOwed {
+			plan.UnappliedEffects = append(plan.UnappliedEffects, step.StampEffect)
+		}
+	}
 	for _, row := range rows {
 		if err := ctx.Err(); err != nil {
 			return RefreshPlan{}, err
@@ -91,30 +129,21 @@ func PlanRefresh(ctx context.Context, path string) (RefreshPlan, error) {
 				effects = append(effects, step.StampEffect)
 			}
 		}
-		var harness ingest.Harness
-		var target ingest.HarvesterVersions
-		found := false
-		for h, versions := range ingest.HarvesterVersionRegistry {
-			if string(h) == row.Harness {
-				harness, target, found = h, versions, true
-				break
-			}
-		}
+		target, found := producers[row.Harness]
+		plan.Estimate.Sessions++
 		if !found {
 			plan.Unknown = append(plan.Unknown, RefreshUnknown{row.SessionID, "harness"})
+			plan.Estimate.Undecided++
+			plan.Sessions = append(plan.Sessions, SessionRefresh{SessionID: row.SessionID, Harness: row.Harness, Effects: effects})
+			continue
 		}
 
 		version := 1
 		if row.AdapterVersion != nil {
 			version = *row.AdapterVersion
 		}
-		canExtract := false
-		if factory, ok := ingest.DefaultAdapterRegistry[harness]; ok {
-			_, canExtract = factory(nil, nil, salt.Salt{}).(ingest.TranscriptMetadataExtractor)
-		}
-		decision := ingest.DecideRefresh(ingest.RefreshEvidence{StoredRow: true, MetadataSchemaOld: row.MetadataVersion <= int(ingest.CurrentSchemaVersion) && !ingest.MetadataSchemaVersionIsCurrent(row.MetadataVersion), AdapterVersion: version, AdapterTarget: target.AdapterVersion, AdapterStampPresent: row.AdapterVersion != nil, AdapterCanExtract: canExtract, IndexerVersion: row.IndexerVersion, IndexerTarget: target.IndexerVersion, IndexProofPresent: row.IndexedInputHash != nil})
-		plan.Sessions = append(plan.Sessions, SessionRefresh{SessionID: row.SessionID, Harness: row.Harness, Decision: decision, Effects: effects})
-		plan.Estimate.Sessions++
+		decision := ingest.DecideRefresh(ingest.RefreshEvidence{StoredRow: true, MetadataSchemaOld: ingest.MetadataNeedsNativeRefresh(row.MetadataVersion), AdapterVersion: version, AdapterTarget: target.adapter, AdapterStampPresent: row.AdapterVersion != nil, AdapterCanExtract: target.canExtract, IndexerVersion: row.IndexerVersion, IndexerTarget: target.indexer, IndexProofPresent: row.IndexedInputHash != nil})
+		plan.Sessions = append(plan.Sessions, SessionRefresh{SessionID: row.SessionID, Harness: row.Harness, Decision: decision, Decided: true, Effects: effects})
 		plan.Estimate.ByLane[decision.Lane]++
 		plan.Estimate.ByReason[decision.Reason]++
 	}

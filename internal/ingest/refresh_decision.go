@@ -195,6 +195,12 @@ type refreshEvidence struct {
 // Unobservable facts must retain their zero values.
 type RefreshEvidence = refreshEvidence
 
+// MetadataNeedsNativeRefresh exposes the same metadata compatibility rule used
+// by the production refresh path.
+func MetadataNeedsNativeRefresh(version int) bool {
+	return metadataNeedsNativeRefresh(version)
+}
+
 // DecideRefresh returns the canonical decision for the supplied evidence.
 func DecideRefresh(in RefreshEvidence) RefreshDecision {
 	return decideRefresh(in)

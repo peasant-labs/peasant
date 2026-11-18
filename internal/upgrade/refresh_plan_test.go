@@ -81,6 +81,11 @@ func TestPlanRefreshBehind(t *testing.T) {
 	if !plan.LowerBound || len(plan.Sessions) != 1 || plan.Sessions[0].Harness != string(ingest.HarnessClaudeCode) {
 		t.Fatalf("unexpected plan: %+v", plan)
 	}
+	if !plan.Approximate || !slices.Contains(plan.EvidenceNotRead, "content_pending") ||
+		!slices.Contains(plan.UnappliedEffects, store.StampEffectSearchInvalidated) ||
+		!slices.Contains(plan.UnappliedEffects, store.StampEffectRecountOwed) {
+		t.Fatalf("missing census limitations: %+v", plan)
+	}
 	for _, effect := range []store.StampEffect{store.StampEffectHarnessRename, store.StampEffectIndexInvalidated} {
 		if !slices.Contains(plan.Sessions[0].Effects, effect) {
 			t.Errorf("session census omitted migration effect %s", effect)
@@ -111,6 +116,57 @@ func TestPlanRefreshBehind(t *testing.T) {
 	}
 }
 
+func TestPlanRefreshCurrentStoreIsApproximate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "current.db")
+	db, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := PlanRefresh(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.LowerBound || !plan.Approximate || !slices.Contains(plan.EvidenceNotRead, "latest_attempt") {
+		t.Fatalf("current store limitations: %+v", plan)
+	}
+}
+
+func TestPlanRefreshUsesManagedProducerTarget(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "current.db")
+	db, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := sqlite.OpenConn(path, sqlite.OpenReadWrite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseline := ingest.HarvesterVersionRegistry[ingest.HarnessCodex]
+	err = sqlitex.ExecuteTransient(conn, `INSERT INTO sessions
+		(session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format, schema_version, adapter_version, index_version, indexed_input_hash)
+		VALUES ('managed-target', ?, 'model', 'host', 'project', 1, 2, 3, '/synthetic/source', 'jsonl', ?, ?, ?, ?)`,
+		&sqlitex.ExecOptions{Args: []any{string(ingest.HarnessCodex), int(ingest.CurrentSchemaVersion), baseline.AdapterVersion, baseline.IndexerVersion, "0000000000000000000000000000000000000000000000000000000000000000"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := PlanRefresh(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Sessions) != 1 || plan.Sessions[0].Decision.Reason != ingest.RefreshReasonAdapterBehind {
+		t.Fatalf("managed adapter target not used: %+v", plan)
+	}
+}
+
 func TestPlanRefreshDelegates(t *testing.T) {
 	path := oldRefreshStore(t)
 	rows, _, err := store.ReadRefreshEvidence(t.Context(), path)
@@ -121,7 +177,7 @@ func TestPlanRefreshDelegates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode]
+	target := ingest.GenerationRepairTargets[ingest.HarnessClaudeCode]
 	_, canExtract := ingest.DefaultAdapterRegistry[ingest.HarnessClaudeCode](nil, nil, salt.Salt{}).(ingest.TranscriptMetadataExtractor)
 	want := map[ingest.RefreshReason]int{}
 	for _, row := range rows {
@@ -179,6 +235,13 @@ func TestPlanRefreshHistoricalHarnessRename(t *testing.T) {
 			unknown := slices.Contains(plan.Unknown, RefreshUnknown{"old-session", "harness"})
 			if unknown != c.Unknown {
 				t.Fatalf("unknown evidence = %+v", plan.Unknown)
+			}
+			if c.Unknown {
+				if session.Decided || plan.Estimate.Undecided != 1 || len(plan.Estimate.ByLane) != 0 || len(plan.Estimate.ByReason) != 0 {
+					t.Fatalf("unknown harness was decided: %+v", plan)
+				}
+			} else if !session.Decided || plan.Estimate.Undecided != 0 {
+				t.Fatalf("known harness was not decided: %+v", plan)
 			}
 		})
 	}
