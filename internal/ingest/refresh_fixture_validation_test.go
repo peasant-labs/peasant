@@ -12,9 +12,6 @@ import (
 //go:embed testdata/refresh_lane_invalid.yaml
 var invalidRefreshLaneYAML []byte
 
-//go:embed testdata/harvester_version_ledger_invalid.yaml
-var invalidHarvesterVersionLedgerYAML []byte
-
 // TestRefreshLaneFixtureRejectsUnknownAxes proves a typo in any mutation or
 // expectation is rejected rather than silently testing a different case.
 func TestRefreshLaneFixtureRejectsUnknownAxes(t *testing.T) {
@@ -55,48 +52,6 @@ func TestRefreshLaneFixtureRejectsUnknownAxes(t *testing.T) {
 		})
 	}
 	if err := testutil.RequireFixtureNames("refresh_lane_invalid.yaml", "cases", invalid.RequiredNames, names); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestHarvesterVersionLedgerRejectsUnknownAxes(t *testing.T) {
-	var invalid struct {
-		RequiredNames []string `yaml:"required_names"`
-		Cases         []struct {
-			Name          string    `yaml:"name"`
-			Patch         yaml.Node `yaml:"patch"`
-			ErrorContains string    `yaml:"error_contains"`
-		} `yaml:"cases"`
-	}
-	if err := testutil.DecodeFixtureYAML(invalidHarvesterVersionLedgerYAML, &invalid); err != nil {
-		t.Fatalf("decode invalid version ledger fixtures: %v", err)
-	}
-	if len(invalid.RequiredNames) == 0 {
-		t.Fatal("invalid version ledger fixture must list its required cases")
-	}
-	baseline := loadHarvesterVersionLedger(t).Rows[0]
-	names := make(map[string]bool, len(invalid.Cases))
-	for _, testCase := range invalid.Cases {
-		if testCase.Name == "" || names[testCase.Name] {
-			t.Fatalf("invalid version ledger fixtures have an empty or repeated name %q", testCase.Name)
-		}
-		names[testCase.Name] = true
-		t.Run(testCase.Name, func(t *testing.T) {
-			input := baseline
-			if err := testCase.Patch.Decode(&input); err != nil {
-				t.Fatalf("decode invalid ledger row patch: %v", err)
-			}
-			data, err := yaml.Marshal([]harvesterVersionLedgerRow{input})
-			if err != nil {
-				t.Fatalf("encode invalid ledger row: %v", err)
-			}
-			_, err = decodeHarvesterVersionLedger(data)
-			if err == nil || !strings.Contains(err.Error(), testCase.ErrorContains) {
-				t.Fatalf("validation error = %v, want it to name %q", err, testCase.ErrorContains)
-			}
-		})
-	}
-	if err := testutil.RequireFixtureNames("harvester_version_ledger_invalid.yaml", "cases", invalid.RequiredNames, names); err != nil {
 		t.Fatal(err)
 	}
 }

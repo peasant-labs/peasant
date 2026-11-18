@@ -1,0 +1,16 @@
+cases:
+  - name: ordinary-schema-step
+    version: 1
+    effect: none
+  - name: legacy-index-has-no-stamp
+    version: 10
+    effect: index-invalidated
+  - name: harness-identifiers-renamed
+    version: 33
+    effect: harness-rename
+  - name: union-search-needs-consolidation
+    version: 62
+    effect: search-invalidated
+  - name: turn-counts-need-recount
+    version: 77
+    effect: recount-owed

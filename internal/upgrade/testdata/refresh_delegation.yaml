@@ -1,0 +1,7 @@
+requiredNames: [adapter-stale, indexer-stale, index-proof-missing, metadata-schema-old, up-to-date]
+cases:
+  - {name: adapter-stale, adapterOffset: -1, indexerOffset: 0, proof: true, metadataOld: false, reason: adapter_behind}
+  - {name: indexer-stale, adapterOffset: 0, indexerOffset: -1, proof: true, metadataOld: false, reason: indexer_behind}
+  - {name: index-proof-missing, adapterOffset: 0, indexerOffset: 0, proof: false, metadataOld: false, reason: indexer_behind}
+  - {name: metadata-schema-old, adapterOffset: 0, indexerOffset: 0, proof: true, metadataOld: true, reason: metadata_schema}
+  - {name: up-to-date, adapterOffset: 0, indexerOffset: 0, proof: true, metadataOld: false, reason: none}

@@ -1,0 +1,40 @@
+# Required row ids for producer_version_ledger.yaml. A removed or renamed bump
+# fails the loader; there is deliberately no bare count.
+requiredNames:
+  - pi-adapter-3
+  - pi-indexer-18
+  - pi-format-1
+  - claude-adapter-4
+  - claude-indexer-25
+  - claude-indexer-26-managed
+  - claude-format-1
+  - claude-format-2-managed
+  - opencode-adapter-4
+  - opencode-adapter-5-managed
+  - opencode-indexer-19
+  - opencode-indexer-20-managed
+  - opencode-format-1
+  - opencode-format-2-managed
+  - codex-adapter-3
+  - codex-adapter-4-managed
+  - codex-indexer-19
+  - codex-indexer-22-managed
+  - codex-format-1
+  - codex-format-2-managed
+  - cursor-adapter-1
+  - cursor-indexer-19
+  - cursor-format-1
+  - strike-adapter-3
+  - strike-indexer-18
+  - strike-format-1
+  - metadata-schema-12
+  - content-model-content-parts-v1
+  - content-model-detailed-usage-v1
+  - content-model-native-metadata-v1
+  - content-model-observed-model-v1
+  - content-model-retained-unknown-v1
+  - content-model-session-graph-provenance-v1
+  - content-model-thinking-level-v1
+  - content-model-tool-namespace-v1
+  - redaction-rules-3-1-1
+  - store-schema-81

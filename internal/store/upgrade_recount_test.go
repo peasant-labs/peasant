@@ -58,7 +58,7 @@ func wantRecountStep() UpgradeStep {
 // schemaStep is the plan step of one migration, as the catalog gives it.
 func schemaStep(version int) UpgradeStep {
 	entry := upgradeStepCatalog[version]
-	return UpgradeStep{Version: version, Kind: UpgradeStepSchema, Title: entry.title, Cost: entry.cost, Counts: entry.counts}
+	return UpgradeStep{Version: version, Kind: UpgradeStepSchema, Title: entry.title, Cost: entry.cost, Counts: entry.counts, StampEffect: entry.stampEffect}
 }
 
 func emptySourceDiagnosticStep() UpgradeStep {

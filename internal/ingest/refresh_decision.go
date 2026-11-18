@@ -191,6 +191,21 @@ type refreshEvidence struct {
 	LatestAttemptSettled bool
 }
 
+// RefreshEvidence is the evidence consumed by the canonical refresh decision.
+// Unobservable facts must retain their zero values.
+type RefreshEvidence = refreshEvidence
+
+// MetadataNeedsNativeRefresh exposes the same metadata compatibility rule used
+// by the production refresh path.
+func MetadataNeedsNativeRefresh(version int) bool {
+	return metadataNeedsNativeRefresh(version)
+}
+
+// DecideRefresh returns the canonical decision for the supplied evidence.
+func DecideRefresh(in RefreshEvidence) RefreshDecision {
+	return decideRefresh(in)
+}
+
 // decideRefresh is the one home of the refresh decision. It orders the facts
 // the way the accepted design does: a capture-side fact (forced, new, missing
 // pair, changed source, old schema) wins a native capture; otherwise the

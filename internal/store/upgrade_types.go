@@ -133,6 +133,32 @@ func NewUpgradeEventKind(raw string) (UpgradeEventKind, error) {
 
 func (k UpgradeEventKind) String() string { return string(k) }
 
+// StampEffect describes how a migration changes evidence used for refresh.
+type StampEffect string
+
+const (
+	StampEffectNone              StampEffect = "none"
+	StampEffectHarnessRename     StampEffect = "harness-rename"
+	StampEffectIndexInvalidated  StampEffect = "index-invalidated"
+	StampEffectSearchInvalidated StampEffect = "search-invalidated"
+	StampEffectRecountOwed       StampEffect = "recount-owed"
+)
+
+// AllStampEffects is the closed set of migration effects.
+var AllStampEffects = []StampEffect{StampEffectNone, StampEffectHarnessRename, StampEffectIndexInvalidated, StampEffectSearchInvalidated, StampEffectRecountOwed}
+
+// NewStampEffect validates a migration effect.
+func NewStampEffect(raw string) (StampEffect, error) {
+	for _, effect := range AllStampEffects {
+		if string(effect) == raw {
+			return effect, nil
+		}
+	}
+	return "", fmt.Errorf("store: read migration stamp effect %q: it is not in the supported set; nothing was planned; use one of %v", raw, AllStampEffects)
+}
+
+func (e StampEffect) String() string { return string(e) }
+
 // UpgradeStep is one step of an upgrade plan.
 type UpgradeStep struct {
 	// Version is the schema version this step produces; 0 for a search step.
@@ -144,6 +170,8 @@ type UpgradeStep struct {
 	// Counts is the unit the step reports in its progress events, or the
 	// empty unit when it cannot count.
 	Counts UpgradeUnit
+	// StampEffect describes the migration's effect on refresh evidence.
+	StampEffect StampEffect
 
 	// recount is the pending_recounts marker a recount step clears; it is
 	// empty for every other kind.
