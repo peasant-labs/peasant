@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -40,6 +41,20 @@ var unchangedPipelineRoutes []byte
 
 //go:embed testdata/unchanged_pipeline_routes.manifest.yaml
 var unchangedPipelineRoutesManifest []byte
+
+//go:embed testdata/output_preserving_pipeline.yaml
+var outputPreservingPipeline []byte
+
+//go:embed testdata/output_preserving_pipeline.manifest.yaml
+var outputPreservingPipelineManifest []byte
+
+type outputPreservingClaudeAdapter struct {
+	*ingest.ClaudeAdapter
+}
+
+func (*outputPreservingClaudeAdapter) DeclaresOutputPreserving() bool { return true }
+
+var _ ingest.OutputPreservingDeclaration = (*outputPreservingClaudeAdapter)(nil)
 
 type countedManagedRefreshStore struct {
 	*store.Store
@@ -284,6 +299,87 @@ func (s *countedManagedRefreshStore) RefreshManagedGenerationWithoutParse(ctx co
 		request.Metadata.Stats.ConversationTurnCount = &conversation
 	}
 	return s.Store.RefreshManagedGenerationWithoutParse(ctx, request)
+}
+
+func TestManagedGenerationOutputPreservingDeclaration(t *testing.T) {
+	var fixture struct {
+		Cases []struct {
+			Name       string `yaml:"name"`
+			Declared   bool   `yaml:"declared"`
+			Diagnostic bool   `yaml:"diagnostic"`
+			Builds     int64  `yaml:"builds"`
+			Copies     int64  `yaml:"copies"`
+		} `yaml:"cases"`
+	}
+	var manifest struct {
+		RequiredNames []string `yaml:"requiredNames"`
+	}
+	if err := yaml.Unmarshal(outputPreservingPipeline, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	if err := yaml.Unmarshal(outputPreservingPipelineManifest, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	required := make(map[string]bool, len(manifest.RequiredNames))
+	for _, name := range manifest.RequiredNames {
+		required[name] = false
+	}
+	for _, tc := range fixture.Cases {
+		if seen, ok := required[tc.Name]; !ok || seen {
+			t.Fatalf("unknown or repeated declaration case %q", tc.Name)
+		}
+		required[tc.Name] = true
+		t.Run(tc.Name, func(t *testing.T) {
+			root := t.TempDir()
+			source, output, empty := filepath.Join(root, "source"), filepath.Join(root, "managed"), filepath.Join(root, "empty")
+			mustMkdir(t, source)
+			mustMkdir(t, empty)
+			id := writeManagedRefreshPipelineCorpus(t, source, 1, 8)[0]
+			db := openManagedRefreshPipelineStore(t, filepath.Join(root, "db"), output)
+			t.Cleanup(func() { _ = db.Close() })
+			initial := runManagedRefreshPipeline(t, db, source, output)
+			if initial.Summary.Errors != 0 || initial.Summary.Indexed != 1 {
+				t.Fatalf("initial import: %+v", initial.Summary)
+			}
+			previous := managedRefreshPipelineActiveGeneration(t, db, id)
+			stored := ingest.GenerationTargets(ingest.HarvesterVersionRegistry)[ingest.HarnessClaudeCode].AdapterVersion - 1
+			managedRefreshPipelineDowngrade(t, db, stored)
+			if managedRefreshPipelineChangeMetadata(t, output, stored, managedRefreshPipelineForcedProject) != 1 {
+				t.Fatal("expected one changed metadata file")
+			}
+			adapters := maps.Clone(ingest.DefaultAdapterRegistry)
+			if tc.Declared {
+				adapters[ingest.HarnessClaudeCode] = func(fs ingest.FileSystem, git ingest.GitResolver, s salt.Salt) ingest.SourceAdapter {
+					return &outputPreservingClaudeAdapter{ClaudeAdapter: ingest.NewClaudeAdapter(fs, git, s)}
+				}
+			}
+			counted := &proofCountingRefreshStore{countedManagedRefreshStore: &countedManagedRefreshStore{Store: db}}
+			var parses, builds atomic.Int64
+			var transcript []byte
+			result := runManagedRefreshPipelineWithAdapters(t, counted, empty, output, &parses, &builds, &transcript, &ingest.OSFileSystem{}, &ingest.IndexProfiler{}, adapters)
+			if result.Summary.Errors != 0 || result.Summary.StoreError != nil || counted.proof.Mismatch != ingest.UnchangedNotProvenMetadata || counted.settles.Load() != 0 || builds.Load() != tc.Builds || counted.calls.Load() != tc.Copies {
+				t.Fatalf("summary %+v proof %+v settles %d builds %d copies %d", result.Summary, counted.proof, counted.settles.Load(), builds.Load(), counted.calls.Load())
+			}
+			diagnostics := 0
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.ErrorType == "output_preserving_proof_failed" && diagnostic.Location == string(id) {
+					diagnostics++
+				}
+			}
+			if (tc.Diagnostic && diagnostics != 1) || (!tc.Diagnostic && diagnostics != 0) {
+				t.Fatalf("declaration diagnostics = %d; all diagnostics: %+v", diagnostics, result.Diagnostics)
+			}
+			active := managedRefreshPipelineActiveGeneration(t, db, id)
+			if active == previous || managedRefreshPipelineProjectName(t, db, id, active) != managedRefreshPipelineForcedProject {
+				t.Fatalf("refreshed generation %q did not install the changed context", active)
+			}
+		})
+	}
+	for name, seen := range required {
+		if !seen {
+			t.Errorf("missing required declaration case %q", name)
+		}
+	}
 }
 
 func TestManagedGenerationRefreshPipelineLanes(t *testing.T) {
@@ -633,6 +729,10 @@ func runManagedRefreshPipelineCounting(t *testing.T, db managedRefreshPipelineSt
 }
 
 func runManagedRefreshPipelineInstrumented(t *testing.T, db managedRefreshPipelineStore, source, output string, calls, builds *atomic.Int64, transcript *[]byte, fs ingest.FileSystem, profiler *ingest.IndexProfiler) *ingest.PipelineResult {
+	return runManagedRefreshPipelineWithAdapters(t, db, source, output, calls, builds, transcript, fs, profiler, ingest.DefaultAdapterRegistry)
+}
+
+func runManagedRefreshPipelineWithAdapters(t *testing.T, db managedRefreshPipelineStore, source, output string, calls, builds *atomic.Int64, transcript *[]byte, fs ingest.FileSystem, profiler *ingest.IndexProfiler, adapters map[ingest.Harness]ingest.AdapterFactory) *ingest.PipelineResult {
 	t.Helper()
 	cfg := makePipelineConfig(output)
 	cfg.Sources = map[ingest.Harness]ingest.SourceConfig{
@@ -649,7 +749,7 @@ func runManagedRefreshPipelineInstrumented(t *testing.T, db managedRefreshPipeli
 			transcript:    transcript,
 		}
 	}
-	pipeline, err := newTestPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg,
+	pipeline, err := newTestPipeline(fs, testutil.NoGitResolver(), adapters, cfg,
 		ingest.WithStore(db),
 		ingest.WithMetricsStore(db),
 		ingest.WithSalt(db.InstallationSalt()),
