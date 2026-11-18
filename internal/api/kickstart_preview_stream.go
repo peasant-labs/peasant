@@ -27,6 +27,44 @@ type previewRegistry struct {
 	newID    func() (string, error)
 }
 
+var errPreviewReasonUnmapped = errors.New("preview reason has no wire mapping")
+
+func previewCutReason(reason sourcepreview.CutReason) (schema.LocalKickstartPreviewCutReason, bool) {
+	switch reason {
+	case sourcepreview.CutSourceBudget:
+		return schema.LocalKickstartPreviewCutSourceBudget, true
+	case sourcepreview.CutSerializedBudget:
+		return schema.LocalKickstartPreviewCutSerializedBudget, true
+	case sourcepreview.CutTurnBudget:
+		return schema.LocalKickstartPreviewCutTurnBudget, true
+	case sourcepreview.CutOversizedRecord:
+		return schema.LocalKickstartPreviewCutOversizedRecord, true
+	case sourcepreview.CutOriginNotResumable:
+		return schema.LocalKickstartPreviewCutOriginNotResumable, true
+	default:
+		return "", false
+	}
+}
+
+func previewCloseReason(reason sourcepreview.CloseReason) (schema.LocalKickstartPreviewCloseReason, bool) {
+	switch reason {
+	case sourcepreview.CloseSourceChanged:
+		return schema.LocalKickstartPreviewSourceChanged, true
+	case sourcepreview.CloseLateResult:
+		return schema.LocalKickstartPreviewLateResult, true
+	case sourcepreview.CloseUnavailable, sourcepreview.CloseClosed:
+		return schema.LocalKickstartPreviewUnavailable, true
+	case sourcepreview.CloseNoTurns:
+		return schema.LocalKickstartPreviewNoTurns, true
+	case sourcepreview.CloseUnreadable:
+		return schema.LocalKickstartPreviewUnreadable, true
+	case sourcepreview.CloseBusy:
+		return schema.LocalKickstartPreviewOutOfOrder, true
+	default:
+		return "", false
+	}
+}
+
 type webPreview struct {
 	outMu     sync.Mutex
 	conn      *Conn
@@ -268,7 +306,12 @@ func (r *previewRegistry) advance(p *webPreview) {
 		event.Continuation = schema.LocalKickstartPreviewContinuationEnd
 		if p.page.Continuation == sourcepreview.ContinuationCut {
 			event.Continuation = schema.LocalKickstartPreviewContinuationCut
-			event.CutReason, _ = schema.NewLocalKickstartPreviewCutReason(p.page.CutReason.String())
+			var mapped bool
+			event.CutReason, mapped = previewCutReason(p.page.CutReason)
+			if !mapped {
+				r.fail(p, errPreviewReasonUnmapped)
+				return
+			}
 		}
 		if p.page.Notice != "" {
 			event.Lines = []schema.LocalKickstartLine{{Kind: schema.LocalKickstartLineText, Text: p.page.Notice}}
@@ -353,7 +396,16 @@ func (r *previewRegistry) send(p *webPreview, event schema.LocalKickstartPreview
 
 func (r *previewRegistry) fail(p *webPreview, err error) {
 	reason, code, message := schema.LocalKickstartPreviewUnreadable, schema.LocalKickstartErrorPreviewUnreadable, "the preview could not be read; check that the transcript is readable and try again"
+	if sourceReason, ok := sourcepreview.ReasonOf(err); ok {
+		var mapped bool
+		reason, mapped = previewCloseReason(sourceReason)
+		if !mapped {
+			err = errPreviewReasonUnmapped
+		}
+	}
 	switch {
+	case errors.Is(err, errPreviewReasonUnmapped):
+		reason, code, message = schema.LocalKickstartPreviewUnavailable, schema.LocalKickstartErrorFailed, "the preview ended because of an internal error; reopen it or report this defect"
 	case errors.Is(err, errPreviewFrameTooLarge), errors.Is(err, sourcepreview.ErrFrameExceedsCap):
 		reason, code, message = schema.LocalKickstartPreviewUnavailable, schema.LocalKickstartErrorFailed, "the preview cannot be displayed because a frame exceeds the safe size; reopen it or report this defect"
 	case errors.Is(err, sourcepreview.ErrUnavailable):
@@ -364,6 +416,10 @@ func (r *previewRegistry) fail(p *webPreview, err error) {
 		reason, code, message = schema.LocalKickstartPreviewSourceChanged, schema.LocalKickstartErrorPreviewSourceChanged, sourcepreview.ErrSourceChanged.Error()
 	case errors.Is(err, sourcepreview.ErrLateResult):
 		reason, code, message = schema.LocalKickstartPreviewLateResult, schema.LocalKickstartErrorPreviewLateResult, sourcepreview.ErrLateResult.Error()
+	case errors.Is(err, sourcepreview.ErrClosed):
+		reason, code, message = schema.LocalKickstartPreviewUnavailable, schema.LocalKickstartErrorFailed, "the preview closed unexpectedly; reopen it"
+	case errors.Is(err, sourcepreview.ErrBusy):
+		reason, code, message = schema.LocalKickstartPreviewOutOfOrder, schema.LocalKickstartErrorPreviewOutOfOrder, "the preview is still reading; open it again"
 	}
 	r.mu.Lock()
 	if r.captures[p.conn] != p {
