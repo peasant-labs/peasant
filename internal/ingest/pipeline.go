@@ -368,6 +368,13 @@ type Pipeline struct {
 	store    SessionStore // nil = skip DB insert (backward compatible)
 	salt     salt.Salt    // per-installation HMAC salt for project hash derivation
 
+	// adapterCapabilities caches what each registered adapter declares, read
+	// once per harness by adapterCapabilityFor. The factory's inputs are
+	// pipeline fields that do not change after construction, so the answer
+	// cannot change either.
+	adapterCapabilitiesMu sync.Mutex
+	adapterCapabilities   map[Harness]adapterCapability
+
 	// generationIDs optionally assigns the installed identity of each
 	// managed generation candidate. Production leaves it nil and mints a fresh
 	// opaque identity per attempt; a deterministic caller injects its own.
