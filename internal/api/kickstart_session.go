@@ -298,7 +298,8 @@ type kickstartSession struct {
 
 // kickstartSessions is the store of live sessions, one per scope.
 type kickstartSessions struct {
-	env kickstartEnv
+	env      kickstartEnv
+	previews *previewRegistry
 
 	// mu guards every session and is held only for work on memory. line orders
 	// publication: a mutation joins it while it holds mu, so events leave in the
@@ -394,6 +395,9 @@ func (st *kickstartSessions) publish(event schema.LocalKickstartEvent) {
 
 // shutdown stops every scan job and idle timer. The sessions stay readable.
 func (st *kickstartSessions) shutdown() {
+	if st.previews != nil {
+		st.previews.closeAll(schema.LocalKickstartPreviewShutdown)
+	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	for _, sess := range st.byID {
@@ -449,6 +453,9 @@ func (st *kickstartSessions) expire(id string, gen uint64) {
 
 // closeLocked removes a session and returns its closed event.
 func (st *kickstartSessions) closeLocked(sess *kickstartSession, reason schema.LocalKickstartCloseReason, committed *schema.LocalKickstartCommitted) schema.LocalKickstartEvent {
+	if st.previews != nil {
+		st.previews.closeSession(sess.id, schema.LocalKickstartPreviewSessionClosed)
+	}
 	sess.closed = true
 	if sess.cancelScan != nil {
 		sess.cancelScan()

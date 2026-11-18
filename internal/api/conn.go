@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"log/slog"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/schema"
 )
 
 // Conn wraps a WebSocket connection with channel subscriptions and a write buffer.
@@ -18,10 +20,15 @@ type Conn struct {
 	ws        *websocket.Conn
 	hub       *Hub
 	channels  map[ChannelTopic]bool
-	writeCh   chan ServerMessage
+	writeCh   chan outboundMessage
 	done      chan struct{}
 	closeOnce sync.Once
 	mu        sync.Mutex // guards channels map
+}
+
+type outboundMessage struct {
+	message ServerMessage
+	encoded []byte
 }
 
 func newConn(ws *websocket.Conn, hub *Hub) *Conn {
@@ -29,7 +36,7 @@ func newConn(ws *websocket.Conn, hub *Hub) *Conn {
 		ws:       ws,
 		hub:      hub,
 		channels: make(map[ChannelTopic]bool),
-		writeCh:  make(chan ServerMessage, defaults.ServerWriteChSize),
+		writeCh:  make(chan outboundMessage, defaults.ServerWriteChSize),
 		done:     make(chan struct{}),
 	}
 }
@@ -40,7 +47,10 @@ func newConn(ws *websocket.Conn, hub *Hub) *Conn {
 // panics the whole process, while an orphaned buffered channel is simply
 // garbage-collected with the Conn.
 func (c *Conn) close() {
-	c.closeOnce.Do(func() { close(c.done) })
+	c.closeOnce.Do(func() {
+		close(c.done)
+		c.hub.previewConnectionClosed(c)
+	})
 }
 
 // Send enqueues a message for delivery. Non-blocking; drops if buffer full
@@ -56,17 +66,38 @@ func (c *Conn) Send(msg ServerMessage) {
 	default:
 	}
 	select {
-	case c.writeCh <- msg:
+	case c.writeCh <- outboundMessage{message: msg}:
 	default:
 		log.Printf("websocket: dropping message to slow client")
 		// Best-effort error notification — don't block if this also fails
 		select {
-		case c.writeCh <- ServerMessage{
+		case c.writeCh <- outboundMessage{message: ServerMessage{
 			Type:    MsgError,
 			Message: "messages dropped: client too slow, re-subscribe for fresh snapshot",
-		}:
+		}}:
 		default:
 		}
+	}
+}
+
+// SendWait encodes a preview frame once and waits for a write-buffer slot.
+func (c *Conn) SendWait(ctx context.Context, msg ServerMessage) error {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return errors.New("preview frame could not be encoded; reopen the preview or report this defect")
+	}
+	if len(data) > defaults.KickstartWebPreviewFrameCapBytes {
+		return fmt.Errorf("preview frame is %d bytes, exceeding the %d-byte limit; reopen the preview or report this defect", len(data), defaults.KickstartWebPreviewFrameCapBytes)
+	}
+	ctx, cancel := context.WithTimeout(ctx, defaults.ServerWriteTimeout)
+	defer cancel()
+	select {
+	case <-c.done:
+		return errors.New("preview connection closed before delivery; reconnect and reopen the preview")
+	case <-ctx.Done():
+		return errors.New("preview delivery timed out; reconnect and reopen the preview")
+	case c.writeCh <- outboundMessage{encoded: data}:
+		return nil
 	}
 }
 
@@ -98,6 +129,7 @@ func (c *Conn) Unsubscribe(topics []ChannelTopic) {
 // ReadPump reads messages from the WebSocket and dispatches to the hub.
 func (c *Conn) ReadPump(ctx context.Context) {
 	defer func() {
+		c.close()
 		// Non-blocking unregister avoids a goroutine leak if the hub has already exited.
 		select {
 		case c.hub.unregisterCh <- c:
@@ -128,13 +160,25 @@ func (c *Conn) ReadPump(ctx context.Context) {
 
 		switch msg.Type {
 		case MsgSubscribe:
-			c.hub.subscribeCh <- subscribeMsg{conn: c, subs: msg.Channels}
+			applied := make(chan struct{})
+			select {
+			case c.hub.subscribeCh <- subscribeMsg{conn: c, subs: msg.Channels, applied: applied}:
+			case <-ctx.Done():
+				return
+			}
+			select {
+			case <-applied:
+			case <-ctx.Done():
+				return
+			}
 		case MsgUnsubscribe:
 			topics := make([]ChannelTopic, 0, len(msg.Channels))
 			for _, sub := range msg.Channels {
 				topics = append(topics, sub.Topic)
 			}
 			c.hub.unsubscribeCh <- unsubscribeMsg{conn: c, topics: topics}
+		case schema.MsgKickstartPreview:
+			c.hub.previewDispatch(ctx, c, msg.Preview)
 		default:
 			c.Send(ServerMessage{
 				Type:    MsgError,
@@ -180,14 +224,18 @@ func (c *Conn) WritePump(ctx context.Context) {
 			if !ok {
 				return
 			}
-			data, err := json.Marshal(msg)
-			if err != nil {
-				log.Printf("websocket: marshal error: %v", err)
-				continue
+			data := msg.encoded
+			if data == nil {
+				var err error
+				data, err = json.Marshal(msg.message)
+				if err != nil {
+					log.Printf("websocket: marshal error: %v", err)
+					continue
+				}
 			}
 
 			writeCtx, cancel := context.WithTimeout(ctx, defaults.ServerWriteTimeout)
-			err = c.ws.Write(writeCtx, websocket.MessageText, data)
+			err := c.ws.Write(writeCtx, websocket.MessageText, data)
 			cancel()
 			if err != nil {
 				return

@@ -1,0 +1,7 @@
+requiredNames:
+  - open-sends-first-segment-unasked
+cases:
+  - name: open-sends-first-segment-unasked
+    transcript: |
+      {"type":"user","uuid":"u1","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"synthetic preview content"}}
+      {"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"synthetic response"}]}}

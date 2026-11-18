@@ -37,9 +37,9 @@ cases:
   - {name: branch-preview, row: branch, status: 200, expected: 'branch: feature/branch-marker', noStore: true}
   - {name: escaped-route-segment, row: branch, escapedRoute: true, status: 200, expected: 'branch: feature/branch-marker', noStore: true}
   - {name: head-preview, row: project, method: HEAD, status: 200, noStore: true}
-  - {name: session-preview, row: session, status: 200, expected: synthetic-transcript-marker, noStore: true, reader: success}
-  - {name: unreadable-session, row: session, status: 500, code: kickstart_preview_unreadable, expected: 'check that its transcript is readable', noStore: true, reader: fail}
-  - {name: cancelled-session, row: session, status: 500, code: kickstart_preview_unreadable, expected: 'check that its transcript is readable', noStore: true, reader: cancel}
+  - {name: session-preview, row: session, status: 200, expected: 'open this session in the local preview', noStore: true}
+  - {name: unreadable-session, row: session, status: 200, expected: 'open this session in the local preview', noStore: true}
+  - {name: cancelled-session, row: session, status: 200, expected: 'open this session in the local preview', noStore: true}
   - {name: unknown-row, row: missing, status: 404, code: kickstart_preview_row_not_found, expected: 'Reload the tree', noStore: true}
   - {name: unknown-setup-session, row: session, unknownSetup: true, status: 404, code: kickstart_session_not_found, expected: 'Open a session again', noStore: true}
   - {name: foreign-host-preview, row: branch, host: foreign.example, status: 403, code: request_host_not_local, expected: 'peasant web start', noStore: true}
