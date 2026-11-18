@@ -2310,11 +2310,9 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 		// both), on the same serialized write lane as every other store write.
 		// A refusal or a stale proof falls through to the ordinary parse path;
 		// the store keeps the old generation active until that parse commits.
-		proofAttempted := false
 		forceParse := false
 		_, canProve := p.metricsStore.(ManagedGenerationUnchangedProver)
 		if input.managedGenerationRefresh && canProve && input.metadata != nil && input.expected != nil && p.adapterSupportsStoredExtraction(input.session.Harness) {
-			proofAttempted = true
 			proofStart := time.Now()
 			proof, proofErr := p.proveManagedGenerationUnchanged(ctx, input)
 			proven := 0
@@ -2335,9 +2333,8 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 				}
 				slog.Warn(logPrefix+": unchanged generation settlement refused", "session_id", im.session.SessionID, "error", settleErr)
 			}
-			forceParse = proofErr != nil || proof.Proven || proof.Mismatch != UnchangedNotProvenIndexer
 		}
-		if input.managedGenerationRefresh && !proofAttempted && p.managedGenerationRefreshApplies(input) {
+		if input.managedGenerationRefresh && p.managedGenerationRefreshApplies(input) {
 			outcome, duration, refreshErr := p.refreshManagedGeneration(ctx, input, writeLane)
 			if refreshErr == nil {
 				reason := indexManagedRefreshReason + " (" + string(outcome.Disposition) + ")"
@@ -2354,8 +2351,9 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 				"session_id", im.session.SessionID,
 				"error", refreshErr,
 				"fallback", "transcript parse")
+			forceParse = true
 		}
-		if !proofAttempted && p.capturedInputBindsWithoutReparse(input) {
+		if !forceParse && p.capturedInputBindsWithoutReparse(input) {
 			// The rule "bind without a re-parse" holds: the flush binds the
 			// stored index to the refreshed metadata capture in one
 			// constant-size write.
