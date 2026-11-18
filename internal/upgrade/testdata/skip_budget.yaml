@@ -1,7 +1,18 @@
-# No StepAction in this revision declares a skip. Measurements are intentionally
-# absent until the skip planner and its profile stages are available.
-requiredNames: []
-budgets: []
+# Measurements remain unmeasured until the corpus runs on an idle machine.
+requiredNames:
+  - proven-settle
+  - copy-refresh
+  - stored-index
+budgets:
+  - name: proven-settle
+    lane: stored-metadata
+    disposition: proven
+  - name: copy-refresh
+    lane: stored-metadata
+    disposition: copy
+  - name: stored-index
+    lane: stored-index
+    disposition: index
 cases:
   - name: winning-ratio
     proof: 1
@@ -18,3 +29,9 @@ cases:
     settle: 1
     avoided: 2
     valid: false
+missingProvenance:
+  - head
+  - base
+  - command
+  - recorded-date
+  - samples

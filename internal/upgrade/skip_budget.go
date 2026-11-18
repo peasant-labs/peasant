@@ -4,7 +4,42 @@ import (
 	"fmt"
 	"math"
 	"strings"
+
+	"github.com/peasant-labs/peasant/internal/ingest"
 )
+
+// SkipDisposition distinguishes the outcomes of the stored-metadata lane.
+// The refresh decision itself does not distinguish proof settlement from copy.
+type SkipDisposition string
+
+const (
+	SkipProven SkipDisposition = "proven"
+	SkipCopy   SkipDisposition = "copy"
+	SkipIndex  SkipDisposition = "index"
+)
+
+// SkipPath identifies both the decision lane and, where necessary, its outcome.
+type SkipPath struct {
+	Lane        ingest.RefreshLane `yaml:"lane" json:"lane"`
+	Disposition SkipDisposition    `yaml:"disposition" json:"disposition"`
+}
+
+// PlannedSkipPaths enumerates skip outcomes from the decision lane vocabulary.
+func PlannedSkipPaths() ([]SkipPath, error) {
+	var paths []SkipPath
+	for _, lane := range ingest.AllRefreshLanes {
+		switch lane {
+		case ingest.RefreshLaneNone, ingest.RefreshLaneNative:
+		case ingest.RefreshLaneStoredMetadata:
+			paths = append(paths, SkipPath{lane, SkipProven}, SkipPath{lane, SkipCopy})
+		case ingest.RefreshLaneStoredIndex:
+			paths = append(paths, SkipPath{lane, SkipIndex})
+		default:
+			return nil, fmt.Errorf("skip budget: refresh lane %q has no budget classification; classify it before shipping", lane)
+		}
+	}
+	return paths, nil
+}
 
 // BudgetProvenance identifies the measurement from which a skip budget came.
 type BudgetProvenance struct {
@@ -17,7 +52,7 @@ type BudgetProvenance struct {
 
 // SkipBudget records median costs in the same unit, or nil until measured.
 type SkipBudget struct {
-	Action     StepAction       `yaml:"action" json:"action"`
+	Path       SkipPath         `yaml:",inline" json:"path"`
 	Proof      *float64         `yaml:"proof" json:"proof"`
 	Settle     *float64         `yaml:"settle" json:"settle"`
 	Avoided    *float64         `yaml:"avoided" json:"avoided"`
@@ -31,19 +66,22 @@ func (b SkipBudget) ValidateMeasured() error {
 	if strings.TrimSpace(p.Head) == "" || strings.TrimSpace(p.Base) == "" ||
 		strings.TrimSpace(p.Command) == "" || strings.TrimSpace(p.Date) == "" ||
 		p.Samples < 1 {
-		return fmt.Errorf("skip budget %q: incomplete measurement provenance; record head, base, command, date and sample count", b.Action)
+		return fmt.Errorf("skip budget %v: incomplete measurement provenance; record head, base, command, date and sample count", b.Path)
 	}
 	if b.Proof == nil || b.Settle == nil || b.Avoided == nil {
-		return fmt.Errorf("skip budget %q: costs are unmeasured; measure proof, settle and avoided work before accepting the budget", b.Action)
+		return fmt.Errorf("skip budget %v: costs are unmeasured; measure proof, settle and avoided work before accepting the budget", b.Path)
 	}
 	proof, settle, avoided := *b.Proof, *b.Settle, *b.Avoided
-	if math.IsNaN(proof) || math.IsNaN(settle) || math.IsNaN(avoided) ||
-		math.IsInf(proof, 0) || math.IsInf(settle, 0) || math.IsInf(avoided, 0) ||
-		proof < 0 || settle < 0 || avoided <= 0 {
-		return fmt.Errorf("skip budget %q: invalid measured costs; record finite nonnegative costs and a positive avoided cost", b.Action)
+	for _, value := range []float64{proof, settle, avoided} {
+		if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+			return fmt.Errorf("skip budget %v: invalid measured costs; record finite nonnegative costs and a positive avoided cost", b.Path)
+		}
+	}
+	if avoided == 0 {
+		return fmt.Errorf("skip budget %v: invalid measured costs; record finite nonnegative costs and a positive avoided cost", b.Path)
 	}
 	if (proof+settle)/avoided >= 1 {
-		return fmt.Errorf("skip budget %q: proof and settlement cost at least as much as avoided work; do not ship this skip", b.Action)
+		return fmt.Errorf("skip budget %v: proof and settlement cost at least as much as avoided work; do not ship this skip", b.Path)
 	}
 	return nil
 }
