@@ -552,6 +552,12 @@ func TestKickstartPreviewStream(t *testing.T) {
 				if releases.Load() != 1 {
 					t.Fatalf("capture released %d times, want once", releases.Load())
 				}
+				hub.previews.mu.Lock()
+				current := hub.previews.captures[held.conn]
+				hub.previews.mu.Unlock()
+				if current == held {
+					t.Fatal("closed capture still occupies its registry slot")
+				}
 			default:
 				t.Fatalf("unknown fixture operation %q", tc.Operation)
 			}
