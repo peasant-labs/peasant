@@ -23,6 +23,10 @@ aggregate totals independently. A run that is cancelled or times out before
 AUDIT stores its run row, marked in `error_message`, and the stage rows it
 measured; it stores no outcome rows. A killed process stores nothing.
 
+`peasant harvest --json` includes `census_stored`, true only when this
+invocation stored both the outcome rows and the corresponding index log.
+False means the census is unavailable, not that it contains zero sessions.
+
 Use read-only SQLite queries against the local database to inspect retained
 details. For example, with a database path supplied in `$DB`:
 

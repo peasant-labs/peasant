@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	_ "embed"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -39,6 +40,18 @@ func TestHarvestAndKickstartCensusSummary(t *testing.T) {
 				result.Census = &ingest.RefreshCensus{Rows: []ingest.RefreshCensusRow{{Reason: ingest.OutcomeReasonRefreshNew, Lane: ingest.RefreshLaneNative, Sessions: 1, SourceBytes: 1024}}}
 			}
 			var output bytes.Buffer
+			if err := printJSON(&output, result); err != nil {
+				t.Fatal(err)
+			}
+			var document map[string]json.RawMessage
+			if err := json.Unmarshal(output.Bytes(), &document); err != nil {
+				t.Fatal(err)
+			}
+			var stored bool
+			if err := json.Unmarshal(document["census_stored"], &stored); err != nil || stored != row.Stored {
+				t.Fatalf("census_stored = %s, want %t (error %v)", document["census_stored"], row.Stored, err)
+			}
+			output.Reset()
 			printSummary(&output, result, false, false, "", "", nil, 0)
 			for _, want := range row.Contains {
 				if !strings.Contains(output.String(), want) {

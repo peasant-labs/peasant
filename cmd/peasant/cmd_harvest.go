@@ -1411,6 +1411,7 @@ func parseSinceDuration(s string) (time.Time, error) {
 // SessionResult.Error (type error) does not serialize; we convert it to a string.
 type jsonPipelineResult struct {
 	Summary              ingest.PipelineSummary       `json:"summary"`
+	CensusStored         bool                         `json:"census_stored"`
 	Sessions             []jsonSessionResult          `json:"sessions"`
 	Duration             string                       `json:"duration"`
 	IndexLog             []ingest.IndexLogEntry       `json:"indexLog,omitempty"`
@@ -1435,6 +1436,7 @@ type jsonSessionResult struct {
 func printJSON(w io.Writer, result *ingest.PipelineResult) error {
 	out := jsonPipelineResult{
 		Summary:              result.Summary,
+		CensusStored:         result.CensusStored,
 		Duration:             result.Duration.Round(100 * time.Millisecond).String(),
 		IndexLog:             result.IndexLog,
 		IndexCoverage:        result.IndexCoverage,
