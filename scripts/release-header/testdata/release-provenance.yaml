@@ -1,0 +1,108 @@
+provenance_candidate: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+provenance_config:
+  automation_author: app/peasant-labs-releaser
+  bot_branches:
+    release: automation/release
+provenance_examples:
+  bot: &provenance-bot
+    merged_at: "2026-01-01T00:00:00Z"
+    merge_commit_sha: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    head: {ref: automation/release}
+    user: {login: "peasant-labs-releaser[bot]"}
+  association_error: &provenance-association-error '::error::release candidate aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa must be the merge commit of exactly one merged release PR from automation/release by peasant-labs-releaser[bot]'
+provenance_required:
+  - merged-bot-release
+  - app-form-is-not-api-login
+  - open-pr-ignored
+  - no-associated-pr
+  - unmerged-pr
+  - wrong-branch
+  - human-author
+  - wrong-merge-commit
+  - multiple-merged-prs
+  - multiple-prs-across-pages
+  - malformed-response
+  - empty-api-output
+  - failed-api
+  - invalid-candidate
+  - wrong-config-author
+provenance_cases:
+  - name: merged-bot-release
+    pages: [[*provenance-bot]]
+    expected_exit: 0
+  - name: app-form-is-not-api-login
+    pages:
+      - - <<: *provenance-bot
+          user: {login: app/peasant-labs-releaser}
+    expected_exit: 1
+    error_contains: *provenance-association-error
+  - name: open-pr-ignored
+    pages:
+      - - *provenance-bot
+        - <<: *provenance-bot
+          merged_at: null
+    expected_exit: 0
+  - name: no-associated-pr
+    pages: [[]]
+    expected_exit: 1
+    error_contains: *provenance-association-error
+  - name: unmerged-pr
+    pages:
+      - - <<: *provenance-bot
+          merged_at: null
+    expected_exit: 1
+    error_contains: *provenance-association-error
+  - name: wrong-branch
+    pages:
+      - - <<: *provenance-bot
+          head: {ref: human/release}
+    expected_exit: 1
+    error_contains: *provenance-association-error
+  - name: human-author
+    pages:
+      - - <<: *provenance-bot
+          user: {login: human}
+          title: "release[patch]: update the changelog"
+    expected_exit: 1
+    error_contains: *provenance-association-error
+  - name: wrong-merge-commit
+    pages:
+      - - <<: *provenance-bot
+          merge_commit_sha: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    expected_exit: 1
+    error_contains: *provenance-association-error
+  - name: multiple-merged-prs
+    pages: [[*provenance-bot, *provenance-bot]]
+    expected_exit: 1
+    error_contains: *provenance-association-error
+  - name: multiple-prs-across-pages
+    pages:
+      - [*provenance-bot]
+      - - <<: *provenance-bot
+          user: {login: human}
+    expected_exit: 1
+    error_contains: *provenance-association-error
+  - name: malformed-response
+    raw_output: "not-json"
+    expected_exit: 1
+    error_contains: *provenance-association-error
+  - name: empty-api-output
+    expected_exit: 1
+    error_contains: *provenance-association-error
+  - name: failed-api
+    pages: [[*provenance-bot]]
+    api_exit: 1
+    expected_exit: 1
+    error_contains: '::error::could not read pull requests associated with release candidate aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  - name: invalid-candidate
+    candidate: not-a-sha
+    pages: [[*provenance-bot]]
+    expected_exit: 1
+    error_contains: '::error::release candidate is not a full commit SHA'
+  - name: wrong-config-author
+    config:
+      automation_author: app/not-the-releaser
+      bot_branches: {release: automation/release}
+    pages: [[*provenance-bot]]
+    expected_exit: 1
+    error_contains: '::error::release configuration does not name the releaser App'
