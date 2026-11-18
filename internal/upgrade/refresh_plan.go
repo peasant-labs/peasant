@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store"
@@ -68,15 +69,20 @@ func PlanRefresh(ctx context.Context, path string) (RefreshPlan, error) {
 			plan.Unknown = append(plan.Unknown, RefreshUnknown{row.SessionID, "indexed_input_hash"})
 		}
 		var effects []store.StampEffect
+		// Historical identifiers are intentionally rejected by NewHarness.
+		// Preserve them (and unknown values) until the rename step is applied.
+		historicalHarness := defaults.Harness(row.Harness)
 		for _, step := range schema.Steps {
 			switch step.StampEffect {
 			case store.StampEffectHarnessRename:
-				switch row.Harness {
-				case "claude":
-					row.Harness = string(ingest.HarnessClaudeCode)
+				switch historicalHarness {
+				case defaults.LegacyHarnessClaude:
+					historicalHarness = defaults.HarnessClaudeCode
+					row.Harness = string(historicalHarness)
 					effects = append(effects, step.StampEffect)
-				case "gemini":
-					row.Harness = "gemini-cli"
+				case defaults.LegacyHarnessGemini:
+					historicalHarness = defaults.HarnessGeminiCLI
+					row.Harness = string(historicalHarness)
 					effects = append(effects, step.StampEffect)
 				}
 			case store.StampEffectIndexInvalidated:

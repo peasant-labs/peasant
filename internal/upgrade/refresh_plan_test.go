@@ -134,3 +134,57 @@ func TestPlanRefreshDelegates(t *testing.T) {
 		}
 	}
 }
+
+//go:embed testdata/refresh_harness_rename.yaml
+var refreshHarnessRenameCases []byte
+
+func TestPlanRefreshHistoricalHarnessRename(t *testing.T) {
+	var fixture struct {
+		Cases []struct {
+			Name, Input, Output string
+			Renamed, Unknown    bool
+		} `yaml:"cases"`
+		RequiredNames []string `yaml:"requiredNames"`
+	}
+	if err := yaml.Unmarshal(refreshHarnessRenameCases, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(fixture.Cases))
+	for _, c := range fixture.Cases {
+		names = append(names, c.Name)
+		t.Run(c.Name, func(t *testing.T) {
+			path := oldRefreshStore(t)
+			conn, err := sqlite.OpenConn(path, sqlite.OpenReadWrite)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = sqlitex.ExecuteTransient(conn, "UPDATE sessions SET model_harness = ?", &sqlitex.ExecOptions{Args: []any{c.Input}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := conn.Close(); err != nil {
+				t.Fatal(err)
+			}
+			plan, err := PlanRefresh(t.Context(), path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(plan.Sessions) != 1 {
+				t.Fatalf("sessions = %+v", plan.Sessions)
+			}
+			session := plan.Sessions[0]
+			if session.Harness != c.Output || slices.Contains(session.Effects, store.StampEffectHarnessRename) != c.Renamed {
+				t.Fatalf("session = %+v", session)
+			}
+			unknown := slices.Contains(plan.Unknown, RefreshUnknown{"old-session", "harness"})
+			if unknown != c.Unknown {
+				t.Fatalf("unknown evidence = %+v", plan.Unknown)
+			}
+		})
+	}
+	for _, name := range fixture.RequiredNames {
+		if !slices.Contains(names, name) {
+			t.Errorf("missing fixture %s", name)
+		}
+	}
+}
