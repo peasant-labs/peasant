@@ -76,8 +76,10 @@ func TestRefreshSkipBaselineChangesTheExecutedPath(t *testing.T) {
 				var transcript []byte
 				result := runManagedRefreshPipelineConfigured(t, counted, empty, output, &parses, &builds, &transcript, &ingest.OSFileSystem{}, &ingest.IndexProfiler{}, ingest.DefaultAdapterRegistry,
 					func(cfg *ingest.PipelineConfig) { cfg.DisableRefreshSkips = mode.disabled })
-				if result.Summary.Errors != 0 || result.Census == nil || len(result.Census.Rows) != 1 ||
-					result.Census.Rows[0].Lane != ingest.RefreshLaneStoredMetadata || result.Census.Rows[0].Reason != ingest.OutcomeReasonRefreshAdapterBehind {
+				if result.Summary.Errors != 0 || result.Census == nil || len(result.Census.Rows) != 1 {
+					t.Fatalf("summary %+v census %+v", result.Summary, result.Census)
+				}
+				if row := result.Census.Rows[0]; row.Lane != ingest.RefreshLaneStoredMetadata || row.Reason != ingest.OutcomeReasonRefreshAdapterBehind {
 					t.Fatalf("decision changed: summary %+v census %+v", result.Summary, result.Census)
 				}
 				// The managed-format builder is the parse: it reads the stored

@@ -130,7 +130,11 @@ func TestPlanRefreshUndeclaredProducer(t *testing.T) {
 			}
 			if !c.Want.Decided {
 				// An unknown harness is in no lane and forces no step.
-				if session.FullStep != nil || plan.Estimate.Undecided != 1 || len(plan.Estimate.ByLane) != 0 || len(plan.Estimate.FullStep) != 0 {
+				planned := session.FullStep != nil ||
+					plan.Estimate.Undecided != 1 ||
+					len(plan.Estimate.ByLane) != 0 ||
+					len(plan.Estimate.FullStep) != 0
+				if planned {
 					t.Fatalf("unknown harness was planned: %+v", plan)
 				}
 				return
@@ -143,7 +147,11 @@ func TestPlanRefreshUndeclaredProducer(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if session.PlannedLane() != lane || session.Decision.Reason != reason || plan.Estimate.ByLane[lane] != 1 || plan.Estimate.Undecided != 0 {
+			mismatch := session.PlannedLane() != lane ||
+				session.Decision.Reason != reason ||
+				plan.Estimate.ByLane[lane] != 1 ||
+				plan.Estimate.Undecided != 0
+			if mismatch {
 				t.Fatalf("planned %s/%s, want %s/%s: %+v", session.PlannedLane(), session.Decision.Reason, lane, reason, plan.Estimate)
 			}
 			if c.Want.FullStep == "" {
@@ -156,7 +164,13 @@ func TestPlanRefreshUndeclaredProducer(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if session.FullStep == nil || session.FullStep.String() != c.Want.FullStep || session.FullStep.Skipped != skipped || session.Decision.Lane != skipped {
+			if session.FullStep == nil {
+				t.Fatalf("no full step, want %s skipping %s", c.Want.FullStep, skipped)
+			}
+			named := session.FullStep.String() == c.Want.FullStep &&
+				session.FullStep.Skipped == skipped &&
+				session.Decision.Lane == skipped
+			if !named {
 				t.Fatalf("full step = %+v, want %s skipping %s", session.FullStep, c.Want.FullStep, skipped)
 			}
 			if plan.Estimate.FullStep[*session.FullStep] != 1 {
