@@ -2324,6 +2324,37 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 			if proofErr != nil {
 				forceParse = true
 			}
+			validationEligible := declared != strictIndexFormat &&
+				input.expected.IndexVersion != nil && *input.expected.IndexVersion == declared &&
+				input.expected.ActiveGenerationID != "" && input.metadata.ContentHash != ""
+			if proofErr == nil && !proof.Proven && validationEligible {
+				if validator, ok := p.metricsStore.(ManagedGenerationValidator); ok {
+					request, requestErr := p.unchangedProofRequest(input)
+					if requestErr == nil {
+						start := time.Now()
+						validation, validationErr := validator.ValidateManagedGenerationUnchanged(ctx, ManagedGenerationValidationRequest{
+							SessionID: request.SessionID, GenerationID: request.Expected.ActiveGenerationID,
+							Metadata: request.Metadata, InputDigest: request.InputDigest,
+							IndexerTarget: request.IndexerTarget, FormatTarget: request.FormatTarget, Expected: request.Expected,
+						})
+						unsupported := 0
+						if validationErr == nil && validation.Outcome == ValidationUnsupported {
+							unsupported = 1
+						}
+						p.config.IndexProfiler.RecordStage(StageRefreshValidate, time.Since(start), unsupported, 1)
+						slog.Info(logPrefix+": refresh validation", "session_id", im.session.SessionID, "outcome", validation.Outcome, "mismatch", validation.Mismatch, "detail", validation.Detail, "error", validationErr)
+						if validationErr == nil && validation.Outcome == ValidationProven && validation.Mismatch == UnchangedMismatchNone {
+							proof.Proven = true
+						} else {
+							forceParse = true
+						}
+					} else {
+						forceParse = true
+					}
+				} else {
+					forceParse = true
+				}
+			}
 			if proofErr == nil && !proof.Proven && p.adapterDeclaresOutputPreserving(input.session.Harness) {
 				p.reportDiagnostic(DiagnosticEntry{
 					ErrorType:   "output_preserving_proof_failed",

@@ -504,6 +504,7 @@ type SessionEntryWrite struct {
 type SessionIndexState struct {
 	PublicationCaptureRevision int64
 	SessionID                  SessionID
+	ActiveGenerationID         string
 	Harness                    Harness
 	ArtifactHash               *string
 	IndexerVersion             int
