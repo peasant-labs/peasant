@@ -1,10 +1,12 @@
 package ingest_test
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -37,6 +39,155 @@ type countedManagedRefreshStore struct {
 	*store.Store
 	calls       atomic.Int64
 	forgeCounts bool
+}
+
+type proofCountingRefreshStore struct {
+	*countedManagedRefreshStore
+	proofs  atomic.Int64
+	settles atomic.Int64
+	proof   ingest.UnchangedProof
+}
+
+func (s *proofCountingRefreshStore) ProveCapturedGenerationUnchanged(ctx context.Context, request ingest.ManagedGenerationUnchangedProof) (ingest.UnchangedProof, error) {
+	s.proofs.Add(1)
+	proof, err := s.Store.ProveCapturedGenerationUnchanged(ctx, request)
+	s.proof = proof
+	return proof, err
+}
+
+func (s *proofCountingRefreshStore) SettleCapturedGenerationUnchanged(ctx context.Context, request ingest.ManagedGenerationUnchangedProof) (ingest.ManagedGenerationRefreshOutcome, error) {
+	s.settles.Add(1)
+	return s.Store.SettleCapturedGenerationUnchanged(ctx, request)
+}
+
+type nativeCountingRefreshFS struct {
+	*ingest.OSFileSystem
+	source string
+	reads  atomic.Int64
+}
+
+func (f *nativeCountingRefreshFS) count(path string) {
+	if strings.HasPrefix(path, f.source+string(os.PathSeparator)) {
+		f.reads.Add(1)
+	}
+}
+
+func (f *nativeCountingRefreshFS) ReadFile(path string) ([]byte, error) {
+	f.count(path)
+	return f.OSFileSystem.ReadFile(path)
+}
+
+func (f *nativeCountingRefreshFS) Open(path string) (io.ReadCloser, error) {
+	f.count(path)
+	return f.OSFileSystem.Open(path)
+}
+
+func (f *nativeCountingRefreshFS) ReadFileHeader(path string, limit int) ([]byte, error) {
+	f.count(path)
+	return f.OSFileSystem.ReadFileHeader(path, limit)
+}
+
+func TestManagedGenerationUnchangedProofPipelineRoutes(t *testing.T) {
+	setup := func(t *testing.T) (string, string, string, ingest.SessionID, *store.Store, []byte) {
+		t.Helper()
+		root := t.TempDir()
+		source, output := filepath.Join(root, "source"), filepath.Join(root, "managed")
+		mustMkdir(t, source)
+		id := writeManagedRefreshPipelineCorpus(t, source, 1, 8)[0]
+		db := openManagedRefreshPipelineStore(t, filepath.Join(root, "db"), output)
+		t.Cleanup(func() { _ = db.Close() })
+		initial := runManagedRefreshPipeline(t, db, source, output)
+		if initial.Summary.Errors != 0 || initial.Summary.Indexed != 1 {
+			t.Fatalf("initial import: %+v", initial.Summary)
+		}
+		data, err := os.ReadFile(filepath.Join(source, "-workspace", string(id)+".jsonl"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		managedRefreshPipelineDowngrade(t, db, ingest.GenerationTargets(ingest.HarvesterVersionRegistry)[ingest.HarnessClaudeCode].AdapterVersion-1)
+		empty := filepath.Join(root, "empty")
+		mustMkdir(t, empty)
+		return source, output, empty, id, db, data
+	}
+	run := func(t *testing.T, db *store.Store, source, output, empty string) (*proofCountingRefreshStore, *nativeCountingRefreshFS, *ingest.IndexProfiler, *ingest.PipelineResult, *atomic.Int64, *atomic.Int64, *[]byte) {
+		t.Helper()
+		counted := &proofCountingRefreshStore{countedManagedRefreshStore: &countedManagedRefreshStore{Store: db}}
+		fs := &nativeCountingRefreshFS{OSFileSystem: &ingest.OSFileSystem{}, source: source}
+		profiler := &ingest.IndexProfiler{}
+		parses, builds := &atomic.Int64{}, &atomic.Int64{}
+		transcript := new([]byte)
+		result := runManagedRefreshPipelineInstrumented(t, counted, empty, output, parses, builds, transcript, fs, profiler)
+		if result.Summary.Errors != 0 || result.Census == nil || len(result.Census.Rows) != 1 || result.Census.Rows[0].Lane != ingest.RefreshLaneStoredMetadata {
+			t.Fatalf("refresh run summary %+v, census %+v", result.Summary, result.Census)
+		}
+		return counted, fs, profiler, result, parses, builds, transcript
+	}
+	assertProfile := func(t *testing.T, p *ingest.IndexProfiler, proven int) {
+		t.Helper()
+		for _, stage := range p.StageTotals() {
+			if stage.Stage == ingest.StageRefreshProof {
+				if stage.Total != 1 || stage.Done != proven {
+					t.Fatalf("proof profile = %+v, want one attempt and %d proven", stage, proven)
+				}
+				return
+			}
+		}
+		t.Fatal("missing proof profile stage")
+	}
+	t.Run("proven", func(t *testing.T) {
+		source, output, empty, id, db, _ := setup(t)
+		counted, _, profiler, _, parses, builds, _ := run(t, db, source, output, empty)
+		if counted.proofs.Load() != 1 || !counted.proof.Proven || counted.settles.Load() != 1 || counted.calls.Load() != 0 || parses.Load() != 0 || builds.Load() != 0 {
+			t.Fatalf("proof %+v attempts %d settles %d copies %d parses %d builds %d", counted.proof, counted.proofs.Load(), counted.settles.Load(), counted.calls.Load(), parses.Load(), builds.Load())
+		}
+		assertProfile(t, profiler, 1)
+		next := runManagedRefreshPipelineInstrumented(t, counted, empty, output, parses, builds, new([]byte), &ingest.OSFileSystem{}, &ingest.IndexProfiler{})
+		if next.Summary.Errors != 0 || next.Census == nil || next.Census.Sessions() != 0 || counted.proofs.Load() != 1 || counted.settles.Load() != 1 || counted.calls.Load() != 0 || parses.Load() != 0 || builds.Load() != 0 {
+			t.Fatalf("second run did refresh work: summary %+v census %+v", next.Summary, next.Census)
+		}
+		locations, err := db.BulkLookupSessionLocations(t.Context(), []ingest.SessionID{id})
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg := makePipelineConfig(output)
+		pipeline, err := newTestPipeline(&ingest.OSFileSystem{}, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		decision := ingest.StoredDecisionForTest(pipeline, ingest.DiscoveredSession{SessionID: id, Harness: ingest.HarnessClaudeCode}, locations[id])
+		if decision.Reason != ingest.RefreshReasonNone || decision.Lane != ingest.RefreshLaneNone {
+			t.Fatalf("second decision = %+v, want none", decision)
+		}
+	})
+	t.Run("index-not-current", func(t *testing.T) {
+		source, output, empty, _, db, expected := setup(t)
+		conn, err := db.Pool().Take(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = sqlitex.Execute(conn, `UPDATE sessions SET index_version = 0`, nil)
+		db.Pool().Put(conn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		counted, fs, profiler, _, _, builds, transcript := run(t, db, source, output, empty)
+		if counted.proofs.Load() != 1 || counted.proof.Proven || counted.proof.Mismatch != ingest.UnchangedNotProvenIndexer || counted.settles.Load() != 0 || counted.calls.Load() != 0 || builds.Load() != 1 || !bytes.Equal(*transcript, expected) || fs.reads.Load() != 0 {
+			t.Fatalf("proof %+v attempts %d settles %d copies %d builds %d stored bytes match %t native reads %d", counted.proof, counted.proofs.Load(), counted.settles.Load(), counted.calls.Load(), builds.Load(), bytes.Equal(*transcript, expected), fs.reads.Load())
+		}
+		assertProfile(t, profiler, 0)
+	})
+	t.Run("metadata-context", func(t *testing.T) {
+		source, output, empty, _, db, expected := setup(t)
+		stored := ingest.GenerationTargets(ingest.HarvesterVersionRegistry)[ingest.HarnessClaudeCode].AdapterVersion - 1
+		if managedRefreshPipelineChangeMetadata(t, output, stored, managedRefreshPipelineForcedProject) != 1 {
+			t.Fatal("expected one metadata file")
+		}
+		counted, _, profiler, _, _, builds, transcript := run(t, db, source, output, empty)
+		if counted.proofs.Load() != 1 || counted.proof.Proven || counted.proof.Mismatch != ingest.UnchangedNotProvenMetadata || counted.settles.Load() != 0 || counted.calls.Load() != 0 || builds.Load() != 1 || !bytes.Equal(*transcript, expected) {
+			t.Fatalf("proof %+v attempts %d settles %d copies %d builds %d stored bytes match %t", counted.proof, counted.proofs.Load(), counted.settles.Load(), counted.calls.Load(), builds.Load(), bytes.Equal(*transcript, expected))
+		}
+		assertProfile(t, profiler, 0)
+	})
 }
 
 func (s *countedManagedRefreshStore) RefreshManagedGenerationWithoutParse(ctx context.Context, request ingest.ManagedGenerationRefreshRequest) (ingest.ManagedGenerationRefreshOutcome, error) {
@@ -344,11 +495,18 @@ func runManagedRefreshPipelineWithStore(t *testing.T, db managedRefreshPipelineS
 
 type countingManagedRefreshIndexer struct {
 	*ingest.ClaudeIndexer
-	calls *atomic.Int64
+	calls      *atomic.Int64
+	builds     *atomic.Int64
+	transcript *[]byte
 }
 
 func (i countingManagedRefreshIndexer) BuildGeneration(ctx context.Context, input ingest.GenerationBuildInput) (ingest.GenerationCandidate, error) {
-	i.calls.Add(1)
+	if i.builds != nil {
+		i.builds.Add(1)
+		*i.transcript = append([]byte(nil), input.CapturedTranscript...)
+	} else {
+		i.calls.Add(1)
+	}
 	return i.ClaudeIndexer.BuildGeneration(ctx, input)
 }
 
@@ -383,18 +541,24 @@ func (i countingManagedRefreshIndexer) IndexTranscriptBytesForCapture(ctx contex
 }
 
 func runManagedRefreshPipelineCounting(t *testing.T, db managedRefreshPipelineStore, source, output string, calls *atomic.Int64) *ingest.PipelineResult {
+	return runManagedRefreshPipelineInstrumented(t, db, source, output, calls, nil, nil, &ingest.OSFileSystem{}, nil)
+}
+
+func runManagedRefreshPipelineInstrumented(t *testing.T, db managedRefreshPipelineStore, source, output string, calls, builds *atomic.Int64, transcript *[]byte, fs ingest.FileSystem, profiler *ingest.IndexProfiler) *ingest.PipelineResult {
 	t.Helper()
 	cfg := makePipelineConfig(output)
 	cfg.Sources = map[ingest.Harness]ingest.SourceConfig{
 		ingest.HarnessClaudeCode: {Paths: []ingest.ResolvedPath{ingest.ResolvedPath(source)}, Enabled: true},
 	}
 	cfg.StalenessThreshold = 0
-	fs := &ingest.OSFileSystem{}
+	cfg.IndexProfiler = profiler
 	indexers := ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})
 	if calls != nil {
 		indexers[ingest.HarnessClaudeCode] = countingManagedRefreshIndexer{
 			ClaudeIndexer: ingest.NewClaudeIndexer(fs, ingest.WithClaudeFullDepth(true)),
 			calls:         calls,
+			builds:        builds,
+			transcript:    transcript,
 		}
 	}
 	pipeline, err := newTestPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg,
