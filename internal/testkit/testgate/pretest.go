@@ -199,8 +199,10 @@ func recipeContains(recipe []string, fragment string) bool {
 // Each step's Fragment must appear in its declared Target's recipe, and the
 // steps must appear, fragment by fragment, in the same order the `check` target
 // executes them: its direct prerequisites in order, then its own recipe. A
-// dropped, renamed, or reordered recipe line therefore fails loudly instead of
-// the fixture measuring a step the Makefile no longer runs. The separate
+// standalone make target can share a recipe fragment with check itself; both
+// recipes must retain the fragment. A dropped, renamed, or reordered recipe
+// line therefore fails loudly instead of the fixture measuring a step the
+// Makefile no longer runs. The separate
 // workflow check is pinned to an exact recipe line in its own target.
 func validatePreTestSources(file PreTestFixture, makefile []byte) error {
 	targets := parseMakefileTargets(makefile)
@@ -261,7 +263,9 @@ func validatePreTestSources(file PreTestFixture, makefile []byte) error {
 		}
 		found := -1
 		for i := pos + 1; i < len(exec); i++ {
-			if exec[i].target == cmd.Target && strings.Contains(exec[i].line, cmd.Fragment) {
+			sameTarget := exec[i].target == cmd.Target
+			standaloneMake := exec[i].target == checkTarget && cmd.Program == "make" && len(cmd.Args) == 1 && cmd.Args[0] == cmd.Target
+			if (sameTarget || standaloneMake) && strings.Contains(exec[i].line, cmd.Fragment) {
 				found = i
 				break
 			}
