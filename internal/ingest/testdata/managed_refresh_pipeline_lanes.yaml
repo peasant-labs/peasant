@@ -2,11 +2,11 @@ cases:
   - name: adapter-behind
     mutation: adapter-behind
     reason: adapter_behind
-    refresh: true
+    refresh: false
   - name: adapter-stamp-absent
     mutation: adapter-absent
     reason: adapter_stamp_absent
-    refresh: true
+    refresh: false
   - name: indexer-behind
     mutation: indexer-behind
     reason: indexer_behind

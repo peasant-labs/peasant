@@ -2315,7 +2315,13 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 		_, canProve := p.metricsStore.(ManagedGenerationUnchangedProver)
 		if input.managedGenerationRefresh && canProve && input.metadata != nil && input.expected != nil && p.adapterSupportsStoredExtraction(input.session.Harness) {
 			proofAttempted = true
+			proofStart := time.Now()
 			proof, proofErr := p.proveManagedGenerationUnchanged(ctx, input)
+			proven := 0
+			if proofErr == nil && proof.Proven {
+				proven = 1
+			}
+			p.config.IndexProfiler.RecordStage(StageRefreshProof, time.Since(proofStart), proven, 1)
 			slog.Info(logPrefix+": refresh proof", "session_id", im.session.SessionID, "proven", proof.Proven, "mismatch", proof.Mismatch, "error", proofErr)
 			if proofErr == nil && proof.Proven {
 				outcome, duration, settleErr := p.settleManagedGenerationUnchanged(ctx, input, writeLane)
