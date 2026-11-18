@@ -221,7 +221,7 @@ func (r *previewRegistry) start(p *webPreview, listings []onboarding.SessionList
 	}
 	opened := schema.LocalKickstartPreviewEvent{Kind: schema.LocalKickstartPreviewOpened, SessionID: p.sessionID, RequestID: p.requestID, CaptureID: p.id, Header: header, Directory: p.directory(false), Continuation: schema.LocalKickstartPreviewContinuationMore}
 	if err := r.send(p, opened); err != nil {
-		r.removeIf(p, schema.LocalKickstartPreviewSlowClient, true)
+		r.sendFailure(p, err)
 		return
 	}
 	r.advance(p)
@@ -281,9 +281,17 @@ func (r *previewRegistry) advance(p *webPreview) {
 	}
 	r.mu.Unlock()
 	if err := r.send(p, event); err != nil {
-		r.removeIf(p, schema.LocalKickstartPreviewSlowClient, true)
+		r.sendFailure(p, err)
 		return
 	}
+}
+
+func (r *previewRegistry) sendFailure(p *webPreview, err error) {
+	if errors.Is(err, errPreviewFrameTooLarge) {
+		r.fail(p, err)
+		return
+	}
+	r.removeIf(p, schema.LocalKickstartPreviewSlowClient, true)
 }
 
 func (p *webPreview) directory(complete bool) *schema.LocalKickstartPreviewDirectory {
@@ -346,6 +354,8 @@ func (r *previewRegistry) send(p *webPreview, event schema.LocalKickstartPreview
 func (r *previewRegistry) fail(p *webPreview, err error) {
 	reason, code, message := schema.LocalKickstartPreviewUnreadable, schema.LocalKickstartErrorPreviewUnreadable, "the preview could not be read; check that the transcript is readable and try again"
 	switch {
+	case errors.Is(err, errPreviewFrameTooLarge), errors.Is(err, sourcepreview.ErrFrameExceedsCap):
+		reason, code, message = schema.LocalKickstartPreviewUnavailable, schema.LocalKickstartErrorFailed, "the preview cannot be displayed because a frame exceeds the safe size; reopen it or report this defect"
 	case errors.Is(err, sourcepreview.ErrUnavailable):
 		reason, code, message = schema.LocalKickstartPreviewUnavailable, "", discovery.PreviewUnavailableNote
 	case errors.Is(err, sourcepreview.ErrNoTurns):

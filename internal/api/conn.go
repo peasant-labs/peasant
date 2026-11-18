@@ -31,6 +31,8 @@ type outboundMessage struct {
 	encoded []byte
 }
 
+var errPreviewFrameTooLarge = errors.New("preview frame exceeds the safe size")
+
 func newConn(ws *websocket.Conn, hub *Hub) *Conn {
 	return &Conn{
 		ws:       ws,
@@ -87,7 +89,7 @@ func (c *Conn) SendWait(ctx context.Context, msg ServerMessage) error {
 		return errors.New("preview frame could not be encoded; reopen the preview or report this defect")
 	}
 	if len(data) > defaults.KickstartWebPreviewFrameCapBytes {
-		return fmt.Errorf("preview frame is %d bytes, exceeding the %d-byte limit; reopen the preview or report this defect", len(data), defaults.KickstartWebPreviewFrameCapBytes)
+		return fmt.Errorf("%w: %d bytes exceeds the %d-byte limit; reopen the preview or report this defect", errPreviewFrameTooLarge, len(data), defaults.KickstartWebPreviewFrameCapBytes)
 	}
 	ctx, cancel := context.WithTimeout(ctx, defaults.ServerWriteTimeout)
 	defer cancel()
