@@ -1,0 +1,8 @@
+requiredNames:
+  - short yes
+  - full yes
+  - short no
+  - full no
+  - empty
+  - invalid then yes
+  - eof

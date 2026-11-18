@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -216,10 +218,26 @@ func confirmMigrate(cmd *cobra.Command) (bool, error) {
 	if !isFile || !term.IsTerminal(int(file.Fd())) {
 		return false, fmt.Errorf("non-interactive terminal: `peasant migrate` refused to prompt for consent to convert sessions in place because its standard input is not a terminal; nothing was converted; re-run with --confirm to proceed without a prompt, or run the command from an interactive shell")
 	}
-	fmt.Fprint(cmd.ErrOrStderr(), "\nWith no other writer running (stop any harvest), convert file-backed sessions in place? [y/N]: ")
-	var response string
-	fmt.Fscanln(file, &response)
-	return response == "y" || response == "Y", nil
+	return readMigrateConsent(file, cmd.ErrOrStderr())
+}
+
+func readMigrateConsent(in io.Reader, out io.Writer) (bool, error) {
+	reader := bufio.NewReader(in)
+	fmt.Fprint(out, "\nWith no other writer running (stop any harvest), convert file-backed sessions in place? [y/yes/N/no]: ")
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return false, fmt.Errorf("read migration consent: %w; nothing was converted; re-run `peasant migrate --confirm` to proceed without a prompt", err)
+		}
+		switch strings.ToLower(strings.TrimSpace(line)) {
+		case "y", "yes":
+			return true, nil
+		case "", "n", "no":
+			return false, nil
+		default:
+			fmt.Fprint(out, "Please answer y/yes or n/no: ")
+		}
+	}
 }
 
 // migrateProgressTracker derives rate and ETA from the store's progress
