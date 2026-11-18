@@ -3,6 +3,7 @@ package upgrade
 import (
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -41,6 +42,49 @@ func PlannedSkipPaths() ([]SkipPath, error) {
 	return paths, nil
 }
 
+// MeasurementCase is the closed set of synthetic corpus cases the skip-budget
+// harness runs. A budget row names the cases whose reports supply its costs.
+type MeasurementCase string
+
+const (
+	// MeasurementCaseStampOnly is an adapter bump that changes no metadata:
+	// the proof and its settle against the baseline parse.
+	MeasurementCaseStampOnly MeasurementCase = "C1"
+	// MeasurementCaseContextChange is an adapter bump that changes the
+	// project context: the copy refresh against the baseline parse.
+	MeasurementCaseContextChange MeasurementCase = "C2"
+	// MeasurementCaseIndexerBump is an indexer bump: the stored-index lane
+	// against the native capture and parse.
+	MeasurementCaseIndexerBump MeasurementCase = "C3"
+	// MeasurementCaseNewSession imports new sessions: the full step.
+	MeasurementCaseNewSession MeasurementCase = "C4"
+	// MeasurementCaseLegacyRow is the stamp-only bump on generations whose
+	// seal is absent: the not-proven rate and the parse it falls back to.
+	MeasurementCaseLegacyRow MeasurementCase = "C5"
+	// MeasurementCaseUndeclaredProducer is the stamp-only bump planned
+	// against a table in which the adapter declares no change scope: the
+	// full step the plan names.
+	MeasurementCaseUndeclaredProducer MeasurementCase = "C6"
+)
+
+// AllMeasurementCases lists every case in matrix order.
+var AllMeasurementCases = []MeasurementCase{
+	MeasurementCaseStampOnly,
+	MeasurementCaseContextChange,
+	MeasurementCaseIndexerBump,
+	MeasurementCaseNewSession,
+	MeasurementCaseLegacyRow,
+	MeasurementCaseUndeclaredProducer,
+}
+
+// NewMeasurementCase validates a raw case id at an input boundary.
+func NewMeasurementCase(raw string) (MeasurementCase, error) {
+	if c := MeasurementCase(raw); slices.Contains(AllMeasurementCases, c) {
+		return c, nil
+	}
+	return "", fmt.Errorf("skip budget: read measurement case %q: the harness defines no such case; nothing was run; use one of %q", raw, AllMeasurementCases)
+}
+
 // BudgetProvenance identifies the measurement from which a skip budget came.
 type BudgetProvenance struct {
 	Head    string `yaml:"head" json:"head"`
@@ -57,6 +101,8 @@ type SkipBudget struct {
 	Settle     *float64         `yaml:"settle" json:"settle"`
 	Avoided    *float64         `yaml:"avoided" json:"avoided"`
 	Provenance BudgetProvenance `yaml:"provenance" json:"provenance"`
+	// Cases names the measurement cases whose reports supply the costs.
+	Cases []MeasurementCase `yaml:"cases" json:"cases"`
 }
 
 // ValidateMeasured rejects incomplete evidence and skips that cost at least as

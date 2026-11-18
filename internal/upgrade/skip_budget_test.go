@@ -2,6 +2,8 @@ package upgrade
 
 import (
 	_ "embed"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -115,5 +117,51 @@ func TestStoredProfileHasAvailableStageShape(t *testing.T) {
 	// per-session write duration is in index_log, not ingest_run_stages.
 	if !proof || !index {
 		t.Fatal("stored profile must expose proof and INDEX stages")
+	}
+}
+
+// TestSkipBudgetRowsNameTheirMeasurement keeps every row traceable to the
+// harness command and the cases that measure it, and keeps an unmeasured row
+// free of numbers until a report supplies them.
+func TestSkipBudgetRowsNameTheirMeasurement(t *testing.T) {
+	var fixture struct {
+		Budgets []struct {
+			Name       string `yaml:"name"`
+			SkipBudget `yaml:",inline"`
+		} `yaml:"budgets"`
+	}
+	if err := yaml.Unmarshal(skipBudgetFixture, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range fixture.Budgets {
+		t.Run(row.Name, func(t *testing.T) {
+			command := row.Provenance.Command
+			if !strings.Contains(command, "./cmd/skip-budget") || len(row.Cases) == 0 {
+				t.Fatalf("row names no harness command or case: %+v", row.SkipBudget)
+			}
+			selected := ""
+			if fields := strings.Fields(command); slices.Contains(fields, "-case") {
+				selected = fields[slices.Index(fields, "-case")+1]
+			}
+			for _, c := range row.Cases {
+				if _, err := NewMeasurementCase(string(c)); err != nil {
+					t.Fatal(err)
+				}
+				if !slices.Contains(strings.Split(selected, ","), string(c)) {
+					t.Errorf("command %q does not run case %s", command, c)
+				}
+			}
+			measured := row.Proof != nil ||
+				row.Settle != nil ||
+				row.Avoided != nil ||
+				row.Provenance.Samples != 0
+			if measured {
+				if err := row.ValidateMeasured(); err != nil {
+					t.Fatal(err)
+				}
+			} else if row.Provenance.Head != "" || row.Provenance.Date != "" {
+				t.Fatalf("unmeasured row carries measurement provenance: %+v", row.Provenance)
+			}
+		})
 	}
 }

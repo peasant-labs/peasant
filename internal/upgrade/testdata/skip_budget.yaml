@@ -1,4 +1,7 @@
 # Measurements remain unmeasured until the corpus runs on an idle machine.
+# Each row names the harness command and the cases whose reports supply its
+# costs. Head, base, date, samples and costs stay empty until a quiet-machine
+# run at the default 240 x 1000 shape fills them from those reports.
 requiredNames:
   - proven-settle
   - copy-refresh
@@ -7,12 +10,21 @@ budgets:
   - name: proven-settle
     lane: stored-metadata
     disposition: proven
+    cases: [C1, C5]
+    provenance:
+      command: 'go run -tags skipbudget ./cmd/skip-budget -case C1,C2,C3,C5,C6 -base "$(git merge-base HEAD origin/develop)"'
   - name: copy-refresh
     lane: stored-metadata
     disposition: copy
+    cases: [C2]
+    provenance:
+      command: 'go run -tags skipbudget ./cmd/skip-budget -case C1,C2,C3,C5,C6 -base "$(git merge-base HEAD origin/develop)"'
   - name: stored-index
     lane: stored-index
     disposition: index
+    cases: [C3]
+    provenance:
+      command: 'go run -tags skipbudget ./cmd/skip-budget -case C1,C2,C3,C5,C6 -base "$(git merge-base HEAD origin/develop)"'
 cases:
   - name: winning-ratio
     proof: 1
