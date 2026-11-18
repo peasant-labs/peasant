@@ -232,6 +232,8 @@ type PipelineConfig struct {
 	// at one decision point, managedGenerationRefreshLane, which gates all
 	// three skips.
 	DisableRefreshSkips bool
+	// Validator is the optional managed-generation validator; nil skips it.
+	Validator ManagedGenerationValidator
 	// Progress receives ProgressEvents from each pipeline stage.
 	// Nil means no progress reporting.
 	Progress *ProgressState
@@ -2342,6 +2344,17 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 			slog.Info(logPrefix+": refresh proof", "session_id", im.session.SessionID, "proven", proof.Proven, "mismatch", proof.Mismatch, "error", proofErr)
 			if proofErr != nil {
 				forceParse = true
+			}
+			if proofErr == nil && !proof.Proven {
+				validation := p.validateRefresh(ctx, input)
+				switch validation.Outcome {
+				case ValidationProven:
+					proof.Proven = true
+					proof.Mismatch = UnchangedMismatchNone
+				case ValidationNotProven:
+					proof.Mismatch = validation.Mismatch
+					forceParse = true
+				}
 			}
 			if proofErr == nil && !proof.Proven && p.adapterDeclaresOutputPreserving(input.session.Harness) {
 				p.reportDiagnostic(DiagnosticEntry{
