@@ -549,7 +549,7 @@ func TestKickstartPreviewStream(t *testing.T) {
 					t.Fatal("late result did not offer a fresh read")
 				}
 			case "refuse-reopen":
-				write(ClientMessage{Type: schema.MsgKickstartPreview, Preview: &schema.LocalKickstartPreviewRequest{Op: schema.LocalKickstartPreviewOpen, RequestID: "refused", SessionID: "setup", NodeID: "row"}})
+				write(ClientMessage{Type: schema.MsgKickstartPreview, Preview: &schema.LocalKickstartPreviewRequest{Op: schema.LocalKickstartPreviewOpen, RequestID: "rejected-request", SessionID: "setup", NodeID: "row"}})
 				select {
 				case <-idReached:
 				case <-ctx.Done():
@@ -560,7 +560,7 @@ func TestKickstartPreviewStream(t *testing.T) {
 				st.mu.Unlock()
 				close(idRelease)
 				refused := read()
-				if refused.Kind != schema.LocalKickstartPreviewClosed || refused.Reason != schema.LocalKickstartPreviewRescanned || refused.RequestID != "refused" {
+				if refused.Kind != schema.LocalKickstartPreviewClosed || refused.Reason != schema.LocalKickstartPreviewRescanned || refused.RequestID != "rejected-request" {
 					t.Fatal("changed setup did not refuse the replacement")
 				}
 				write(ClientMessage{Type: schema.MsgKickstartPreview, Preview: &schema.LocalKickstartPreviewRequest{Op: schema.LocalKickstartPreviewMore, RequestID: "next", SessionID: "setup", CaptureID: state.CaptureID, After: state.Seq}})
