@@ -19,6 +19,12 @@ type RefreshReason string
 // The values are variables rather than typed constants because their spelling
 // is owned by outcome_reason.go. A switch on them is an ordinary expression
 // switch and stays exhaustive-checkable through AllRefreshReasons.
+//
+// RefreshReasonAdapterBehindNativeOnly is an adapter bump the stored lane
+// cannot serve, for one of two causes: the adapter cannot re-derive metadata
+// from the stored transcript, or it withholds the metadata-only change scope
+// (see AdapterDeclaresChangeScope). The decision's AdapterUndeclared field and
+// the dry-run full_step census name the second cause.
 var (
 	RefreshReasonNew                                     = RefreshReason(OutcomeReasonRefreshNew.Code())
 	RefreshReasonSourceChanged                           = RefreshReason(OutcomeReasonRefreshSourceChanged.Code())

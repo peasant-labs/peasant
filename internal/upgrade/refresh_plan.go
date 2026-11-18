@@ -126,6 +126,8 @@ func planRefresh(ctx context.Context, path string, declarations []ProducerDeclar
 		target := producers[d.Name]
 		if d.Kind == ProducerKindAdapter {
 			target.adapter, target.canExtract = version, d.Input == ProducerInputStoredTranscript
+			// Only adapterDeclaration builds an adapter's row, and it sets
+			// the scope from ingest.AdapterDeclaresChangeScope.
 			target.undeclared = d.ChangeScope != ChangeScopeMetadataOnly
 		} else {
 			target.indexer = version
