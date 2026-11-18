@@ -1294,28 +1294,20 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		rootEntries = append(rootEntries, e)
 	}
 
-	// Only expose a byte denominator when every source has a measurable file.
-	// Virtual sources and stored-copy refreshes cannot be estimated from the
-	// native file's size.
+	// A denominator is usable only if every queued item has a measured input.
 	byteSizes := make(map[SessionID]int64, len(toProcessEntries))
 	var extractBytes int64
 	for _, entry := range toProcessEntries {
 		if prog == nil {
 			break
 		}
-		session := entry.Session
-		if session.TranscriptOrigin != TranscriptOriginFile || session.SourcePath.String() == "" ||
-			entry.Decision.Lane == RefreshLaneStoredIndex || entry.Decision.Lane == RefreshLaneStoredMetadata {
+		size := p.extractInputBytes(ctx, entry)
+		if size <= 0 || size > int64(^uint64(0)>>1)-extractBytes {
 			extractBytes = 0
 			break
 		}
-		info, statErr := p.fs.Stat(session.SourcePath.String())
-		if statErr != nil || !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > int64(^uint64(0)>>1)-extractBytes {
-			extractBytes = 0
-			break
-		}
-		byteSizes[session.SessionID] = info.Size()
-		extractBytes += info.Size()
+		byteSizes[entry.Session.SessionID] = size
+		extractBytes += size
 	}
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageExtract, Total: toProcess, BytesTotal: extractBytes})
 	var extractDoneAtomic atomic.Int64
@@ -2138,7 +2130,7 @@ func indexParseWriteBytes(result indexParseResult) int64 {
 }
 
 // indexBatch parses a batch, then serializes SQLite writes through one goroutine.
-func (p *Pipeline) indexBatch(ctx context.Context, metas []indexedMeta, outcome IndexOutcome, logPrefix string) ([]indexedMeta, []IndexLogEntry, []RecordKindRefusal) {
+func (p *Pipeline) indexBatch(ctx context.Context, metas []indexedMeta, outcome IndexOutcome, logPrefix string, progress ...func(indexedMeta)) ([]indexedMeta, []IndexLogEntry, []RecordKindRefusal) {
 	indexed := make([]indexedMeta, 0, len(metas))
 	logs := make([]IndexLogEntry, 0, len(metas))
 	var refused []RecordKindRefusal
@@ -2175,6 +2167,9 @@ func (p *Pipeline) indexBatch(ctx context.Context, metas []indexedMeta, outcome 
 		for _, result := range pending {
 			if result.refusedKind != nil {
 				refused = append(refused, *result.refusedKind)
+			}
+			if len(progress) > 0 && progress[0] != nil {
+				progress[0](result.im)
 			}
 		}
 		for _, profileSession := range flush.profileSessions {
@@ -4891,7 +4886,40 @@ func (p *Pipeline) indexComputeAndFinalize(
 	}
 	if p.indexers != nil && p.metricsStore != nil {
 		indexProfileStart := time.Now()
-		batchIndexed, batchLogs, batchRefused := p.indexBatch(ctx, indexSessions, outcome, logPrefix)
+		// Streamed work has already completed; its index log carries the
+		// bytes actually parsed. Unknown prior sizes make the total unknown.
+		sizes := make(map[SessionID]int64, len(indexSessions))
+		var totalBytes, priorBytes int64
+		known := prog != nil && len(priorIndexLogEntries) == priorDone
+		if known {
+			for _, log := range priorIndexLogEntries {
+				if log.Bytes == nil || *log.Bytes <= 0 || *log.Bytes > int64(^uint64(0)>>1)-priorBytes {
+					known = false
+					break
+				}
+				priorBytes += *log.Bytes
+			}
+		}
+		if known {
+			totalBytes = priorBytes
+			for _, im := range indexSessions {
+				if im.session.Harness == HarnessOpenCode && im.session.TranscriptOrigin == TranscriptOriginFile && im.session.OriginalRoot != "" {
+					totalBytes = 0
+					break
+				}
+				size := p.indexProfileBytes(im)
+				if size <= 0 || size > int64(^uint64(0)>>1)-totalBytes {
+					totalBytes = 0
+					break
+				}
+				sizes[im.session.SessionID] = size
+				totalBytes += size
+			}
+		}
+		emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageIndex, BytesTotal: totalBytes, BytesDelta: priorBytes})
+		batchIndexed, batchLogs, batchRefused := p.indexBatch(ctx, indexSessions, outcome, logPrefix, func(im indexedMeta) {
+			emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageIndex, Delta: 1, Total: priorDone + len(indexSessions), BytesDelta: sizes[im.session.SessionID]})
+		})
 		refusedKinds = append(refusedKinds, batchRefused...)
 		for i, result := range batchIndexed {
 			if result.indexed {
@@ -4903,7 +4931,6 @@ func (p *Pipeline) indexComputeAndFinalize(
 			if batchLogs[i].SessionID != "" {
 				indexLogEntries = append(indexLogEntries, batchLogs[i])
 			}
-			emitAdvance(prog, StageIndex, 1, priorDone+len(indexSessions))
 		}
 		p.recordIndexProfileStage(StageIndex, indexProfileStart, len(batchIndexed), len(indexSessions))
 	}

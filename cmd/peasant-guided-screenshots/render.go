@@ -307,12 +307,12 @@ func renderIngestProgressCapture(workingDirectory string, index int, capture ing
 		if state.Candidates != nil {
 			progress.Update(ingest.ProgressEvent{Kind: ingest.KindCandidates, Stage: ingest.StageExtract, Total: *state.Candidates})
 		}
-		progress.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageExtract, Total: 4})
+		progress.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageExtract, Total: 4, BytesTotal: state.BytesTotal})
 	}
 	program, _ = program.Update(tick(clock.Now()))
 	clock.now = clock.now.Add(2 * time.Second)
 	if capture.State == ingestProgressStateRunning {
-		progress.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageExtract, Delta: 1, Total: 4})
+		progress.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageExtract, Delta: 1, Total: 4, BytesDelta: state.BytesDone})
 	} else if capture.State != ingestProgressStateUnknownTotal {
 		progress.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiscover, Delta: 1, Total: discoveryTotal})
 	}
@@ -341,12 +341,12 @@ func renderHarvestInlineCapture(capture ingestProgressCaptureFixture, state inge
 			progress.Update(ingest.ProgressEvent{Kind: ingest.KindCandidates, Stage: ingest.StageExtract, Total: *state.Candidates})
 		}
 		activeStage = ingest.StageExtract
-		progress.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: activeStage, Total: 4})
+		progress.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: activeStage, Total: 4, BytesTotal: state.BytesTotal})
 	}
 	model := harvestprogress.New(harvestprogress.Options{Progress: progress, Animation: animation.IngestAnimation(), Theme: captureThemeValue(capture.Theme), StartedAt: started})
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: capture.Width, Height: capture.Height})
 	model = updated.(harvestprogress.Model)
-	progress.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: activeStage, Delta: 1, Total: 4})
+	progress.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: activeStage, Delta: 1, Total: 4, BytesDelta: state.BytesDone})
 	updated, _ = model.Update(harvestprogress.TickMsg(started.Add(2 * time.Second)))
 	if capture.State == ingestProgressStateHarvestCanceling || capture.State == ingestProgressStateHarvestCanceled {
 		updated, _ = updated.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})

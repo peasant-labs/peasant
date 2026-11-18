@@ -213,6 +213,9 @@ func (ps *ProgressState) Update(ev ProgressEvent) {
 		sp.HasErr = false
 	case KindAdvance:
 		sp.Started = true
+		if ev.BytesTotal > 0 && sp.BytesTotal == 0 {
+			sp.BytesTotal = ev.BytesTotal
+		}
 		// The store owns the cumulative count: a worker adds the items it
 		// finished, so completion order cannot move Done backwards.
 		if ev.Delta > 0 {
