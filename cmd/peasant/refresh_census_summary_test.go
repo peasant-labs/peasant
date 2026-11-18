@@ -24,11 +24,16 @@ func TestHarvestAndKickstartCensusSummary(t *testing.T) {
 			Absent   []string `yaml:"absent"`
 		} `yaml:"cases"`
 	}
-	if err := yaml.Unmarshal(refreshCensusSummaryYAML, &fixture); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(refreshCensusSummaryYAML))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&fixture); err != nil {
 		t.Fatal(err)
 	}
 	seen := make(map[string]bool)
 	for _, row := range fixture.Cases {
+		if len(row.Contains) == 0 {
+			t.Fatalf("case %q has no contains assertions", row.Name)
+		}
 		if seen[row.Name] {
 			t.Fatalf("duplicate case %q", row.Name)
 		}
