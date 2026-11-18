@@ -1,8 +1,11 @@
 package ingest
 
 import (
+	"bytes"
 	_ "embed"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -13,6 +16,9 @@ import (
 
 //go:embed testdata/progress_input_bytes.yaml
 var progressInputBytesYAML []byte
+
+//go:embed testdata/progress_input_bytes_invalid.yaml
+var invalidProgressInputBytesYAML []byte
 
 type progressInputKind string
 
@@ -26,25 +32,61 @@ const (
 type progressInputBytesFixture struct {
 	RequiredNames []string `yaml:"requiredNames"`
 	Cases         []struct {
-		Name    string            `yaml:"name"`
-		Kind    progressInputKind `yaml:"kind"`
-		Fixture string            `yaml:"fixture"`
-		Session string            `yaml:"session"`
-		Known   bool              `yaml:"known"`
+		Name      string            `yaml:"name"`
+		Kind      progressInputKind `yaml:"kind"`
+		Fixture   string            `yaml:"fixture"`
+		Session   string            `yaml:"session"`
+		Known     bool              `yaml:"known"`
+		WantBytes int64             `yaml:"wantBytes"`
 	} `yaml:"cases"`
 }
 
-func TestExtractInputBytes(t *testing.T) {
+func decodeProgressInputBytes(data []byte) (progressInputBytesFixture, error) {
 	var fixture progressInputBytesFixture
-	if err := yaml.Unmarshal(progressInputBytesYAML, &fixture); err != nil {
-		t.Fatal(err)
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&fixture); err != nil {
+		return fixture, err
+	}
+	if len(fixture.RequiredNames) == 0 {
+		return fixture, fmt.Errorf("requiredNames must not be empty")
 	}
 	seen := map[string]bool{}
 	for _, row := range fixture.Cases {
 		if row.Name == "" || seen[row.Name] {
-			t.Fatalf("duplicate or empty case %q", row.Name)
+			return fixture, fmt.Errorf("duplicate or empty case %q", row.Name)
 		}
 		seen[row.Name] = true
+		if row.Known && row.WantBytes <= 0 {
+			return fixture, fmt.Errorf("case %q requires a positive wantBytes", row.Name)
+		}
+	}
+	required := map[string]bool{}
+	for _, name := range fixture.RequiredNames {
+		if name == "" || required[name] {
+			return fixture, fmt.Errorf("empty or duplicate required name %q", name)
+		}
+		required[name] = true
+		if !seen[name] {
+			return fixture, fmt.Errorf("missing required case %q", name)
+		}
+	}
+	return fixture, nil
+}
+
+func TestProgressInputBytesFixtureRejectsMisspelledKey(t *testing.T) {
+	_, err := decodeProgressInputBytes(invalidProgressInputBytesYAML)
+	if err == nil || !strings.Contains(err.Error(), "wantBytess") {
+		t.Fatalf("misspelled key: got %v, want unknown-field error", err)
+	}
+}
+
+func TestExtractInputBytes(t *testing.T) {
+	fixture, err := decodeProgressInputBytes(progressInputBytesYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range fixture.Cases {
 		t.Run(row.Name, func(t *testing.T) {
 			filesystem := &OSFileSystem{}
 			p := &Pipeline{fs: filesystem}
@@ -71,41 +113,7 @@ func TestExtractInputBytes(t *testing.T) {
 					origin = TranscriptOriginOpenCodeCurrentSQLite
 				}
 				entry.Session = DiscoveredSession{SessionID: SessionID(row.Session), Harness: HarnessOpenCode, SourcePath: ResolvedPath(materialized.Path), TranscriptOrigin: origin}
-				sourcePath, err := NewOpenCodeSQLiteSourcePath(materialized.Path)
-				if err != nil {
-					t.Fatal(err)
-				}
-				source, err := OpenOpenCodeSQLiteSource(t.Context(), sourcePath, DefaultOpenCodeSQLiteSourceOptions())
-				if err != nil {
-					t.Fatal(err)
-				}
-				var size OpenCodePayloadSize
-				if row.Kind == progressInputLegacy {
-					id, err := NewOpenCodeLegacySessionID(row.Session)
-					if err != nil {
-						t.Fatal(err)
-					}
-					size, err = source.LegacySessionPayloadSize(t.Context(), id)
-					if err != nil {
-						t.Fatal(err)
-					}
-				} else {
-					id, err := NewOpenCodeCurrentSessionID(row.Session)
-					if err != nil {
-						t.Fatal(err)
-					}
-					size, err = source.CurrentSessionPayloadSize(t.Context(), id)
-					if err != nil {
-						t.Fatal(err)
-					}
-				}
-				if err := source.Close(t.Context()); err != nil {
-					t.Fatal(err)
-				}
-				want = size.Bytes
-				if row.Known && want <= 0 {
-					t.Fatal("fixture has no payload")
-				}
+				want = row.WantBytes
 			case progressInputTree:
 				entry.Session = DiscoveredSession{Harness: HarnessOpenCode, SourcePath: "/synthetic/session.json", OriginalRoot: "/synthetic"}
 			default:
@@ -115,10 +123,5 @@ func TestExtractInputBytes(t *testing.T) {
 				t.Fatalf("input bytes = %d, want %d", got, want)
 			}
 		})
-	}
-	for _, name := range fixture.RequiredNames {
-		if !seen[name] {
-			t.Fatalf("missing case %q", name)
-		}
 	}
 }
