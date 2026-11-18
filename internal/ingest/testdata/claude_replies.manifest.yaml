@@ -1,0 +1,7 @@
+requiredNames:
+  - records-of-one-message-group-into-one-reply
+  - a-message-resumed-after-another-message-joins-its-reply
+  - every-text-block-is-the-reply-prose
+  - a-thinking-only-reply-holds-its-thinking
+  - records-without-a-message-id-stay-separate-replies
+  - a-malformed-line-keeps-its-gap

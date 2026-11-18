@@ -140,11 +140,11 @@ func (idx *ClaudeIndexer) buildClaudeGeneration(ctx context.Context, in Generati
 	parse.fullContent = true
 	parse.fullDepth = true
 	parse.retainUnknown = true
-	entries, err := parse.parseClaudeRecords(ctx, in.Session.SessionID, data, nil, true)
+	records, err := parse.parseClaudeSourceRecords(ctx, in.Session.SessionID, data, nil, true)
 	if err != nil {
 		return GenerationCandidate{}, err
 	}
-	blocks, err := claudeClassifiedBlocks(in.Session.SessionID, entries)
+	blocks, err := claudeClassifiedBlocks(in.Session.SessionID, records)
 	if err != nil {
 		return GenerationCandidate{}, err
 	}
@@ -262,89 +262,94 @@ func claudeBoundKey(key string) (string, error) {
 // tool-result error flag, the stop reason) are not expressible in a managed
 // generation and are not reconstructed.
 //
+// Native keys are assigned over the ungrouped source records, then the records
+// of one API message are grouped into one reply exactly as the V1 path groups
+// them. A reply keeps its first record's key; every child keeps the key of its
+// own source record and its ordinal among that record's blocks, so a block's
+// key does not depend on which reply it was grouped into.
+//
 // RawByteLength keeps the retained indexer's meaning. A depth-0 block records
-// the whitespace-trimmed byte length of the JSONL line it came from, including
-// an opaque carrier and a line whose unknown content blocks were retained. A
-// depth-1 block is carved from that line and does not repeat its size: a
-// thinking block records the byte length of its thinking text, and every other
-// depth-1 block records none.
-func claudeClassifiedBlocks(sessionID SessionID, entries []schema.SessionEntry) ([]ClassifiedBlock, error) {
-	type claudeRecord struct {
-		carrier  schema.SessionEntry
-		children []schema.SessionEntry
+// the whitespace-trimmed byte length of the JSONL lines it came from (summed
+// over a reply's records), including an opaque carrier and a line whose
+// unknown content blocks were retained. A depth-1 block is carved from a line
+// and does not repeat its size: a thinking block records the byte length of
+// its thinking text, and every other depth-1 block records none.
+func claudeClassifiedBlocks(sessionID SessionID, records claudeSourceRecords) ([]ClassifiedBlock, error) {
+	entries := records.entries
+	for i := range entries {
+		entry := entries[i]
+		if entry.Depth != 0 && entry.ParentIndex == nil {
+			return nil, fmt.Errorf("ingest.claudeClassifiedBlocks: depth-1 entry %d has no parent index; the record boundary cannot be resolved; rebuild the classification", entry.EntryIndex)
+		}
 	}
-	records := make(map[int]*claudeRecord)
-	order := make([]int, 0, len(entries))
+	// Record keys over the ungrouped stream: the uuid, or the record's
+	// stream ordinal, with a duplicate discriminator for a repeated uuid.
+	var recordKeys []string
+	seenUUID := make(map[string]int)
+	carriers := make(map[int]bool)
 	for i := range entries {
 		entry := entries[i]
 		if entry.Depth != 0 {
+			if !carriers[*entry.ParentIndex] {
+				return nil, fmt.Errorf("ingest.claudeClassifiedBlocks: depth-1 entry %d names parent %d, which is not a classified record; the block has no carrier; rebuild the classification", entry.EntryIndex, *entry.ParentIndex)
+			}
 			continue
 		}
-		records[entry.EntryIndex] = &claudeRecord{carrier: entry}
-		order = append(order, entry.EntryIndex)
-	}
-	for i := range entries {
-		entry := entries[i]
-		if entry.Depth == 0 {
-			continue
-		}
-		if entry.ParentIndex == nil {
-			return nil, fmt.Errorf("ingest.claudeClassifiedBlocks: depth-1 entry %d has no parent index; the record boundary cannot be resolved; rebuild the classification", entry.EntryIndex)
-		}
-		record, ok := records[*entry.ParentIndex]
-		if !ok {
-			return nil, fmt.Errorf("ingest.claudeClassifiedBlocks: depth-1 entry %d names parent %d, which is not a classified record; the block has no carrier; rebuild the classification", entry.EntryIndex, *entry.ParentIndex)
-		}
-		record.children = append(record.children, entry)
-	}
-
-	seenUUID := make(map[string]int, len(order))
-	blocks := make([]ClassifiedBlock, 0, len(entries))
-	seenCalls := make(map[string]bool)
-	for ordinal, entryIndex := range order {
-		record := records[entryIndex]
-		carrier := record.carrier
-		uuid := claudeRecordUUID(carrier)
-		base, err := claudeRecordKey(sessionID, uuid, ordinal)
+		carriers[entry.EntryIndex] = true
+		uuid := claudeRecordUUID(entry)
+		key, err := claudeRecordKey(sessionID, uuid, len(recordKeys))
 		if err != nil {
 			return nil, err
 		}
-		recordKey := base
 		if uuid != "" {
 			seenUUID[uuid]++
 			if seenUUID[uuid] > 1 {
-				recordKey, err = claudeDuplicateRecordKey(base, seenUUID[uuid])
+				key, err = claudeDuplicateRecordKey(key, seenUUID[uuid])
 				if err != nil {
 					return nil, err
 				}
 			}
 		}
-		hasToolResultContent := false
-		for _, child := range record.children {
-			if child.EntryType == EntryTypeToolResult {
-				hasToolResultContent = true
-				break
-			}
+		recordKeys = append(recordKeys, key)
+	}
+
+	grouped, sources := groupClaudeReplies(entries, records.messageIDs, true)
+	carrierKeys := make(map[int]string, len(recordKeys))
+	hasToolResultContent := make(map[int]bool)
+	for i, entry := range grouped {
+		if entry.Depth == 0 {
+			carrierKeys[entry.EntryIndex] = recordKeys[sources[i].record]
+			continue
 		}
-		carrierBlock, err := claudeCarrierBlock(recordKey, carrier, hasToolResultContent)
+		if entry.EntryType == EntryTypeToolResult {
+			hasToolResultContent[*entry.ParentIndex] = true
+		}
+	}
+
+	blocks := make([]ClassifiedBlock, 0, len(grouped))
+	seenCalls := make(map[string]bool)
+	for i, entry := range grouped {
+		recordKey := recordKeys[sources[i].record]
+		if entry.Depth == 0 {
+			block, err := claudeCarrierBlock(recordKey, entry, hasToolResultContent[entry.EntryIndex])
+			if err != nil {
+				return nil, err
+			}
+			blocks = append(blocks, block)
+			continue
+		}
+		childKey, err := claudeBlockKey(recordKey, sources[i].block)
 		if err != nil {
 			return nil, err
 		}
-		blocks = append(blocks, carrierBlock)
-		for blockOrdinal, child := range record.children {
-			childKey, err := claudeBlockKey(recordKey, blockOrdinal)
-			if err != nil {
-				return nil, err
-			}
-			block, err := claudeChildBlock(childKey, recordKey, child, seenCalls)
-			if err != nil {
-				return nil, err
-			}
-			if block.Depth == 1 {
-				seenCalls[derefString(child.ToolCallID)] = true
-			}
-			blocks = append(blocks, block)
+		block, err := claudeChildBlock(childKey, carrierKeys[*entry.ParentIndex], entry, seenCalls)
+		if err != nil {
+			return nil, err
 		}
+		if block.Depth == 1 {
+			seenCalls[derefString(entry.ToolCallID)] = true
+		}
+		blocks = append(blocks, block)
 	}
 	return blocks, nil
 }

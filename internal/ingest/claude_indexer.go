@@ -162,10 +162,33 @@ func (idx *ClaudeIndexer) parseJSONLWithCompletion(ctx context.Context, sessionI
 	return idx.parseClaudeRecords(ctx, sessionID, data, completion, false)
 }
 
-// parseClaudeRecords keeps the decoded envelope local to one record. Managed
-// candidates validate that same envelope before projecting it and decomposing
-// its content; the tolerant stored index path retains its existing behavior.
+// parseClaudeRecords returns the stored entries: the source records with the
+// records of one API message grouped into one reply (groupClaudeReplies).
 func (idx *ClaudeIndexer) parseClaudeRecords(ctx context.Context, sessionID SessionID, data []byte, completion *indexCompletion, strict bool) ([]schema.SessionEntry, error) {
+	parsed, err := idx.parseClaudeSourceRecords(ctx, sessionID, data, completion, strict)
+	entries, _ := groupClaudeReplies(parsed.entries, parsed.messageIDs, idx.fullContent)
+	return entries, err
+}
+
+// claudeSourceRecords is the ungrouped parse: one depth-0 entry per source
+// record with its decomposed blocks, and the API message id of every reply
+// record, keyed by its entry index.
+type claudeSourceRecords struct {
+	entries    []schema.SessionEntry
+	messageIDs map[int]string
+}
+
+// parseClaudeSourceRecords keeps the decoded envelope local to one record.
+// Managed candidates validate that same envelope before projecting it and
+// decomposing its content; the tolerant stored index path retains its existing
+// behavior.
+func (idx *ClaudeIndexer) parseClaudeSourceRecords(ctx context.Context, sessionID SessionID, data []byte, completion *indexCompletion, strict bool) (claudeSourceRecords, error) {
+	messageIDs := make(map[int]string)
+	entries, err := idx.parseClaudeSourceEntries(ctx, sessionID, data, completion, strict, messageIDs)
+	return claudeSourceRecords{entries: entries, messageIDs: messageIDs}, err
+}
+
+func (idx *ClaudeIndexer) parseClaudeSourceEntries(ctx context.Context, sessionID SessionID, data []byte, completion *indexCompletion, strict bool, messageIDs map[int]string) ([]schema.SessionEntry, error) {
 	if strict {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -274,6 +297,9 @@ func (idx *ClaudeIndexer) parseClaudeRecords(ctx context.Context, sessionID Sess
 		entry.RawByteLength = &sourceBytes
 		if err := AttachRetainedUnknown(&entry, unknown); err != nil {
 			return nil, err
+		}
+		if id, reply := claudeReplyMessageID(entry, line); reply {
+			messageIDs[entry.EntryIndex] = id
 		}
 		entries = append(entries, entry)
 		parentIndex := entryIndex
@@ -407,6 +433,9 @@ type claudeIndexLine struct {
 	Effort     json.RawMessage `json:"effort"`
 	Attachment json.RawMessage `json:"attachment"`
 	Message    struct {
+		// ID is the API message id. Claude Code writes one message as
+		// several records that share it.
+		ID      string          `json:"id"`
 		Role    string          `json:"role"`
 		Model   string          `json:"model"`
 		Content json.RawMessage `json:"content"`
