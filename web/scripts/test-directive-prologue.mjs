@@ -3,8 +3,10 @@ import { readFile } from 'node:fs/promises'
 import YAML from 'yaml'
 import { checkSource } from './assert-directive-prologue.mjs'
 
-const fixture = YAML.parse(await readFile(new URL('./testdata/directive-prologue.yaml', import.meta.url), 'utf8'))
-const manifest = YAML.parse(await readFile(new URL('./testdata/directive-prologue.manifest.yaml', import.meta.url), 'utf8'))
+const FIXTURE = new URL('./testdata/directive-prologue.yaml', import.meta.url)
+const MANIFEST = new URL('./testdata/directive-prologue.manifest.yaml', import.meta.url)
+const fixture = YAML.parse(await readFile(FIXTURE, 'utf8'))
+const manifest = YAML.parse(await readFile(MANIFEST, 'utf8'))
 const names = fixture.cases.map((entry) => entry.name)
 assert.equal(new Set(names).size, names.length, 'duplicate fixture case name')
 assert.deepEqual([...names].sort(), [...manifest.requiredCaseNames].sort(), 'directive guard case names')
