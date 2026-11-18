@@ -65,7 +65,8 @@ func (s *heapSampler) finish() uint64 {
 // transient peak of a capture passes 128 MiB.
 //
 // It reads the 32 MiB synthetic transcript of BenchmarkCaptureWeb32MiB with the
-// web options and one segment per request, under three source caps, and
+// web options and one segment per request, under the web source cap and two
+// larger caps, and
 // reports per cap the median of the runs of:
 //
 //   - retained-MiB: the largest heap left after a forced GC following each
@@ -84,7 +85,10 @@ func (s *heapSampler) finish() uint64 {
 //	go test ./internal/sourcepreview -run '^$' -bench BenchmarkCaptureWebHeap -benchtime 3x
 func BenchmarkCaptureWebHeap(b *testing.B) {
 	listing := writeGenerated(b, 7_700, 4_000, 0)
-	for _, capMiB := range []int64{16, 24, 32} {
+	// The web source cap, then the larger caps the rule refused, so the curve
+	// stays visible.
+	caps := []int64{defaults.KickstartWebPreviewSourceCapBytes >> 20, 24, 32}
+	for _, capMiB := range caps {
 		for _, gogc := range []int{100, 10} {
 			b.Run(fmt.Sprintf("cap-%dMiB/gogc-%d", capMiB, gogc), func(b *testing.B) {
 				previous := debug.SetGCPercent(gogc)
@@ -114,9 +118,11 @@ func measureCaptureHeap(b *testing.B, listing onboarding.SessionListing, sourceC
 		TurnCap:        defaults.KickstartWebPreviewTurnCap,
 	}
 	segmentOpts := sourcepreview.SegmenterOptions{
-		BudgetBytes:        schema.TranscriptSegmentBudgetBytes,
-		FrameCapBytes:      defaults.KickstartWebPreviewFrameCapBytes,
-		SerializedCapBytes: defaults.KickstartWebPreviewSerializedCapBytes,
+		BudgetBytes:   schema.TranscriptSegmentBudgetBytes,
+		FrameCapBytes: defaults.KickstartWebPreviewFrameCapBytes,
+		// The sweep measures the source cap, so the serialized cap never cuts
+		// first; at the web source cap this is exactly the web's value.
+		SerializedCapBytes: max(defaults.KickstartWebPreviewSerializedCapBytes, sourceCap),
 	}
 	runtime.GC()
 	sampler := startHeapSampler()
