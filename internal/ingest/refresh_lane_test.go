@@ -143,10 +143,14 @@ type refreshLaneBench struct {
 }
 
 func newRefreshLaneBench(t *testing.T, fixture refreshLaneFixture, testCase refreshLaneCase) *refreshLaneBench {
+	return newRefreshLaneBenchWithVersions(t, fixture, testCase, cloneHarvesterVersions())
+}
+
+func newRefreshLaneBenchWithVersions(t *testing.T, fixture refreshLaneFixture, testCase refreshLaneCase, versions map[ingest.Harness]ingest.HarvesterVersions, options ...store.OpenOption) *refreshLaneBench {
 	t.Helper()
 	mem := testutil.NewMemFS()
 	fs := testutil.NewCountingFS(mem)
-	database := storetest.OpenWith(t)
+	database := storetest.OpenWith(t, options...)
 	t.Cleanup(func() { _ = database.Close() })
 
 	root := "/refresh-lane"
@@ -175,7 +179,7 @@ func newRefreshLaneBench(t *testing.T, fixture refreshLaneFixture, testCase refr
 		t: t, fixture: fixture, fs: fs, database: database,
 		harness: testCase.Harness, sessionID: sessionID,
 		sourceRoot: sourceRoot, sourcePath: sourcePath, sourceText: transcript,
-		recordLimitBytes: testCase.RecordLimitBytes, outputDir: outputDir, versions: cloneHarvesterVersions(),
+		recordLimitBytes: testCase.RecordLimitBytes, outputDir: outputDir, versions: versions,
 	}
 	result := bench.run(true, true)
 	if result.Summary.New != 1 || result.Summary.StoreError != nil {
@@ -524,6 +528,25 @@ func (b *refreshLaneBench) applyMutation(testCase refreshLaneCase) {
 // production metadata encoder and reconciles the recorded artifact identity,
 // so the pair stays a valid pair for the new bytes.
 func (b *refreshLaneBench) mutateMetadata(mutate func(*ingest.UnifiedMetadata)) {
+	b.mutateMetadataWithoutBinding(mutate)
+	// A metadata-only pair change records a new publication capture. The
+	// stored index still describes the same transcript, so re-state the
+	// binding the way the ordinary index write would.
+	state, err := b.database.ReadIndexState(b.t.Context(), b.sessionID)
+	if err != nil || state == nil {
+		b.t.Fatalf("read index state after metadata mutation: state=%+v err=%v", state, err)
+	}
+	if state.IndexedInputHash != nil && !state.PublicationBound {
+		if err := b.database.BindPublicationIndex(b.t.Context(), ingest.PublicationIndexBind{
+			SessionID: b.sessionID, ExpectedState: state, IndexedInputHash: *state.IndexedInputHash,
+			CaptureRevision: state.PublicationCaptureRevision, IndexedAtMs: time.Now().UnixMilli(),
+		}); err != nil {
+			b.t.Fatalf("rebind metadata-only pair: %v", err)
+		}
+	}
+}
+
+func (b *refreshLaneBench) mutateMetadataWithoutBinding(mutate func(*ingest.UnifiedMetadata)) {
 	b.t.Helper()
 	data, err := b.fs.ReadFile(b.metadataPath)
 	if err != nil {
@@ -553,21 +576,6 @@ func (b *refreshLaneBench) mutateMetadata(mutate func(*ingest.UnifiedMetadata)) 
 	mirrored := b.database.MirrorArtifacts(b.t.Context(), []ingest.ArtifactMirrorRequest{{Artifact: artifact, TranscriptKept: true}})
 	if len(mirrored) != 1 || mirrored[0].Err != nil || !mirrored[0].Mirrored {
 		b.t.Fatalf("reconcile mutated pair: %+v", mirrored)
-	}
-	// A metadata-only pair change records a new publication capture. The
-	// stored index still describes the same transcript, so re-state the
-	// binding the way the ordinary index write would.
-	state, err := b.database.ReadIndexState(b.t.Context(), b.sessionID)
-	if err != nil || state == nil {
-		b.t.Fatalf("read index state after metadata mutation: state=%+v err=%v", state, err)
-	}
-	if state.IndexedInputHash != nil && !state.PublicationBound {
-		if err := b.database.BindPublicationIndex(b.t.Context(), ingest.PublicationIndexBind{
-			SessionID: b.sessionID, ExpectedState: state, IndexedInputHash: *state.IndexedInputHash,
-			CaptureRevision: state.PublicationCaptureRevision, IndexedAtMs: time.Now().UnixMilli(),
-		}); err != nil {
-			b.t.Fatalf("rebind metadata-only pair: %v", err)
-		}
 	}
 }
 

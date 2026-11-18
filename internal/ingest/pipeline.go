@@ -2310,7 +2310,44 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 		// both), on the same serialized write lane as every other store write.
 		// A refusal or a stale proof falls through to the ordinary parse path;
 		// the store keeps the old generation active until that parse commits.
-		if input.managedGenerationRefresh && p.managedGenerationRefreshApplies(input) {
+		forceParse := false
+		_, canProve := p.metricsStore.(ManagedGenerationUnchangedProver)
+		if input.managedGenerationRefresh && canProve && input.metadata != nil && input.expected != nil && p.adapterSupportsStoredExtraction(input.session.Harness) {
+			proofStart := time.Now()
+			proof, proofErr := p.proveManagedGenerationUnchanged(ctx, input)
+			proven := 0
+			if proofErr == nil && proof.Proven {
+				proven = 1
+			}
+			p.config.IndexProfiler.RecordStage(StageRefreshProof, time.Since(proofStart), proven, 1)
+			slog.Info(logPrefix+": refresh proof", "session_id", im.session.SessionID, "proven", proof.Proven, "mismatch", proof.Mismatch, "error", proofErr)
+			if proofErr != nil {
+				forceParse = true
+			}
+			if proofErr == nil && !proof.Proven && p.adapterDeclaresOutputPreserving(input.session.Harness) {
+				p.reportDiagnostic(DiagnosticEntry{
+					ErrorType:   "output_preserving_proof_failed",
+					Location:    string(input.session.SessionID),
+					Message:     fmt.Sprintf("the %s producer declared output-preserving but its unchanged proof was not proven (%s); the transcript will be parsed", input.session.Harness, proof.Mismatch),
+					Remediation: "Review the producer declaration and proof mismatch before relying on an unchanged-output optimization.",
+				})
+				forceParse = true
+			}
+			if proofErr == nil && proof.Proven {
+				outcome, duration, settleErr := p.settleManagedGenerationUnchanged(ctx, input, writeLane)
+				if settleErr == nil && outcome.Disposition == ManagedGenerationRefreshUnchanged {
+					reason := indexManagedRefreshReason + " (" + string(outcome.Disposition) + ")"
+					result.managedRefreshDuration = duration
+					result.logEntry = p.makeIndexLogEntry(im, IndexOutcomeSkipped, 0, result.startedAt, &reason, nil)
+					result.bytes = 0
+					input.transcript, input.tree = nil, nil
+					return result
+				}
+				slog.Warn(logPrefix+": unchanged generation settlement refused", "session_id", im.session.SessionID, "error", settleErr)
+				forceParse = true
+			}
+		}
+		if !forceParse && input.managedGenerationRefresh && p.managedGenerationRefreshApplies(input) {
 			outcome, duration, refreshErr := p.refreshManagedGeneration(ctx, input, writeLane)
 			if refreshErr == nil {
 				reason := indexManagedRefreshReason + " (" + string(outcome.Disposition) + ")"
@@ -2327,15 +2364,16 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 				"session_id", im.session.SessionID,
 				"error", refreshErr,
 				"fallback", "transcript parse")
+			forceParse = true
 		}
-		if p.capturedInputBindsWithoutReparse(input) {
+		if !forceParse && p.capturedInputBindsWithoutReparse(input) {
 			// The rule "bind without a re-parse" holds: the flush binds the
 			// stored index to the refreshed metadata capture in one
 			// constant-size write.
 			result.bindPublication = true
 			reason := indexBindWithoutReparseReason
 			result.logEntry = p.makeIndexLogEntry(im, IndexOutcomeSkipped, 0, result.startedAt, &reason, nil)
-		} else if p.capturedInputNeedsWork(input) {
+		} else if forceParse || p.capturedInputNeedsWork(input) {
 			parsed = true
 			// A harness whose declared output format is a managed generation is
 			// produced through its GenerationBuilder, which carries the captured

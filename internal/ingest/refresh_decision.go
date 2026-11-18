@@ -286,6 +286,15 @@ func (p *Pipeline) adapterSupportsStoredExtraction(harness Harness) bool {
 	return ok
 }
 
+func (p *Pipeline) adapterDeclaresOutputPreserving(harness Harness) bool {
+	factory, ok := p.adapters[harness]
+	if !ok {
+		return false
+	}
+	declaration, ok := factory(p.fs, p.git, p.salt).(OutputPreservingDeclaration)
+	return ok && declaration.DeclaresOutputPreserving()
+}
+
 // classificationDecision is the decision the discovery classifier derives
 // from the stored row. It reads no file: the row carries the adapter stamp,
 // index producer, refusal and publication facts the decision needs, and the

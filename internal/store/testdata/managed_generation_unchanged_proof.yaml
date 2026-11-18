@@ -1,0 +1,90 @@
+cases:
+  - {name: unchanged, mutation: mutation-none, mismatch: ""}
+  - {name: adapter-bump, mutation: adapter, mismatch: ""}
+  - {name: redaction-provenance, mutation: redaction-provenance, mismatch: ""}
+  - {name: inactive-generation, mutation: mutation-active, mismatch: generation-not-active}
+  - {name: unsupported-generation, mutation: mutation-unsupported, mismatch: generation-unsupported}
+  - {name: latest-attempt-held, mutation: latest-attempt, mismatch: latest-attempt-held}
+  - {name: content-hash, mutation: mutation-content, mismatch: content-hash}
+  - {name: source-format, mutation: mutation-source-format, mismatch: source-format}
+  - {name: harness, mutation: mutation-harness, mismatch: harness}
+  - {name: completeness, mutation: mutation-completeness, mismatch: completeness}
+  - {name: source-evidence, mutation: mutation-source-evidence, mismatch: source-evidence}
+  - {name: metadata-context, mutation: mutation-metadata, mismatch: metadata-context}
+  - {name: zero-metadata-hash, mutation: zero-metadata, mismatch: metadata-context}
+  - {name: forged-metadata-hash, mutation: forged-metadata, mismatch: metadata-context}
+  - {name: redaction-content, mutation: redaction, mismatch: redaction-context}
+  - {name: indexer-behind, mutation: indexer, mismatch: index-not-current}
+  - {name: input-proof-differs, mutation: mutation-input, mismatch: input-proof-missing}
+  - {name: missing-index-input-proof-is-not-proven, mutation: null-input-proof, mismatch: input-proof-missing}
+  - {name: seal-missing, mutation: seal, mismatch: seal-missing}
+
+settleCases:
+  - name: settle-commits-at-most-two-wal-frames
+    maxCommitFrames: 2
+  - name: settle-writes-only-stats-and-binding
+    changedTables: [session_captured_stats, session_content_captures, sessions, sessions, sessions, store_state]
+  - name: unchanged-path-reads-zero-entry-mapping-and-title-ref-rows
+readColumns:
+  - session_captured_stats.cached_read_tokens
+  - session_captured_stats.cached_write_tokens
+  - session_captured_stats.conversation_turn_count
+  - session_captured_stats.duration_ms
+  - session_captured_stats.input_submission_count
+  - session_captured_stats.overflow
+  - session_captured_stats.seed_json
+  - session_captured_stats.session_id
+  - session_captured_stats.source
+  - session_captured_stats.subagent_count
+  - session_captured_stats.thought_tokens
+  - session_captured_stats.tokens_in
+  - session_captured_stats.tokens_out
+  - session_captured_stats.tool_call_count
+  - session_captured_stats.turn_count
+  - session_captured_stats.updated_at_ms
+  - session_content_captures.failure_code
+  - session_content_captures.session_id
+  - session_content_captures.status
+  - session_generations.activated_at_ms
+  - session_generations.adapter_version
+  - session_generations.candidate_digest
+  - session_generations.completeness
+  - session_generations.content_hash
+  - session_generations.derived_at
+  - session_generations.generation_id
+  - session_generations.harness
+  - session_generations.index_format_version
+  - session_generations.metadata_hash
+  - session_generations.redaction_applied
+  - session_generations.redaction_content_hash_at_redact
+  - session_generations.redaction_level
+  - session_generations.session_id
+  - session_generations.source_evidence_digest
+  - session_generations.source_format
+  - session_publication_metadata.capture_revision
+  - session_publication_metadata.metadata_json
+  - session_publication_metadata.session_id
+  - session_relationship_evidence.generation_id
+  - session_relationship_evidence.kind
+  - session_relationship_evidence.session_id
+  - session_relationship_evidence.target_local_id
+  - session_relationship_evidence.target_state
+  - sessions.active_generation_id
+  - sessions.artifact_hash
+  - sessions.cwd_provenance_kind
+  - sessions.index_format_version
+  - sessions.index_version
+  - sessions.indexed_at
+  - sessions.indexed_input_hash
+  - sessions.indexed_publication_capture_revision
+  - sessions.latest_attempt_artifact_hash
+  - sessions.latest_attempt_generation_id
+  - sessions.latest_attempt_indexer_version
+  - sessions.metric_seed_json
+  - sessions.model_harness
+  - sessions.parent_id
+  - sessions.publication_capture_revision
+  - sessions.session_entries_hash
+  - sessions.session_id
+  - store_state.id
+  - store_state.revision

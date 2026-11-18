@@ -25,6 +25,13 @@ type SourceAdapter interface {
 	ExtractMetadata(ctx context.Context, session DiscoveredSession) (*UnifiedMetadata, error)
 }
 
+// OutputPreservingDeclaration is an optional producer declaration. Absence
+// means no declaration, not a negative declaration. The producer graph in
+// #1033 supplies real declarations through this seam.
+type OutputPreservingDeclaration interface {
+	DeclaresOutputPreserving() bool
+}
+
 // DiscoveryProgress reports the number of source files enumerated and built
 // by a Discover call. The total precedes every advance; an advance includes a
 // source that disappeared or was rejected while it was being built. An adapter

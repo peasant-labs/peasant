@@ -1,0 +1,4 @@
+requiredNames:
+  - missing-turn-count
+  - missing-conversation-count
+  - missing-input-count

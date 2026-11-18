@@ -1,0 +1,3 @@
+requiredNames:
+  - declared-mismatch-reports-and-parses
+  - undeclared-mismatch-does-not-report
