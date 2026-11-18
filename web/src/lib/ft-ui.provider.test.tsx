@@ -12,22 +12,25 @@ import { ProviderIcon, ProviderName } from '@/lib/ft-ui';
 describe('ProviderName and ProviderIcon', () => {
   afterEach(cleanup);
 
-  it('renders the Fairtrade name and gemini mark for Antigravity CLI', () => {
+  it.each([Harness.AntigravityCLI, Harness.AntigravityIDE])('renders the Fairtrade name and gemini mark for %s', (harness) => {
     render(
       <>
-        <ProviderName harness={Harness.AntigravityCLI} />
-        <ProviderIcon harness={Harness.AntigravityCLI} label accent />
+        <ProviderName harness={harness} />
+        <ProviderIcon harness={harness} label accent />
       </>,
     );
 
-    const displayName = providerDisplayName(Harness.AntigravityCLI);
+    const displayName = providerDisplayName(harness);
     const name = document.querySelector('.pv-name');
-    expect(name?.querySelector('.pv-name-label')).toHaveTextContent(Harness.AntigravityCLI);
+    expect(name?.querySelector('.pv-name-label')).toHaveTextContent(harness);
     expect(name?.querySelector('.brand')).toHaveAttribute('data-brand', 'gemini');
 
     const mark = screen.getByRole('img', { name: displayName });
     expect(mark).toHaveAttribute('data-brand', 'gemini');
     expect(mark.closest('.pv-icon')).toHaveStyle({ color: 'var(--teal)' });
-    expect(displayName).toBe('Antigravity CLI');
+    expect(displayName).toBe({
+      [Harness.AntigravityCLI]: 'Antigravity CLI',
+      [Harness.AntigravityIDE]: 'Antigravity IDE',
+    }[harness]);
   });
 });
