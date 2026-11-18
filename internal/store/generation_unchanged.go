@@ -25,9 +25,6 @@ type ManagedGenerationUnchangedProof struct {
 	UpdatedAtMs   int64
 }
 
-// ManagedGenerationRefreshResult reports the successful unchanged settlement.
-type ManagedGenerationRefreshResult struct{ Unchanged bool }
-
 // ProveManagedGenerationUnchanged reads the catalog and index in one snapshot.
 // It never reads generation mappings, content descriptors, or title references.
 func (s *Store) ProveManagedGenerationUnchanged(ctx context.Context, p ManagedGenerationUnchangedProof) (result ingest.UnchangedProof, err error) {
@@ -191,5 +188,5 @@ func (s *Store) SettleManagedGenerationUnchanged(ctx context.Context, p ManagedG
 			return result, err
 		}
 	}
-	return ManagedGenerationRefreshResult{Unchanged: true}, nil
+	return ManagedGenerationRefreshResult{GenerationID: p.GenerationID, Disposition: ManagedGenerationRefreshUnchanged}, nil
 }
