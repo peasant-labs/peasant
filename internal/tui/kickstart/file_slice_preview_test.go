@@ -104,12 +104,16 @@ func TestSourceTurns_ASlicedFileReadEqualsTheWholeFileRead(t *testing.T) {
 				Source:    ftue.SessionSource{Path: path, Root: dir, Origin: ftue.SessionSourceOriginFile},
 			}
 			reader := func(slice int64) *kickstart.SourceTurns {
+				opts := kickstart.TerminalCaptureOptions()
+				if slice > 0 {
+					opts.FirstReadBytes, opts.SliceReadBytes = slice, slice
+				} else {
+					opts.FirstReadBytes, opts.SliceReadBytes = 1<<20, 1<<20
+				}
 				return kickstart.NewSourceTurns(&ingest.OSFileSystem{}, []ftue.SessionListing{listing},
 					kickstart.WithSourceTurnsGitResolver(testutil.NoGitResolver()),
 					kickstart.WithSourceTurnsSalt(salt.Salt{}),
-					kickstart.WithSourceTurnsSliceBudget(slice),
-					kickstart.WithSourceTurnsFirstPageBudget(slice),
-					kickstart.WithSourceTurnsPreviewBudget(slice))
+					kickstart.WithSourceTurnsCaptureOptions(opts))
 			}
 
 			// The reference: the whole-file read the preview used before paging.
@@ -123,7 +127,7 @@ func TestSourceTurns_ASlicedFileReadEqualsTheWholeFileRead(t *testing.T) {
 
 			// The sliced read, driven to exhaustion the way a reader scrolling does.
 			sliced := reader(c.SliceBytes)
-			turns, err := sliced.Turns(sessionID)
+			turns, _, err := sliced.FirstTurns(sessionID)
 			if err != nil {
 				t.Fatalf("read the first slice: %v", err)
 			}
