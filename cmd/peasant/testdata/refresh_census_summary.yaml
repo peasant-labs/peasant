@@ -3,7 +3,7 @@ cases:
   - name: stored-census
     stored: true
     census: true
-    contains: ["refresh census: 1 sessions (includes failed attempts)", "native / new: 1", "indexed bytes measured: 1 KiB (may be partial)"]
+    contains: ["refresh census: 1 session (includes failed attempts)", "native / new: 1", "indexed bytes measured: 1 KiB (may be partial)"]
     absent: ["refresh census unavailable"]
   - name: incomplete-audit
     stored: false

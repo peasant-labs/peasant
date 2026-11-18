@@ -121,6 +121,8 @@ func (m Model) Update(message tea.Msg) (Model, tea.Cmd) {
 	case CancelRequestedMsg:
 		m.retainEstimate()
 	case FinalMsg:
+		m.lane = nil
+		m.waiting = ""
 		candidate := msg.Snapshot[ingest.StageExtract]
 		m.candidateCount, m.candidatesKnown = candidate.CandidateCount, candidate.CandidatesKnown
 		if msg.Outcome == FinalCanceled {
@@ -284,7 +286,7 @@ func (m Model) View() string {
 	}
 	detail := []string{}
 	if m.candidatesKnown {
-		detail = append(detail, styles.Muted.Render(fmt.Sprintf("%sextract candidates: %d sessions (not confirmed refreshes)", kit.Indent(2), m.candidateCount)))
+		detail = append(detail, styles.Muted.Render(fmt.Sprintf("%sextract candidates: %d %s (not confirmed refreshes)", kit.Indent(2), m.candidateCount, sessionWord(m.candidateCount))))
 	}
 	if m.lane != nil {
 		busy := "busy unknown"
