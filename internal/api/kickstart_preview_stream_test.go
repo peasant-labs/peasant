@@ -61,13 +61,18 @@ func TestKickstartPreviewStream(t *testing.T) {
 			}
 			if tc.Long {
 				var data strings.Builder
+				character := "x"
+				if tc.Operation == "finish-without-segment" {
+					// JSON escaping expands ampersands in the served segments.
+					character = "&"
+				}
 				for i := range fixture.Generated.Pairs {
 					parent := ""
 					if i > 0 {
 						parent = fmt.Sprintf(`"parentUuid":"a%d",`, i-1)
 					}
 					fmt.Fprintf(&data, "{\"type\":\"user\",\"uuid\":\"u%d\",%s\"timestamp\":\"2026-01-01T00:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"question\"}}\n", i, parent)
-					fmt.Fprintf(&data, "{\"type\":\"assistant\",\"uuid\":\"a%d\",\"parentUuid\":\"u%d\",\"timestamp\":\"2026-01-01T00:00:01Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"%s\"}]}}\n", i, i, strings.Repeat("x", fixture.Generated.AnswerBytes))
+					fmt.Fprintf(&data, "{\"type\":\"assistant\",\"uuid\":\"a%d\",\"parentUuid\":\"u%d\",\"timestamp\":\"2026-01-01T00:00:01Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"%s\"}]}}\n", i, i, strings.Repeat(character, fixture.Generated.AnswerBytes))
 				}
 				content = data.String()
 			}
@@ -396,6 +401,29 @@ func TestKickstartPreviewStream(t *testing.T) {
 				closed := read()
 				if closed.Kind != schema.LocalKickstartPreviewClosed || closed.Reason != schema.LocalKickstartPreviewRescanned || closed.CaptureID != state.CaptureID {
 					t.Fatal("finished scan did not close its capture")
+				}
+			case "finish-without-segment":
+				for !state.Directory.Complete {
+					previousRefs, err := json.Marshal(state.Directory.Segments)
+					if err != nil {
+						t.Fatal(err)
+					}
+					write(ClientMessage{Type: schema.MsgKickstartPreview, Preview: &schema.LocalKickstartPreviewRequest{Op: schema.LocalKickstartPreviewMore, RequestID: "next", SessionID: "setup", CaptureID: state.CaptureID, After: state.Seq}})
+					event := read()
+					next, err := schema.MergeLocalKickstartPreview(state, event)
+					if err != nil {
+						t.Fatalf("merge continuation: %v", err)
+					}
+					if next.Directory.Complete {
+						if event.Segment != nil {
+							t.Fatal("expected the serialized cap to finish without a new segment")
+						}
+						finalRefs, err := json.Marshal(event.Directory.Segments)
+						if err != nil || !bytes.Equal(previousRefs, finalRefs) {
+							t.Fatal("final frame altered previously sent references")
+						}
+					}
+					state = next
 				}
 			default:
 				t.Fatalf("unknown fixture operation %q", tc.Operation)

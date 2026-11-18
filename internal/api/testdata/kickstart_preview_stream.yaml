@@ -17,6 +17,8 @@ requiredNames:
   - socket-disconnect-frees-capture
   - rescan-frees-capture
   - capacity-refusal-at-two-live-captures
+  - final-frame-without-segment-when-last-already-sent
+  - final-frame-repeats-sent-refs-unchanged
 cases:
   - name: open-sends-first-segment-unasked
     transcript: |
@@ -35,3 +37,5 @@ cases:
   - {name: socket-disconnect-frees-capture, long: true, operation: disconnect}
   - {name: rescan-frees-capture, long: true, operation: rescan}
   - {name: capacity-refusal-at-two-live-captures, operation: capacity}
+  - {name: final-frame-without-segment-when-last-already-sent, long: true, operation: finish-without-segment}
+  - {name: final-frame-repeats-sent-refs-unchanged, long: true, operation: finish-without-segment}
