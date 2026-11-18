@@ -47,6 +47,8 @@ func TestNeutralPackageBoundaries(t *testing.T) {
 		"selectionfilter-not-import-onboarding": {Directory: "internal/selectionfilter", Forbidden: "github.com/peasant-labs/peasant/internal/onboarding"},
 		"api-not-import-internal-tui":           {Directory: "internal/api", Forbidden: "github.com/peasant-labs/peasant/internal/tui"},
 		"discovery-not-import-internal-tui":     {Directory: "internal/discovery", Forbidden: "github.com/peasant-labs/peasant/internal/tui"},
+		"sourcepreview-not-import-internal-tui": {Directory: "internal/sourcepreview", Forbidden: "github.com/peasant-labs/peasant/internal/tui"},
+		"sourcepreview-not-import-net-http":     {Directory: "internal/sourcepreview", Forbidden: "net/http"},
 		"one-declaration-of-each-neutral-type":  {},
 	}
 	required := map[string]bool{}
@@ -137,7 +139,7 @@ func checkNeutralDeclarations(t *testing.T, root string, f neutralFixture) {
 	// Names that once had a second declaration and were removed. No guarded
 	// directory and no onboarding file may declare one again, alias or not.
 	retired := map[string]bool{"NextStepKind": false}
-	dirs := map[string]bool{"internal/tui/settings": false, "internal/tui/kickstart": false, "internal/tui/ftue": false, "internal/discovery": false}
+	dirs := map[string]bool{"internal/tui/settings": false, "internal/tui/kickstart": false, "internal/tui/ftue": false, "internal/discovery": false, "internal/sourcepreview": false}
 	for _, name := range f.NeutralTypes {
 		if seen, ok := types[name]; !ok || seen {
 			t.Fatalf("unknown or duplicate neutral type %q", name)

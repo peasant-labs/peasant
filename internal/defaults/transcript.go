@@ -93,3 +93,58 @@ const ServedDetailDocumentBudgetBytes int = SessionDetailDocumentCapBytes - Serv
 // record meets; the document budget bounds the session as a whole and may lower
 // this one further when many fields are large at once.
 const ServedTextFieldBudgetBytes int = 1 << 20
+
+// The raw session preview reads a discovered session in place, from the
+// transcript its harness wrote, through internal/sourcepreview. The capture
+// itself takes every bound as an option, so each surface states its own. The
+// values below are the WEB preview's: the kickstart page's server-owned capture
+// passes them. The terminal preview does not inherit them; it keeps its own
+// options (unbounded source and turns), stated where its adapter builds them.
+//
+// Why a cumulative source cap exists at all: the file capture holds the loaded
+// prefix and re-parses all of it on every read, because the canonical
+// projection is not resumable. Its retained memory and its re-parse work both
+// grow with the prefix, so the web capture caps the prefix. Paging alone would
+// not need it: a segment is the contract's budget and a frame is bounded below.
+const (
+	// KickstartWebPreviewSourceCapBytes is the cumulative source bytes one web
+	// capture may load. Five reads at most: 256 KiB, then 8 MiB at a time.
+	KickstartWebPreviewSourceCapBytes int64 = 32 << 20
+	// KickstartWebPreviewSerializedCapBytes is the most encoded segment bytes
+	// one web capture sends: the most one preview pane holds.
+	KickstartWebPreviewSerializedCapBytes int64 = 32 << 20
+	// KickstartWebPreviewTurnCap is the most turns one web capture emits. It
+	// bounds the capture's turn digests and the browser's view model.
+	KickstartWebPreviewTurnCap = 20_000
+	// KickstartWebPreviewFrameCapBytes is the largest encoded preview frame:
+	// one segment plus the header and directory, half the client's 8 MiB frame
+	// cap.
+	KickstartWebPreviewFrameCapBytes = 4 << 20
+	// KickstartWebPreviewLiveCaptures is how many web captures may be live at
+	// once across the server; it sets the retained-memory ceiling.
+	KickstartWebPreviewLiveCaptures = 2
+	// KickstartWebPreviewParseWorkers is how many captures may re-parse at
+	// once, so only one transient re-parse peak exists at a time.
+	KickstartWebPreviewParseWorkers = 1
+	// KickstartWebPreviewIdle frees a web capture no one has asked for more of.
+	KickstartWebPreviewIdle = 5 * time.Minute
+)
+
+// SourcePreviewHoldbackBytes is the most a capture holds back while waiting for
+// tool results. Past it, the oldest held turns are emitted with their calls
+// still pending, so a session that never answers a call cannot stall the
+// preview. It is one contract segment, for every surface.
+const SourcePreviewHoldbackBytes = schema.TranscriptSegmentBudgetBytes
+
+// The capture benchmark on a 32 MiB synthetic Claude transcript, read to the
+// web source cap. The targets warn; the ceiling fails closed and exists to
+// catch a catastrophic regression (a re-parse per turn, an unbounded read),
+// not runner contention.
+const (
+	SourcePreviewFirstSegmentBudget = 250 * time.Millisecond
+	SourcePreviewFullCaptureBudget  = 6 * time.Second
+	SourcePreviewFullCaptureCeiling = 30 * time.Second
+	// SourcePreviewPeakHeapCeilingBytes is the transient peak the plan allows
+	// for one capture before the web source cap must be lowered.
+	SourcePreviewPeakHeapCeilingBytes int64 = 512 << 20
+)
