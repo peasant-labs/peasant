@@ -3215,23 +3215,23 @@ func identityMatchesLocation(meta *UnifiedMetadata, loc SessionLocation) bool {
 // The caller supplies a location whose IngestedMs is set; a session with no
 // store record is DiffNew by definition and never reaches here.
 func ClassifyAgainstStore(session DiscoveredSession, loc SessionLocation, _ time.Duration) DiffStatus {
-	if loc.SchemaVersion > CurrentSchemaVersion {
-		return DiffUnchanged
+	return freshnessStatus(session, loc)
+}
+
+func freshnessStatus(session DiscoveredSession, loc SessionLocation) DiffStatus {
+	evidence := refreshEvidence{
+		FreshnessFutureSchema:      loc.SchemaVersion > CurrentSchemaVersion,
+		FreshnessClockMoved:        loc.IngestedMs != nil && *loc.IngestedMs > 0 && session.ModTime.After(time.UnixMilli(*loc.IngestedMs)),
+		FreshnessSchemaOld:         metadataNeedsNativeRefresh(loc.SchemaVersion),
+		FreshnessPublicationNeeded: loc.PublicationReadiness == PublicationNeedsIngest,
 	}
-	if loc.IngestedMs != nil && *loc.IngestedMs > 0 {
-		// Source modified more recently than DB ingested_ms: re-ingest.
-		if session.ModTime.After(time.UnixMilli(*loc.IngestedMs)) {
-			return DiffUpdated
-		}
-	}
-	// Schema version behind current (DB value): re-ingest.
-	if metadataNeedsNativeRefresh(loc.SchemaVersion) {
+	return evidence.freshnessStatus()
+}
+
+func (in refreshEvidence) freshnessStatus() DiffStatus {
+	if !in.FreshnessFutureSchema && (in.FreshnessClockMoved || in.FreshnessSchemaOld || in.FreshnessPublicationNeeded) {
 		return DiffUpdated
 	}
-	if loc.PublicationReadiness == PublicationNeedsIngest {
-		return DiffUpdated
-	}
-	// Activity does not make an otherwise unchanged captured source fresh.
 	return DiffUnchanged
 }
 
@@ -3250,7 +3250,11 @@ func (p *Pipeline) classifySessionWithDecision(ctx context.Context, session Disc
 	if err != nil {
 		return status, RefreshDecision{}, err
 	}
-	decision := p.classificationDecision(session, nil)
+	evidence, hasEvidence := p.refreshEvidenceForClassification(session, nil)
+	var decision RefreshDecision
+	if hasEvidence {
+		decision = decideRefresh(evidence)
+	}
 	if _, ok := p.locationCache[session.SessionID]; !ok {
 		// Store-free and legacy file fallbacks carry their evidence in the
 		// saved metadata and the owned capture marker, not a row.
@@ -3263,11 +3267,13 @@ func (p *Pipeline) classifySessionWithDecision(ctx context.Context, session Disc
 					}
 				}
 			}
-			decision = p.refreshDecisionForFile(session, metadata, sourceCompare)
+			evidence = p.refreshEvidenceForFile(session, metadata, sourceCompare)
+			decision = decideRefresh(evidence)
 		}
 	}
 	if decision.Reason == RefreshReasonPublicationUnbound && !p.publicationBindable(ctx, session.SessionID) {
-		decision = RefreshDecision{Reason: RefreshReasonSourceChanged, Lane: RefreshLaneNative}
+		evidence.PublicationCannotBind = true
+		decision = decideRefresh(evidence)
 	}
 	if session.Harness == HarnessOpenCode && (decision.Lane == RefreshLaneStoredIndex || decision.Reason == RefreshReasonNone) {
 		// OpenCode's changed clock is the session row's updated time, not the
@@ -3275,7 +3281,8 @@ func (p *Pipeline) classifySessionWithDecision(ctx context.Context, session Disc
 		// newer than the stored capture; that is source change evidence the
 		// stored-index lane must not skip.
 		if p.openCodeSessionClockMoved(ctx, session) {
-			decision = RefreshDecision{Reason: RefreshReasonSourceCompare, Lane: RefreshLaneNative}
+			evidence.OpenCodeClockMoved = true
+			decision = decideRefresh(evidence)
 		}
 	}
 	if status != DiffActive {
@@ -3316,7 +3323,11 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 		}
 		return DiffNew, nil
 	}
-	decision := p.classificationDecision(session, captured)
+	evidence, hasEvidence := p.refreshEvidenceForClassification(session, captured)
+	var decision RefreshDecision
+	if hasEvidence {
+		decision = decideRefresh(evidence)
+	}
 	if captured == nil && decision.Lane == RefreshLaneStoredIndex {
 		if isActive {
 			return DiffActive, nil
@@ -3325,7 +3336,8 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 			// A bind needs the stored pair and a current captured snapshot. A
 			// missing pair or a capture row the index cannot reach is a native
 			// repair, not a publication bind.
-			decision = RefreshDecision{Reason: RefreshReasonSourceChanged, Lane: RefreshLaneNative}
+			evidence.PublicationCannotBind = true
+			decision = decideRefresh(evidence)
 		} else {
 			p.markRefreshReason(session.SessionID, decision.OutcomeReason())
 			return DiffUnchanged, nil
@@ -3374,7 +3386,7 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 		if refusalSettled {
 			freshness.PublicationReadiness = PublicationReady
 		}
-		status := ClassifyAgainstStore(session, freshness, p.config.StalenessThreshold)
+		status := freshnessStatus(session, freshness)
 		needsPublicationRepair := loc.PublicationReadiness == PublicationNeedsIngest && loc.CaptureRevision > 0
 		if captured == nil && status == DiffUpdated && needsPublicationRepair {
 			// Publication readiness is a repair hint, not change evidence.
@@ -3389,7 +3401,7 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 			// by the native publication-capture decision.
 			settled := loc
 			settled.PublicationReadiness = PublicationReady
-			if ClassifyAgainstStore(session, settled, p.config.StalenessThreshold) == DiffUnchanged {
+			if freshnessStatus(session, settled) == DiffUnchanged {
 				if metaPath, err := p.findMetadataPath(ctx, session); err == nil && metaPath != "" {
 					status = DiffUnchanged
 				}
@@ -3417,7 +3429,8 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 				p.markRefreshReason(session.SessionID, decision.OutcomeReason())
 				return DiffUnchanged, nil
 			}
-			decision = RefreshDecision{Reason: RefreshReasonSourceChanged, Lane: RefreshLaneNative}
+			evidence.StructuralMismatch = true
+			decision = decideRefresh(evidence)
 		}
 		nativeRefresh := captured != nil && loc.SourceEvidenceSupported && decision.IsRefresh()
 		if nativeRefresh && decision.Lane != RefreshLaneStoredIndex {
@@ -3450,7 +3463,8 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 				stored.Project.Hash == captured.Metadata.Project.Hash &&
 				cacheMatches)
 			if !structureMatches {
-				decision = RefreshDecision{Reason: RefreshReasonSourceChanged, Lane: RefreshLaneNative}
+				evidence.StructuralMismatch = true
+				decision = decideRefresh(evidence)
 				status = DiffUpdated
 				p.markRefreshReason(session.SessionID, decision.OutcomeReason())
 			}
