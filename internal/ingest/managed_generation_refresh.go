@@ -63,10 +63,10 @@ type ManagedGenerationRefreshOutcome struct {
 
 // ManagedGenerationRefresher is the store capability that installs a
 // metadata-only refresh of a managed generation without parsing the
-// transcript. The store keeps the entries, content and structural rows of the
-// active generation by reference and rewrites only the parsed-context rows,
-// so the write cost is proportional to the refreshed context, not the
-// transcript.
+// transcript. The store reuses body and content bytes, but loads the active
+// view and clones generation-scoped entry references and structural rows as
+// well as rewriting refreshed context. Cost grows with those rows and context,
+// rather than with the size of the reused bodies.
 //
 // Refusals are not failures of the session. The implementation returns the
 // store's actionable refusal (a *store.ManagedGenerationRefreshError matching

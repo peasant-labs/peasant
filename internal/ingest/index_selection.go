@@ -147,8 +147,8 @@ func (p *Pipeline) capturedInputBindsWithoutReparse(input *CapturedIndexInput) b
 // copied the recorded project, git, host, parent and redaction context into the
 // generation. The refresh is the narrower operation: it installs a NEW
 // immutable generation from the refreshed metadata capture while reusing the
-// stored entries and content by reference, so the write is proportional to the
-// context, not the transcript.
+// stored bodies and content while cloning entry references and structural rows.
+// Its write cost grows with those rows and the refreshed context, not body bytes.
 //
 // Every term is required:
 //

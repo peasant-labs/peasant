@@ -1,10 +1,11 @@
 //go:build managed_refresh_bench
 
 // Package ingest_test contains an opt-in, synthetic measurement harness for
-// the parse baseline of a managed-generation refresh after an adapter revision
-// bump. This branch measures the ordinary parse lane; the metadata-only refresh
-// lane runs the same harness on the same prepared base in its own branch. It is
-// not part of the default test build; build it with -tags managed_refresh_bench.
+// managed-generation refresh after an adapter revision bump. It measures both
+// the metadata-only refresh and ordinary parse paths on the same prepared base.
+// Keep this harness to answer whether the refresh saves time and write
+// amplification as entry counts grow, while retaining the same authority.
+// It is opt-in; build it with -tags managed_refresh_bench.
 //
 // The harness has two entry points:
 //

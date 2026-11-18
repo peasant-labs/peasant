@@ -32,7 +32,8 @@ import (
 //     never O(transcript bytes).
 //   - The METADATA CAPTURE owns the flattened catalog columns (project, git,
 //     host, model, source, timestamps, redaction context, adapter revision,
-//     diagnostics flag), the mutable measured stats, and the metadata-derived
+//     diagnostics flag), mutable measured stats other than the three
+//     parse-derived turn and submission counts, and the metadata-derived
 //     children: subagents, commits, associations, and diagnostics. Those are
 //     re-derived from the refreshed capture and become the new generation's
 //     values.
