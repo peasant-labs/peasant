@@ -6,6 +6,12 @@ All notable changes to Peasant are recorded here. The format follows
 GitHub Releases, which hold the signed artifacts and checksums. A version that
 was tagged but not published links to its tag instead.
 
+## [0.19.0] - 2026-11-18
+
+- handle interactive consent read errors (#1069)
+- complete the live import profile and clear the upgrade review follow-ups (#1071)
+- settle a managed-generation metadata refresh without parsing (#1078)
+
 ## [0.18.2] - 2026-11-17
 
 - cut a release (#1060)
