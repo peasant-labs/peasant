@@ -1,0 +1,5 @@
+requiredNames: [misspelled-byte-key]
+cases:
+  - name: misspelled-byte-key
+    kind: current
+    wantBytess: 145

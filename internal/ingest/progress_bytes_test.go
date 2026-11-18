@@ -1,7 +1,9 @@
 package ingest_test
 
 import (
+	"bytes"
 	_ "embed"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +18,9 @@ import (
 //go:embed testdata/progress_bytes.yaml
 var progressBytesYAML []byte
 
+//go:embed testdata/progress_bytes_invalid.yaml
+var invalidProgressBytesYAML []byte
+
 type progressBytesFixture struct {
 	RequiredNames []string `yaml:"requiredNames"`
 	Cases         []struct {
@@ -29,17 +34,52 @@ type progressBytesFixture struct {
 	} `yaml:"cases"`
 }
 
-func TestProgressBytes(t *testing.T) {
+func decodeProgressBytes(data []byte) (progressBytesFixture, error) {
 	var fixture progressBytesFixture
-	if err := yaml.Unmarshal(progressBytesYAML, &fixture); err != nil {
-		t.Fatal(err)
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&fixture); err != nil {
+		return fixture, err
+	}
+	if len(fixture.RequiredNames) == 0 {
+		return fixture, fmt.Errorf("requiredNames must not be empty")
 	}
 	seen := make(map[string]bool)
 	for _, c := range fixture.Cases {
-		if seen[c.Name] {
-			t.Fatalf("duplicate case %q", c.Name)
+		if c.Name == "" || seen[c.Name] {
+			return fixture, fmt.Errorf("empty or duplicate case %q", c.Name)
 		}
 		seen[c.Name] = true
+		if c.WantEstimate == "" {
+			return fixture, fmt.Errorf("case %q has an empty wantEstimate", c.Name)
+		}
+	}
+	required := make(map[string]bool)
+	for _, name := range fixture.RequiredNames {
+		if name == "" || required[name] {
+			return fixture, fmt.Errorf("empty or duplicate required name %q", name)
+		}
+		required[name] = true
+		if !seen[name] {
+			return fixture, fmt.Errorf("missing required case %q", name)
+		}
+	}
+	return fixture, nil
+}
+
+func TestProgressBytesFixtureRejectsMisspelledKey(t *testing.T) {
+	_, err := decodeProgressBytes(invalidProgressBytesYAML)
+	if err == nil || !strings.Contains(err.Error(), "wantEstimatte") {
+		t.Fatalf("misspelled key: got %v, want unknown-field error", err)
+	}
+}
+
+func TestProgressBytes(t *testing.T) {
+	fixture, err := decodeProgressBytes(progressBytesYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range fixture.Cases {
 		t.Run(c.Name, func(t *testing.T) {
 			state := ingest.NewProgressState()
 			now := time.Unix(100, 0)
@@ -64,10 +104,5 @@ func TestProgressBytes(t *testing.T) {
 				t.Errorf("missing %q in %q", c.WantEstimate, view)
 			}
 		})
-	}
-	for _, name := range fixture.RequiredNames {
-		if !seen[name] {
-			t.Fatalf("missing case %q", name)
-		}
 	}
 }
