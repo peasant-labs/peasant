@@ -9,17 +9,26 @@ export function checkSource(source, path) {
     sourceType: 'module',
     ecmaFeatures: { jsx: true },
   })
-  const first = ast.body[0]
-  function visit(node) {
+  const functionBodies = new WeakMap()
+  function visit(node, parent) {
     if (!node || typeof node !== 'object') return
+    if ((node.type === 'FunctionDeclaration' || node.type === 'FunctionExpression' ||
+         node.type === 'ArrowFunctionExpression') && node.body?.type === 'BlockStatement') {
+      functionBodies.set(node.body, node)
+    }
     if (node.type === 'ExpressionStatement' && node.expression?.type === 'Literal' &&
-        (node.expression.value === 'use client' || node.expression.value === 'use server') &&
-        node !== first) {
-      throw new Error(`${path}: "${node.expression.value}" must be the first statement; move it before imports and other statements`)
+        (node.expression.value === 'use client' || node.expression.value === 'use server')) {
+      const value = node.expression.value
+      const validModule = parent === ast && node === ast.body[0] && node.directive === value
+      const owner = functionBodies.get(parent)
+      const validAction = value === 'use server' && owner?.async && node.directive === value
+      if (!validModule && !validAction) {
+        throw new Error(`${path}: "${value}" must be the first statement of a module or a valid async function directive; remove parentheses and escapes, and move it before other statements`)
+      }
     }
     for (const value of Object.values(node)) {
-      if (Array.isArray(value)) value.forEach(visit)
-      else if (value && typeof value === 'object') visit(value)
+      if (Array.isArray(value)) value.forEach((child) => visit(child, node))
+      else if (value && typeof value === 'object') visit(value, node)
     }
   }
   visit(ast)
