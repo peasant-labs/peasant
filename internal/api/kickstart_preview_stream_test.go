@@ -139,6 +139,68 @@ func TestKickstartPreviewStream(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			if tc.Operation == "capacity" {
+				// Occupy the parse worker so both registered captures are busy.
+				hub.previews.worker <- struct{}{}
+				defer func() { <-hub.previews.worker }()
+				send := func(socket *websocket.Conn, msg ClientMessage) {
+					t.Helper()
+					data, err := json.Marshal(msg)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := socket.Write(ctx, websocket.MessageText, data); err != nil {
+						t.Fatal(err)
+					}
+				}
+				subscribe := ClientMessage{Type: MsgSubscribe, Channels: []ChannelSubscription{{Topic: TopicKickstart}}}
+				open := ClientMessage{Type: schema.MsgKickstartPreview, Preview: &schema.LocalKickstartPreviewRequest{Op: schema.LocalKickstartPreviewOpen, RequestID: "request", SessionID: "setup", NodeID: "row"}}
+				barrier := ClientMessage{Type: MsgDashboard}
+				openBusy := func(socket *websocket.Conn) {
+					t.Helper()
+					send(socket, subscribe)
+					send(socket, open)
+					send(socket, barrier)
+					_, data, err := socket.Read(ctx)
+					if err != nil {
+						t.Fatal(err)
+					}
+					var message ServerMessage
+					if err := json.Unmarshal(data, &message); err != nil || message.Type != MsgError {
+						t.Fatal("capture registration barrier did not complete")
+					}
+				}
+				openBusy(conn)
+				connect := func() *websocket.Conn {
+					t.Helper()
+					socket, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, _, err := socket.Read(ctx); err != nil {
+						t.Fatal(err)
+					}
+					return socket
+				}
+				second := connect()
+				defer second.CloseNow()
+				openBusy(second)
+				third := connect()
+				defer third.CloseNow()
+				send(third, subscribe)
+				send(third, open)
+				_, data, err := third.Read(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var message struct {
+					Data schema.LocalKickstartPreviewEvent `json:"data"`
+				}
+				if err := json.Unmarshal(data, &message); err != nil || message.Data.Reason != schema.LocalKickstartPreviewCapacity || message.Data.Code != schema.LocalKickstartErrorPreviewCapacity {
+					t.Fatal("third open was not refused for capacity")
+				}
+				return
+			}
 			var other *websocket.Conn
 			if tc.Operation == "isolation" {
 				other, _, err = websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
