@@ -462,8 +462,9 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]PiExtra, facts 
 	// When a depth=0 assistant message has both text and tool_use children, the
 	// depth=0 parent's ContentPreview already contains the text summary. Emitting
 	// the text sibling as a separate card would duplicate content. A thinking
-	// child is not a summary of anything: it is the reply's own thinking, so it
-	// stays a depth-1 turn under its reply.
+	// child of a harness that stores one reply per entry (replyThinkingHarness)
+	// is the reply's own thinking, so it stays a depth-1 turn under its reply;
+	// every other harness keeps its stored shape until it is re-indexed.
 	parentsWithTools := make(map[int]bool) // depth=0 entries that have folded ToolCalls
 	for parentIdx := range foldedToolCalls {
 		parentsWithTools[parentIdx] = true
@@ -498,7 +499,8 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]PiExtra, facts 
 			// A Claude carrier contains only its first text block. Its other
 			// text blocks remain conversation even when tools share the record.
 			legacyTextSummary := e.EntryType == schema.EntryTypeText && e.Harness != schema.HarnessClaudeCode
-			if legacyTextSummary {
+			hiddenThinking := e.EntryType == schema.EntryTypeThinking && !replyThinkingHarness(e.Harness)
+			if legacyTextSummary || hiddenThinking {
 				suppress[e.EntryIndex] = true
 			}
 		}
@@ -729,6 +731,15 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]PiExtra, facts 
 	}
 
 	return deduped
+}
+
+// replyThinkingHarness reports whether a harness stores each agent reply as one
+// entry with its thinking as children, so a thinking child is served as a turn
+// under its reply even when the reply called tools. Only the harnesses whose
+// indexer revisions were raised for that shape qualify; the others keep the
+// suppression their stored sessions were indexed under.
+func replyThinkingHarness(harness schema.Harness) bool {
+	return harness == schema.HarnessClaudeCode || harness == schema.HarnessOpenCode
 }
 
 func suppressEmptyTurn(hasContent, hasTools, hasObservation bool) bool {

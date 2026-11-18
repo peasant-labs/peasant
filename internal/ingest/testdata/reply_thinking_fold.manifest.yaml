@@ -1,0 +1,6 @@
+requiredNames:
+  - claude-code-serves-reply-thinking
+  - opencode-serves-reply-thinking
+  - codex-keeps-reply-thinking-hidden
+  - cursor-keeps-reply-thinking-hidden
+  - strike-keeps-reply-thinking-hidden
