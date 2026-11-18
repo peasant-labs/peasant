@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/peasant-labs/peasant/internal/defaults"
 )
 
 // Choice is one answer to the one-time sign-in ownership prompt.
@@ -27,16 +29,19 @@ const (
 // answer. An empty answer selects the default, Unclaimed.
 func ParseChoice(input string) (Choice, bool) {
 	switch strings.ToLower(strings.TrimSpace(input)) {
-	case "", "1", "u", "unclaimed", "only-unclaimed", "only unclaimed":
+	case "", defaults.Key1.String(), "u", "unclaimed", "only-unclaimed", "only unclaimed":
 		return Unclaimed, true
-	case "2", "a", "all", "claim-all", "claim all":
+	case defaults.Key2.String(), defaults.KeyAnnotate.String(), "all", "claim-all", "claim all":
 		return All, true
-	case "3", "n", "no", "not-now", "not now", "later":
+	case defaults.Key3.String(), "n", promptAnswerNo, "not-now", "not now", "later":
 		return NotNow, true
 	default:
 		return "", false
 	}
 }
+
+// promptAnswerNo is the word form of the "not now" answer.
+const promptAnswerNo = "no"
 
 // Prompt asks the three-way question on out and reads the answer from in. It
 // repeats on an answer outside the closed set. An EOF before any answer means

@@ -53,13 +53,13 @@ func TestClaimableSessionIDs(t *testing.T) {
 			for _, result := range test.Results {
 				status := DiffUnchanged
 				switch result.Status {
-				case "new":
+				case DiffNew.String():
 					status = DiffNew
-				case "updated":
+				case DiffUpdated.String():
 					status = DiffUpdated
-				case "unchanged":
+				case DiffUnchanged.String():
 					status = DiffUnchanged
-				case "active":
+				case DiffActive.String():
 					status = DiffActive
 				default:
 					t.Fatalf("unknown fixture status %q", result.Status)

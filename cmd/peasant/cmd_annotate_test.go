@@ -288,7 +288,7 @@ func TestAnnotateCreateClaimsNewAnnotations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(page.Claims) != 1 || page.Claims[0].Source != "automatic" {
+	if len(page.Claims) != 1 || page.Claims[0].Source != store.ClaimSourceAutomatic {
 		t.Fatalf("claims = %+v, want one reused automatic entry", page.Claims)
 	}
 	counts, err := db.OwnershipCounts(t.Context())
@@ -321,7 +321,7 @@ func TestAnnotateCreateProjectClaimsNewAnnotation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(page.Claims) != 1 || page.Claims[0].Source != "automatic" {
+	if len(page.Claims) != 1 || page.Claims[0].Source != store.ClaimSourceAutomatic {
 		t.Fatalf("claims = %+v, want one automatic entry", page.Claims)
 	}
 	counts, err := db.OwnershipCounts(t.Context())

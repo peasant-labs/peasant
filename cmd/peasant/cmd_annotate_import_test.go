@@ -210,7 +210,7 @@ func TestCLI_AnnotateImportRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("claims after import: %v", err)
 	}
-	if len(page.Claims) != 1 || page.Claims[0].Source != "automatic" {
+	if len(page.Claims) != 1 || page.Claims[0].Source != store.ClaimSourceAutomatic {
 		t.Fatalf("claims after import = %+v, want one automatic entry", page.Claims)
 	}
 	counts, err := db2.OwnershipCounts(ctx)

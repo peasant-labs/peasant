@@ -98,7 +98,7 @@ func runUserShowNoNetwork(t *testing.T) {
 	if report.NextBefore != nil {
 		t.Fatalf("nextBefore = %q, want none on a short page", *report.NextBefore)
 	}
-	if report.Prompt.State != "not_applicable" || report.Prompt.Account != nil {
+	if report.Prompt.State != string(userPromptStateNotApplicable) || report.Prompt.Account != nil {
 		t.Fatalf("prompt = %+v, want not_applicable without an account", report.Prompt)
 	}
 	if report.Ownership.Sessions.Total != 2 || report.Ownership.Sessions.Claimed != 0 || report.Ownership.Sessions.Unclaimed != 2 {
@@ -223,7 +223,7 @@ func TestUserClaimDefaultThenAll(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &second); err != nil {
 		t.Fatalf("decode second claim json: %v\n%s", err, stdout)
 	}
-	if second.Claimed != 0 || second.ClaimID == "" || second.Outcome.Kind != "nothing_to_claim" {
+	if second.Claimed != 0 || second.ClaimID == "" || second.Outcome.Kind != string(userClaimOutcomeNothingToMove) {
 		t.Fatalf("second claim = %+v, want nothing moved but a recorded entry", second)
 	}
 
@@ -243,7 +243,7 @@ func TestUserClaimDefaultThenAll(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &all); err != nil {
 		t.Fatalf("decode claim all json: %v\n%s", err, stdout)
 	}
-	if !all.Outcome.All || all.Claimed != 3 || all.ClaimID == "" || all.Outcome.Kind != "claimed" {
+	if !all.Outcome.All || all.Claimed != 3 || all.ClaimID == "" || all.Outcome.Kind != string(userClaimOutcomeClaimed) {
 		t.Fatalf("claim all = %+v, want three reassigned sessions with an entry", all)
 	}
 	page, err := db.OwnerClaims(t.Context(), "")
@@ -334,7 +334,7 @@ func runUserClaimJSONParity(t *testing.T) {
 	if err := decoder.Decode(&report); err != nil {
 		t.Fatalf("decode claim json with unknown fields refused: %v\n%s", err, jsonOut)
 	}
-	if report.Outcome.Kind != "claimed" || report.Claimed != 2 || report.ClaimID == "" || report.Outcome.Username != "alice" {
+	if report.Outcome.Kind != string(userClaimOutcomeClaimed) || report.Claimed != 2 || report.ClaimID == "" || report.Outcome.Username != "alice" {
 		t.Fatalf("claim json = %+v, want two claimed artifacts for alice", report)
 	}
 	if report.Outcome.VillageURL != "https://village.example/team" || report.Outcome.UserID != "11111111-1111-4111-8111-111111111111" {

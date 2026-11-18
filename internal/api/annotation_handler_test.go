@@ -21,6 +21,7 @@ import (
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
+	"github.com/peasant-labs/schema/route"
 )
 
 // ---------------------------------------------------------------------------
@@ -234,7 +235,7 @@ func postAnnotation(t *testing.T, baseURL string, req schema.CreateAnnotationReq
 	if err != nil {
 		t.Fatalf("postAnnotation: marshal: %v", err)
 	}
-	resp, err := http.Post(baseURL+"/api/v1/annotations", "application/json", bytes.NewReader(body))
+	resp, err := http.Post(baseURL+route.LocalCreateAnnotation.Pattern(), "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("postAnnotation: POST: %v", err)
 	}
@@ -279,7 +280,7 @@ func TestAnnotationHandler_GetAssociationTarget(t *testing.T) {
 		t.Fatalf("CreateAnnotation: %v", err)
 	}
 
-	response, err := http.Get(baseURL + "/api/v1/annotations?session_id=" + sessionID)
+	response, err := http.Get(baseURL + route.LocalListAnnotations.Pattern() + "?session_id=" + sessionID)
 	if err != nil {
 		t.Fatalf("GET annotations: %v", err)
 	}
@@ -516,7 +517,7 @@ func TestAnnotationHandler_TUIClient_CreateSingle(t *testing.T) {
 
 	if resp.StatusCode != http.StatusCreated {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		t.Errorf("POST /api/v1/annotations: status = %d, want %d; body: %s", resp.StatusCode, http.StatusCreated, bodyBytes)
+		t.Errorf(route.LocalCreateAnnotation.MuxPattern()+": status = %d, want %d; body: %s", resp.StatusCode, http.StatusCreated, bodyBytes)
 	}
 
 	var result schema.CreateAnnotationResponse
@@ -625,9 +626,9 @@ func TestAnnotationHandler_TUIClient_GetAnnotationTypes(t *testing.T) {
 	baseURL, cancel := startAnnotationServer(t, s)
 	defer cancel()
 
-	resp, err := http.Get(baseURL + "/api/v1/annotation-types")
+	resp, err := http.Get(baseURL + route.LocalListAnnotationTypes.Pattern())
 	if err != nil {
-		t.Fatalf("GET /api/v1/annotation-types: %v", err)
+		t.Fatalf(route.LocalListAnnotationTypes.MuxPattern()+": %v", err)
 	}
 	defer resp.Body.Close()
 
@@ -671,9 +672,9 @@ func TestAnnotationHandler_NoStore_Returns503(t *testing.T) {
 
 	baseURL := "http://" + srv.Addr().String()
 
-	resp, err := http.Get(baseURL + "/api/v1/annotations?session_id=any")
+	resp, err := http.Get(baseURL + route.LocalListAnnotations.Pattern() + "?session_id=any")
 	if err != nil {
-		t.Fatalf("GET /api/v1/annotations: %v", err)
+		t.Fatalf(route.LocalListAnnotations.MuxPattern()+": %v", err)
 	}
 	defer resp.Body.Close()
 
@@ -690,9 +691,9 @@ func TestAnnotationHandler_GetAnnotations_MissingSessionID(t *testing.T) {
 	baseURL, cancel := startAnnotationServer(t, s)
 	defer cancel()
 
-	resp, err := http.Get(baseURL + "/api/v1/annotations")
+	resp, err := http.Get(baseURL + route.LocalListAnnotations.Pattern())
 	if err != nil {
-		t.Fatalf("GET /api/v1/annotations (no session_id): %v", err)
+		t.Fatalf(route.LocalListAnnotations.MuxPattern()+" (no session_id): %v", err)
 	}
 	defer resp.Body.Close()
 
@@ -729,7 +730,7 @@ func TestAnnotationHandler_ClaimsWebAnnotation(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		t.Fatalf("POST /api/v1/annotations: status = %d, want %d; body: %s", resp.StatusCode, http.StatusCreated, bodyBytes)
+		t.Fatalf(route.LocalCreateAnnotation.MuxPattern()+": status = %d, want %d; body: %s", resp.StatusCode, http.StatusCreated, bodyBytes)
 	}
 
 	page, err := s.OwnerClaims(t.Context(), "")

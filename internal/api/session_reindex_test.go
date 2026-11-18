@@ -21,6 +21,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
+	"github.com/peasant-labs/schema/route"
 )
 
 //go:embed testdata/session_reindex.yaml
@@ -153,6 +154,9 @@ func harvestLikeTheCLI(t *testing.T, dbPath string, cfg *config.Config) {
 	}
 }
 
+// unstring-allow: go-endpoint-literal — the one-session ingest route is not yet declared in the pinned schema route package.
+const sessionIngestPath = "/api/v1/sync/ingest/session?session_id="
+
 // TestSessionReindexRoute drives the mounted one-session re-index over a real
 // Claude Code source and SQLite: the run re-reads the session only, from a
 // stable view of a file still being written, answers within its bound, and
@@ -248,7 +252,7 @@ func TestSessionReindexRoute(t *testing.T) {
 				target = unrecorded
 			}
 			response := httptest.NewRecorder()
-			handler.handleSyncIngestSession(response, httptest.NewRequest(http.MethodPost, "/api/v1/sync/ingest/session?session_id="+target, nil))
+			handler.handleSyncIngestSession(response, httptest.NewRequest(http.MethodPost, sessionIngestPath+target, nil))
 			if response.Code != c.Status {
 				t.Fatalf("status = %d, want %d; body %s", response.Code, c.Status, response.Body.String())
 			}
@@ -297,7 +301,7 @@ func TestSessionReindexRoute(t *testing.T) {
 				return
 			}
 			scan := httptest.NewRecorder()
-			handler.handleSyncRedactions(scan, httptest.NewRequest(http.MethodGet, "/api/v1/sync/redactions?session_id="+sessionID, nil))
+			handler.handleSyncRedactions(scan, httptest.NewRequest(http.MethodGet, route.LocalGetSyncRedactions.Pattern()+"?session_id="+sessionID, nil))
 			if scan.Code != c.ScanStatus {
 				t.Fatalf("scan status = %d, want %d; body %s", scan.Code, c.ScanStatus, scan.Body.String())
 			}
@@ -361,7 +365,7 @@ func TestAutoClaimSkipsWebOneSessionIngest(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	handler := hs.handler(db, cfg)
 	response := httptest.NewRecorder()
-	handler.handleSyncIngestSession(response, httptest.NewRequest(http.MethodPost, "/api/v1/sync/ingest/session?session_id="+sessionID, nil))
+	handler.handleSyncIngestSession(response, httptest.NewRequest(http.MethodPost, sessionIngestPath+sessionID, nil))
 	if response.Code != http.StatusOK {
 		t.Fatalf("one-session ingest status = %d, want 200; body %s", response.Code, response.Body.String())
 	}

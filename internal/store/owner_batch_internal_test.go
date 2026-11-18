@@ -69,7 +69,7 @@ VALUES('batch-e', 'claude-code', 'fixture-model', 'batch-host', 'batch-project',
 	s.claimBatchSize = 2
 	interrupted := false
 	s.claimBatchSeam = func(table string, batch, changed int) error {
-		if table == "sessions" && !interrupted && changed > 0 {
+		if !interrupted && changed > 0 {
 			interrupted = true
 			return errors.New("simulated interruption")
 		}
@@ -149,7 +149,7 @@ func claimScalarForTest(t *testing.T, s *Store, query string) int64 {
 //
 // Set PEASANT_LARGE_CLAIM_TEST=1 to run it (the seed takes a few seconds).
 func TestClaimArtifactsLargeStoreBatchesWithinWriterHold(t *testing.T) {
-	if testing.Short() || os.Getenv("PEASANT_LARGE_CLAIM_TEST") != "1" {
+	if testing.Short() || os.Getenv("PEASANT_LARGE_CLAIM_TEST") == "" {
 		t.Skip("set PEASANT_LARGE_CLAIM_TEST=1 to measure the large-store claim")
 	}
 	const sessions = 20616
