@@ -538,74 +538,141 @@ func classifyOpenCodeToolFormShell(msg OpenCodeProvenanceMessage, attr OpenCodeM
 	return blocks, nil
 }
 
-// classifyOpenCodeAssistant classifies one assistant row with its native part
-// IDs preserved: the first text or thinking block carries later tool parts,
-// further text or thinking blocks stay separate depth-0 entries so identical
-// prose in both survives, and tool parts hang below the carrier by native call
-// identity, never by text equality.
+// classifyOpenCodeAssistant classifies one assistant row as one reply with
+// its native part IDs preserved. The reply is one depth-0 entry that holds the
+// message's prose: every text part, in order. Its reasoning parts are depth-1
+// thinking children and its tool parts hang below it by native call identity,
+// never by text equality. The reply keeps the first text part's key, or the
+// fixed carrier key when the message holds no text. A message that holds only
+// reasoning is a standalone thinking turn: the reasoning is the reply's
+// content, under the first reasoning part's key, with no thinking children.
+// A part of a kind this build does not recognize stays a depth-0 entry of its
+// own at its position.
 func classifyOpenCodeAssistant(msg OpenCodeProvenanceMessage, attr OpenCodeMessageAttribution) ([]ClassifiedBlock, error) {
 	evidence := openCodeProvenanceEvidence(msg.Shape)
 	ownership := attr.Ownership
 	delivery := openCodeLifecycleDelivery(attr)
-	var blocks []ClassifiedBlock
-	carrierKey := ""
+	agentOutput := func() *schema.ContentProvenance {
+		return &schema.ContentProvenance{
+			Origin:        schema.ContentOriginAgentOutput,
+			Actor:         schema.ActorOriginUnknown,
+			Delivery:      delivery,
+			Ownership:     ownership,
+			Evidence:      evidence,
+			InputModality: schema.InputModalityNone,
+		}
+	}
+	toolActivity := func() *schema.ContentProvenance {
+		return &schema.ContentProvenance{
+			Origin:        schema.ContentOriginToolActivity,
+			Actor:         schema.ActorOriginUnknown,
+			Delivery:      delivery,
+			Ownership:     ownership,
+			Evidence:      evidence,
+			InputModality: schema.InputModalityNone,
+		}
+	}
+	partIDs := make([]string, len(msg.Parts))
+	var prose, reasoning []string
+	firstText, firstReasoning, firstReplyPart := -1, -1, -1
+	hasTools := false
+	seenParts := make(map[string]bool, len(msg.Parts))
 	for i, part := range msg.Parts {
-		partID := part.ID
-		if partID == "" {
-			partID = fmt.Sprintf("slot-%d", i)
+		partIDs[i] = part.ID
+		if partIDs[i] == "" {
+			partIDs[i] = fmt.Sprintf("slot-%d", i)
+		}
+		if seenParts[partIDs[i]] {
+			// A part absorbed into the reply leaves no block of its own, so
+			// the projection's duplicate-key check can no longer see a
+			// repeated identity; refuse it here instead.
+			return nil, fmt.Errorf("ingest.classifyOpenCodeAssistant: an assistant message repeats a recorded part identity at part %d; one native part would stand for two; restore the source message", i)
+		}
+		seenParts[partIDs[i]] = true
+		switch part.Kind {
+		case openCodePartKindText:
+			prose = append(prose, part.Text)
+			if firstText < 0 {
+				firstText = i
+			}
+		case openCodePartKindReasoning:
+			reasoning = append(reasoning, part.Text)
+			if firstReasoning < 0 {
+				firstReasoning = i
+			}
+		case openCodePartKindTool:
+			hasTools = true
+		default:
+			continue
+		}
+		if firstReplyPart < 0 {
+			firstReplyPart = i
+		}
+	}
+	thinkingOnly := firstText < 0 && !hasTools && firstReasoning >= 0
+
+	var carrier ClassifiedBlock
+	carrierKey := ""
+	if firstReplyPart >= 0 {
+		var err error
+		carrier = ClassifiedBlock{
+			Role:        schema.RoleAssistant,
+			HasThinking: firstReasoning >= 0,
+			TimestampMs: nonEmptyTimestamp(msg.TimeCreated),
+		}
+		switch {
+		case firstText >= 0:
+			carrierKey, err = openCodeNativeKey(msg.Shape, msg.MessageID, "part-"+partIDs[firstText])
+			carrier.EntryType = assistantEntryType(true, hasTools, firstReasoning >= 0)
+			carrier.Content = strings.Join(prose, openCodeReplyProseSeparator)
+			carrier.Provenance = agentOutput()
+		case thinkingOnly:
+			carrierKey, err = openCodeNativeKey(msg.Shape, msg.MessageID, "part-"+partIDs[firstReasoning])
+			carrier.EntryType = schema.EntryTypeThinking
+			carrier.Content = strings.Join(reasoning, openCodeReplyProseSeparator)
+			carrier.Provenance = agentOutput()
+		default:
+			// A message with tool calls and no prose holds no words of its
+			// own, so its carrier is a tool-only carrier.
+			carrierKey, err = openCodeNativeKey(msg.Shape, msg.MessageID, "carrier")
+			carrier.EntryType = assistantEntryType(false, true, firstReasoning >= 0)
+			carrier.Provenance = toolActivity()
+		}
+		if err != nil {
+			return nil, err
+		}
+		carrier.NativeKey = carrierKey
+	}
+
+	var blocks []ClassifiedBlock
+	for i, part := range msg.Parts {
+		partID := partIDs[i]
+		if i == firstReplyPart {
+			blocks = append(blocks, carrier)
 		}
 		switch part.Kind {
-		case "reasoning", "text":
-			entryType := schema.EntryTypeText
-			if part.Kind == "reasoning" {
-				entryType = schema.EntryTypeThinking
+		case openCodePartKindText:
+			// The reply holds every text part as its content.
+		case openCodePartKindReasoning:
+			if thinkingOnly {
+				continue
 			}
 			key, err := openCodeNativeKey(msg.Shape, msg.MessageID, "part-"+partID)
 			if err != nil {
 				return nil, err
 			}
-			if carrierKey == "" {
-				carrierKey = key
-			}
 			blocks = append(blocks, ClassifiedBlock{
-				NativeKey: key,
-				Role:      schema.RoleAssistant,
-				EntryType: entryType,
-				Content:   part.Text,
-				Provenance: &schema.ContentProvenance{
-					Origin:        schema.ContentOriginAgentOutput,
-					Actor:         schema.ActorOriginUnknown,
-					Delivery:      delivery,
-					Ownership:     ownership,
-					Evidence:      evidence,
-					InputModality: schema.InputModalityNone,
-				},
-				TimestampMs: nonEmptyTimestamp(msg.TimeCreated),
+				NativeKey:        key,
+				Depth:            1,
+				CarrierNativeKey: carrierKey,
+				Role:             schema.RoleAssistant,
+				EntryType:        schema.EntryTypeThinking,
+				HasThinking:      true,
+				Content:          part.Text,
+				Provenance:       agentOutput(),
+				TimestampMs:      nonEmptyTimestamp(msg.TimeCreated),
 			})
-		case "tool":
-			if carrierKey == "" {
-				key, err := openCodeNativeKey(msg.Shape, msg.MessageID, "carrier")
-				if err != nil {
-					return nil, err
-				}
-				carrierKey = key
-				// A tool-only message holds no prose, so its carrier is a
-				// tool-only carrier.
-				blocks = append(blocks, ClassifiedBlock{
-					NativeKey: carrierKey,
-					Role:      schema.RoleAssistant,
-					EntryType: toolOnlyCarrierEntryType,
-					Provenance: &schema.ContentProvenance{
-						Origin:        schema.ContentOriginToolActivity,
-						Actor:         schema.ActorOriginUnknown,
-						Delivery:      delivery,
-						Ownership:     ownership,
-						Evidence:      evidence,
-						InputModality: schema.InputModalityNone,
-					},
-					TimestampMs: nonEmptyTimestamp(msg.TimeCreated),
-				})
-			}
+		case openCodePartKindTool:
 			useKey, err := openCodeNativeKey(msg.Shape, msg.MessageID, "tool-"+partID)
 			if err != nil {
 				return nil, err
@@ -619,15 +686,8 @@ func classifyOpenCodeAssistant(msg OpenCodeProvenanceMessage, attr OpenCodeMessa
 				Role:             schema.RoleAssistant,
 				EntryType:        schema.EntryTypeToolUse,
 				ToolArguments:    part.ToolInput,
-				Provenance: &schema.ContentProvenance{
-					Origin:        schema.ContentOriginToolActivity,
-					Actor:         schema.ActorOriginUnknown,
-					Delivery:      delivery,
-					Ownership:     ownership,
-					Evidence:      evidence,
-					InputModality: schema.InputModalityNone,
-				},
-				TimestampMs: nonEmptyTimestamp(msg.TimeCreated),
+				Provenance:       toolActivity(),
+				TimestampMs:      nonEmptyTimestamp(msg.TimeCreated),
 			})
 			if part.ToolCompleted || part.ToolResult != "" {
 				resultKey, err := openCodeNativeKey(msg.Shape, msg.MessageID, "result-"+partID)
@@ -643,15 +703,8 @@ func classifyOpenCodeAssistant(msg OpenCodeProvenanceMessage, attr OpenCodeMessa
 					Role:             schema.RoleTool,
 					EntryType:        schema.EntryTypeToolResult,
 					ToolResult:       part.ToolResult,
-					Provenance: &schema.ContentProvenance{
-						Origin:        schema.ContentOriginToolActivity,
-						Actor:         schema.ActorOriginUnknown,
-						Delivery:      delivery,
-						Ownership:     ownership,
-						Evidence:      evidence,
-						InputModality: schema.InputModalityNone,
-					},
-					TimestampMs: nonEmptyTimestamp(msg.TimeCompleted),
+					Provenance:       toolActivity(),
+					TimestampMs:      nonEmptyTimestamp(msg.TimeCompleted),
 				})
 			}
 		default:
@@ -685,17 +738,10 @@ func classifyOpenCodeAssistant(msg OpenCodeProvenanceMessage, attr OpenCodeMessa
 			return nil, err
 		}
 		blocks = append(blocks, ClassifiedBlock{
-			NativeKey: key,
-			Role:      schema.RoleAssistant,
-			EntryType: schema.EntryTypeText,
-			Provenance: &schema.ContentProvenance{
-				Origin:        schema.ContentOriginAgentOutput,
-				Actor:         schema.ActorOriginUnknown,
-				Delivery:      delivery,
-				Ownership:     ownership,
-				Evidence:      evidence,
-				InputModality: schema.InputModalityNone,
-			},
+			NativeKey:   key,
+			Role:        schema.RoleAssistant,
+			EntryType:   schema.EntryTypeText,
+			Provenance:  agentOutput(),
 			TimestampMs: nonEmptyTimestamp(msg.TimeCreated),
 		})
 	}
@@ -710,6 +756,17 @@ func classifyOpenCodeAssistant(msg OpenCodeProvenanceMessage, attr OpenCodeMessa
 	}
 	return blocks, nil
 }
+
+// The native part kinds an assistant row's parts carry.
+const (
+	openCodePartKindText      = "text"
+	openCodePartKindReasoning = "reasoning"
+	openCodePartKindTool      = "tool"
+)
+
+// openCodeReplyProseSeparator joins the text parts of one reply. Each part is
+// a paragraph of its own.
+const openCodeReplyProseSeparator = "\n\n"
 
 // classifyOpenCodeHistoricalMessage classifies legacy and semantic shapes with
 // their existing reader's authority: roles and synthetic flags decide, and

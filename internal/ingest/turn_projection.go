@@ -458,10 +458,12 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]PiExtra, facts 
 		}
 	}
 
-	// Suppress depth=1 text/thinking siblings of folded tool entries.
+	// Suppress depth=1 text siblings of folded tool entries.
 	// When a depth=0 assistant message has both text and tool_use children, the
 	// depth=0 parent's ContentPreview already contains the text summary. Emitting
-	// the text sibling as a separate card would duplicate content.
+	// the text sibling as a separate card would duplicate content. A thinking
+	// child is not a summary of anything: it is the reply's own thinking, so it
+	// stays a depth-1 turn under its reply.
 	parentsWithTools := make(map[int]bool) // depth=0 entries that have folded ToolCalls
 	for parentIdx := range foldedToolCalls {
 		parentsWithTools[parentIdx] = true
@@ -496,7 +498,7 @@ func foldEntries(entries []schema.SessionEntry, evidence map[int]PiExtra, facts 
 			// A Claude carrier contains only its first text block. Its other
 			// text blocks remain conversation even when tools share the record.
 			legacyTextSummary := e.EntryType == schema.EntryTypeText && e.Harness != schema.HarnessClaudeCode
-			if legacyTextSummary || e.EntryType == schema.EntryTypeThinking {
+			if legacyTextSummary {
 				suppress[e.EntryIndex] = true
 			}
 		}
