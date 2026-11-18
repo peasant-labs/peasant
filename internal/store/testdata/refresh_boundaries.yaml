@@ -1,0 +1,7 @@
+requiredNames: [before-index, index-added, before-adapter, adapter-added, proof-added]
+cases:
+  - {name: before-index, version: 9, indexer: 0, adapter: false, proof: false}
+  - {name: index-added, version: 10, indexer: 7, adapter: false, proof: false}
+  - {name: before-adapter, version: 54, indexer: 7, adapter: false, proof: false}
+  - {name: adapter-added, version: 55, indexer: 7, adapter: true, proof: false}
+  - {name: proof-added, version: 56, indexer: 7, adapter: true, proof: true}

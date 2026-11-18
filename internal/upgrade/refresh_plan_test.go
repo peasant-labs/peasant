@@ -3,6 +3,8 @@ package upgrade
 import (
 	"crypto/sha256"
 	_ "embed"
+	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -167,8 +169,62 @@ func TestPlanRefreshUsesManagedProducerTarget(t *testing.T) {
 	}
 }
 
+//go:embed testdata/refresh_delegation.yaml
+var refreshDelegationCases []byte
+
 func TestPlanRefreshDelegates(t *testing.T) {
-	path := oldRefreshStore(t)
+	var fixture struct {
+		RequiredNames []string `yaml:"requiredNames"`
+		Cases         []struct {
+			Name          string
+			AdapterOffset int `yaml:"adapterOffset"`
+			IndexerOffset int `yaml:"indexerOffset"`
+			Proof         bool
+			MetadataOld   bool `yaml:"metadataOld"`
+			Reason        ingest.RefreshReason
+		} `yaml:"cases"`
+	}
+	if err := yaml.Unmarshal(refreshDelegationCases, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "current.db")
+	db, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := sqlite.OpenConn(path, sqlite.OpenReadWrite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := ingest.GenerationRepairTargets[ingest.HarnessClaudeCode]
+	_, canExtract := ingest.DefaultAdapterRegistry[ingest.HarnessClaudeCode](nil, nil, salt.Salt{}).(ingest.TranscriptMetadataExtractor)
+	var names []string
+	for _, c := range fixture.Cases {
+		names = append(names, c.Name)
+		metadata := int(ingest.CurrentSchemaVersion)
+		if c.MetadataOld {
+			metadata = 1
+		}
+		var proof any
+		if c.Proof {
+			proof = "0000000000000000000000000000000000000000000000000000000000000000"
+		}
+		err := sqlitex.ExecuteTransient(conn, `INSERT INTO sessions(session_id,model_harness,model_id,opaque_host_id,project_hash,start_ms,end_ms,ingested_ms,source_path,source_format,schema_version,adapter_version,index_version,indexed_input_hash) VALUES (?, ?, 'model', 'host', 'project', 1, 2, 3, 'source', 'jsonl', ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{c.Name, string(ingest.HarnessClaudeCode), metadata, target.AdapterVersion + c.AdapterOffset, target.IndexerVersion + c.IndexerOffset, proof}})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range fixture.RequiredNames {
+		if !slices.Contains(names, name) {
+			t.Errorf("missing fixture %s", name)
+		}
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
 	rows, _, err := store.ReadRefreshEvidence(t.Context(), path)
 	if err != nil {
 		t.Fatal(err)
@@ -177,18 +233,145 @@ func TestPlanRefreshDelegates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := ingest.GenerationRepairTargets[ingest.HarnessClaudeCode]
-	_, canExtract := ingest.DefaultAdapterRegistry[ingest.HarnessClaudeCode](nil, nil, salt.Salt{}).(ingest.TranscriptMetadataExtractor)
-	want := map[ingest.RefreshReason]int{}
+	reasons := map[ingest.RefreshReason]int{}
+	lanes := map[ingest.RefreshLane]int{}
+	decisions := map[string]ingest.RefreshDecision{}
 	for _, row := range rows {
-		d := ingest.DecideRefresh(ingest.RefreshEvidence{StoredRow: true, MetadataSchemaOld: !ingest.MetadataSchemaVersionIsCurrent(row.MetadataVersion), AdapterVersion: 1, AdapterTarget: target.AdapterVersion, AdapterCanExtract: canExtract, IndexerVersion: 0, IndexerTarget: target.IndexerVersion, IndexProofPresent: false})
-		want[d.Reason]++
+		adapter := 1
+		if row.AdapterVersion != nil {
+			adapter = *row.AdapterVersion
+		}
+		d := ingest.DecideRefresh(ingest.RefreshEvidence{StoredRow: true, MetadataSchemaOld: ingest.MetadataNeedsNativeRefresh(row.MetadataVersion), AdapterVersion: adapter, AdapterStampPresent: row.AdapterVersion != nil, AdapterTarget: target.AdapterVersion, AdapterCanExtract: canExtract, IndexerVersion: row.IndexerVersion, IndexerTarget: target.IndexerVersion, IndexProofPresent: row.IndexedInputHash != nil})
+		decisions[row.SessionID] = d
+		reasons[d.Reason]++
+		lanes[d.Lane]++
 	}
-	for reason, count := range want {
-		if plan.Estimate.ByReason[reason] != count {
-			t.Fatalf("%s: got %d want %d", reason, plan.Estimate.ByReason[reason], count)
+	if !maps.Equal(plan.Estimate.ByReason, reasons) || !maps.Equal(plan.Estimate.ByLane, lanes) {
+		t.Fatalf("census = %+v, want reasons %v lanes %v", plan.Estimate, reasons, lanes)
+	}
+	if len(plan.Sessions) != len(decisions) {
+		t.Fatalf("sessions = %+v, want %v", plan.Sessions, decisions)
+	}
+	for _, session := range plan.Sessions {
+		if !session.Decided || session.Decision != decisions[session.SessionID] {
+			t.Errorf("session = %+v want %+v", session, decisions[session.SessionID])
 		}
 	}
+	for _, c := range fixture.Cases {
+		if decisions[c.Name].Reason != c.Reason {
+			t.Errorf("%s reason = %s, want %s", c.Name, decisions[c.Name].Reason, c.Reason)
+		}
+	}
+	// Migration 77's recount does not feed decideRefresh; migration 62's
+	// content-pending work is not evidence this planner reads.
+	conn, err = sqlite.OpenConn(path, sqlite.OpenReadWrite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlitex.ExecuteTransient(conn, "PRAGMA user_version = 56", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	behind, err := PlanRefresh(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(behind.UnappliedEffects, store.StampEffectSearchInvalidated) || !slices.Contains(behind.UnappliedEffects, store.StampEffectRecountOwed) {
+		t.Fatalf("unapplied effects = %v", behind.UnappliedEffects)
+	}
+	if len(behind.Sessions) != len(decisions) {
+		t.Fatalf("behind sessions = %+v", behind.Sessions)
+	}
+	for _, session := range behind.Sessions {
+		if !session.Decided || session.Decision != decisions[session.SessionID] {
+			t.Errorf("pending effects changed %s: %+v, want %+v", session.SessionID, session.Decision, decisions[session.SessionID])
+		}
+	}
+}
+
+func TestPlanRefreshVersionBoundaries(t *testing.T) {
+	const boundaryFixturePath = "../store/testdata/refresh_boundaries.yaml"
+	data, err := os.ReadFile(boundaryFixturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture struct {
+		RequiredNames []string `yaml:"requiredNames"`
+		Cases         []struct {
+			Name             string
+			Version, Indexer int
+			Adapter, Proof   bool
+		} `yaml:"cases"`
+	}
+	if err := yaml.Unmarshal(data, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, c := range fixture.Cases {
+		names = append(names, c.Name)
+		t.Run(c.Name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "behind.db")
+			conn, err := sqlite.OpenConn(path, sqlite.OpenReadWrite, sqlite.OpenCreate)
+			if err != nil {
+				t.Fatal(err)
+			}
+			columns := "session_id TEXT, model_harness TEXT, schema_version INTEGER"
+			values := "'session', 'claude-code', 1"
+			if c.Version >= 10 {
+				columns += ", index_version INTEGER"
+				values += ", 7"
+			}
+			if c.Version >= 55 {
+				columns += ", adapter_version INTEGER"
+				values += ", 8"
+			}
+			if c.Version >= 56 {
+				columns += ", indexed_input_hash TEXT"
+				values += ", 'proof'"
+			}
+			for _, sql := range []string{"CREATE TABLE sessions(" + columns + ")", "INSERT INTO sessions VALUES(" + values + ")", fmt.Sprintf("PRAGMA user_version = %d", c.Version)} {
+				if err := sqlitex.ExecuteTransient(conn, sql, nil); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := conn.Close(); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before := sha256.Sum256(data)
+			plan, err := PlanRefresh(t.Context(), path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, err = os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if sha256.Sum256(data) != before {
+				t.Fatal("planning changed database")
+			}
+			if slices.Contains(plan.Unknown, RefreshUnknown{"session", "adapter_version"}) == c.Adapter || slices.Contains(plan.Unknown, RefreshUnknown{"session", "indexed_input_hash"}) == c.Proof || len(plan.Unknown) != boolCount(!c.Adapter)+boolCount(!c.Proof) {
+				t.Fatalf("unknown = %+v", plan.Unknown)
+			}
+		})
+	}
+	for _, name := range fixture.RequiredNames {
+		if !slices.Contains(names, name) {
+			t.Errorf("missing fixture %s", name)
+		}
+	}
+}
+
+func boolCount(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 //go:embed testdata/refresh_harness_rename.yaml
