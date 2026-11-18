@@ -12,7 +12,7 @@ func CensusLines(census *RefreshCensus) []string {
 	if census == nil {
 		return []string{"refresh census unavailable"}
 	}
-	lines := []string{fmt.Sprintf("refresh census: %d %s (includes failed attempts)", census.Sessions(), sessionWord(census.Sessions()))}
+	lines := []string{fmt.Sprintf("refresh census: %d %s (includes failed attempts)", census.Sessions(), SessionWord(census.Sessions()))}
 	for _, row := range census.Rows {
 		lines = append(lines, fmt.Sprintf("  %s / %s: %d", row.Lane, row.Reason.Code(), row.Sessions))
 		bytes := "indexed bytes: unknown"
@@ -24,7 +24,7 @@ func CensusLines(census *RefreshCensus) []string {
 	return lines
 }
 
-func sessionWord(count int) string {
+func SessionWord(count int) string {
 	if count == 1 {
 		return "session"
 	}

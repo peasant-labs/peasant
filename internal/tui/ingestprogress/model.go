@@ -284,7 +284,7 @@ func (m Model) View() string {
 	}
 	detail := []string{}
 	if m.candidatesKnown {
-		detail = append(detail, styles.Muted.Render(fmt.Sprintf("%sextract candidates: %d %s (not confirmed refreshes)", kit.Indent(2), m.candidateCount, sessionWord(m.candidateCount))))
+		detail = append(detail, styles.Muted.Render(fmt.Sprintf("%sextract candidates: %d %s (not confirmed refreshes)", kit.Indent(2), m.candidateCount, ingest.SessionWord(m.candidateCount))))
 	}
 	if m.lane != nil {
 		busy := "busy unknown"
