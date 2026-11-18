@@ -1527,7 +1527,7 @@ func printSummary(w io.Writer, result *ingest.PipelineResult, verbose bool, incl
 	if result.CensusStored {
 		census = result.Census
 	}
-	for _, line := range ingestprogress.CensusLines(census) {
+	for _, line := range ingest.CensusLines(census) {
 		fmt.Fprintln(w, line)
 	}
 	// The index line is printed whenever there is anything to say, INCLUDING when

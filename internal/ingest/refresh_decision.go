@@ -64,38 +64,20 @@ func NewRefreshReason(raw string) (RefreshReason, error) {
 	return "", fmt.Errorf("ingest: read refresh reason %q: this build defines no such decision reason; nothing was refreshed; use one of the named refresh reasons", raw)
 }
 
+var refreshOutcomeReasons = func() map[RefreshReason]OutcomeReason {
+	reasons := make(map[RefreshReason]OutcomeReason, len(AllRefreshReasons))
+	for _, reason := range AllRefreshReasons {
+		outcome, err := NewOutcomeReason(string(reason))
+		if err == nil && outcome.Kind() == OutcomeKindRefresh {
+			reasons[reason] = outcome
+		}
+	}
+	return reasons
+}()
+
 // OutcomeReason returns the run-outcome reason this decision records, or 0 for
 // source_compare and none, which write no outcome row.
-func (r RefreshReason) OutcomeReason() OutcomeReason {
-	switch r {
-	case RefreshReasonNew:
-		return OutcomeReasonRefreshNew
-	case RefreshReasonSourceChanged:
-		return OutcomeReasonRefreshSourceChanged
-	case RefreshReasonPairMissing:
-		return OutcomeReasonRefreshPairMissing
-	case RefreshReasonMetadataSchema:
-		return OutcomeReasonRefreshMetadataSchema
-	case RefreshReasonForced:
-		return OutcomeReasonRefreshForced
-	case RefreshReasonAdapterBehind:
-		return OutcomeReasonRefreshAdapterBehind
-	case RefreshReasonAdapterBehindNativeOnly:
-		return OutcomeReasonRefreshAdapterBehindNativeOnly
-	case RefreshReasonAdapterStampAbsent:
-		return OutcomeReasonRefreshAdapterStampAbsent
-	case RefreshReasonIndexerBehind:
-		return OutcomeReasonRefreshIndexerBehind
-	case RefreshReasonRefusalReopened:
-		return OutcomeReasonRefreshRefusalReopened
-	case RefreshReasonPublicationUnbound:
-		return OutcomeReasonRefreshPublicationUnbound
-	case RefreshReasonPublicationCaptureMissing:
-		return OutcomeReasonRefreshPublicationCaptureMissing
-	default:
-		return 0
-	}
-}
+func (r RefreshReason) OutcomeReason() OutcomeReason { return refreshOutcomeReasons[r] }
 
 // Refreshing reports whether the reason writes a refresh outcome row.
 func (r RefreshReason) Refreshing() bool { return r.OutcomeReason().Defined() }

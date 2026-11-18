@@ -110,7 +110,7 @@ func TestMountedHarvestLaneAndCensus(t *testing.T) {
 					census.Rows = append(census.Rows, ingest.RefreshCensusRow{Reason: reason, Lane: reason.RefreshLane(), Sessions: input.Sessions, SourceBytes: input.IndexedBytes})
 				}
 			}
-			assertLiveProfileText(t, strings.Join(ingestprogress.CensusLines(census), "\n"), row.Contains, row.Absent)
+			assertLiveProfileText(t, strings.Join(ingest.CensusLines(census), "\n"), row.Contains, row.Absent)
 		})
 	}
 	for _, name := range fixture.RequiredCensusCases {
