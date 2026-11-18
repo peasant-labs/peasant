@@ -693,7 +693,7 @@ func (s *Store) CleanupOrphanProjects(ctx context.Context, scope ingest.ProjectS
 			"store.CleanupOrphanProjects: delete orphan daily_summary_by_project: %w — "+
 				"what: DELETE failed on daily_summary_by_project; "+
 				"why: unexpected SQLite error; "+
-				"how to fix: re-run peasant ingest; if persistent, delete the DB at ~/.local/share/peasant/peasant.db and re-ingest",
+				"how to fix: re-run peasant ingest; if persistent, delete the DB at ~/.local/share/peasant/peasant.db and re-ingest; local ownership claims are lost with the database, but the local owner id is kept in local-owner.json beside it",
 			err,
 		)
 	}
@@ -704,7 +704,7 @@ func (s *Store) CleanupOrphanProjects(ctx context.Context, scope ingest.ProjectS
 			"store.CleanupOrphanProjects: delete orphan projects: %w — "+
 				"what: DELETE failed on projects; "+
 				"why: unexpected SQLite error; "+
-				"how to fix: re-run peasant ingest; if persistent, delete the DB at ~/.local/share/peasant/peasant.db and re-ingest",
+				"how to fix: re-run peasant ingest; if persistent, delete the DB at ~/.local/share/peasant/peasant.db and re-ingest; local ownership claims are lost with the database, but the local owner id is kept in local-owner.json beside it",
 			err,
 		)
 	}

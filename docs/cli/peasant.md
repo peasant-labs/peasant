@@ -36,6 +36,7 @@ peasant [flags]
 * [peasant service](peasant_service.md)	 - Run harvest on a schedule with a systemd user timer (Linux)
 * [peasant sessions](peasant_sessions.md)	 - Manage sessions
 * [peasant upgrade](peasant_upgrade.md)	 - Upgrade Peasant
+* [peasant user](peasant_user.md)	 - Inspect the local owner and claim local sessions
 * [peasant version](peasant_version.md)	 - Print the version
 * [peasant village](peasant_village.md)	 - Interact with peasant online
 * [peasant web](peasant_web.md)	 - Launch the web dashboard

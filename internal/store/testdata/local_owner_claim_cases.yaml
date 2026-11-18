@@ -1,0 +1,173 @@
+# Named local-owner and claim-log cases from peasant-labs/peasant#890. Each case
+# is driven by typed steps and asserts per-artifact owner pointers ("first",
+# "second", "third", or "null") against the ordered claim entries. The names
+# guard the set in both directions; owner_test.go decodes this file strictly.
+#
+# The four automatic-claim B1 cases live in internal/ingest/testdata because
+# they exercise the pipeline's DiffNew selection, not the store.
+requiredNames:
+  - owner-created-without-village-login
+  - owner-survives-sign-out
+  - owner-second-row-refused
+  - claim-default-unclaimed-only
+  - claim-all-retains-earlier-entries
+  - claim-username-snapshot-only
+  - claim-username-reuse-different-uuid
+  - claim-reassign-other-account-retains-entries
+  - claim-existing-install-prompted-once
+  - claim-never-touches-pulled-transcripts
+  - claim-harvest-covers-entry-targets
+  - auto-claim-leaves-other-account-rows
+
+cases:
+  - name: owner-created-without-village-login
+    steps:
+      - {kind: ensureOwner, nowMs: 1000}
+      - {kind: ensureOwner, nowMs: 2000}
+    expect:
+      ownerStable: true
+      ownerRows: 1
+      ownerFile: true
+      credentialsAbsent: true
+
+  - name: owner-survives-sign-out
+    steps:
+      - {kind: ensureOwner, nowMs: 1000}
+      - {kind: signIn, user: one, username: alice}
+      - {kind: claimDefault, source: manual, nowMs: 2000}
+      - {kind: signOut}
+      - {kind: ensureOwner, nowMs: 3000}
+    expect:
+      ownerStable: true
+      ownerRows: 1
+
+  - name: owner-second-row-refused
+    steps:
+      - {kind: ensureOwner, nowMs: 1000}
+      - {kind: insertSecondOwner, wantError: "exactly one row"}
+    expect:
+      ownerRows: 1
+
+  - name: claim-default-unclaimed-only
+    steps:
+      - {kind: seed, sessions: [owner-session-a, owner-session-b, owner-session-c], annotations: [owner-session-a, owner-session-b]}
+      - {kind: signIn, user: one, username: alice}
+      - {kind: claimSessions, sessions: [owner-session-a], source: automatic, nowMs: 2000}
+      - {kind: claimDefault, source: manual, nowMs: 3000}
+    expect:
+      claimCount: 2
+      claimSources: [automatic, manual]
+      sessions:
+        owner-session-a: first
+        owner-session-b: second
+        owner-session-c: second
+      annotations:
+        owner-session-a: first
+        owner-session-b: second
+
+  - name: claim-all-retains-earlier-entries
+    steps:
+      - {kind: seed, sessions: [owner-session-a, owner-session-b]}
+      - {kind: signIn, user: one, username: alice}
+      - {kind: claimDefault, source: manual, nowMs: 1000}
+      - {kind: claimAll, source: manual, nowMs: 2000}
+    expect:
+      claimCount: 2
+      claimSources: [manual, manual]
+      sessions:
+        owner-session-a: second
+        owner-session-b: second
+
+  - name: claim-username-snapshot-only
+    steps:
+      - {kind: seed, sessions: [owner-session-a]}
+      - {kind: signIn, user: one, username: alice}
+      - {kind: claimDefault, source: manual, nowMs: 1000}
+      - {kind: signIn, user: one, username: alice-renamed}
+      - {kind: claimAll, source: manual, nowMs: 2000}
+    expect:
+      claimCount: 2
+      claimUsernames: [alice, alice-renamed]
+      claimUserIDs: [one, one]
+      sessions:
+        owner-session-a: second
+
+  - name: claim-username-reuse-different-uuid
+    steps:
+      - {kind: seed, sessions: [owner-session-a]}
+      - {kind: signIn, user: one, username: shared-name}
+      - {kind: claimDefault, source: manual, nowMs: 1000}
+      - {kind: signIn, user: two, username: shared-name}
+      - {kind: claimAll, source: manual, nowMs: 2000}
+    expect:
+      claimCount: 2
+      claimUsernames: [shared-name, shared-name]
+      claimUserIDs: [one, two]
+      sessions:
+        owner-session-a: second
+
+  - name: claim-reassign-other-account-retains-entries
+    steps:
+      - {kind: seed, sessions: [owner-session-a]}
+      - {kind: signIn, user: one, username: alice}
+      - {kind: claimDefault, source: manual, nowMs: 1000}
+      - {kind: signIn, user: two, username: bob}
+      - {kind: claimAll, source: manual, nowMs: 2000}
+    expect:
+      claimCount: 2
+      claimUserIDs: [one, two]
+      sessions:
+        owner-session-a: second
+
+  - name: claim-existing-install-prompted-once
+    steps:
+      - {kind: seed, sessions: [owner-session-a]}
+      - {kind: signIn, user: one, username: alice}
+      - {kind: claimDefault, source: sign_in_prompt, nowMs: 2000}
+    expect:
+      claimCount: 1
+      claimSources: [sign_in_prompt]
+      sessions:
+        owner-session-a: first
+
+  - name: claim-never-touches-pulled-transcripts
+    steps:
+      - {kind: seed, sessions: [owner-session-a]}
+      - {kind: seedPulled}
+      - {kind: signIn, user: one, username: alice}
+      - {kind: claimAll, source: manual, nowMs: 2000}
+    expect:
+      pulledUnchanged: true
+      sessions:
+        owner-session-a: first
+
+  - name: claim-harvest-covers-entry-targets
+    steps:
+      - {kind: seed, sessions: [owner-session-a, owner-session-b], annotations: [owner-session-a, owner-session-b], entryAnnotations: [owner-session-a]}
+      - {kind: signIn, user: one, username: alice}
+      - {kind: claimSessions, sessions: [owner-session-a], source: automatic, nowMs: 2000}
+    expect:
+      claimCount: 1
+      annotations:
+        owner-session-a: first
+        entry:owner-session-a: first
+        owner-session-b: "null"
+
+  - name: auto-claim-leaves-other-account-rows
+    steps:
+      - {kind: seed, sessions: [owner-session-a, owner-session-b, owner-session-c]}
+      - {kind: signIn, user: one, username: alice}
+      - {kind: claimDefault, source: manual, nowMs: 1000}
+      - {kind: seed, sessions: [owner-session-d, owner-session-e]}
+      - {kind: signIn, user: two, username: bob}
+      - {kind: claimSessions, sessions: [owner-session-b, owner-session-d], source: automatic, nowMs: 2000}
+      - {kind: claimSessions, sessions: [owner-session-e], source: automatic, nowMs: 3000}
+    expect:
+      claimCount: 2
+      claimUserIDs: [one, two]
+      sessions:
+        owner-session-a: first
+        owner-session-b: first
+        owner-session-c: first
+        owner-session-d: second
+        owner-session-e: second

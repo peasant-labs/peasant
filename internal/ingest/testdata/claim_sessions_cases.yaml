@@ -1,0 +1,28 @@
+# Automatic claims cover only DiffNew sessions. Updated, reindexed, and rebuilt
+# sessions stay unclaimed until an explicit `peasant user claim` or the sign-in
+# prompt claims them. Each case maps pipeline session results to the ids an
+# automatic claim may name.
+requiredNames:
+  - auto-claim-skips-updated-unclaimed-session
+  - auto-claim-skips-reindexed-sessions
+  - auto-claim-skips-rebuilt-sessions
+  - auto-claim-after-decline-covers-only-new-sessions
+cases:
+  - name: auto-claim-skips-updated-unclaimed-session
+    results:
+      - {id: updated-unclaimed, status: updated}
+    want: []
+  - name: auto-claim-skips-reindexed-sessions
+    results:
+      - {id: reindexed-a, status: updated}
+      - {id: reindexed-b, status: updated}
+    want: []
+  - name: auto-claim-skips-rebuilt-sessions
+    results:
+      - {id: rebuilt-from-files, status: updated}
+    want: []
+  - name: auto-claim-after-decline-covers-only-new-sessions
+    results:
+      - {id: declined-old, status: unchanged}
+      - {id: new-session, status: new}
+    want: [new-session]
