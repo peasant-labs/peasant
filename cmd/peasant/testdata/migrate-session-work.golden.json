@@ -25,6 +25,7 @@
   "by_reason": {
     "metadata_schema": 1
   },
+  "full_step": {},
   "unknown": {
     "adapter_version": 1,
     "indexed_input_hash": 1

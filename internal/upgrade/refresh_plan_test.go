@@ -187,44 +187,20 @@ func TestPlanRefreshDelegates(t *testing.T) {
 	if err := yaml.Unmarshal(refreshDelegationCases, &fixture); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(t.TempDir(), "current.db")
-	db, err := store.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatal(err)
-	}
-	conn, err := sqlite.OpenConn(path, sqlite.OpenReadWrite)
-	if err != nil {
-		t.Fatal(err)
-	}
 	target := ingest.GenerationRepairTargets[ingest.HarnessClaudeCode]
 	_, canExtract := ingest.DefaultAdapterRegistry[ingest.HarnessClaudeCode](nil, nil, salt.Salt{}).(ingest.TranscriptMetadataExtractor)
 	var names []string
+	var seeds []refreshSeed
 	for _, c := range fixture.Cases {
 		names = append(names, c.Name)
-		metadata := int(ingest.CurrentSchemaVersion)
-		if c.MetadataOld {
-			metadata = 1
-		}
-		var proof any
-		if c.Proof {
-			proof = "0000000000000000000000000000000000000000000000000000000000000000"
-		}
-		err := sqlitex.ExecuteTransient(conn, `INSERT INTO sessions(session_id,model_harness,model_id,opaque_host_id,project_hash,start_ms,end_ms,ingested_ms,source_path,source_format,schema_version,adapter_version,index_version,indexed_input_hash) VALUES (?, ?, 'model', 'host', 'project', 1, 2, 3, 'source', 'jsonl', ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{c.Name, string(ingest.HarnessClaudeCode), metadata, target.AdapterVersion + c.AdapterOffset, target.IndexerVersion + c.IndexerOffset, proof}})
-		if err != nil {
-			t.Fatal(err)
-		}
+		seeds = append(seeds, refreshSeed{ID: c.Name, Harness: ingest.HarnessClaudeCode, AdapterOffset: offset(c.AdapterOffset), IndexerOffset: c.IndexerOffset, MetadataOld: c.MetadataOld, Proof: c.Proof})
 	}
 	for _, name := range fixture.RequiredNames {
 		if !slices.Contains(names, name) {
 			t.Errorf("missing fixture %s", name)
 		}
 	}
-	if err := conn.Close(); err != nil {
-		t.Fatal(err)
-	}
+	path := currentRefreshStore(t, seeds...)
 	rows, _, err := store.ReadRefreshEvidence(t.Context(), path)
 	if err != nil {
 		t.Fatal(err)
@@ -264,7 +240,7 @@ func TestPlanRefreshDelegates(t *testing.T) {
 	}
 	// Migration 77's recount does not feed decideRefresh; migration 62's
 	// content-pending work is not evidence this planner reads.
-	conn, err = sqlite.OpenConn(path, sqlite.OpenReadWrite)
+	conn, err := sqlite.OpenConn(path, sqlite.OpenReadWrite)
 	if err != nil {
 		t.Fatal(err)
 	}

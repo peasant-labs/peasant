@@ -398,13 +398,20 @@ func adapterDeclaration(harness ingest.Harness, factory ingest.AdapterFactory, v
 	input := ProducerInputNativeSource
 	// The capability is a type assertion; the adapter's dependencies are never
 	// used, so none are supplied.
-	if _, ok := factory(nil, nil, salt.Salt{}).(ingest.TranscriptMetadataExtractor); ok {
+	adapter := factory(nil, nil, salt.Salt{})
+	if _, ok := adapter.(ingest.TranscriptMetadataExtractor); ok {
 		input = ProducerInputStoredTranscript
+	}
+	// The scope is read through the same function the refresh decision's
+	// evidence uses, so the plan and a run agree on an undeclared adapter.
+	scope := ChangeScopeMetadataOnly
+	if !ingest.AdapterDeclaresChangeScope(adapter) {
+		scope = ""
 	}
 	return ProducerDeclaration{
 		Kind: ProducerKindAdapter, Name: string(harness),
 		Versions:    versions,
-		ChangeScope: ChangeScopeMetadataOnly, Input: input,
+		ChangeScope: scope, Input: input,
 		OutputProof: []ProofName{ProofContentHash, ProofMetadataContextDigest},
 		Precheck:    PrecheckAdapterContextEquivalence, Fallback: StepActionParse,
 	}

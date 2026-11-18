@@ -220,6 +220,18 @@ type PipelineConfig struct {
 	// entry point passes one; the pipeline stores its stage totals with the
 	// audit row. Nil records nothing and stores no stage row.
 	IndexProfiler *IndexProfiler
+	// DisableRefreshSkips runs an adapter refresh of a managed generation
+	// without its skips: no unchanged proof, no unchanged settle, and no
+	// metadata-only copy refresh. The refresh still takes the stored-metadata
+	// lane its decision names, and the index stage parses the stored
+	// transcript as it did before those skips existed. Every store capability
+	// stays wired; only the pipeline declines to use the three skips.
+	//
+	// Baseline only: it lets a measurement time the skips against the work
+	// they avoid on the same prepared base, and no command sets it. It is read
+	// at one decision point, managedGenerationRefreshLane, which gates all
+	// three skips.
+	DisableRefreshSkips bool
 	// Validator is the optional managed-generation validator; nil skips it.
 	Validator ManagedGenerationValidator
 	// Progress receives ProgressEvents from each pipeline stage.
@@ -357,6 +369,13 @@ type Pipeline struct {
 	config   PipelineConfig
 	store    SessionStore // nil = skip DB insert (backward compatible)
 	salt     salt.Salt    // per-installation HMAC salt for project hash derivation
+
+	// adapterCapabilities caches what each registered adapter declares, read
+	// once per harness by adapterCapabilityFor. The factory's inputs are
+	// pipeline fields that do not change after construction, so the answer
+	// cannot change either.
+	adapterCapabilitiesMu sync.Mutex
+	adapterCapabilities   map[Harness]adapterCapability
 
 	// generationIDs optionally assigns the installed identity of each
 	// managed generation candidate. Production leaves it nil and mints a fresh

@@ -1,0 +1,9 @@
+requiredNames:
+  - declared-adapter-keeps-its-stored-lane
+  - undeclared-adapter-plans-the-full-step
+  - undeclared-adapter-without-a-stamp-plans-the-full-step
+  - undeclared-adapter-leaves-an-indexer-bump-on-its-lane
+  - undeclared-adapter-with-nothing-to-skip-names-nothing
+  - undeclared-adapter-already-native-names-nothing
+  - unknown-harness-stays-undecided
+  - unknown-harness-is-not-an-undeclared-producer
