@@ -17,6 +17,8 @@ required_names:
   - managed-codex-world-state-preview-absent
   - codex-control-records-certify
   - codex-managed-controls-certify
+  - codex-metadata-envelopes-certify
+  - codex-managed-metadata-envelopes-certify
   - unknown-record-refused
   - control-payload-lone-surrogate-publishes
 cases:
@@ -71,6 +73,46 @@ cases:
     control_preview: "Web search completed: synthetic query"
     control_extra_members:
       control: '{"call_id":"search-1","query":"synthetic query"}'
+    export_accepted: true
+    publication_ready: true
+    preflight_accepts: true
+  # Token accounting and inter-agent trigger metadata are envelopes Codex writes
+  # beside the conversation. They carry no user-visible content, so both parsers
+  # account for them as ignored control: the capture still certifies complete,
+  # and neither kind becomes a stored entry or retained unknown evidence.
+  - name: codex-metadata-envelopes-certify
+    harness: codex
+    transcript: &codex-metadata-transcript |
+      {"timestamp":"2026-01-01T00:00:00Z","type":"session_meta","payload":{"id":"SESSION_ID","cwd":"/synthetic/workspace","model_provider":"openai"}}
+      {"timestamp":"2026-01-01T00:00:00.500Z","type":"turn_context","payload":{"model":"synthetic-model","effort":"medium"}}
+      {"timestamp":"2026-01-01T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"inspect the fixture"}]}}
+      {"timestamp":"2026-01-01T00:00:01.500Z","ordinal":3,"type":"inter_agent_communication_metadata","payload":{"trigger_turn":true}}
+      {"timestamp":"2026-01-01T00:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"I will inspect the fixture now."}]}}
+      {"timestamp":"2026-01-01T00:00:02.500Z","ordinal":5,"type":"token_usage_record","payload":{"response_id":"resp-synthetic","root_turn_id":"turn-synthetic","session_id":"SESSION_ID","thread_id":"SESSION_ID","turn_id":"turn-synthetic","usage":{"input_tokens":120,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":40,"reasoning_output_tokens":8,"total_tokens":160},"turn_token_usage":{"input_tokens":120,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":40,"reasoning_output_tokens":8,"total_tokens":160},"thread_token_usage":{"input_tokens":120,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":40,"reasoning_output_tokens":8,"total_tokens":160}}}
+      {"timestamp":"2026-01-01T00:00:03Z","type":"world_state","payload":{"state":{"mode":"synthetic"}}}
+      {"timestamp":"2026-01-01T00:00:08Z","type":"event_msg","payload":{"type":"web_search_end","call_id":"search-1","query":"synthetic query"}}
+    capture_status: complete
+    capture_format: full
+    failure_code: ""
+    control_part_type: web_search_end
+    control_preview: "Web search completed: synthetic query"
+    absent_part_types: [token_usage_record, inter_agent_communication_metadata]
+    export_accepted: true
+    publication_ready: true
+    preflight_accepts: true
+  - name: codex-managed-metadata-envelopes-certify
+    harness: codex
+    managed: true
+    transcript: *codex-metadata-transcript
+    capture_status: complete
+    capture_format: full
+    failure_code: ""
+    control_part_type: web_search_end
+    control_part_types: [world_state, web_search_end]
+    control_preview: "Web search completed: synthetic query"
+    control_extra_members:
+      control: '{"call_id":"search-1","query":"synthetic query"}'
+    absent_part_types: [token_usage_record, inter_agent_communication_metadata]
     export_accepted: true
     publication_ready: true
     preflight_accepts: true

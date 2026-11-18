@@ -39,6 +39,7 @@ type controlRecordIngestCase struct {
 	ControlPreview       string            `yaml:"control_preview"`
 	ControlPreviewAbsent bool              `yaml:"control_preview_absent"`
 	ControlExtraMembers  map[string]string `yaml:"control_extra_members"`
+	AbsentPartTypes      []string          `yaml:"absent_part_types"`
 	ExportAccepted       bool              `yaml:"export_accepted"`
 	PublicationReady     bool              `yaml:"publication_ready"`
 	PreflightAccepts     bool              `yaml:"preflight_accepts"`
@@ -235,6 +236,14 @@ func TestControlRecordIngestExportAndPublication(t *testing.T) {
 					for _, kind := range fixture.ControlPartTypes {
 						if findControlIngestEntry(snapshot.Entries, controlRecordIngestCase{ControlPartType: kind}) == nil {
 							t.Fatalf("the full-content reader lost %q control", kind)
+						}
+					}
+					// An ignored kind is accounted for without a row: neither
+					// reader may surface it as an entry.
+					for _, kind := range fixture.AbsentPartTypes {
+						probe := controlRecordIngestCase{ControlPartType: kind}
+						if findControlIngestEntry(snapshot.Entries, probe) != nil || findControlIngestEntry(nativeEntries, probe) != nil {
+							t.Fatalf("ignored kind %q was stored as an entry", kind)
 						}
 					}
 					// A managed generation carries the source ref on its stored

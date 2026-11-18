@@ -334,6 +334,8 @@ harnesses:
           - {<<: *structural, kind: response_item}
           - &control {kind: compacted, status: represented, preview: yes, payload: bounded control extra (oversized known controls retain identity only)}
           - {<<: *control, kind: world_state}
+          - {<<: *ignored, kind: token_usage_record}
+          - {<<: *ignored, kind: inter_agent_communication_metadata}
       - context: retained-format-1
         namespace: event
         sources:
@@ -395,6 +397,8 @@ harnesses:
           - {<<: *structural, kind: response_item}
           - {<<: *structural, kind: compacted}
           - {<<: *control, kind: world_state}
+          - {<<: *structural, kind: token_usage_record}
+          - {<<: *structural, kind: inter_agent_communication_metadata}
       - context: native-generation
         namespace: event
         sources:

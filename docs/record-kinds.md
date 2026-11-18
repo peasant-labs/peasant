@@ -16,10 +16,10 @@ remain errors, not successful unknown-kind captures.
 - **Namespace** separates discriminator domains. Equal record and block names
   are not the same key. **Match** is literal unless explicitly marked prefix.
 - **Status** is the closed set below, listed with what this build declares.
-  **represented** (interpreted entries or owning-entry state) — 283 rows;
+  **represented** (interpreted entries or owning-entry state) — 285 rows;
   **tracked-only** (stored non-conversation evidence outside interpreted
   transcript entries) — 5 rows; **ignored-control** (no row; the capture
-  accounts for the kind and can still certify complete) — 82 rows;
+  accounts for the kind and can still certify complete) — 84 rows;
   **retained-unknown** (complete redacted evidence without interpretation) — 0
   rows, declared by no kind in this build, and the unseen-valid-kind fallback of
   every harness; **refused** (an explicit known-unsupported disposition that
@@ -160,6 +160,8 @@ Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted e
 | retained-format-1 | envelope | `response_item` | literal | represented | no | state on owning entry; no independent row |  | `content_capture.go codexStrictEnvelopeKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
 | retained-format-1 | envelope | `compacted` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) |  | `content_capture.go codexStrictEnvelopeKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
 | retained-format-1 | envelope | `world_state` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) |  | `content_capture.go codexStrictEnvelopeKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | envelope | `token_usage_record` | literal | ignored-control | no | none | Entryless control; unexpected conversation content remains a validation error. | `content_capture.go codexStrictEnvelopeKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
+| retained-format-1 | envelope | `inter_agent_communication_metadata` | literal | ignored-control | no | none | Entryless control; unexpected conversation content remains a validation error. | `content_capture.go codexStrictEnvelopeKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
 | retained-format-1 | event | `token_count` | literal | ignored-control | no | none | Entryless control; unexpected conversation content remains a validation error. | `content_capture.go codexStrictEventMsgKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
 | retained-format-1 | event | `task_started` | literal | ignored-control | no | none | Entryless control; unexpected conversation content remains a validation error. | `content_capture.go codexStrictEventMsgKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
 | retained-format-1 | event | `task_complete` | literal | ignored-control | no | none | Entryless control; unexpected conversation content remains a validation error. | `content_capture.go codexStrictEventMsgKinds; content_capture.go CodexIndexer.IndexTranscriptBytesForCapture` |
@@ -188,6 +190,8 @@ Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted e
 | native-generation | envelope | `response_item` | literal | represented | no | state on owning entry; no independent row |  | `codex_history_replay.go recognizedCodexEnvelopeType; codex_history_replay.go codexReplayState.replayRecord` |
 | native-generation | envelope | `compacted` | literal | represented | no | state on owning entry; no independent row |  | `codex_history_replay.go recognizedCodexEnvelopeType; codex_history_replay.go codexReplayState.replayRecord` |
 | native-generation | envelope | `world_state` | literal | represented | yes | bounded control extra (oversized known controls retain identity only) |  | `codex_history_replay.go recognizedCodexEnvelopeType; codex_history_replay.go codexReplayState.replayRecord` |
+| native-generation | envelope | `token_usage_record` | literal | represented | no | state on owning entry; no independent row |  | `codex_history_replay.go recognizedCodexEnvelopeType; codex_history_replay.go codexReplayState.replayRecord` |
+| native-generation | envelope | `inter_agent_communication_metadata` | literal | represented | no | state on owning entry; no independent row |  | `codex_history_replay.go recognizedCodexEnvelopeType; codex_history_replay.go codexReplayState.replayRecord` |
 | native-generation | event | `token_count` | literal | ignored-control | no | none | Metadata event; no conversation row. | `codex_history_replay.go codexNativeEventDispatch; codex_history_replay.go codexReplayState.replayEventMessage; codex_history_replay.go codexNativeOnlyEventTypes; content_capture.go codexStrictEventMsgKinds` |
 | native-generation | event | `user_message` | literal | ignored-control | no | none | Mirrored content is represented by response items. | `codex_history_replay.go codexNativeEventDispatch; codex_history_replay.go codexReplayState.replayEventMessage; codex_history_replay.go codexNativeOnlyEventTypes; content_capture.go codexStrictEventMsgKinds` |
 | native-generation | event | `agent_message` | literal | ignored-control | no | none | Mirrored content is represented by response items. | `codex_history_replay.go codexNativeEventDispatch; codex_history_replay.go codexReplayState.replayEventMessage; codex_history_replay.go codexNativeOnlyEventTypes; content_capture.go codexStrictEventMsgKinds` |

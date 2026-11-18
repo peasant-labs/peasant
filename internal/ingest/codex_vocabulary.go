@@ -19,6 +19,8 @@ var codexVocabulary = recordKindAdapterVocabulary{
 				recordKindLiteral("response_item", indexformat.OutcomeIgnored),
 				recordKindLiteral(CodexTypeCompacted, indexformat.OutcomeControl),
 				recordKindLiteral(codexTypeWorldState, indexformat.OutcomeControl),
+				recordKindLiteral(codexTypeTokenUsageRecord, indexformat.OutcomeIgnored),
+				recordKindLiteral(codexTypeInterAgentMetadata, indexformat.OutcomeIgnored),
 			},
 			Production: func() recordKindProductionSet {
 				return recordKindProductionLiterals(codexStrictEnvelopeKinds())
@@ -122,6 +124,8 @@ var codexVocabulary = recordKindAdapterVocabulary{
 				recordKindLiteral("response_item", indexformat.OutcomeIgnored),
 				recordKindLiteral("compacted", indexformat.OutcomeIgnored),
 				recordKindLiteral("world_state", indexformat.OutcomeControl),
+				recordKindLiteral(codexTypeTokenUsageRecord, indexformat.OutcomeIgnored),
+				recordKindLiteral(codexTypeInterAgentMetadata, indexformat.OutcomeIgnored),
 			},
 			Production: func() recordKindProductionSet {
 				return recordKindProductionLiterals(codexNativeEnvelopeKinds())

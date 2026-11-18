@@ -887,6 +887,11 @@ const (
 	codexTypeEventMsg    = "event_msg"
 	codexTypeResponse    = "response_item"
 
+	// Token accounting and inter-agent trigger metadata are envelopes Codex
+	// writes beside the conversation. Neither carries user-visible content.
+	codexTypeTokenUsageRecord   = "token_usage_record"
+	codexTypeInterAgentMetadata = "inter_agent_communication_metadata"
+
 	codexResponseMessage       = "message"
 	codexResponseAgentMessage  = "agent_message"
 	codexResponseFunctionCall  = "function_call"

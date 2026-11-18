@@ -89,6 +89,8 @@ func codexStrictEnvelopeKinds() []string {
 		codexTypeResponse,
 		CodexTypeCompacted,
 		codexTypeWorldState,
+		codexTypeTokenUsageRecord,
+		codexTypeInterAgentMetadata,
 	}
 }
 
@@ -581,7 +583,7 @@ func (idx *CodexIndexer) IndexTranscriptBytesForCapture(ctx context.Context, s D
 			return nil, nil
 		}
 		switch env.Type {
-		case codexTypeSessionMeta:
+		case codexTypeSessionMeta, codexTypeTokenUsageRecord, codexTypeInterAgentMetadata:
 			return &IgnoredSourceRecord{Kind: env.Type, Reason: IgnoredRecordMetadata}, nil
 		case codexTypeTurnContext:
 			// turn_context carries per-turn control evidence (the thinking

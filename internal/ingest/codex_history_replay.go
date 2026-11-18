@@ -202,7 +202,7 @@ type codexHistoryRecord struct {
 }
 
 func codexNativeEnvelopeKinds() []string {
-	return []string{codexTypeSessionMeta, codexTypeTurnContext, codexTypeResponse, codexTypeEventMsg, CodexTypeCompacted, codexTypeWorldState}
+	return []string{codexTypeSessionMeta, codexTypeTurnContext, codexTypeResponse, codexTypeEventMsg, CodexTypeCompacted, codexTypeWorldState, codexTypeTokenUsageRecord, codexTypeInterAgentMetadata}
 }
 
 // recognizedCodexEnvelopeType reports whether an envelope type advances the
@@ -1036,7 +1036,7 @@ func (state *codexReplayState) replayRecord(threadID string, segment codexDecode
 	}
 
 	switch record.EnvelopeType {
-	case codexTypeSessionMeta:
+	case codexTypeSessionMeta, codexTypeTokenUsageRecord, codexTypeInterAgentMetadata:
 		return nil
 	case codexTypeTurnContext:
 		state.replayTurnContext(threadID, segment, record)
