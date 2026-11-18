@@ -227,8 +227,10 @@ type PipelineConfig struct {
 	// transcript as it did before those skips existed. Every store capability
 	// stays wired; only the pipeline declines to use the three skips.
 	//
-	// It is a measurement baseline: it lets a harness time the skips against
-	// the work they avoid on the same prepared base. No command sets it.
+	// Baseline only: it lets a measurement time the skips against the work
+	// they avoid on the same prepared base, and no command sets it. It is read
+	// at one decision point, managedGenerationRefreshLane, which gates all
+	// three skips.
 	DisableRefreshSkips bool
 	// Progress receives ProgressEvents from each pipeline stage.
 	// Nil means no progress reporting.
