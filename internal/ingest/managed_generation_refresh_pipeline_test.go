@@ -2,16 +2,19 @@ package ingest_test
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store"
@@ -19,9 +22,109 @@ import (
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
+	"gopkg.in/yaml.v3"
 )
 
 const managedRefreshPipelineForcedProject = "managed refresh pipeline project"
+
+//go:embed testdata/managed_refresh_pipeline_lanes.yaml
+var managedRefreshPipelineLanes []byte
+
+//go:embed testdata/managed_refresh_pipeline_lanes.manifest.yaml
+var managedRefreshPipelineLanesManifest []byte
+
+type countedManagedRefreshStore struct {
+	*store.Store
+	calls       atomic.Int64
+	forgeCounts bool
+}
+
+func (s *countedManagedRefreshStore) RefreshManagedGenerationWithoutParse(ctx context.Context, request ingest.ManagedGenerationRefreshRequest) (ingest.ManagedGenerationRefreshOutcome, error) {
+	s.calls.Add(1)
+	if s.forgeCounts {
+		input, conversation := int64(903), int64(902)
+		request.Metadata.Stats.TurnCount = 901
+		request.Metadata.Stats.InputSubmissionCount = &input
+		request.Metadata.Stats.ConversationTurnCount = &conversation
+	}
+	return s.Store.RefreshManagedGenerationWithoutParse(ctx, request)
+}
+
+func TestManagedGenerationRefreshPipelineLanes(t *testing.T) {
+	var fixture struct {
+		Cases []struct {
+			Name     string `yaml:"name"`
+			Mutation string `yaml:"mutation"`
+			Reason   string `yaml:"reason"`
+			Refresh  bool   `yaml:"refresh"`
+		} `yaml:"cases"`
+	}
+	if err := yaml.Unmarshal(managedRefreshPipelineLanes, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		RequiredNames []string `yaml:"requiredNames"`
+	}
+	if err := yaml.Unmarshal(managedRefreshPipelineLanesManifest, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	names := make(map[string]bool)
+	for _, c := range fixture.Cases {
+		names[c.Name] = true
+		t.Run(c.Name, func(t *testing.T) {
+			root := t.TempDir()
+			source, output := filepath.Join(root, "source"), filepath.Join(root, "managed")
+			mustMkdir(t, source)
+			writeManagedRefreshPipelineCorpus(t, source, 1, 8)
+			base := openManagedRefreshPipelineStore(t, filepath.Join(root, "db"), output)
+			t.Cleanup(func() { _ = base.Close() })
+			runManagedRefreshPipeline(t, base, source, output)
+			stored := ingest.GenerationTargets(ingest.HarvesterVersionRegistry)[ingest.HarnessClaudeCode].AdapterVersion - 1
+			switch c.Mutation {
+			case "adapter-behind":
+				managedRefreshPipelineDowngrade(t, base, stored)
+				managedRefreshPipelineChangeMetadata(t, output, stored, managedRefreshPipelineForcedProject)
+			case "adapter-absent":
+				managedRefreshPipelineDowngrade(t, base, -1)
+				managedRefreshPipelineChangeMetadata(t, output, -1, managedRefreshPipelineForcedProject)
+			case "indexer-behind":
+				conn, err := base.Pool().Take(t.Context())
+				if err != nil {
+					t.Fatal(err)
+				}
+				err = sqlitex.Execute(conn, `UPDATE sessions SET index_version = 0`, nil)
+				base.Pool().Put(conn)
+				if err != nil {
+					t.Fatal(err)
+				}
+			default:
+				t.Fatalf("unknown lane mutation %q", c.Mutation)
+			}
+			empty := filepath.Join(root, "empty")
+			mustMkdir(t, empty)
+			counted := &countedManagedRefreshStore{Store: base}
+			var parses atomic.Int64
+			result := runManagedRefreshPipelineCounting(t, counted, empty, output, &parses)
+			if result.Summary.Errors != 0 || result.Census == nil || len(result.Census.Rows) != 1 {
+				t.Fatalf("run summary %+v census %+v", result.Summary, result.Census)
+			}
+			if got := result.Census.Rows[0].Reason.Code(); got != c.Reason {
+				t.Fatalf("reason = %q, want %q", got, c.Reason)
+			}
+			if c.Refresh && (counted.calls.Load() != 1 || parses.Load() != 0) {
+				t.Fatalf("refresh calls %d, parses %d; want 1 and 0", counted.calls.Load(), parses.Load())
+			}
+			if !c.Refresh && (counted.calls.Load() != 0 || parses.Load() == 0) {
+				t.Fatalf("refresh calls %d, parses %d; want 0 and positive", counted.calls.Load(), parses.Load())
+			}
+		})
+	}
+	for _, name := range manifest.RequiredNames {
+		if !names[name] {
+			t.Fatalf("missing required lane %q", name)
+		}
+	}
+}
 
 // TestManagedGenerationMetadataRefreshRunsThroughThePipeline is the production
 // path for a metadata-only adapter bump on a managed generation: the worker
@@ -48,6 +151,7 @@ func TestManagedGenerationMetadataRefreshRunsThroughThePipeline(t *testing.T) {
 		t.Fatalf("initial import summary = %+v, want %d new, indexed and no errors", first.Summary, len(sessionIDs))
 	}
 	initial := make(map[ingest.SessionID]string, len(sessionIDs))
+	initialCounts := managedRefreshPipelineRows(t, db, `SELECT c.turn_count || ':' || c.conversation_turn_count || ':' || c.input_submission_count || ':' || s.input_submission_count FROM sessions s JOIN session_captured_stats c USING (session_id) WHERE s.session_id = ?`, sessionIDs[0])
 	for _, sid := range sessionIDs {
 		initial[sid] = managedRefreshPipelineActiveGeneration(t, db, sid)
 	}
@@ -72,7 +176,16 @@ func TestManagedGenerationMetadataRefreshRunsThroughThePipeline(t *testing.T) {
 
 	emptySource := filepath.Join(root, "empty-source")
 	mustMkdir(t, emptySource)
-	refreshed := runManagedRefreshPipeline(t, db, emptySource, output)
+	var parses atomic.Int64
+	refresher := &countedManagedRefreshStore{Store: db, forgeCounts: true}
+	refreshed := runManagedRefreshPipelineCounting(t, refresher, emptySource, output, &parses)
+	if refresher.calls.Load() != int64(len(sessionIDs)) {
+		t.Fatalf("refresh requests = %d, want %d", refresher.calls.Load(), len(sessionIDs))
+	}
+	if parses.Load() != 0 {
+		t.Fatalf("metadata refresh invoked parser %d times", parses.Load())
+	}
+	assertManagedRefreshRowsEqual(t, "parse counts", initialCounts, managedRefreshPipelineRows(t, db, `SELECT c.turn_count || ':' || c.conversation_turn_count || ':' || c.input_submission_count || ':' || s.input_submission_count FROM sessions s JOIN session_captured_stats c USING (session_id) WHERE s.session_id = ?`, sessionIDs[0]))
 	if refreshed.Summary.Errors != 0 || refreshed.Summary.New != 0 || refreshed.Summary.Unchanged != 0 {
 		t.Fatalf("metadata-only refresh summary = %+v, want updated only and no errors", refreshed.Summary)
 	}
@@ -139,7 +252,10 @@ func TestManagedGenerationMetadataRefreshRunsThroughThePipeline(t *testing.T) {
 	// A following transcript change re-enters the native parse path and writes
 	// a new generation from the changed bytes.
 	appendManagedRefreshPipelineRecord(t, filepath.Join(source, "-workspace", string(sessionIDs[0])+".jsonl"), string(sessionIDs[0]))
-	changed := runManagedRefreshPipeline(t, db, source, output)
+	changed := runManagedRefreshPipelineCounting(t, db, source, output, &parses)
+	if parses.Load() == 0 {
+		t.Fatal("changed input did not invoke the generation builder or parser")
+	}
 	if changed.Summary.Errors != 0 || changed.Summary.Indexed != 1 {
 		t.Fatalf("changed-source run summary = %+v, want one re-indexed session and no errors", changed.Summary)
 	}
@@ -228,6 +344,50 @@ func runManagedRefreshPipeline(t *testing.T, db *store.Store, source, output str
 }
 
 func runManagedRefreshPipelineWithStore(t *testing.T, db managedRefreshPipelineStore, source, output string) *ingest.PipelineResult {
+	return runManagedRefreshPipelineCounting(t, db, source, output, nil)
+}
+
+type countingManagedRefreshIndexer struct {
+	*ingest.ClaudeIndexer
+	calls *atomic.Int64
+}
+
+func (i countingManagedRefreshIndexer) BuildGeneration(ctx context.Context, input ingest.GenerationBuildInput) (ingest.GenerationCandidate, error) {
+	i.calls.Add(1)
+	return i.ClaudeIndexer.BuildGeneration(ctx, input)
+}
+
+func (i countingManagedRefreshIndexer) IndexTranscript(ctx context.Context, session ingest.DiscoveredSession) ([]schema.SessionEntry, error) {
+	i.calls.Add(1)
+	return i.ClaudeIndexer.IndexTranscript(ctx, session)
+}
+
+func (i countingManagedRefreshIndexer) IndexTranscriptBytes(ctx context.Context, session ingest.DiscoveredSession, data []byte) ([]schema.SessionEntry, error) {
+	i.calls.Add(1)
+	return i.ClaudeIndexer.IndexTranscriptBytes(ctx, session, data)
+}
+
+func (i countingManagedRefreshIndexer) IndexTranscriptResult(ctx context.Context, session ingest.DiscoveredSession) (indexformat.Result, error) {
+	i.calls.Add(1)
+	return i.ClaudeIndexer.IndexTranscriptResult(ctx, session)
+}
+
+func (i countingManagedRefreshIndexer) IndexTranscriptBytesResult(ctx context.Context, session ingest.DiscoveredSession, data []byte) (indexformat.Result, error) {
+	i.calls.Add(1)
+	return i.ClaudeIndexer.IndexTranscriptBytesResult(ctx, session, data)
+}
+
+func (i countingManagedRefreshIndexer) IndexTranscriptForCapture(ctx context.Context, session ingest.DiscoveredSession) (ingest.TranscriptCaptureResult, error) {
+	i.calls.Add(1)
+	return i.ClaudeIndexer.IndexTranscriptForCapture(ctx, session)
+}
+
+func (i countingManagedRefreshIndexer) IndexTranscriptBytesForCapture(ctx context.Context, session ingest.DiscoveredSession, data []byte) (ingest.TranscriptCaptureResult, error) {
+	i.calls.Add(1)
+	return i.ClaudeIndexer.IndexTranscriptBytesForCapture(ctx, session, data)
+}
+
+func runManagedRefreshPipelineCounting(t *testing.T, db managedRefreshPipelineStore, source, output string, calls *atomic.Int64) *ingest.PipelineResult {
 	t.Helper()
 	cfg := makePipelineConfig(output)
 	cfg.Sources = map[ingest.Harness]ingest.SourceConfig{
@@ -235,11 +395,18 @@ func runManagedRefreshPipelineWithStore(t *testing.T, db managedRefreshPipelineS
 	}
 	cfg.StalenessThreshold = 0
 	fs := &ingest.OSFileSystem{}
+	indexers := ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})
+	if calls != nil {
+		indexers[ingest.HarnessClaudeCode] = countingManagedRefreshIndexer{
+			ClaudeIndexer: ingest.NewClaudeIndexer(fs, ingest.WithClaudeFullDepth(true)),
+			calls:         calls,
+		}
+	}
 	pipeline, err := newTestPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg,
 		ingest.WithStore(db),
 		ingest.WithMetricsStore(db),
 		ingest.WithSalt(db.InstallationSalt()),
-		ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
+		ingest.WithIndexers(indexers),
 		ingest.WithLogger(db),
 		ingest.WithIndexLogger(db),
 	)
@@ -340,7 +507,11 @@ func managedRefreshPipelineDowngrade(t *testing.T, db *store.Store, stored int) 
 		t.Fatal(err)
 	}
 	defer db.Pool().Put(conn)
-	if err := sqlitex.Execute(conn, `UPDATE sessions SET adapter_version = ?`, &sqlitex.ExecOptions{Args: []any{stored}}); err != nil {
+	var value any = stored
+	if stored < 0 {
+		value = nil
+	}
+	if err := sqlitex.Execute(conn, `UPDATE sessions SET adapter_version = ?`, &sqlitex.ExecOptions{Args: []any{value}}); err != nil {
 		t.Fatalf("downgrade session adapter rows: %v", err)
 	}
 }
@@ -372,7 +543,11 @@ func managedRefreshPipelineChangeMetadata(t *testing.T, output string, stored in
 		if err := json.Unmarshal(data, &metadata); err != nil {
 			t.Fatalf("decode managed metadata %s: %v", path, err)
 		}
-		metadata.AdapterVersion = &stored
+		if stored < 0 {
+			metadata.AdapterVersion = nil
+		} else {
+			metadata.AdapterVersion = &stored
+		}
 		metadata.Project.Name = projectName
 		metadata.MetadataHash = schema.ComputeMetadataHash(&metadata)
 		encoded, err := json.Marshal(&metadata)

@@ -1,0 +1,13 @@
+cases:
+  - name: adapter-behind
+    mutation: adapter-behind
+    reason: adapter_behind
+    refresh: true
+  - name: adapter-stamp-absent
+    mutation: adapter-absent
+    reason: adapter_stamp_absent
+    refresh: true
+  - name: indexer-behind
+    mutation: indexer-behind
+    reason: indexer_behind
+    refresh: false
