@@ -49,7 +49,6 @@ rules:
     web/scripts/visual/publish-states-shoot.mjs: 14
     web/scripts/visual/root-page-visual.mjs: 18
     web/scripts/visual/search-share-visual.mjs: 11
-    web/scripts/visual/settings-shoot.mjs: 2
     web/scripts/visual/shell-chrome-manifest.mjs: 3
     web/scripts/visual/shell-nav-default-gate.mjs: 5
     web/scripts/visual/stitch-sxs.mjs: 1
@@ -59,12 +58,11 @@ rules:
     web/src/app/dev/visual-harness/page.tsx: 2
     web/src/app/dev/visual-harness/sample-session.ts: 7
     web/src/app/home-adapter.test.tsx: 1
-    web/src/app/map/[[...segments]]/MapPageClient.tsx: 7
+    web/src/app/map/[[...segments]]/MapPageClient.tsx: 6
     web/src/app/map/[[...segments]]/MapRail.tsx: 3
     web/src/app/map/[[...segments]]/MapRouter.test.tsx: 1
-    web/src/app/map/[[...segments]]/MapRouter.tsx: 3
     web/src/app/map/[[...segments]]/MapShell.realCodeMap.test.tsx: 1
-    web/src/app/map/[[...segments]]/MapShell.test.tsx: 3
+    web/src/app/map/[[...segments]]/MapShell.test.tsx: 1
     web/src/app/map/lib/codeMapRouteState.errors.test.ts: 2
     web/src/app/map/lib/mapData.test.ts: 1
     web/src/app/page.cache.test.tsx: 6
@@ -73,15 +71,12 @@ rules:
     web/src/app/page.test.tsx: 7
     web/src/app/page.tsx: 6
     web/src/app/projects/[[...segments]]/ProjectsRouter.test.tsx: 6
-    web/src/app/projects/[[...segments]]/ProjectsRouter.tsx: 7
     web/src/app/projects/[[...segments]]/transcriptContextNavigation.mounted.test.tsx: 2
     web/src/app/review/[[...segments]]/ChangeDetail.tsx: 3
     web/src/app/review/[[...segments]]/DiffView.tsx: 6
-    web/src/app/review/[[...segments]]/ReviewRouter.test.tsx: 9
-    web/src/app/review/[[...segments]]/ReviewRouter.tsx: 3
     web/src/app/review/[[...segments]]/ReviewSurface.diff.mounted.test.tsx: 6
     web/src/app/review/[[...segments]]/ReviewSurface.test.tsx: 5
-    web/src/app/review/[[...segments]]/ReviewSurface.tsx: 7
+    web/src/app/review/[[...segments]]/ReviewSurface.tsx: 5
     web/src/app/review/[[...segments]]/caption.ts: 1
     web/src/app/review/[[...segments]]/changeGraphLayout.test.ts: 5
     web/src/app/review/[[...segments]]/timelineNavigation.fixture.ts: 1
@@ -99,7 +94,6 @@ rules:
     web/src/app/share/publishPopupStates.mounted.test.tsx: 17
     web/src/app/share/testdata/grouped-sync.ts: 1
     web/src/app/share/testdata/grouped-wire-cases.ts: 1
-    web/src/app/share/testdata/publish-automatic-consent.mjs: 6
     web/src/app/share/testdata/publish-popup-states.mjs: 26
     web/src/app/village/VillagePageClient.tsx: 2
     web/src/components/ChoiceMenu.tsx: 1
@@ -160,8 +154,6 @@ rules:
     web/src/lib/kickstart/model.ts: 1
     web/src/lib/kickstart/useVillageSignIn.ts: 2
     web/src/lib/nav/sections.test.ts: 2
-    web/src/lib/navigation/projectRoutes.test.ts: 4
-    web/src/lib/navigation/projectRoutes.ts: 3
     web/src/lib/navigation/useProjectIdentity.test.ts: 10
     web/src/lib/quality/types.test.ts: 2
     web/src/lib/quality/utils.ts: 1

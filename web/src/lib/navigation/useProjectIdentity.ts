@@ -1,15 +1,19 @@
 'use client';
 
+import { closed } from '@peasant-labs/fairtrade/closed-value';
+
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchProjectResolution } from '@/lib/api/map';
 import { DiscoveryRequestError } from '@/lib/api/errors';
 import { parseProjectHash, type ProjectHash } from './projectRoutes';
 
+export const ProjectIdentityPhase = Object.freeze({ Resolving: closed('resolving', 'resolving').wire, Ready: closed('ready', 'ready').wire, Missing: closed('missing', 'missing').wire, Error: closed('error', 'error').wire } as const);
+
 export type ProjectIdentityState =
-  | { phase: 'resolving'; requestedIdentity: string }
-  | { phase: 'ready'; requestedIdentity: string; projectHash: ProjectHash; label: string }
-  | { phase: 'missing'; requestedIdentity: string; message: string }
-  | { phase: 'error'; requestedIdentity: string; message: string };
+  | { phase: typeof ProjectIdentityPhase.Resolving; requestedIdentity: string }
+  | { phase: typeof ProjectIdentityPhase.Ready; requestedIdentity: string; projectHash: ProjectHash; label: string }
+  | { phase: typeof ProjectIdentityPhase.Missing; requestedIdentity: string; message: string }
+  | { phase: typeof ProjectIdentityPhase.Error; requestedIdentity: string; message: string };
 
 export function useProjectIdentity(requestedIdentity: string | null): {
   state: ProjectIdentityState;
@@ -17,30 +21,30 @@ export function useProjectIdentity(requestedIdentity: string | null): {
 } {
   const [revision, setRevision] = useState(0);
   const [state, setState] = useState<ProjectIdentityState>(() => requestedIdentity
-    ? { phase: 'resolving', requestedIdentity }
-    : { phase: 'missing', requestedIdentity: '', message: 'No project identity was provided. Pick a project and retry.' });
+    ? { phase: ProjectIdentityPhase.Resolving, requestedIdentity }
+    : { phase: ProjectIdentityPhase.Missing, requestedIdentity: '', message: 'No project identity was provided. Pick a project and retry.' });
   const request = useRef(0);
 
   useEffect(() => {
     const generation = ++request.current;
     if (!requestedIdentity) {
-      setState({ phase: 'missing', requestedIdentity: '', message: 'No project identity was provided. Pick a project and retry.' });
+      setState({ phase: ProjectIdentityPhase.Missing, requestedIdentity: '', message: 'No project identity was provided. Pick a project and retry.' });
       return;
     }
-    setState({ phase: 'resolving', requestedIdentity });
+    setState({ phase: ProjectIdentityPhase.Resolving, requestedIdentity });
     fetchProjectResolution(requestedIdentity)
       .then((payload) => {
         if (generation !== request.current) return;
         const projectHash = parseProjectHash(payload.projectHash);
         if (!projectHash) {
           setState({
-            phase: 'error',
+            phase: ProjectIdentityPhase.Error,
             requestedIdentity,
             message: `Project resolution returned malformed identity ${JSON.stringify(payload.projectHash)}. Update Peasant and retry; no stale project was opened.`,
           });
           return;
         }
-        setState({ phase: 'ready', requestedIdentity, projectHash, label: payload.project });
+        setState({ phase: ProjectIdentityPhase.Ready, requestedIdentity, projectHash, label: payload.project });
       })
       .catch((error: unknown) => {
         if (generation !== request.current) return;
@@ -48,8 +52,8 @@ export function useProjectIdentity(requestedIdentity: string | null): {
           ? error.detail
           : error instanceof Error ? error.message : 'Project resolution failed without an error message. Retry, then inspect the Peasant server logs.';
         setState(error instanceof DiscoveryRequestError && error.status === 404
-          ? { phase: 'missing', requestedIdentity, message }
-          : { phase: 'error', requestedIdentity, message });
+          ? { phase: ProjectIdentityPhase.Missing, requestedIdentity, message }
+          : { phase: ProjectIdentityPhase.Error, requestedIdentity, message });
       });
     return () => {
       request.current++;
@@ -60,7 +64,7 @@ export function useProjectIdentity(requestedIdentity: string | null): {
   const visibleState: ProjectIdentityState = requestedIdentity
     ? state.requestedIdentity === requestedIdentity
       ? state
-      : { phase: 'resolving', requestedIdentity }
-    : { phase: 'missing', requestedIdentity: '', message: 'No project identity was provided. Pick a project and retry.' };
+      : { phase: ProjectIdentityPhase.Resolving, requestedIdentity }
+    : { phase: ProjectIdentityPhase.Missing, requestedIdentity: '', message: 'No project identity was provided. Pick a project and retry.' };
   return { state: visibleState, retry };
 }

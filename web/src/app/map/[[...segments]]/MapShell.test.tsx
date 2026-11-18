@@ -106,11 +106,13 @@ vi.mock('@peasant-labs/fairtrade/graph', async (importOriginal) => {
 // Fetch stub — routes the REST calls onto fixture payloads.
 // ---------------------------------------------------------------------------
 
+const StubResponse = Object.freeze({ Pending: 'pending', Error: 'error' } as const);
+
 type StubBody = unknown | 'pending' | 'error';
 
 function respond(body: StubBody): Promise<Response> {
-  if (body === 'pending') return new Promise<Response>(() => {});
-  if (body === 'error') {
+  if (body === StubResponse.Pending) return new Promise<Response>(() => {});
+  if (body === StubResponse.Error) {
     return Promise.resolve({
       ok: false,
       status: 500,

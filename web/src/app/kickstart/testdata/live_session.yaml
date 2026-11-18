@@ -88,7 +88,7 @@ cases:
           - nothing was published and no hook was installed
           - importing
       - expectControl: {role: button, name: continue, present: false}
-      - expectControl: {role: button, name: back, disabled: true}
+      - expectControl: {role: button, name: prev, disabled: true}
       # Import progress arrives on the same topic, with no reload.
       - push: {kind: ingest, sessionId: ses-full, revision: 4, ingest: {state: idle, new: 12, updated: 3}}
       - expectText: [import finished]

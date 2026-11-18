@@ -18,7 +18,7 @@ import {
   visibleStopAfter,
   visibleStops,
 } from '@/lib/kickstart/view';
-import { KickstartCloseReason, KickstartConnectAnswer, KickstartStopKind, type KickstartScope } from '@/lib/kickstart/values';
+import { KickstartCloseReason, KickstartConnectAnswer, KickstartStopKind, KickstartScope } from '@/lib/kickstart/values';
 import { CONNECT_OFFER_PROMPT_ID, ConnectOffer } from './ConnectOffer';
 import { FinishPanel } from './FinishPanel';
 import { FootAnswers } from './FootAnswers';
@@ -85,7 +85,7 @@ export function KickstartFlow({ scope, title, trail, ariaLabel }: KickstartFlowP
   const frame = (body: ReactNode) => (
     <div className="asb-page wizard-page animate-fade-up">
       <Breadcrumbs items={[{ label: 'home', href: '/' }, ...trail]} />
-      <h1 className="iu-page-title page-title">{title}</h1>
+      {scope !== KickstartScope.Full && <h1 className="iu-page-title page-title">{title}</h1>}
       {body}
     </div>
   );
@@ -113,7 +113,14 @@ export function KickstartFlow({ scope, title, trail, ariaLabel }: KickstartFlowP
   const previous = previousVisibleStop(session, stop.key);
   const expired = ending !== null && ending.reason === KickstartCloseReason.Expired;
 
-  const steps = visible.map((candidate) => ({ id: candidate.key, label: candidate.title }));
+  // Labels are presentation only; an unknown server stop keeps its full title.
+  const shortLabels: Readonly<Record<string, string>> = {
+    village: 'online', selection: 'sessions', 'auto-ingest': 'auto ingest',
+    publication: 'publish', privacy: 'privacy', license: 'license',
+    destination: 'sharing', retention: 'retention', review: 'review', ingest: 'ingest',
+    'auto-publish': 'auto publish',
+  };
+  const steps = visible.map((candidate) => ({ id: candidate.key, label: candidate.title, shortLabel: shortLabels[candidate.key] ?? candidate.title }));
   const completed = new Set(visible.slice(0, Math.max(index, 0)).map((candidate) => candidate.key));
   if (committed) completed.add(stop.key);
   const reachable = new Set(
@@ -243,15 +250,16 @@ export function KickstartFlow({ scope, title, trail, ariaLabel }: KickstartFlowP
   return frame(
     <StepWizardFrame
       aria-label={ariaLabel}
-      className="wizard-host"
+      className="wizard-host ks-wizard"
+      footerProgress
       steps={steps}
       current={stop.key}
       completed={completed}
       reachable={reachable}
       onJump={(key) => go(stopByKey(session, key))}
       footStart={
-        <Button variant="ghost" onClick={back ?? undefined} disabled={back === null}>
-          back
+        <Button variant="secondary" onClick={back ?? undefined} disabled={back === null}>
+          prev
         </Button>
       }
       footEnd={

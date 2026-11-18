@@ -1,10 +1,12 @@
 'use client';
 
+import { ProjectRouteKind } from '@/lib/navigation/projectRoutes';
+
 import { useEffect } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { ReviewSurface } from './ReviewSurface';
 import { parseReviewRoute, parseReviewRouteQuery, reviewHref, type ReturnLocation } from '@/lib/navigation/projectRoutes';
-import { useProjectIdentity } from '@/lib/navigation/useProjectIdentity';
+import { ProjectIdentityPhase, useProjectIdentity } from '@/lib/navigation/useProjectIdentity';
 import { ProjectIdentityProblem } from '@/components/ProjectIdentityProblem';
 import { ProjectPickerPage } from '@/components/picker/ProjectPickerPage';
 
@@ -25,9 +27,9 @@ export function ReviewRouter() {
   if (!query) return <p role="alert">This changes link contains malformed navigation state. Return Home and open the project again.</p>;
   const { branch, returnLocation } = query;
 
-  if (route.kind === 'canonical') return <ReviewSurface key={`${route.projectHash}:${branch ?? ''}`} projectHash={route.projectHash} branch={branch} returnLocation={returnLocation} />;
-  if (route.kind === 'legacy') return <LegacyReviewRoute projectLabel={route.projectLabel} branch={branch} returnLocation={returnLocation} />;
-  if (route.kind === 'malformed') return <p role="alert">{route.message}</p>;
+  if (route.kind === ProjectRouteKind.Canonical) return <ReviewSurface key={`${route.projectHash}:${branch ?? ''}`} projectHash={route.projectHash} branch={branch} returnLocation={returnLocation} />;
+  if (route.kind === ProjectRouteKind.Legacy) return <LegacyReviewRoute projectLabel={route.projectLabel} branch={branch} returnLocation={returnLocation} />;
+  if (route.kind === ProjectRouteKind.Malformed) return <p role="alert">{route.message}</p>;
   return <ProjectPickerPage title="changes" destination="changes" docs={{ topic: 'changes', label: 'how to read changes' }} />;
 }
 
@@ -35,8 +37,8 @@ function LegacyReviewRoute({ projectLabel, branch, returnLocation }: { projectLa
   const router = useRouter();
   const { state, retry } = useProjectIdentity(projectLabel);
   useEffect(() => {
-    if (state.phase === 'ready' && state.requestedIdentity === projectLabel) router.replace(reviewHref(state.projectHash, { branch: branch ?? undefined, returnLocation: returnLocation ?? undefined }));
+    if (state.phase === ProjectIdentityPhase.Ready && state.requestedIdentity === projectLabel) router.replace(reviewHref(state.projectHash, { branch: branch ?? undefined, returnLocation: returnLocation ?? undefined }));
   }, [branch, projectLabel, returnLocation, router, state]);
-  if (state.phase === 'missing' || state.phase === 'error') return <ProjectIdentityProblem state={state} onRetry={retry} />;
+  if (state.phase === ProjectIdentityPhase.Missing || state.phase === ProjectIdentityPhase.Error) return <ProjectIdentityProblem state={state} onRetry={retry} />;
   return <p>resolving project…</p>;
 }

@@ -191,11 +191,11 @@ cases:
     steps:
       - expectText: [step 1 of 8]
       - expectControl: {role: navigation, name: set up peasant progress}
-      - expectControl: {role: button, name: 1 peasant online, disabled: false}
+      - expectControl: {role: button, name: "step 1 of 8, peasant online", disabled: false}
       # The stop the server hides is not a step; the next visible one is, and is locked.
-      - expectControl: {role: button, name: 2 choose sessions to import, disabled: true}
-      - expectControl: {role: button, name: 3 auto-ingest new branches, present: false}
-      - expectControl: {role: button, name: back, disabled: true}
+      - expectControl: {role: button, name: "step 2 of 8, choose sessions to import", disabled: true}
+      - expectControl: {role: button, name: "step 3 of 8, auto-ingest new branches", present: false}
+      - expectControl: {role: button, name: prev, disabled: true}
       # The opening stop is answered by its buttons in the foot, not by continue.
       - expectFoot: {end: ["no", "yes"], primary: "yes"}
       - expectControl: {role: button, name: continue, present: false}

@@ -133,7 +133,7 @@ cases:
       - click: continue
       - click: continue
       - expectText: [log in now to choose a default sharing visibility?]
-      - expectFoot: {tabOrder: [back, "no", "yes"]}
+      - expectFoot: {tabOrder: [prev, "no", "yes"]}
 
   - name: expired-session-draws-no-answers
     server:

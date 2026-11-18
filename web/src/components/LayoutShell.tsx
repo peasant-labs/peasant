@@ -1,5 +1,7 @@
 'use client';
 
+import { ProjectRouteKind } from '@/lib/navigation/projectRoutes';
+
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { usePathname } from 'next/navigation';
 import { WebSocketProvider } from '@/contexts/WebSocketContext';
@@ -65,7 +67,7 @@ export function LayoutShell({ children }: { children: ReactNode }) {
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => setHydrated(true), []);
   const route = parseTranscriptRoute(pathname);
-  const viewport = hydrated && (route.kind === 'canonical' || route.kind === 'legacy');
+  const viewport = hydrated && (route.kind === ProjectRouteKind.Canonical || route.kind === ProjectRouteKind.Legacy);
   return (
     <WebSocketProvider>
       <ServerCapabilitiesProvider>
@@ -73,7 +75,7 @@ export function LayoutShell({ children }: { children: ReactNode }) {
           {/* Sends the person to setup from any top-level page until setup has been saved,
               and holds a page that starts something on mount until that is decided. */}
           <FirstRunProvider>
-            <AppSidebarLayout sidebar={<LocalSidebar />} viewport={viewport} notice={<PageNotices />} mainAs="main">
+            <AppSidebarLayout sidebar={<LocalSidebar />} viewport={viewport} notice={<PageNotices />} topBar={pathname === '/kickstart' ? <h1 className="ks-page-title">set up peasant</h1> : undefined} mainAs="main">
               {children}
             </AppSidebarLayout>
           </FirstRunProvider>

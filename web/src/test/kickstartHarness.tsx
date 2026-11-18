@@ -79,6 +79,7 @@ export interface Step {
   expectBodyKeys?: { route: string; only: string[] };
   /** The forest rows on the page, by node id, in the order they are drawn. */
   expectRows?: string[];
+  expectTallies?: string[];
   /**
    * The structured-value blocks on the page, in order: the lines of each as
    * drawn, and whether it sits inside a collapsed `<details>`. These are all of
@@ -142,6 +143,7 @@ const STEP_KEYS = Object.freeze({
   expectBody: true,
   expectBodyKeys: true,
   expectRows: true,
+  expectTallies: true,
   expectBlocks: true,
   expectLink: true,
   expectNoReload: true,
@@ -596,6 +598,9 @@ export async function runSteps(steps: readonly Step[], mounted: Mounted, where?:
         expect(keys.filter((key) => !only.includes(key)), `${at}: keys sent to ${route} beyond ${only.join(', ')}`).toEqual([]);
       }
     }
+    if (step.expectTallies) {
+      await waitFor(() => expect([...container.querySelectorAll(".st-tally")].map((el) => el.textContent?.trim()), `${at}: row counts`).toEqual(step.expectTallies));
+    }
     if (step.expectRows) {
       await waitFor(() => {
         const drawn = [...container.querySelectorAll('[data-node-id]')].map((row) => row.getAttribute('data-node-id'));
@@ -650,7 +655,7 @@ export async function runSteps(steps: readonly Step[], mounted: Mounted, where?:
         if (group !== undefined) {
           expect(within(slot).getByRole('group', { name: group }), `${at}: the answers are named by the question`).toBeDefined();
         }
-        if (tabOrder !== undefined) expect(tabbable(foot).map(nameOf), `${at}: what a Tab reaches in the foot, in order`).toEqual(tabOrder);
+        if (tabOrder !== undefined) expect(tabbable(foot).filter((element) => !element.closest('nav')).map(nameOf), `${at}: what a Tab reaches in the foot, in order`).toEqual(tabOrder);
       });
     }
     if (step.expectInBody) {

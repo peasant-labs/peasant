@@ -25,6 +25,9 @@ defaultServer:
   "GET /api/v1/kickstart/sessions/ses-full/tree/s-one/preview": {body: {lines: [{kind: text, text: the first lines of this session}]}}
   "GET /api/v1/kickstart/sessions/ses-full/tree/s-two/preview": {body: {lines: [{kind: text, text: the first lines of this session}]}}
 requiredNames:
+  - title-click-opens-preview-and-sends-no-answer
+  - checkbox-click-sends-answer-without-preview
+  - rows-name-their-child-kind
   - own-live-session
   - wizard-undisturbed
   - saves-only-selection-keys
@@ -50,6 +53,33 @@ requiredNames:
   - a-preview-row-that-is-gone-says-so-and-the-session-goes-on
   - saved-choices-no-longer-on-disk-name-their-labels
 cases:
+  - name: title-click-opens-preview-and-sends-no-answer
+    kind: page
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+    steps:
+      - click: preview fix the ledger rounding
+      - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-selection/tree/s-one/preview", count: 1}
+      - expectCalls: {route: "PATCH /api/v1/kickstart/sessions/ses-selection", count: 0}
+      - expectControl: {role: checkbox, name: fix the ledger rounding, checked: true}
+  - name: checkbox-click-sends-answer-without-preview
+    kind: page
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+      "PATCH /api/v1/kickstart/sessions/ses-selection": {body: {revision: 4, stale: false, view: {$model: selection-scope-two-selected}}}
+    steps:
+      - check: add a CSV export
+      - expectCalls: {route: "PATCH /api/v1/kickstart/sessions/ses-selection", count: 1}
+      - expectNoCalls: "/preview"
+  - name: rows-name-their-child-kind
+    kind: page
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+    steps:
+      - expectTallies: ["project: 2 groups", "group: 2 sessions", session, session, project]
   # The page opens a session of its own and draws only the stops the server
   # serves for it. Events of the wizard's session are not its own.
   - name: own-live-session
@@ -167,7 +197,7 @@ cases:
       - expectRows: [p-ledger, g-main, s-one, s-two, p-locked]
       - expectControl: {role: checkbox, name: "ambiguous-rule, locked", disabled: true}
       # The preview of the row the reader is on.
-      - focus: fix the ledger rounding
+      - click: preview fix the ledger rounding
       - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-selection/tree/s-one/preview", count: 1}
       - expectText: [the first lines of this session, fix the rounding in the ledger totals]
       # A toggle sends the ids and reads the forest again.
@@ -503,20 +533,20 @@ cases:
     steps:
       - expectText: [step 1 of 3]
       - expectControl: {role: navigation, name: choose sessions progress}
-      - expectControl: {role: button, name: 1 choose sessions to import, disabled: false}
-      - expectControl: {role: button, name: 2 review, disabled: true}
-      - expectControl: {role: button, name: 3 ingest, disabled: true}
-      - expectControl: {role: button, name: back, disabled: true}
+      - expectControl: {role: button, name: "step 1 of 3, choose sessions to import", disabled: false}
+      - expectControl: {role: button, name: "step 2 of 3, review", disabled: true}
+      - expectControl: {role: button, name: "step 3 of 3, ingest", disabled: true}
+      - expectControl: {role: button, name: prev, disabled: true}
       - expectControl: {role: button, name: continue, disabled: false}
       - click: continue
       - expectText: [step 2 of 3]
       # The stop that was left is done: reachable by its marker, named for its title.
-      - expectControl: {role: button, name: choose sessions to import, disabled: false}
-      - expectControl: {role: button, name: 2 review, disabled: false}
-      - expectControl: {role: button, name: back, disabled: false}
+      - expectControl: {role: button, name: "step 1 of 3, choose sessions to import", disabled: false}
+      - expectControl: {role: button, name: "step 2 of 3, review", disabled: false}
+      - expectControl: {role: button, name: prev, disabled: false}
       # The review stop's one action is in the foot.
       - expectControl: {role: button, name: save and import, disabled: false}
-      - expectControl: {role: button, name: 3 ingest, disabled: true}
+      - expectControl: {role: button, name: "step 3 of 3, ingest", disabled: true}
 
   # The page opens a session of its own as soon as it is drawn, so its body waits
   # for the shell's status answer. Nothing is started before it arrives.
@@ -669,7 +699,7 @@ cases:
           code: kickstart_preview_row_not_found
           error: "No row has the id \"s-one\" in the forest of the selection session. Nothing was changed. Scan again, then choose a row."
     steps:
-      - focus: fix the ledger rounding
+      - click: preview fix the ledger rounding
       - expectText: [No row has the id, "Scan again, then choose a row."]
       - expectNoText: [this selection session timed out]
       - expectControl: {role: button, name: continue, disabled: false}

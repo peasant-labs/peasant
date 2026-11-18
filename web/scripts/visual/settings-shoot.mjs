@@ -184,6 +184,10 @@ const abort = async (what, fix) => {
   fail(what, fix)
 }
 
+const IngestStatus = Object.freeze({ Running: 'running' })
+const ConsoleLevel = Object.freeze({ Error: 'error' })
+const RequestMethod = Object.freeze({ Patch: 'PATCH' })
+
 try {
   // It is started only when nothing answers on the port yet, and the wait ends when it answers or has
   // exited, so the page is never driven against a server this run did not start.
@@ -200,7 +204,7 @@ try {
   for (let attempt = 0; attempt < 120 && recorded < REPOS.length; attempt++) {
     await pause(250)
     const status = await (await fetch(`${ORIGIN}/api/v1/sync/ingest/status`)).json()
-    if (status.status === 'running') continue
+    if (status.status === IngestStatus.Running) continue
     recorded = (await (await fetch(`${ORIGIN}/api/v1/sessions`)).json()).sessions?.length ?? 0
   }
   if (recorded < REPOS.length) await abort(`ingest recorded ${recorded} of ${REPOS.length} sessions.`, 'rerun with KEEP=1 and inspect the recordings under home/.claude/projects and the store under data/ of the kept world.')
@@ -245,7 +249,7 @@ try {
     const errors = []
     page.on('pageerror', (error) => errors.push(error.message))
     // The browser logs every non-2xx answer; the refused write is one on purpose. Script errors still count.
-    page.on('console', (message) => { if (message.type() === 'error' && !/favicon|^Failed to load resource/i.test(message.text())) errors.push(message.text()) })
+    page.on('console', (message) => { if (message.type() === ConsoleLevel.Error && !/favicon|^Failed to load resource/i.test(message.text())) errors.push(message.text()) })
     await applyDeterminism(page)
     await page.evaluateOnNewDocument((value) => { try { localStorage.setItem('peasant-theme', value) } catch {} }, theme)
     await page.goto(`${ORIGIN}/settings/?section=automatic-publishing`, { waitUntil: 'networkidle0' })
@@ -295,7 +299,7 @@ try {
     await page.setRequestInterception(true)
     let held = null
     page.on('request', (request) => {
-      if (request.method() === 'PATCH' && held === null) { held = request; return }
+      if (request.method() === RequestMethod.Patch && held === null) { held = request; return }
       void request.continue()
     })
     await page.click('[data-setting-keys~="daemon.projectMode"] [role="switch"]')
