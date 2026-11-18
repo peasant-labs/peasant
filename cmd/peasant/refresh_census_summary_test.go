@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	_ "embed"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -47,6 +48,18 @@ func TestHarvestAndKickstartCensusSummary(t *testing.T) {
 			}
 			var output bytes.Buffer
 			printSummaryWithForecast(&output, result, false, false, "", "", nil, 0, row.Forecast)
+			var jsonOutput bytes.Buffer
+			if err := printJSON(&jsonOutput, result); err != nil {
+				t.Fatal(err)
+			}
+			var document map[string]json.RawMessage
+			if err := json.Unmarshal(jsonOutput.Bytes(), &document); err != nil {
+				t.Fatal(err)
+			}
+			var stored bool
+			if err := json.Unmarshal(document["census_stored"], &stored); err != nil || stored != row.Stored {
+				t.Fatalf("census_stored = %s, want %t (error %v)", document["census_stored"], row.Stored, err)
+			}
 			for _, want := range row.Contains {
 				if !strings.Contains(output.String(), want) {
 					t.Errorf("summary missing %q", want)
