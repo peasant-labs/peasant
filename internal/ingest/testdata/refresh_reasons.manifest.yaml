@@ -1,0 +1,15 @@
+requiredNames:
+  - new
+  - source_changed
+  - pair_missing
+  - metadata_schema
+  - forced
+  - adapter_behind
+  - adapter_behind_native_only
+  - adapter_stamp_absent
+  - indexer_behind
+  - refusal_reopened
+  - publication_unbound
+  - publication_capture_missing
+  - source_compare
+  - none

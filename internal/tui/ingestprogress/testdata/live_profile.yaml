@@ -2,6 +2,7 @@ requiredLaneCases: [unknown, idle, busy, elapsed-unknown, candidates-before-extr
 laneCases:
   - name: unknown
     available: false
+    contains: ["filter"]
     absent: [writer lane:]
   - name: idle
     available: true
