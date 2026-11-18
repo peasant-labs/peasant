@@ -1,0 +1,15 @@
+{
+  "available": true,
+  "lower_bound": true,
+  "sessions": 1,
+  "by_lane": {
+    "native": 1
+  },
+  "by_reason": {
+    "metadata_schema": 1
+  },
+  "unknown": {
+    "adapter_version": 1,
+    "indexed_input_hash": 1
+  }
+}

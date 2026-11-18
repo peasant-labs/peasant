@@ -9,6 +9,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/upgrade"
 	"github.com/peasant-labs/schema"
 	"github.com/spf13/cobra"
 )
@@ -100,7 +101,7 @@ func TestWriteMigratePlanJSON(t *testing.T) {
 		DiskFreeOK:               true,
 		Advisory:                 "no other writer running is recommended",
 	}
-	if err := writeMigratePlan(cmd, plan, true); err != nil {
+	if err := writeMigratePlan(cmd, plan, store.UpgradePlan{}, summarizeSessionWork(upgrade.RefreshPlan{}, nil), true); err != nil {
 		t.Fatalf("writeMigratePlan(json): %v", err)
 	}
 	var decoded struct {

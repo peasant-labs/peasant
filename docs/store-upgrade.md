@@ -371,3 +371,25 @@ the same tables and now asks for the same disk.
 Its log is about 1,240 bytes per row, about the size of the copied tables,
 so it asks for twice those tables rather than the row-scaled share of the
 database.
+
+## Dry-run session work
+
+The migration dry run also reports a read-only session-work census from the
+stored refresh evidence. It counts sessions by refresh lane and reason, and
+counts unknown evidence by name; it does not list session identities. Counts
+are not a duration estimate. A behind schema makes the census a lower bound:
+upgrade the schema and repeat the dry run to see what further work it reveals.
+
+`peasant migrate --dry-run --json` emits one JSON document. In addition to the
+existing schema or conversion plan, its `session_work` object has these fields:
+
+- `available`: whether refresh evidence was read successfully.
+- `error`: the reason if evidence could not be read (omitted on success).
+- `lower_bound`: whether pending schema changes may reveal more work.
+- `sessions`: the number of stored sessions in the census.
+- `by_lane`, `by_reason`: maps from the planner's lane and reason names to counts.
+- `unknown`: a map from unavailable evidence names to counts; a session can
+  contribute to more than one evidence count.
+
+When `available` is false, the counts do not represent a census. The schema
+plan is still printed so the operator can inspect it and fix the evidence read.
