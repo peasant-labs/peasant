@@ -46,7 +46,7 @@ steps:
     fragment: "ast-grep scan --error=unused-suppression --config sgconfig.yml ."
   - step: unstring
     program: go
-    args: ["run", "github.com/peasant-labs/infra/unstring/cmd/unstring@v0.0.2", "check"]
+    args: ["run", "github.com/peasant-labs/infra/unstring/cmd/unstring@v0.0.4", "check"]
     target: check
     fragment: "$(UNSTRING) check"
   - step: ast-grep-gate-test
