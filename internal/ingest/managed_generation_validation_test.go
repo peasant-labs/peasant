@@ -86,6 +86,12 @@ func TestValidationResultRejectsInconsistentMismatch(t *testing.T) {
 	if _, err := ingest.NewManagedGenerationValidationResult(ingest.ValidationNotProven, ingest.UnchangedMismatchNone, ""); err == nil {
 		t.Fatal("not-proven without mismatch was accepted")
 	}
+	if _, err := ingest.NewManagedGenerationValidationResult(ingest.ValidationUnsupported, ingest.UnchangedNotProvenSeal, ""); err == nil {
+		t.Fatal("unsupported with mismatch was accepted")
+	}
+	if _, err := ingest.NewManagedGenerationValidationResult(ingest.ValidationNotProven, ingest.UnchangedProofMismatch("synthetic-unknown-mismatch"), ""); err == nil {
+		t.Fatal("unknown mismatch was accepted")
+	}
 }
 
 func TestValidationProfileFoldsAttempts(t *testing.T) {

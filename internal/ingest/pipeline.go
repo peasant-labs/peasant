@@ -2331,6 +2331,7 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 				switch validation.Outcome {
 				case ValidationProven:
 					proof.Proven = true
+					proof.Mismatch = UnchangedMismatchNone
 				case ValidationNotProven:
 					proof.Mismatch = validation.Mismatch
 					forceParse = true
