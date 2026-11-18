@@ -15,6 +15,7 @@ requiredNames:
   - setup-session-end-closes-the-capture
   - oversized-turn-stays-within-frame-cap
   - socket-disconnect-frees-capture
+  - rescan-frees-capture
 cases:
   - name: open-sends-first-segment-unasked
     transcript: |
@@ -31,3 +32,4 @@ cases:
   - {name: setup-session-end-closes-the-capture, long: true, operation: end-setup}
   - {name: oversized-turn-stays-within-frame-cap, operation: bounded-turn}
   - {name: socket-disconnect-frees-capture, long: true, operation: disconnect}
+  - {name: rescan-frees-capture, long: true, operation: rescan}

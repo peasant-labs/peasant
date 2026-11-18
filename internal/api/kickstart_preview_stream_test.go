@@ -16,7 +16,10 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/discovery"
+	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/onboarding"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
@@ -79,6 +82,16 @@ func TestKickstartPreviewStream(t *testing.T) {
 			const sourceID = "11111111-2222-4333-8444-555555555555"
 			expire := make(chan func(), 1)
 			env := kickstartEnv{}
+			if tc.Operation == "rescan" {
+				env.ctx = ctx
+				env.configPath = filepath.Join(t.TempDir(), "config.yaml")
+				env.newID = func() string { return "setup" }
+				env.loadConfig = func(context.Context) (*config.Config, error) { return config.BaseConfig(), nil }
+				env.scan = func(ctx context.Context, _ *config.Config, _ ingest.KnownSessionIndex, _ discovery.ScanProgress) (discovery.ProviderInventory, []onboarding.SessionListing, discovery.SubagentRelation) {
+					<-ctx.Done()
+					return nil, nil, nil
+				}
+			}
 			if tc.Operation == "expire" {
 				env.afterFunc = func(_ time.Duration, fn func()) func() bool {
 					expire <- fn
@@ -86,11 +99,21 @@ func TestKickstartPreviewStream(t *testing.T) {
 				}
 			}
 			st := newKickstartSessions(env)
-			st.byID["setup"] = &kickstartSession{
-				id:       "setup",
-				forest:   onboarding.Forest{Nodes: []onboarding.Node{{ID: "row", Kind: onboarding.NodeKindSession, SessionID: sourceID}}},
-				listings: []onboarding.SessionListing{{SessionID: sourceID, Harness: "claude-code", Source: onboarding.SessionSource{Path: path, Origin: onboarding.SessionSourceOriginFile}}},
+			if tc.Operation == "rescan" {
+				if _, err := st.open(ctx, onboarding.ScopeFull); err != nil {
+					t.Fatal(err)
+				}
+				defer st.shutdown()
+			} else {
+				st.byID["setup"] = &kickstartSession{id: "setup"}
 			}
+			st.mu.Lock()
+			if tc.Operation == "rescan" {
+				delete(st.byScope, onboarding.ScopeFull)
+			}
+			st.byID["setup"].forest = onboarding.Forest{Nodes: []onboarding.Node{{ID: "row", Kind: onboarding.NodeKindSession, SessionID: sourceID}}}
+			st.byID["setup"].listings = []onboarding.SessionListing{{SessionID: sourceID, Harness: "claude-code", Source: onboarding.SessionSource{Path: path, Origin: onboarding.SessionSourceOriginFile}}}
+			st.mu.Unlock()
 			hub := NewHub(&mockDataProvider{})
 			hub.attachKickstart(st)
 			go hub.Run(ctx)
@@ -301,6 +324,16 @@ func TestKickstartPreviewStream(t *testing.T) {
 				hub.previews.mu.Unlock()
 				if remaining != nil {
 					t.Fatal("disconnect did not free its registry slot")
+				}
+			case "rescan":
+				st.mu.Lock()
+				session := st.byID["setup"]
+				generation := session.scanGen
+				st.mu.Unlock()
+				st.finishScan(session, generation, kickstartScanResult{})
+				closed := read()
+				if closed.Kind != schema.LocalKickstartPreviewClosed || closed.Reason != schema.LocalKickstartPreviewRescanned || closed.CaptureID != state.CaptureID {
+					t.Fatal("finished scan did not close its capture")
 				}
 			default:
 				t.Fatalf("unknown fixture operation %q", tc.Operation)
