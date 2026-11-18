@@ -13,11 +13,14 @@ import (
 //go:embed testdata/skip_budget.yaml
 var skipBudgetFixture []byte
 
-func TestSkipBudgetRatios(t *testing.T) {
+// TestValidateMeasuredRatios exercises the measured-budget validator on
+// ratios and malformed costs: a missing cost, a zero avoided cost, a negative
+// cost, NaN and infinity are all refused.
+func TestValidateMeasuredRatios(t *testing.T) {
 	var fixture struct {
 		Cases []struct {
 			Name                   string `yaml:"name"`
-			Proof, Settle, Avoided float64
+			Proof, Settle, Avoided *float64
 			Valid                  bool `yaml:"valid"`
 		} `yaml:"cases"`
 	}
@@ -26,7 +29,7 @@ func TestSkipBudgetRatios(t *testing.T) {
 	}
 	for _, c := range fixture.Cases {
 		t.Run(c.Name, func(t *testing.T) {
-			b := SkipBudget{Proof: &c.Proof, Settle: &c.Settle, Avoided: &c.Avoided, Provenance: BudgetProvenance{Head: "head", Base: "base", Command: "command", Date: "date", Samples: 5}}
+			b := SkipBudget{Proof: c.Proof, Settle: c.Settle, Avoided: c.Avoided, Provenance: BudgetProvenance{Head: "head", Base: "base", Command: "command", Date: "date", Samples: 5}}
 			if got := b.ValidateMeasured() == nil; got != c.Valid {
 				t.Fatalf("valid = %v; want %v", got, c.Valid)
 			}
@@ -118,14 +121,25 @@ func TestStoredProfileHasAvailableStageShape(t *testing.T) {
 	if !proof || !index {
 		t.Fatal("stored profile must expose proof and INDEX stages")
 	}
+	// A settle stage would change the budget's shape: the settle cost would
+	// then be read from it rather than from INDEX. Adding one must revisit
+	// the budget rows, so this test goes red.
+	for _, stage := range ingest.IndexProfileStageOrder {
+		if strings.Contains(strings.ToLower(stage.String()), "settle") {
+			t.Fatalf("stored profile gained a settle stage %q; read settle cost from it in the budget rows and update this test", stage)
+		}
+	}
 }
 
 // TestSkipBudgetRowsNameTheirMeasurement keeps every row traceable to the
-// harness command and the cases that measure it, and keeps an unmeasured row
-// free of numbers until a report supplies them.
+// harness command and the cases that measure it. While measurementRequired is
+// false a row carries no numbers; once it is true (the default) every row must
+// pass the validator and the rows must not all share one ratio, which would
+// mean a value was copied rather than measured.
 func TestSkipBudgetRowsNameTheirMeasurement(t *testing.T) {
 	var fixture struct {
-		Budgets []struct {
+		MeasurementRequired *bool `yaml:"measurementRequired"`
+		Budgets             []struct {
 			Name       string `yaml:"name"`
 			SkipBudget `yaml:",inline"`
 		} `yaml:"budgets"`
@@ -133,35 +147,45 @@ func TestSkipBudgetRowsNameTheirMeasurement(t *testing.T) {
 	if err := yaml.Unmarshal(skipBudgetFixture, &fixture); err != nil {
 		t.Fatal(err)
 	}
+	required := fixture.MeasurementRequired == nil || *fixture.MeasurementRequired
+	ratios := map[float64]bool{}
 	for _, row := range fixture.Budgets {
 		t.Run(row.Name, func(t *testing.T) {
 			command := row.Provenance.Command
 			if !strings.Contains(command, "./cmd/skip-budget") || len(row.Cases) == 0 {
 				t.Fatalf("row names no harness command or case: %+v", row.SkipBudget)
 			}
-			selected := ""
-			if fields := strings.Fields(command); slices.Contains(fields, "-case") {
-				selected = fields[slices.Index(fields, "-case")+1]
+			fields := strings.Fields(command)
+			flag := slices.Index(fields, "-case")
+			if flag < 0 || flag+1 >= len(fields) {
+				t.Fatalf("command %q selects no case", command)
 			}
+			selected := strings.Split(fields[flag+1], ",")
 			for _, c := range row.Cases {
 				if _, err := NewMeasurementCase(string(c)); err != nil {
 					t.Fatal(err)
 				}
-				if !slices.Contains(strings.Split(selected, ","), string(c)) {
+				if !slices.Contains(selected, string(c)) {
 					t.Errorf("command %q does not run case %s", command, c)
 				}
 			}
-			measured := row.Proof != nil ||
-				row.Settle != nil ||
-				row.Avoided != nil ||
-				row.Provenance.Samples != 0
-			if measured {
+			if required {
 				if err := row.ValidateMeasured(); err != nil {
 					t.Fatal(err)
 				}
-			} else if row.Provenance.Head != "" || row.Provenance.Date != "" {
-				t.Fatalf("unmeasured row carries measurement provenance: %+v", row.Provenance)
+				ratios[(*row.Proof+*row.Settle) / *row.Avoided] = true
+				return
+			}
+			numbers := row.Proof != nil ||
+				row.Settle != nil ||
+				row.Avoided != nil ||
+				row.Provenance.Samples != 0
+			if numbers || row.Provenance.Head != "" || row.Provenance.Date != "" {
+				t.Fatalf("row carries measurement while measurementRequired is false: %+v", row.SkipBudget)
 			}
 		})
+	}
+	if required && len(fixture.Budgets) > 1 && len(ratios) == 1 {
+		t.Fatalf("every budget row has the same ratio %v; record each row from its own case report", ratios)
 	}
 }
