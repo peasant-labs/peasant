@@ -3,7 +3,9 @@ requiredNames:
   - refusal-indexer-literal
   - damaged-pair-literal
   - inequality-literal
-  - empty-and-escaped-literals
+  - escaped-literal
+  - empty-string-is-exempt
+  - member-literal-still-fails-beside-empty-string
   - production-field-comparison
   - all-named-fields
   - typed-constant
@@ -58,12 +60,24 @@ cases:
           _ = c.Outcome == "v"
           _ = c.Harness == "v"
       }
-  - name: empty-and-escaped-literals
+  - name: escaped-literal
     path: string_literals_test.go
-    matches: 2
+    matches: 1
     source: |
       package example
-      func check(c Example) bool { return c.Lane == "" || c.Source != "with \"quotes\"" }
+      func check(c Example) bool { return c.Source != "with \"quotes\"" }
+  - name: empty-string-is-exempt
+    path: empty_string_test.go
+    matches: 0
+    source: |
+      package example
+      func check(c Example) bool { return c.Lane != "" && c.Status == "" }
+  - name: member-literal-still-fails-beside-empty-string
+    path: member_beside_empty_test.go
+    matches: 1
+    source: |
+      package example
+      func check(c Example) bool { return c.Lane != "" && c.Lane == "fast" }
   - name: production-field-comparison
     path: internal/example/decision.go
     matches: 1

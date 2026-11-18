@@ -183,6 +183,26 @@ func (e *storeUpgradeRefusal) Error() string {
 		headline, storeUpgradeWhat(plan), why, e.Command, when, meaning, then)
 }
 
+// storeUpgradeBehindWhileMountedError is returned when a command that has a
+// progress renderer mounted reaches its store open with the store still behind.
+// The command was meant to upgrade before it mounted the renderer. Nothing was
+// written and nothing was changed.
+type storeUpgradeBehindWhileMountedError struct {
+	Plan    store.UpgradePlan
+	Command string
+}
+
+func (e *storeUpgradeBehindWhileMountedError) Error() string {
+	return fmt.Sprintf("peasant did not run `%s`: the local store needs an upgrade, and the progress display already owns the terminal.\n"+
+		"what: %s.\n"+
+		"why: the upgrade prints its plan and may ask a question on the terminal, and the progress display's next redraw would erase both.\n"+
+		"where: store open of `%s`, after the progress display was mounted.\n"+
+		"when: before the store was opened; nothing was changed.\n"+
+		"meaning: the command did not run; stored sessions and history are unchanged.\n"+
+		"fix: run `peasant migrate --schema-only` in a terminal, then run the command again; if this keeps happening the command mounts its progress display before the store upgrade, which is a bug to report.",
+		e.Command, storeUpgradeWhat(e.Plan), e.Command)
+}
+
 // storeUpgradeWhat says what the store needs. A store at the head schema can
 // still owe the steps an earlier upgrade did not finish.
 func storeUpgradeWhat(plan store.UpgradePlan) string {
@@ -274,6 +294,9 @@ func ensureStoreCurrentWithProgress(cmd *cobra.Command, dbPath string, mode stor
 	plan, err := planStoreUpgrade(dbPath)
 	if err != nil {
 		return err
+	}
+	if progress == storeUpgradeProgressMounted && len(plan.Steps) > 0 {
+		return &storeUpgradeBehindWhileMountedError{Plan: plan, Command: strings.TrimPrefix(storeCommandName(cmd), "peasant ")}
 	}
 	stderr := io.Writer(os.Stderr)
 	if cmd != nil {
@@ -379,10 +402,17 @@ const (
 	// storeUpgradeProgressPlain prints plain lines even on a terminal because
 	// the command already owns it with its own progress program.
 	storeUpgradeProgressPlain storeUpgradeProgressMode = "plain"
+	// storeUpgradeProgressMounted means a progress renderer is mounted on the
+	// terminal right now. The upgrade writes a plan, a prompt and progress
+	// lines straight to that terminal, and the renderer's next redraw would
+	// erase them, so it never runs here: a store that is behind is an error,
+	// and nothing is written. The caller upgrades before it mounts the
+	// renderer.
+	storeUpgradeProgressMounted storeUpgradeProgressMode = "mounted"
 )
 
 // allStoreUpgradeProgressModes is the closed progress-mode set.
-var allStoreUpgradeProgressModes = []storeUpgradeProgressMode{storeUpgradeProgressAuto, storeUpgradeProgressPlain}
+var allStoreUpgradeProgressModes = []storeUpgradeProgressMode{storeUpgradeProgressAuto, storeUpgradeProgressPlain, storeUpgradeProgressMounted}
 
 // newStoreUpgradeProgressMode validates a raw progress mode at an input
 // boundary.
@@ -448,7 +478,7 @@ var needsMigrationConsent = store.NeedsMigrationConsent
 // terminal for this upgrade. It refuses when the upgrade still has to ask the
 // one-time migration consent on that same terminal.
 func shouldMountUpgradeProgress(progress storeUpgradeProgressMode, terminal bool, dbPath string) bool {
-	if progress == storeUpgradeProgressPlain || !terminal {
+	if progress != storeUpgradeProgressAuto || !terminal {
 		return false
 	}
 	consentPending, err := needsMigrationConsent(dbPath)
