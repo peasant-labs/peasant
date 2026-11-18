@@ -134,6 +134,20 @@
   to: 22
   reason: indexer_behind
   lane: stored-index
+- id: codex-indexer-23
+  harness: codex
+  kind: indexer
+  from: 22
+  to: 23
+  reason: indexer_behind
+  lane: stored-index
+- id: codex-indexer-24-managed
+  harness: codex
+  kind: indexer
+  from: 23
+  to: 24
+  reason: indexer_behind
+  lane: stored-index
 - id: codex-format-1
   harness: codex
   kind: format
