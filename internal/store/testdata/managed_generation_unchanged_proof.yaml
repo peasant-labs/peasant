@@ -1,0 +1,19 @@
+cases:
+  - {name: unchanged, mutation: mutation-none, mismatch: ""}
+  - {name: adapter-bump, mutation: adapter, mismatch: ""}
+  - {name: redaction-provenance, mutation: redaction-provenance, mismatch: ""}
+  - {name: inactive-generation, mutation: mutation-active, mismatch: generation-not-active}
+  - {name: unsupported-generation, mutation: mutation-unsupported, mismatch: generation-unsupported}
+  - {name: latest-attempt-held, mutation: latest-attempt, mismatch: latest-attempt-held}
+  - {name: content-hash, mutation: mutation-content, mismatch: content-hash}
+  - {name: source-format, mutation: mutation-source-format, mismatch: source-format}
+  - {name: harness, mutation: mutation-harness, mismatch: harness}
+  - {name: completeness, mutation: mutation-completeness, mismatch: completeness}
+  - {name: source-evidence, mutation: mutation-source-evidence, mismatch: source-evidence}
+  - {name: metadata-context, mutation: mutation-metadata, mismatch: metadata-context}
+  - {name: zero-metadata-hash, mutation: zero-metadata, mismatch: metadata-context}
+  - {name: forged-metadata-hash, mutation: forged-metadata, mismatch: metadata-context}
+  - {name: redaction-content, mutation: redaction, mismatch: redaction-context}
+  - {name: indexer-behind, mutation: indexer, mismatch: index-not-current}
+  - {name: input-proof-missing, mutation: mutation-input, mismatch: input-proof-missing}
+  - {name: seal-missing, mutation: seal, mismatch: seal-missing}

@@ -1,0 +1,19 @@
+requiredNames:
+  - unchanged
+  - adapter-bump
+  - redaction-provenance
+  - inactive-generation
+  - unsupported-generation
+  - latest-attempt-held
+  - content-hash
+  - source-format
+  - harness
+  - completeness
+  - source-evidence
+  - metadata-context
+  - zero-metadata-hash
+  - forged-metadata-hash
+  - redaction-content
+  - indexer-behind
+  - input-proof-missing
+  - seal-missing
