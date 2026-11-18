@@ -5,6 +5,7 @@ requiredNames:
   - pi-indexer-18
   - pi-format-1
   - claude-adapter-4
+  - claude-adapter-5
   - claude-indexer-25
   - claude-indexer-26-managed
   - claude-indexer-27-managed

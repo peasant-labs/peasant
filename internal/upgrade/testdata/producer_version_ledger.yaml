@@ -70,6 +70,18 @@
   fallback: parse
   reason: adapter_behind
   lane: stored-metadata
+- id: claude-adapter-5
+  harness: claude-code
+  kind: metadata-adapter
+  from: 4
+  to: 5
+  change_scope: metadata-only
+  input: stored-transcript
+  output_proof: [content-hash, metadata-context-digest]
+  precheck: adapter-context-equivalence
+  fallback: parse
+  reason: adapter_behind
+  lane: stored-metadata
 - id: claude-indexer-25
   harness: claude-code
   kind: transcript-indexer
