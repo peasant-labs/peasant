@@ -24,6 +24,12 @@ var unchangedProofYAML []byte
 //go:embed testdata/managed_generation_unchanged_proof.manifest.yaml
 var unchangedProofManifestYAML []byte
 
+//go:embed testdata/unchanged_missing_counts.yaml
+var unchangedMissingCountsYAML []byte
+
+//go:embed testdata/unchanged_missing_counts.manifest.yaml
+var unchangedMissingCountsManifestYAML []byte
+
 type unchangedProofCase struct {
 	Name     string `yaml:"name"`
 	Mutation string `yaml:"mutation"`
@@ -121,6 +127,10 @@ func TestManagedGenerationUnchangedSettle(t *testing.T) {
 		t.Fatal("settlement fixture does not define its commit budget and changed tables")
 	}
 	s, p := unchangedProofSetup(t)
+	prior, err := s.ReadCapturedStats(context.Background(), p.SessionID)
+	if err != nil || prior.TurnCount == nil || prior.ConversationTurnCount == nil || prior.InputSubmissionCount == nil {
+		t.Fatalf("initial parse counts = %+v, error = %v", prior, err)
+	}
 	conn, err := s.pool.Take(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -152,7 +162,14 @@ func TestManagedGenerationUnchangedSettle(t *testing.T) {
 	if err = sqlitex.Execute(conn, `CREATE TEMP TABLE observed_writes (table_name TEXT NOT NULL)`, nil); err != nil {
 		t.Fatal(err)
 	}
-	for _, table := range []string{"session_generations", "session_generation_entries", "session_generation_title_refs", "session_generation_content", "session_captured_stats", "session_content_captures"} {
+	var tables []string
+	if err = sqlitex.Execute(conn, `SELECT name FROM pragma_table_list WHERE schema='main' AND type='table' AND name NOT LIKE 'sqlite_%'`, &sqlitex.ExecOptions{ResultFunc: func(st *sqlite.Stmt) error {
+		tables = append(tables, st.ColumnText(0))
+		return nil
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range tables {
 		for _, operation := range []string{"INSERT", "UPDATE", "DELETE"} {
 			query := fmt.Sprintf("CREATE TEMP TRIGGER watch_%s_%s AFTER %s ON main.%s BEGIN INSERT INTO observed_writes VALUES ('%s'); END", table, operation, operation, table, table)
 			if err = sqlitex.Execute(conn, query, nil); err != nil {
@@ -194,6 +211,9 @@ func TestManagedGenerationUnchangedSettle(t *testing.T) {
 		t.Fatalf("proof = %+v, error = %v", proof, err)
 	}
 	count := int64(42)
+	conversation := int64(43)
+	p.Metadata.Stats.TurnCount = 44
+	p.Metadata.Stats.ConversationTurnCount = &conversation
 	p.Metadata.Stats.InputSubmissionCount = &count
 	result, err := s.SettleManagedGenerationUnchanged(context.Background(), p)
 	if err != nil || result.Disposition != ManagedGenerationRefreshUnchanged {
@@ -250,8 +270,8 @@ func TestManagedGenerationUnchangedSettle(t *testing.T) {
 		return nil
 	}})
 	s.pool.Put(conn)
-	if err != nil || mirror != count {
-		t.Fatalf("input count mirror = %d, error = %v; want %d", mirror, err, count)
+	if err != nil || mirror != *prior.InputSubmissionCount {
+		t.Fatalf("input count mirror = %d, error = %v; want %d", mirror, err, *prior.InputSubmissionCount)
 	}
 	state, err := s.ReadIndexState(context.Background(), p.SessionID)
 	if err != nil || state == nil || !state.PublicationBound || state.PublicationCaptureRevision != 2 {
@@ -262,8 +282,93 @@ func TestManagedGenerationUnchangedSettle(t *testing.T) {
 		t.Fatalf("post-settle capture = %+v, found = %t, error = %v", capture, found, err)
 	}
 	stats, err := s.ReadCapturedStats(context.Background(), p.SessionID)
-	if err != nil || stats.InputSubmissionCount == nil || *stats.InputSubmissionCount != count {
+	if err != nil || stats.InputSubmissionCount == nil || stats.TurnCount == nil || stats.ConversationTurnCount == nil ||
+		*stats.InputSubmissionCount != *prior.InputSubmissionCount || *stats.TurnCount != *prior.TurnCount || *stats.ConversationTurnCount != *prior.ConversationTurnCount {
 		t.Fatalf("stats = %+v, error = %v", stats, err)
+	}
+}
+
+func TestManagedGenerationUnchangedSettleRefusesMissingCounts(t *testing.T) {
+	var fixture struct {
+		Cases []struct {
+			Name   string `yaml:"name"`
+			Column string `yaml:"column"`
+		} `yaml:"cases"`
+	}
+	var manifest struct {
+		RequiredNames []string `yaml:"requiredNames"`
+	}
+	if err := yaml.Unmarshal(unchangedMissingCountsYAML, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	if err := yaml.Unmarshal(unchangedMissingCountsManifestYAML, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, c := range fixture.Cases {
+		names = append(names, c.Name)
+		t.Run(c.Name, func(t *testing.T) {
+			if !slices.Contains([]string{"turn_count", "conversation_turn_count", "input_submission_count"}, c.Column) {
+				t.Fatalf("unknown count column %q", c.Column)
+			}
+			s, request := unchangedProofSetup(t)
+			conn, err := s.pool.Take(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.Column == "conversation_turn_count" {
+				// The current schema forbids NULL here. Exercise a legacy or
+				// damaged row in this isolated test database.
+				var version int
+				err = sqlitex.Execute(conn, `PRAGMA schema_version`, &sqlitex.ExecOptions{ResultFunc: func(st *sqlite.Stmt) error {
+					version = st.ColumnInt(0)
+					return nil
+				}})
+				if err == nil {
+					err = sqlitex.ExecuteScript(conn, fmt.Sprintf(`PRAGMA writable_schema=ON;
+UPDATE sqlite_schema SET sql=replace(sql, 'conversation_turn_count INTEGER NOT NULL DEFAULT 0', 'conversation_turn_count INTEGER DEFAULT 0') WHERE type='table' AND name='session_captured_stats';
+PRAGMA schema_version=%d;
+PRAGMA writable_schema=OFF;`, version+1), nil)
+				}
+				if err != nil {
+					s.pool.Put(conn)
+					t.Fatal(err)
+				}
+			}
+			err = sqlitex.Execute(conn, fmt.Sprintf(`UPDATE session_captured_stats SET %s=NULL WHERE session_id=?`, c.Column), &sqlitex.ExecOptions{Args: []any{string(request.SessionID)}})
+			s.pool.Put(conn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			proof, err := s.ProveManagedGenerationUnchanged(context.Background(), request)
+			if err != nil || !proof.Proven {
+				t.Fatalf("proof = %+v, error = %v", proof, err)
+			}
+			if _, err := s.SettleManagedGenerationUnchanged(context.Background(), request); err == nil {
+				t.Fatal("settlement accepted missing parse count")
+			}
+			stats, err := s.ReadCapturedStats(context.Background(), request.SessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch c.Column {
+			case "turn_count":
+				if stats.TurnCount != nil {
+					t.Fatal("refused settlement wrote turn count")
+				}
+			case "conversation_turn_count":
+				if stats.ConversationTurnCount != nil {
+					t.Fatal("refused settlement wrote conversation count")
+				}
+			case "input_submission_count":
+				if stats.InputSubmissionCount != nil {
+					t.Fatal("refused settlement wrote input count")
+				}
+			}
+		})
+	}
+	if err := validateRecoveryRequiredNames(manifest.RequiredNames, names, "unchanged missing counts"); err != nil {
+		t.Fatal(err)
 	}
 }
 

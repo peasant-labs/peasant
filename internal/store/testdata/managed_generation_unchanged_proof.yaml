@@ -23,7 +23,7 @@ settleCases:
   - name: settle-commits-at-most-two-wal-frames
     maxCommitFrames: 2
   - name: settle-writes-only-stats-and-binding
-    changedTables: [session_captured_stats, session_content_captures]
+    changedTables: [session_captured_stats, session_content_captures, sessions, sessions, sessions, store_state]
   - name: unchanged-path-reads-zero-entry-mapping-and-title-ref-rows
 readColumns:
   - session_captured_stats.cached_read_tokens

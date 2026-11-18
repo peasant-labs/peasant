@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -160,6 +161,21 @@ func (s *Store) SettleManagedGenerationUnchanged(ctx context.Context, p ManagedG
 	if !proof.Proven {
 		return result, &ingest.StaleIndexWorkError{SessionID: p.SessionID}
 	}
+	stored, readErr := readCapturedStatsOnConn(conn, p.SessionID)
+	if readErr != nil && !errors.Is(readErr, ErrNoCapturedStats) {
+		return result, fmt.Errorf("store: read parse counts for unchanged settlement of %s: %w; nothing was written; restore database access and retry", p.SessionID, readErr)
+	}
+	if readErr != nil || stored.TurnCount == nil || stored.ConversationTurnCount == nil || stored.InputSubmissionCount == nil {
+		return result, &ManagedGenerationRefreshError{
+			SessionID: p.SessionID, SourceGenerationID: p.GenerationID,
+			Reason: ManagedGenerationRefreshSourceUnsupported,
+			Detail: "the stored parse counts are incomplete; re-parse the source to restore authoritative counts",
+		}
+	}
+	p.Metadata.Stats.TurnCount = *stored.TurnCount
+	p.Metadata.Stats.InputSubmissionCount = stored.InputSubmissionCount
+	conversation := int64(*stored.ConversationTurnCount)
+	p.Metadata.Stats.ConversationTurnCount = &conversation
 	stats := capturedStatsForHarnessWrite(p.SessionID, p.Metadata.Stats, seedJSONForStats(p.Metadata.Stats), p.UpdatedAtMs)
 	var warnings []schema.DiagnosticEntry
 	stats.Overflow, warnings, err = retainPriorStatsOverflowOnConn(conn, stats)
