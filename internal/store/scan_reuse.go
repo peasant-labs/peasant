@@ -48,7 +48,7 @@ func (s ReadSurface) floor() (int, bool) {
 // ScanReuse holds one read-only SQLite snapshot. Only the surfaces requested
 // at open may be read. It exposes no store or writer, and owns its connection.
 type ScanReuse struct {
-	store    *Store
+	pool     *sqlitex.Pool
 	version  int
 	current  bool
 	surfaces map[ReadSurface]bool
@@ -129,7 +129,7 @@ func OpenForScanReuse(path string, surfaces ...ReadSurface) (*ScanReuse, error) 
 		current = recountErr == nil && len(owed) == 0
 	}
 	pool.Put(conn)
-	return &ScanReuse{store: &Store{pool: pool}, version: int(version), current: current, surfaces: requested}, nil
+	return &ScanReuse{pool: pool, version: int(version), current: current, surfaces: requested}, nil
 }
 
 // SchemaVersion is the schema version of the pinned snapshot.
@@ -150,12 +150,12 @@ func (s *ScanReuse) require(ctx context.Context, surface ReadSurface) error {
 	if s.closed {
 		return fmt.Errorf("store: the scan reuse snapshot is closed")
 	}
-	conn, err := s.store.pool.Take(ctx)
+	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return err
 	}
 	active := !conn.AutocommitEnabled()
-	s.store.pool.Put(conn)
+	s.pool.Put(conn)
 	if !active {
 		return fmt.Errorf("store: the scan reuse snapshot ended before the read; retry discovery")
 	}
@@ -169,7 +169,12 @@ func (s *ScanReuse) AllIngestedSessions(ctx context.Context) ([]IngestedSessionR
 	if err := s.require(ctx, ReadSurfaceKnownSessions); err != nil {
 		return nil, err
 	}
-	return s.store.AllIngestedSessions(ctx)
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("store: all ingested sessions take connection: %w", err)
+	}
+	defer s.pool.Put(conn)
+	return allIngestedSessionsOnConn(conn)
 }
 
 // LoadClaudeEvidenceCompletely reads the complete evidence surface.
@@ -179,7 +184,12 @@ func (s *ScanReuse) LoadClaudeEvidenceCompletely(ctx context.Context) (map[inges
 	if err := s.require(ctx, ReadSurfaceClaudeEvidence); err != nil {
 		return nil, false, err
 	}
-	return s.store.LoadClaudeEvidenceCompletely(ctx)
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf("store.LoadClaudeEvidence: take connection: %w", err)
+	}
+	defer s.pool.Put(conn)
+	return loadClaudeEvidenceOnConn(conn)
 }
 
 // LoadClaudeEvidenceForCompletely reads the requested evidence paths.
@@ -189,7 +199,15 @@ func (s *ScanReuse) LoadClaudeEvidenceForCompletely(ctx context.Context, paths [
 	if err := s.require(ctx, ReadSurfaceClaudeEvidence); err != nil {
 		return nil, false, err
 	}
-	return s.store.LoadClaudeEvidenceForCompletely(ctx, paths)
+	if !hasEvidencePath(paths) {
+		return make(map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence), true, nil
+	}
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf("store.LoadClaudeEvidenceFor: take connection: %w; what: failed to obtain a database connection for the by-path evidence read; why: the pool is exhausted or the context was cancelled; where: store.LoadClaudeEvidenceFor in internal/store/claude_evidence.go; when: before the first by-path batch ran; impact: no cached transcript evidence was returned, so the caller cannot reuse the cache; fix: check the pool size and context deadline, then retry the scoped read", err)
+	}
+	defer s.pool.Put(conn)
+	return loadClaudeEvidenceForOnConn(conn, paths)
 }
 
 // LoadClaudeIdentityChains reads the coordinate lists needed for lineage.
@@ -199,7 +217,15 @@ func (s *ScanReuse) LoadClaudeIdentityChains(ctx context.Context, paths []ingest
 	if err := s.require(ctx, ReadSurfaceClaudeEvidence); err != nil {
 		return nil, nil, err
 	}
-	return s.store.LoadClaudeIdentityChains(ctx, paths)
+	if !hasEvidencePath(paths) {
+		return make(map[ingest.ResolvedPath][]ingest.ClaudeIdentityChainLink), nil, nil
+	}
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("store.LoadClaudeIdentityChains: take connection: %w; what: failed to obtain a database connection for the identity-chain read; why: the pool is exhausted or the context was cancelled; where: store.LoadClaudeIdentityChains in internal/store/claude_evidence.go; when: before the first chain batch ran; impact: no coordinate list was returned, so lineage linking cannot reuse the cache; fix: check the pool size and context deadline, then retry", err)
+	}
+	defer s.pool.Put(conn)
+	return loadClaudeIdentityChainsOnConn(conn, paths)
 }
 
 // Close releases the pinned snapshot and its connection. It is idempotent.
@@ -213,15 +239,15 @@ func (s *ScanReuse) Close() error {
 		return nil
 	}
 	s.closed = true
-	conn, err := s.store.pool.Take(context.Background())
+	conn, err := s.pool.Take(context.Background())
 	if err != nil {
 		return err
 	}
 	if !conn.AutocommitEnabled() {
 		err = sqlitex.ExecuteTransient(conn, "ROLLBACK", nil)
 	}
-	s.store.pool.Put(conn)
-	if closeErr := s.store.pool.Close(); err == nil {
+	s.pool.Put(conn)
+	if closeErr := s.pool.Close(); err == nil {
 		err = closeErr
 	}
 	return err
