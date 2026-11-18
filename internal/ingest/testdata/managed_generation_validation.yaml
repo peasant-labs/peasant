@@ -1,0 +1,14 @@
+cases:
+  - name: zero-budget
+    maxConcurrent: 0
+    chunkSessions: 0
+    maxBytesPerValidation: 0
+  - name: populated-budget
+    sessionID: abc00000-0000-4000-8000-000000000001
+    generationID: gen_synthetic
+    inputDigest: synthetic-digest
+    indexerTarget: 1
+    formatTarget: 2
+    maxConcurrent: 3
+    chunkSessions: 7
+    maxBytesPerValidation: 4096

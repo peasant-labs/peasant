@@ -1,0 +1,28 @@
+cases:
+  - name: unsupported-copies
+    outcome: unsupported
+    validatorCalls: 1
+    copies: 1
+    unsupported: true
+  - name: proven-settles
+    outcome: proven
+    validatorCalls: 1
+    settles: 1
+  - name: not-proven-parses
+    outcome: not-proven
+    mismatch: content-hash
+    validatorCalls: 1
+    builds: 1
+    diagnostic: true
+  - name: validator-error-copies
+    error: true
+    validatorCalls: 1
+    copies: 1
+  - name: inconsistent-proven-copies
+    outcome: proven
+    mismatch: content-hash
+    validatorCalls: 1
+    copies: 1
+  - name: missing-validator-copies
+    missing: true
+    copies: 1

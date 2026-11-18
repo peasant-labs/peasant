@@ -504,13 +504,16 @@ type SessionEntryWrite struct {
 type SessionIndexState struct {
 	PublicationCaptureRevision int64
 	SessionID                  SessionID
-	Harness                    Harness
-	ArtifactHash               *string
-	IndexerVersion             int
-	IndexVersion               *int
-	IndexedAt                  *int64
-	IndexedInputHash           *string
-	SessionEntriesHash         *string
+	// ActiveGenerationID is empty when no generation is active. The shared
+	// index-state snapshot carries it so validation names the same authority.
+	ActiveGenerationID string
+	Harness            Harness
+	ArtifactHash       *string
+	IndexerVersion     int
+	IndexVersion       *int
+	IndexedAt          *int64
+	IndexedInputHash   *string
+	SessionEntriesHash *string
 	// PublicationBound reports that the stored index write is bound to the
 	// current publication metadata capture. It is read in the same snapshot as
 	// the fields above, and it is the revision half of publication readiness:
