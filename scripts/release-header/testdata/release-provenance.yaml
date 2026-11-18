@@ -14,6 +14,11 @@ provenance_required:
   - merged-bot-release
   - app-form-is-not-api-login
   - open-pr-ignored
+  - pages-one-merged
+  - empty-bot-branch
+  - missing-bot-branch
+  - failed-config-git
+  - failed-config-yq
   - no-associated-pr
   - unmerged-pr
   - wrong-branch
@@ -106,3 +111,29 @@ provenance_cases:
     pages: [[*provenance-bot]]
     expected_exit: 1
     error_contains: '::error::release configuration does not name the releaser App'
+  - name: pages-one-merged
+    pages:
+      - - <<: *provenance-bot
+          merged_at: null
+      - [*provenance-bot]
+    expected_exit: 0
+  - name: empty-bot-branch
+    config:
+      automation_author: app/peasant-labs-releaser
+      bot_branches: {release: ""}
+    expected_exit: 1
+    error_contains: '::error::release configuration has no bot release branch'
+  - name: missing-bot-branch
+    config:
+      automation_author: app/peasant-labs-releaser
+      bot_branches: {}
+    expected_exit: 1
+    error_contains: '::error::release configuration has no bot release branch'
+  - name: failed-config-git
+    git_exit: 1
+    expected_exit: 1
+    error_contains: '::error::could not read the release configuration'
+  - name: failed-config-yq
+    yq_exit: 1
+    expected_exit: 1
+    error_contains: '::error::could not read the release configuration'

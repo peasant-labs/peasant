@@ -17,28 +17,23 @@ import (
 //go:embed testdata/release-provenance.yaml
 var releaseAdoptionFixture []byte
 
-type provenanceConfig struct {
-	AutomationAuthor string `yaml:"automation_author" json:"automation_author"`
-	BotBranches      struct {
-		Release string `yaml:"release" json:"release"`
-	} `yaml:"bot_branches" json:"bot_branches"`
-}
-
 // TestReleaseCandidateProvenance executes the workflow's actual shell step.
 // Git, yq, and the GitHub API are isolated dependencies; jq and the decision
 // under test are real.
 func TestReleaseCandidateProvenance(t *testing.T) {
 	var fixture struct {
-		Candidate string           `yaml:"provenance_candidate"`
-		Config    provenanceConfig `yaml:"provenance_config"`
-		Required  []string         `yaml:"provenance_required"`
+		Candidate string         `yaml:"provenance_candidate"`
+		Config    map[string]any `yaml:"provenance_config"`
+		Required  []string       `yaml:"provenance_required"`
 		Cases     []struct {
 			Name          string             `yaml:"name"`
 			Candidate     string             `yaml:"candidate"`
-			Config        *provenanceConfig  `yaml:"config"`
+			Config        map[string]any     `yaml:"config"`
 			Pages         [][]map[string]any `yaml:"pages"`
 			RawOutput     string             `yaml:"raw_output"`
 			APIExit       int                `yaml:"api_exit"`
+			GitExit       int                `yaml:"git_exit"`
+			YQExit        int                `yaml:"yq_exit"`
 			ExpectedExit  int                `yaml:"expected_exit"`
 			ErrorContains string             `yaml:"error_contains"`
 		} `yaml:"provenance_cases"`
@@ -56,6 +51,10 @@ func TestReleaseCandidateProvenance(t *testing.T) {
 		t.Fatal(err)
 	}
 	job := provenanceMappingChild(provenanceMappingChild(doc.Content[0], "jobs"), "plan")
+	permissions := provenanceMappingChild(job, "permissions")
+	if pr := provenanceMappingChild(permissions, "pull-requests"); pr == nil || pr.Value != "read" {
+		t.Fatal("plan job must grant pull-requests: read")
+	}
 	steps := provenanceMappingChild(job, "steps")
 	if steps == nil {
 		t.Fatal("release plan has no steps")
@@ -67,6 +66,9 @@ func TestReleaseCandidateProvenance(t *testing.T) {
 			if provenanceMappingChild(step, "continue-on-error") != nil {
 				t.Fatal("provenance must not continue on error")
 			}
+			if run := provenanceMappingChild(step, "run"); run != nil {
+				script = run.Value
+			}
 		}
 		if name := provenanceMappingChild(step, "name"); name != nil && name.Value == "Make the annotated release tag" {
 			if condition := provenanceMappingChild(step, "if"); condition != nil {
@@ -76,13 +78,6 @@ func TestReleaseCandidateProvenance(t *testing.T) {
 	}
 	if !strings.Contains(tagCondition, "steps.provenance.outcome == 'success'") {
 		t.Fatal("tag creation must require provenance success")
-	}
-	for _, step := range steps.Content {
-		if id := provenanceMappingChild(step, "id"); id != nil && id.Value == "provenance" {
-			if run := provenanceMappingChild(step, "run"); run != nil {
-				script = run.Value
-			}
-		}
 	}
 	if script == "" {
 		t.Fatal("release candidate provenance step has no script")
@@ -102,9 +97,9 @@ func TestReleaseCandidateProvenance(t *testing.T) {
 			if err := os.Mkdir(bin, 0o755); err != nil {
 				t.Fatal(err)
 			}
-			git := "#!/bin/sh\n[ \"$#\" -eq 2 ] && [ \"$1\" = show ] && [ \"$2\" = \"${PLAN_SOURCE}:.github/release-intent.yaml\" ] || exit 90\nprintf 'fixture config\\n'\n"
-			yq := "#!/bin/sh\n[ \"$#\" -eq 2 ] && [ \"$1\" = '-o=json' ] && [ \"$2\" = '.' ] || exit 91\ncat >/dev/null\nprintf '%s\\n' \"$TEST_CONFIG_JSON\"\n"
-			gh := "#!/bin/sh\n[ \"$#\" -eq 3 ] && [ \"$1\" = api ] && [ \"$2\" = --paginate ] && [ \"$3\" = \"repos/${GITHUB_REPOSITORY}/commits/${CANDIDATE}/pulls?per_page=100\" ] && [ \"$GH_TOKEN\" = readonly-test-token ] || exit 92\nprintf '%s' \"$TEST_API_OUTPUT\"\nexit \"$TEST_API_EXIT\"\n"
+			git := "#!/bin/sh\n[ \"$#\" -eq 2 ] && [ \"$1\" = show ] && [ \"$2\" = \"${PLAN_SOURCE}:.github/release-intent.yaml\" ] || { echo UNEXPECTED_STUB_ARGUMENTS:git >&2; exit 90; }\n[ \"$TEST_GIT_EXIT\" = 0 ] || exit \"$TEST_GIT_EXIT\"\nprintf 'fixture config\\n'\n"
+			yq := "#!/bin/sh\n[ \"$#\" -eq 2 ] && [ \"$1\" = '-o=json' ] && [ \"$2\" = '.' ] || { echo UNEXPECTED_STUB_ARGUMENTS:yq >&2; exit 91; }\n[ \"$TEST_YQ_EXIT\" = 0 ] || exit \"$TEST_YQ_EXIT\"\ncat >/dev/null\nprintf '%s\\n' \"$TEST_CONFIG_JSON\"\n"
+			gh := "#!/bin/sh\n[ \"$#\" -eq 3 ] && [ \"$1\" = api ] && [ \"$2\" = --paginate ] && [ \"$3\" = \"repos/${GITHUB_REPOSITORY}/commits/${CANDIDATE}/pulls?per_page=100\" ] && [ \"$GH_TOKEN\" = readonly-test-token ] || { echo UNEXPECTED_STUB_ARGUMENTS:gh >&2; exit 92; }\nprintf '%s' \"$TEST_API_OUTPUT\"\nexit \"$TEST_API_EXIT\"\n"
 			for name, content := range map[string]string{"git": git, "yq": yq, "gh": gh} {
 				if err := os.WriteFile(filepath.Join(bin, name), []byte(content), 0o755); err != nil {
 					t.Fatal(err)
@@ -112,7 +107,7 @@ func TestReleaseCandidateProvenance(t *testing.T) {
 			}
 			config := fixture.Config
 			if c.Config != nil {
-				config = *c.Config
+				config = c.Config
 			}
 			configJSON, err := json.Marshal(config)
 			if err != nil {
@@ -142,7 +137,7 @@ func TestReleaseCandidateProvenance(t *testing.T) {
 				"GH_TOKEN=readonly-test-token", "GITHUB_REPOSITORY=peasant-labs/peasant",
 				"CANDIDATE="+candidate, "PLAN_SOURCE=plan-source", "RUNNER_TEMP="+dir,
 				"TEST_CONFIG_JSON="+string(configJSON), "TEST_API_OUTPUT="+output.String(),
-				"TEST_API_EXIT="+strconv.Itoa(c.APIExit))
+				"TEST_API_EXIT="+strconv.Itoa(c.APIExit), "TEST_GIT_EXIT="+strconv.Itoa(c.GitExit), "TEST_YQ_EXIT="+strconv.Itoa(c.YQExit))
 			actual, err := cmd.CombinedOutput()
 			exit := 0
 			if err != nil {
@@ -151,6 +146,9 @@ func TestReleaseCandidateProvenance(t *testing.T) {
 				} else {
 					t.Fatalf("execute provenance step: %v\n%s", err, actual)
 				}
+			}
+			if strings.Contains(string(actual), "UNEXPECTED_STUB_ARGUMENTS:") {
+				t.Fatalf("stub received unexpected arguments:\n%s", actual)
 			}
 			if exit != c.ExpectedExit || (c.ExpectedExit != 0 && (c.ErrorContains == "" || !strings.Contains(string(actual), c.ErrorContains))) {
 				t.Fatalf("provenance step exit %d, want %d with %q:\n%s", exit, c.ExpectedExit, c.ErrorContains, actual)
