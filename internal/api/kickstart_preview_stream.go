@@ -19,12 +19,13 @@ import (
 )
 
 type previewRegistry struct {
-	mu       sync.Mutex
-	sessions *kickstartSessions
-	captures map[*Conn]*webPreview
-	worker   chan struct{}
-	revision atomic.Uint64
-	newID    func() (string, error)
+	mu             sync.Mutex
+	sessions       *kickstartSessions
+	captures       map[*Conn]*webPreview
+	worker         chan struct{}
+	revision       atomic.Uint64
+	newID          func() (string, error)
+	captureOptions sourcepreview.CaptureOptions
 }
 
 var errPreviewReasonUnmapped = errors.New("preview reason has no wire mapping")
@@ -85,7 +86,10 @@ type webPreview struct {
 }
 
 func newPreviewRegistry(sessions *kickstartSessions) *previewRegistry {
-	return &previewRegistry{sessions: sessions, captures: make(map[*Conn]*webPreview), worker: make(chan struct{}, defaults.KickstartWebPreviewParseWorkers), newID: newPreviewCaptureID}
+	return &previewRegistry{sessions: sessions, captures: make(map[*Conn]*webPreview), worker: make(chan struct{}, defaults.KickstartWebPreviewParseWorkers), newID: newPreviewCaptureID, captureOptions: sourcepreview.CaptureOptions{
+		FirstReadBytes: defaults.TranscriptInitialReadBytes, SliceReadBytes: defaults.TranscriptContinuationReadBytes,
+		SourceCapBytes: defaults.KickstartWebPreviewSourceCapBytes, TurnCap: defaults.KickstartWebPreviewTurnCap,
+	}}
 }
 
 func newPreviewCaptureID() (string, error) {
@@ -228,10 +232,7 @@ func (r *previewRegistry) start(p *webPreview, listings []onboarding.SessionList
 		return
 	}
 	reader := sourcepreview.NewReader(r.sessions.env.previewFS, listings)
-	capture, page, err := reader.Open(p.ctx, sessionID, sourcepreview.CaptureOptions{
-		FirstReadBytes: defaults.TranscriptInitialReadBytes, SliceReadBytes: defaults.TranscriptContinuationReadBytes,
-		SourceCapBytes: defaults.KickstartWebPreviewSourceCapBytes, TurnCap: defaults.KickstartWebPreviewTurnCap,
-	})
+	capture, page, err := reader.Open(p.ctx, sessionID, r.captureOptions)
 	<-r.worker
 	if err != nil {
 		r.fail(p, err)

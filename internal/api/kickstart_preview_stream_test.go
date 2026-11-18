@@ -23,6 +23,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/discovery"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/onboarding"
+	"github.com/peasant-labs/peasant/internal/sourcepreview"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 )
@@ -97,6 +98,9 @@ func TestKickstartPreviewStream(t *testing.T) {
 				}
 			})
 			content := tc.Transcript
+			if tc.Operation == "late-result" {
+				content = strings.ReplaceAll(content, "{{PAD}}", strings.Repeat("x", 600))
+			}
 			if tc.Operation == "bounded-turn" {
 				content = fmt.Sprintf("{\"type\":\"user\",\"uuid\":\"u1\",\"timestamp\":\"2026-01-01T00:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"%s\"}}\n", strings.Repeat("x", fixture.Generated.OversizedBytes))
 			}
@@ -176,6 +180,9 @@ func TestKickstartPreviewStream(t *testing.T) {
 			st.mu.Unlock()
 			hub := NewHub(&mockDataProvider{})
 			hub.attachKickstart(st)
+			if tc.Operation == "late-result" {
+				hub.previews.captureOptions = sourcepreview.CaptureOptions{FirstReadBytes: 2400, SliceReadBytes: 2400, HoldbackBytes: 200}
+			}
 			idReached, idRelease := make(chan struct{}), make(chan struct{})
 			if tc.Operation == "refuse-reopen" {
 				var count atomic.Int32
@@ -214,7 +221,7 @@ func TestKickstartPreviewStream(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if tc.Operation == "capacity" {
+			if tc.Operation == "capacity" || tc.Operation == "capacity-race" {
 				// Occupy the parse worker so both registered captures are busy.
 				hub.previews.worker <- struct{}{}
 				defer func() { <-hub.previews.worker }()
@@ -259,6 +266,55 @@ func TestKickstartPreviewStream(t *testing.T) {
 				}
 				second := connect()
 				defer second.CloseNow()
+				if tc.Operation == "capacity-race" {
+					third := connect()
+					defer third.CloseNow()
+					start := make(chan struct{})
+					results := make(chan []byte, 2)
+					run := func(socket *websocket.Conn) {
+						<-start
+						for _, msg := range []ClientMessage{subscribe, open, barrier} {
+							data, _ := json.Marshal(msg)
+							if socket.Write(ctx, websocket.MessageText, data) != nil {
+								results <- nil
+								return
+							}
+						}
+						_, data, err := socket.Read(ctx)
+						if err != nil {
+							results <- nil
+							return
+						}
+						results <- data
+					}
+					go run(second)
+					go run(third)
+					close(start)
+					successes, refusals := 0, 0
+					for range 2 {
+						var received struct {
+							Type schema.MessageType                `json:"type"`
+							Data schema.LocalKickstartPreviewEvent `json:"data"`
+						}
+						select {
+						case data := <-results:
+							if err := json.Unmarshal(data, &received); err != nil {
+								t.Fatal(err)
+							}
+						case <-ctx.Done():
+							t.Fatal("racing opens did not answer")
+						}
+						if received.Type == MsgError {
+							successes++
+						} else if received.Type == schema.MsgKickstartPreview && received.Data.Reason == schema.LocalKickstartPreviewCapacity {
+							refusals++
+						}
+					}
+					if successes != 1 || refusals != 1 {
+						t.Fatal("racing opens did not yield exactly one reservation and one capacity refusal")
+					}
+					return
+				}
 				openBusy(second)
 				third := connect()
 				defer third.CloseNow()
@@ -357,7 +413,7 @@ func TestKickstartPreviewStream(t *testing.T) {
 					t.Fatalf("invalid frame: %v", err)
 				}
 			}
-			if len(state.Segments) != 1 || state.Directory.Complete == tc.Long {
+			if len(state.Segments) != 1 || state.Directory.Complete == (tc.Long || tc.Operation == "late-result") {
 				t.Fatalf("unexpected first segment: %+v", state.Directory)
 			}
 			switch tc.Operation {
@@ -476,6 +532,21 @@ func TestKickstartPreviewStream(t *testing.T) {
 				closed := read()
 				if closed.Kind != schema.LocalKickstartPreviewClosed || closed.Reason != schema.LocalKickstartPreviewRescanned || closed.CaptureID != state.CaptureID {
 					t.Fatal("finished scan did not close its capture")
+				}
+			case "alter-source":
+				if err := os.Truncate(path, 0); err != nil {
+					t.Fatal(err)
+				}
+				write(ClientMessage{Type: schema.MsgKickstartPreview, Preview: &schema.LocalKickstartPreviewRequest{Op: schema.LocalKickstartPreviewMore, RequestID: "next", SessionID: "setup", CaptureID: state.CaptureID, After: state.Seq}})
+				event := read()
+				if event.Kind != schema.LocalKickstartPreviewClosed || event.Reason != schema.LocalKickstartPreviewSourceChanged || event.Code != schema.LocalKickstartErrorPreviewSourceChanged {
+					t.Fatal("changed source did not close with its reason")
+				}
+			case "late-result":
+				write(ClientMessage{Type: schema.MsgKickstartPreview, Preview: &schema.LocalKickstartPreviewRequest{Op: schema.LocalKickstartPreviewMore, RequestID: "next", SessionID: "setup", CaptureID: state.CaptureID, After: state.Seq}})
+				event := read()
+				if event.Kind != schema.LocalKickstartPreviewClosed || event.Reason != schema.LocalKickstartPreviewLateResult || event.Code != schema.LocalKickstartErrorPreviewLateResult || !strings.Contains(event.Message, "read it again") {
+					t.Fatal("late result did not offer a fresh read")
 				}
 			case "refuse-reopen":
 				write(ClientMessage{Type: schema.MsgKickstartPreview, Preview: &schema.LocalKickstartPreviewRequest{Op: schema.LocalKickstartPreviewOpen, RequestID: "refused", SessionID: "setup", NodeID: "row"}})
