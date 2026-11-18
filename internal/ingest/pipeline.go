@@ -2321,6 +2321,9 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 			}
 			p.config.IndexProfiler.RecordStage(StageRefreshProof, time.Since(proofStart), proven, 1)
 			slog.Info(logPrefix+": refresh proof", "session_id", im.session.SessionID, "proven", proof.Proven, "mismatch", proof.Mismatch, "error", proofErr)
+			if proofErr != nil {
+				forceParse = true
+			}
 			if proofErr == nil && proof.Proven {
 				outcome, duration, settleErr := p.settleManagedGenerationUnchanged(ctx, input, writeLane)
 				if settleErr == nil && outcome.Disposition == ManagedGenerationRefreshUnchanged {
@@ -2332,9 +2335,10 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 					return result
 				}
 				slog.Warn(logPrefix+": unchanged generation settlement refused", "session_id", im.session.SessionID, "error", settleErr)
+				forceParse = true
 			}
 		}
-		if input.managedGenerationRefresh && p.managedGenerationRefreshApplies(input) {
+		if !forceParse && input.managedGenerationRefresh && p.managedGenerationRefreshApplies(input) {
 			outcome, duration, refreshErr := p.refreshManagedGeneration(ctx, input, writeLane)
 			if refreshErr == nil {
 				reason := indexManagedRefreshReason + " (" + string(outcome.Disposition) + ")"

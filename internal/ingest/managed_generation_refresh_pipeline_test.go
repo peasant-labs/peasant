@@ -35,6 +35,12 @@ var managedRefreshPipelineLanes []byte
 //go:embed testdata/managed_refresh_pipeline_lanes.manifest.yaml
 var managedRefreshPipelineLanesManifest []byte
 
+//go:embed testdata/unchanged_pipeline_routes.yaml
+var unchangedPipelineRoutes []byte
+
+//go:embed testdata/unchanged_pipeline_routes.manifest.yaml
+var unchangedPipelineRoutesManifest []byte
+
 type countedManagedRefreshStore struct {
 	*store.Store
 	calls       atomic.Int64
@@ -44,13 +50,19 @@ type countedManagedRefreshStore struct {
 
 type proofCountingRefreshStore struct {
 	*countedManagedRefreshStore
-	proofs  atomic.Int64
-	settles atomic.Int64
-	proof   ingest.UnchangedProof
+	proofs            atomic.Int64
+	settles           atomic.Int64
+	proof             ingest.UnchangedProof
+	proofError        bool
+	settleRefused     bool
+	forgeSettleCounts bool
 }
 
 func (s *proofCountingRefreshStore) ProveCapturedGenerationUnchanged(ctx context.Context, request ingest.ManagedGenerationUnchangedProof) (ingest.UnchangedProof, error) {
 	s.proofs.Add(1)
+	if s.proofError {
+		return ingest.UnchangedProof{}, fmt.Errorf("synthetic proof read failure")
+	}
 	proof, err := s.Store.ProveCapturedGenerationUnchanged(ctx, request)
 	s.proof = proof
 	return proof, err
@@ -58,6 +70,15 @@ func (s *proofCountingRefreshStore) ProveCapturedGenerationUnchanged(ctx context
 
 func (s *proofCountingRefreshStore) SettleCapturedGenerationUnchanged(ctx context.Context, request ingest.ManagedGenerationUnchangedProof) (ingest.ManagedGenerationRefreshOutcome, error) {
 	s.settles.Add(1)
+	if s.settleRefused {
+		return ingest.ManagedGenerationRefreshOutcome{}, &ingest.StaleIndexWorkError{SessionID: request.SessionID}
+	}
+	if s.forgeSettleCounts {
+		input, conversation := int64(903), int64(902)
+		request.Metadata.Stats.TurnCount = 901
+		request.Metadata.Stats.InputSubmissionCount = &input
+		request.Metadata.Stats.ConversationTurnCount = &conversation
+	}
 	return s.Store.SettleCapturedGenerationUnchanged(ctx, request)
 }
 
@@ -110,9 +131,9 @@ func TestManagedGenerationUnchangedProofPipelineRoutes(t *testing.T) {
 		mustMkdir(t, empty)
 		return source, output, empty, id, db, data
 	}
-	run := func(t *testing.T, db *store.Store, source, output, empty string, refuse bool) (*proofCountingRefreshStore, *nativeCountingRefreshFS, *ingest.IndexProfiler, *ingest.PipelineResult, *atomic.Int64, *atomic.Int64, *[]byte) {
+	run := func(t *testing.T, db *store.Store, source, output, empty string, mode string) (*proofCountingRefreshStore, *nativeCountingRefreshFS, *ingest.IndexProfiler, *ingest.PipelineResult, *atomic.Int64, *atomic.Int64, *[]byte) {
 		t.Helper()
-		counted := &proofCountingRefreshStore{countedManagedRefreshStore: &countedManagedRefreshStore{Store: db, refuse: refuse}}
+		counted := &proofCountingRefreshStore{countedManagedRefreshStore: &countedManagedRefreshStore{Store: db, refuse: mode == "copy-refused"}, proofError: mode == "proof-error", settleRefused: mode == "settle-refused", forgeSettleCounts: mode == ""}
 		fs := &nativeCountingRefreshFS{OSFileSystem: &ingest.OSFileSystem{}, source: source}
 		profiler := &ingest.IndexProfiler{}
 		parses, builds := &atomic.Int64{}, &atomic.Int64{}
@@ -135,72 +156,120 @@ func TestManagedGenerationUnchangedProofPipelineRoutes(t *testing.T) {
 		}
 		t.Fatal("missing proof profile stage")
 	}
-	t.Run("proven", func(t *testing.T) {
-		source, output, empty, id, db, _ := setup(t)
-		counted, _, profiler, _, parses, builds, _ := run(t, db, source, output, empty, false)
-		if counted.proofs.Load() != 1 || !counted.proof.Proven || counted.settles.Load() != 1 || counted.calls.Load() != 0 || parses.Load() != 0 || builds.Load() != 0 {
-			t.Fatalf("proof %+v attempts %d settles %d copies %d parses %d builds %d", counted.proof, counted.proofs.Load(), counted.settles.Load(), counted.calls.Load(), parses.Load(), builds.Load())
+	routes := map[string]func(*testing.T){
+		"proven": func(t *testing.T) {
+			source, output, empty, id, db, _ := setup(t)
+			before := managedRefreshPipelineRows(t, db, `SELECT c.turn_count || ':' || c.conversation_turn_count || ':' || c.input_submission_count || ':' || s.input_submission_count FROM sessions s JOIN session_captured_stats c USING (session_id) WHERE s.session_id = ?`, id)
+			counted, _, profiler, _, parses, builds, _ := run(t, db, source, output, empty, "")
+			if counted.proofs.Load() != 1 || !counted.proof.Proven || counted.settles.Load() != 1 || counted.calls.Load() != 0 || parses.Load() != 0 || builds.Load() != 0 {
+				t.Fatalf("proof %+v attempts %d settles %d copies %d parses %d builds %d", counted.proof, counted.proofs.Load(), counted.settles.Load(), counted.calls.Load(), parses.Load(), builds.Load())
+			}
+			assertProfile(t, profiler, 1)
+			assertManagedRefreshRowsEqual(t, "parse-owned counts", before, managedRefreshPipelineRows(t, db, `SELECT c.turn_count || ':' || c.conversation_turn_count || ':' || c.input_submission_count || ':' || s.input_submission_count FROM sessions s JOIN session_captured_stats c USING (session_id) WHERE s.session_id = ?`, id))
+			next := runManagedRefreshPipelineInstrumented(t, counted, empty, output, parses, builds, new([]byte), &ingest.OSFileSystem{}, &ingest.IndexProfiler{})
+			if next.Summary.Errors != 0 || next.Census == nil || next.Census.Sessions() != 0 || counted.proofs.Load() != 1 || counted.settles.Load() != 1 || counted.calls.Load() != 0 || parses.Load() != 0 || builds.Load() != 0 {
+				t.Fatalf("second run did refresh work: summary %+v census %+v", next.Summary, next.Census)
+			}
+			locations, err := db.BulkLookupSessionLocations(t.Context(), []ingest.SessionID{id})
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg := makePipelineConfig(output)
+			pipeline, err := newTestPipeline(&ingest.OSFileSystem{}, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			decision := ingest.StoredDecisionForTest(pipeline, ingest.DiscoveredSession{SessionID: id, Harness: ingest.HarnessClaudeCode}, locations[id])
+			if decision.Reason != ingest.RefreshReasonNone || decision.Lane != ingest.RefreshLaneNone {
+				t.Fatalf("second decision = %+v, want none", decision)
+			}
+		},
+		"index-not-current": func(t *testing.T) {
+			source, output, empty, _, db, expected := setup(t)
+			conn, err := db.Pool().Take(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = sqlitex.Execute(conn, `UPDATE sessions SET index_version = 0`, nil)
+			db.Pool().Put(conn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			counted, fs, profiler, _, _, builds, transcript := run(t, db, source, output, empty, "")
+			if counted.proofs.Load() != 1 || counted.proof.Proven || counted.proof.Mismatch != ingest.UnchangedNotProvenIndexer || counted.settles.Load() != 0 || counted.calls.Load() != 0 || builds.Load() != 1 || !bytes.Equal(*transcript, expected) || fs.reads.Load() != 0 {
+				t.Fatalf("proof %+v attempts %d settles %d copies %d builds %d stored bytes match %t native reads %d", counted.proof, counted.proofs.Load(), counted.settles.Load(), counted.calls.Load(), builds.Load(), bytes.Equal(*transcript, expected), fs.reads.Load())
+			}
+			assertProfile(t, profiler, 0)
+		},
+		"metadata-context": func(t *testing.T) {
+			source, output, empty, _, db, _ := setup(t)
+			stored := ingest.GenerationTargets(ingest.HarvesterVersionRegistry)[ingest.HarnessClaudeCode].AdapterVersion - 1
+			if managedRefreshPipelineChangeMetadata(t, output, stored, managedRefreshPipelineForcedProject) != 1 {
+				t.Fatal("expected one metadata file")
+			}
+			counted, _, profiler, _, _, builds, _ := run(t, db, source, output, empty, "")
+			if counted.proofs.Load() != 1 || counted.proof.Proven || counted.proof.Mismatch != ingest.UnchangedNotProvenMetadata || counted.settles.Load() != 0 || counted.calls.Load() != 1 || builds.Load() != 0 {
+				t.Fatalf("proof %+v attempts %d settles %d copies %d builds %d", counted.proof, counted.proofs.Load(), counted.settles.Load(), counted.calls.Load(), builds.Load())
+			}
+			assertProfile(t, profiler, 0)
+		},
+		"copy-refused": func(t *testing.T) {
+			source, output, empty, _, db, expected := setup(t)
+			stored := ingest.GenerationTargets(ingest.HarvesterVersionRegistry)[ingest.HarnessClaudeCode].AdapterVersion - 1
+			if managedRefreshPipelineChangeMetadata(t, output, stored, managedRefreshPipelineForcedProject) != 1 {
+				t.Fatal("expected one metadata file")
+			}
+			counted, fs, profiler, _, _, builds, transcript := run(t, db, source, output, empty, "copy-refused")
+			if counted.proofs.Load() != 1 || counted.proof.Mismatch != ingest.UnchangedNotProvenMetadata || counted.settles.Load() != 0 || counted.calls.Load() != 1 || builds.Load() != 1 || !bytes.Equal(*transcript, expected) || fs.reads.Load() != 0 {
+				t.Fatalf("proof %+v attempts %d settles %d copies %d builds %d stored bytes match %t native reads %d", counted.proof, counted.proofs.Load(), counted.settles.Load(), counted.calls.Load(), builds.Load(), bytes.Equal(*transcript, expected), fs.reads.Load())
+			}
+			assertProfile(t, profiler, 0)
+		},
+		"proof-error": func(t *testing.T) {
+			source, output, empty, _, db, expected := setup(t)
+			counted, fs, profiler, _, _, builds, transcript := run(t, db, source, output, empty, "proof-error")
+			if counted.proofs.Load() != 1 || counted.settles.Load() != 0 || counted.calls.Load() != 0 || builds.Load() != 1 || !bytes.Equal(*transcript, expected) || fs.reads.Load() != 0 {
+				t.Fatalf("proofs %d settles %d copies %d builds %d bytes match %t native reads %d", counted.proofs.Load(), counted.settles.Load(), counted.calls.Load(), builds.Load(), bytes.Equal(*transcript, expected), fs.reads.Load())
+			}
+			assertProfile(t, profiler, 0)
+		},
+		"settle-refused": func(t *testing.T) {
+			source, output, empty, _, db, expected := setup(t)
+			counted, fs, profiler, _, _, builds, transcript := run(t, db, source, output, empty, "settle-refused")
+			if counted.proofs.Load() != 1 || !counted.proof.Proven || counted.settles.Load() != 1 || counted.calls.Load() != 0 || builds.Load() != 1 || !bytes.Equal(*transcript, expected) || fs.reads.Load() != 0 {
+				t.Fatalf("proof %+v attempts %d settles %d copies %d builds %d bytes match %t native reads %d", counted.proof, counted.proofs.Load(), counted.settles.Load(), counted.calls.Load(), builds.Load(), bytes.Equal(*transcript, expected), fs.reads.Load())
+			}
+			assertProfile(t, profiler, 1)
+		},
+	}
+	var fixture struct {
+		Cases []struct {
+			Name string `yaml:"name"`
+		} `yaml:"cases"`
+	}
+	var manifest struct {
+		RequiredNames []string `yaml:"requiredNames"`
+	}
+	if err := yaml.Unmarshal(unchangedPipelineRoutes, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	if err := yaml.Unmarshal(unchangedPipelineRoutesManifest, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, c := range fixture.Cases {
+		fn, ok := routes[c.Name]
+		if !ok || seen[c.Name] {
+			t.Fatalf("unknown or duplicate route %q", c.Name)
 		}
-		assertProfile(t, profiler, 1)
-		next := runManagedRefreshPipelineInstrumented(t, counted, empty, output, parses, builds, new([]byte), &ingest.OSFileSystem{}, &ingest.IndexProfiler{})
-		if next.Summary.Errors != 0 || next.Census == nil || next.Census.Sessions() != 0 || counted.proofs.Load() != 1 || counted.settles.Load() != 1 || counted.calls.Load() != 0 || parses.Load() != 0 || builds.Load() != 0 {
-			t.Fatalf("second run did refresh work: summary %+v census %+v", next.Summary, next.Census)
+		seen[c.Name] = true
+		t.Run(c.Name, fn)
+	}
+	for _, name := range manifest.RequiredNames {
+		if !seen[name] {
+			t.Errorf("missing required route %q", name)
 		}
-		locations, err := db.BulkLookupSessionLocations(t.Context(), []ingest.SessionID{id})
-		if err != nil {
-			t.Fatal(err)
-		}
-		cfg := makePipelineConfig(output)
-		pipeline, err := newTestPipeline(&ingest.OSFileSystem{}, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg)
-		if err != nil {
-			t.Fatal(err)
-		}
-		decision := ingest.StoredDecisionForTest(pipeline, ingest.DiscoveredSession{SessionID: id, Harness: ingest.HarnessClaudeCode}, locations[id])
-		if decision.Reason != ingest.RefreshReasonNone || decision.Lane != ingest.RefreshLaneNone {
-			t.Fatalf("second decision = %+v, want none", decision)
-		}
-	})
-	t.Run("index-not-current", func(t *testing.T) {
-		source, output, empty, _, db, expected := setup(t)
-		conn, err := db.Pool().Take(t.Context())
-		if err != nil {
-			t.Fatal(err)
-		}
-		err = sqlitex.Execute(conn, `UPDATE sessions SET index_version = 0`, nil)
-		db.Pool().Put(conn)
-		if err != nil {
-			t.Fatal(err)
-		}
-		counted, fs, profiler, _, _, builds, transcript := run(t, db, source, output, empty, false)
-		if counted.proofs.Load() != 1 || counted.proof.Proven || counted.proof.Mismatch != ingest.UnchangedNotProvenIndexer || counted.settles.Load() != 0 || counted.calls.Load() != 0 || builds.Load() != 1 || !bytes.Equal(*transcript, expected) || fs.reads.Load() != 0 {
-			t.Fatalf("proof %+v attempts %d settles %d copies %d builds %d stored bytes match %t native reads %d", counted.proof, counted.proofs.Load(), counted.settles.Load(), counted.calls.Load(), builds.Load(), bytes.Equal(*transcript, expected), fs.reads.Load())
-		}
-		assertProfile(t, profiler, 0)
-	})
-	t.Run("metadata-context", func(t *testing.T) {
-		source, output, empty, _, db, _ := setup(t)
-		stored := ingest.GenerationTargets(ingest.HarvesterVersionRegistry)[ingest.HarnessClaudeCode].AdapterVersion - 1
-		if managedRefreshPipelineChangeMetadata(t, output, stored, managedRefreshPipelineForcedProject) != 1 {
-			t.Fatal("expected one metadata file")
-		}
-		counted, _, profiler, _, _, builds, _ := run(t, db, source, output, empty, false)
-		if counted.proofs.Load() != 1 || counted.proof.Proven || counted.proof.Mismatch != ingest.UnchangedNotProvenMetadata || counted.settles.Load() != 0 || counted.calls.Load() != 1 || builds.Load() != 0 {
-			t.Fatalf("proof %+v attempts %d settles %d copies %d builds %d", counted.proof, counted.proofs.Load(), counted.settles.Load(), counted.calls.Load(), builds.Load())
-		}
-		assertProfile(t, profiler, 0)
-	})
-	t.Run("copy-refused", func(t *testing.T) {
-		source, output, empty, _, db, expected := setup(t)
-		stored := ingest.GenerationTargets(ingest.HarvesterVersionRegistry)[ingest.HarnessClaudeCode].AdapterVersion - 1
-		if managedRefreshPipelineChangeMetadata(t, output, stored, managedRefreshPipelineForcedProject) != 1 {
-			t.Fatal("expected one metadata file")
-		}
-		counted, fs, profiler, _, _, builds, transcript := run(t, db, source, output, empty, true)
-		if counted.proofs.Load() != 1 || counted.proof.Mismatch != ingest.UnchangedNotProvenMetadata || counted.settles.Load() != 0 || counted.calls.Load() != 1 || builds.Load() != 1 || !bytes.Equal(*transcript, expected) || fs.reads.Load() != 0 {
-			t.Fatalf("proof %+v attempts %d settles %d copies %d builds %d stored bytes match %t native reads %d", counted.proof, counted.proofs.Load(), counted.settles.Load(), counted.calls.Load(), builds.Load(), bytes.Equal(*transcript, expected), fs.reads.Load())
-		}
-		assertProfile(t, profiler, 0)
-	})
+	}
 }
 
 func (s *countedManagedRefreshStore) RefreshManagedGenerationWithoutParse(ctx context.Context, request ingest.ManagedGenerationRefreshRequest) (ingest.ManagedGenerationRefreshOutcome, error) {
