@@ -99,20 +99,28 @@ const ServedTextFieldBudgetBytes int = 1 << 20
 // itself takes every bound as an option, so each surface states its own. The
 // values below are the WEB preview's: the kickstart page's server-owned capture
 // passes them. The terminal preview does not inherit them; it keeps its own
-// options (unbounded source and turns), stated where its adapter builds them.
+// options, stated where its adapter builds them.
 //
 // Why a cumulative source cap exists at all: the file capture holds the loaded
 // prefix and re-parses all of it on every read, because the canonical
 // projection is not resumable. Its retained memory and its re-parse work both
 // grow with the prefix, so the web capture caps the prefix. Paging alone would
 // not need it: a segment is the contract's budget and a frame is bounded below.
+//
+// The source cap is set by the transient peak of one re-parse, which must stay
+// at or under 128 MiB. A re-parse briefly needs about 5.5 times the prefix it
+// parses (the live expansion factor BenchmarkCaptureWebHeap in
+// internal/sourcepreview measures with the collector running often): 16 MiB
+// peaked at about 92 MiB, 24 MiB at about 132 MiB. So the cap is 16 MiB.
 const (
 	// KickstartWebPreviewSourceCapBytes is the cumulative source bytes one web
-	// capture may load. Five reads at most: 256 KiB, then 8 MiB at a time.
-	KickstartWebPreviewSourceCapBytes int64 = 32 << 20
+	// capture may load. Three reads at most: 256 KiB, then 8 MiB at a time.
+	KickstartWebPreviewSourceCapBytes int64 = 16 << 20
 	// KickstartWebPreviewSerializedCapBytes is the most encoded segment bytes
-	// one web capture sends: the most one preview pane holds.
-	KickstartWebPreviewSerializedCapBytes int64 = 32 << 20
+	// one web capture sends: the most one preview pane holds. It matches the
+	// source cap, so neither cap cuts a capture the other would let continue
+	// by much.
+	KickstartWebPreviewSerializedCapBytes int64 = 16 << 20
 	// KickstartWebPreviewTurnCap is the most turns one web capture emits. It
 	// bounds the capture's turn digests and the browser's view model.
 	KickstartWebPreviewTurnCap = 20_000
@@ -136,15 +144,17 @@ const (
 // preview. It is one contract segment, for every surface.
 const SourcePreviewHoldbackBytes = schema.TranscriptSegmentBudgetBytes
 
-// The capture benchmark on a 32 MiB synthetic Claude transcript, read to the
-// web source cap. The targets warn; the ceiling fails closed and exists to
+// The capture benchmark reads a 32 MiB synthetic Claude transcript to the web
+// source cap. The targets warn; the ceiling fails closed and exists to
 // catch a catastrophic regression (a re-parse per turn, an unbounded read),
 // not runner contention.
 const (
 	SourcePreviewFirstSegmentBudget = 250 * time.Millisecond
 	SourcePreviewFullCaptureBudget  = 6 * time.Second
 	SourcePreviewFullCaptureCeiling = 30 * time.Second
-	// SourcePreviewPeakHeapCeilingBytes is the transient peak the plan allows
-	// for one capture before the web source cap must be lowered.
+	// SourcePreviewPeakHeapCeilingBytes fails the capture benchmark when the
+	// sampled heap (default collector settings, garbage included) passes it.
+	// It catches a catastrophic regression; the 128 MiB rule on the live
+	// transient is what sets the web source cap above.
 	SourcePreviewPeakHeapCeilingBytes int64 = 512 << 20
 )
