@@ -194,7 +194,7 @@ func (m *Model) observe(at time.Time, snapshot map[ingest.Stage]ingest.StageProg
 		o.estimate.ok = false
 		if total != o.lastTotal || bytes != o.byteEstimate {
 			if bytes != o.byteEstimate {
-				o.estimator = kit.NewEstimator(estimateWindow)
+				o.estimator = kit.NewEstimator(kit.EstimateWindow)
 			}
 			o.lastAt, o.lastDone, o.lastTotal, o.byteEstimate, o.progress = at, done, total, bytes, sp
 			o.estimateEligible = total > 0 && !sp.HasErr && !m.retry
