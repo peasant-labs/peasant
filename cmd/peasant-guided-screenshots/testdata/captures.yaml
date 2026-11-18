@@ -206,12 +206,16 @@ selectionStates:
 ingestProgressStates:
   - key: running
     candidates: 4
+    bytesTotal: 8388608
+    bytesDone: 2097152
     lane: {queued: 3, busyMs: 1000, elapsedMs: 1000}
-    wantContains: [importing transcripts, local import progress, extract+write, 1/4, "█", "_|||_", "extract candidates: 4 sessions (not confirmed refreshes)", "writer lane: 3 waiting", "100% busy", "total elapsed: 2s", "estimate: 6s", ctrl+c to quit]
+    wantContains: [importing transcripts, local import progress, extract+write, 1/4, "2 MiB/8 MiB", "█", "_|||_", "extract candidates: 4 sessions (not confirmed refreshes)", "writer lane: 3 waiting", "100% busy", "total elapsed: 2s", "estimate: 6s", ctrl+c to quit]
   - key: harvest-inline
     candidates: 4
+    bytesTotal: 8388608
+    bytesDone: 2097152
     lane: {queued: 3, busyMs: 1000, elapsedMs: 1000}
-    wantContains: [local import progress, extract+write, 1/4, "█", "_|||_", "extract candidates: 4 sessions (not confirmed refreshes)", "writer lane: 3 waiting", "100% busy", "total elapsed: 2s", "estimate: 6s", ctrl+c to cancel]
+    wantContains: [local import progress, extract+write, 1/4, "2 MiB/8 MiB", "█", "_|||_", "extract candidates: 4 sessions (not confirmed refreshes)", "writer lane: 3 waiting", "100% busy", "total elapsed: 2s", "estimate: 6s", ctrl+c to cancel]
   - key: harvest-canceling
     wantContains: [local import progress, "✗ discover", 2/4, "total elapsed: 9s", "estimate: 6s", canceling harvest]
   - key: harvest-canceled
