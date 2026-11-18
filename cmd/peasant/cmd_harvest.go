@@ -716,7 +716,7 @@ func outputHarvest(cmd *cobra.Command, execution harvestExecution, options harve
 		}
 		return nil
 	}
-	printSummary(cmd.OutOrStdout(), result, options.flags.verbose, options.flags.includeActive, options.outputDir, options.configPath, options.sources, options.customPatternCount)
+	printSummaryWithForecast(cmd.OutOrStdout(), result, options.flags.verbose, options.flags.includeActive, options.outputDir, options.configPath, options.sources, options.customPatternCount, options.flags.dryRun)
 	if remaining := result.Summary.ContentCaptureRemaining; remaining > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "%d sessions do not have their full text stored yet. The next harvest continues this. Run `peasant harvest index` to finish it now.\n", remaining)
 	}
@@ -1482,6 +1482,10 @@ func printRecordKindsReport(w io.Writer, refused []ingest.RecordKindRefusalCount
 // Default (no --verbose): path header + summary line + changed/error rows with provider and output path.
 // --verbose: same rows but visible subagents are expanded underneath their parent instead of collapsed.
 func printSummary(w io.Writer, result *ingest.PipelineResult, verbose bool, includeActive bool, outputDir string, configPath string, sources map[defaults.Harness]ingest.SourceConfig, customPatternCount int) {
+	printSummaryWithForecast(w, result, verbose, includeActive, outputDir, configPath, sources, customPatternCount, false)
+}
+
+func printSummaryWithForecast(w io.Writer, result *ingest.PipelineResult, verbose bool, includeActive bool, outputDir string, configPath string, sources map[defaults.Harness]ingest.SourceConfig, customPatternCount int, forecast bool) {
 	// Path header.
 	fmt.Fprintf(w, "Output:  %s\n", outputDir)
 	if configPath != "" {
@@ -1524,8 +1528,11 @@ func printSummary(w io.Writer, result *ingest.PipelineResult, verbose bool, incl
 	fmt.Fprintf(w, "   - %-5d active %s\n", s.Active, activeLabel)
 	fmt.Fprintf(w, "duration: %s\n", result.Duration.Round(100*time.Millisecond))
 	var census *ingest.RefreshCensus
-	if result.CensusStored {
+	if result.CensusStored || forecast {
 		census = result.Census
+	}
+	if forecast && census != nil {
+		fmt.Fprintln(w, "forecast (not stored; indexed bytes are not yet measured):")
 	}
 	for _, line := range ingestprogress.CensusLines(census) {
 		fmt.Fprintln(w, line)

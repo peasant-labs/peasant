@@ -13,5 +13,6 @@ requiredNames:
   - adapter-bump-refresh-writes-a-refresh-row
   - forced-run-names-every-refresh-forced
   - dry-run-stores-nothing
+  - dry-run-prints-the-same-census-as-a-real-run
   - cancelled-run-stores-the-profile-it-measured
   - profiler-observations-scale-with-batches-sessions-and-stages

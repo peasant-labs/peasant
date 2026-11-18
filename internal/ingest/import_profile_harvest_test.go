@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -411,6 +412,26 @@ WHERE k.name = 'refresh' AND o.run_id = ?`, firstRun)
 			}
 			if bench.lastRun() != before {
 				t.Fatal("a dry run stored an audit row")
+			}
+		},
+		"dry-run-prints-the-same-census-as-a-real-run": func(t *testing.T) {
+			bench.writeSession(first.ID, first.Entries+7)
+			before := bench.lastRun()
+			forecast, _ := bench.run(func(cfg *ingest.PipelineConfig) { cfg.DryRun = true })
+			if forecast.CensusStored || forecast.Census == nil || bench.lastRun() != before {
+				t.Fatalf("dry run stored a census or omitted its forecast: %+v", forecast)
+			}
+			actual, _ := bench.run(nil)
+			if !actual.CensusStored || actual.Census == nil {
+				t.Fatalf("real run has no stored census: %+v", actual)
+			}
+			// A forecast cannot know the bytes that a future indexer parses.
+			rows := append([]ingest.RefreshCensusRow(nil), actual.Census.Rows...)
+			for i := range rows {
+				rows[i].SourceBytes = 0
+			}
+			if !reflect.DeepEqual(forecast.Census.Rows, rows) || len(rows) == 0 {
+				t.Fatalf("forecast rows %+v, real rows %+v", forecast.Census.Rows, actual.Census.Rows)
 			}
 		},
 		"cancelled-run-stores-the-profile-it-measured": func(t *testing.T) {

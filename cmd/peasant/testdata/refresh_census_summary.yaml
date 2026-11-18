@@ -1,4 +1,4 @@
-requiredNames: [stored-census, incomplete-audit, unknown-census]
+requiredNames: [stored-census, incomplete-audit, unknown-census, dry-run-forecast]
 cases:
   - name: stored-census
     stored: true
@@ -15,3 +15,8 @@ cases:
     census: false
     contains: ["refresh census unavailable"]
     absent: ["refresh census: 0 sessions"]
+  - name: dry-run-forecast
+    census: true
+    forecast: true
+    contains: ["forecast (not stored", "native / new: 1"]
+    absent: ["refresh census unavailable"]

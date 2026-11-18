@@ -98,7 +98,8 @@ type PipelineResult struct {
 	// plus the entries-membership capability.
 	IndexCoverage *IndexCoverage `json:"indexCoverage,omitempty"`
 	// Census counts the sessions this run refreshed, by reason. It is built
-	// from the same refresh rows the audit stores. Nil on a dry run.
+	// from the same refresh rows the audit stores. On a dry run it forecasts
+	// FILTER decisions; indexed bytes are unknown until indexing takes place.
 	Census *RefreshCensus `json:"census,omitempty"`
 	// CensusStored is true only when this invocation wrote both the outcome
 	// rows and every index-log entry used to calculate the census. A failed
@@ -1002,6 +1003,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	sessionResults = append(sessionResults, duplicateResults...)
 	var indexSessions []indexedMeta // sessions to index after write
 	var toProcessEntries []DiffEntry
+	var dryRunIndexRefreshes []SessionResult
 	dryRunSessions := make([]SessionResult, 0, len(diffResult.Sessions))
 	// A duplicate-id refusal never reaches DIFF, so the dry-run forecast has
 	// to carry the same failed result the real run counts. Otherwise the
@@ -1145,6 +1147,11 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		switch entry.Status {
 		case DiffUnchanged:
 			recordDryRun(entry, DiffUnchanged)
+			if p.config.DryRun && entry.Decision.IsRefresh() && entry.Decision.Lane == RefreshLaneStoredIndex {
+				dryRunIndexRefreshes = append(dryRunIndexRefreshes, SessionResult{
+					SessionID: entry.Session.SessionID, Status: DiffUpdated, Decision: entry.Decision,
+				})
+			}
 			sessionResults = append(sessionResults, SessionResult{
 				SessionID:  entry.Session.SessionID,
 				Harness:    entry.Session.Harness,
@@ -1220,9 +1227,18 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	// It stops only after that shared FILTER pass and performs no extraction,
 	// write, or store action. A refusal counts as one error, matching REPORT.
 	if p.config.DryRun {
+		forecast := make([]SessionResult, 0, len(toProcessEntries)+len(dryRunIndexRefreshes))
+		forecast = append(forecast, dryRunIndexRefreshes...)
+		for _, entry := range toProcessEntries {
+			forecast = append(forecast, SessionResult{
+				SessionID: entry.Session.SessionID, Status: entry.Status, Decision: entry.Decision,
+			})
+		}
+		census := refreshCensus(p.refreshOutcomes(forecast, nil, 0), nil)
 		result := &PipelineResult{
 			Duration:             time.Since(start),
 			Sessions:             dryRunSessions,
+			Census:               &census,
 			DiscoveryDiagnostics: p.discoveryDiagnostics,
 			ScopeReport:          p.scopeReport,
 		}

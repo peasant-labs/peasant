@@ -20,6 +20,7 @@ func TestHarvestAndKickstartCensusSummary(t *testing.T) {
 			Name     string   `yaml:"name"`
 			Stored   bool     `yaml:"stored"`
 			Census   bool     `yaml:"census"`
+			Forecast bool     `yaml:"forecast"`
 			Contains []string `yaml:"contains"`
 			Absent   []string `yaml:"absent"`
 		} `yaml:"cases"`
@@ -39,7 +40,7 @@ func TestHarvestAndKickstartCensusSummary(t *testing.T) {
 				result.Census = &ingest.RefreshCensus{Rows: []ingest.RefreshCensusRow{{Reason: ingest.OutcomeReasonRefreshNew, Lane: ingest.RefreshLaneNative, Sessions: 1, SourceBytes: 1024}}}
 			}
 			var output bytes.Buffer
-			printSummary(&output, result, false, false, "", "", nil, 0)
+			printSummaryWithForecast(&output, result, false, false, "", "", nil, 0, row.Forecast)
 			for _, want := range row.Contains {
 				if !strings.Contains(output.String(), want) {
 					t.Errorf("summary missing %q", want)
