@@ -294,6 +294,43 @@ cases:
     want_indexed: false
     want_bound: true
 
+  # A publishable partial capture is a permanent-refusal code, yet the store
+  # certifies its saved content as full. When the indexer then moves, the stored
+  # copy is re-indexed from the saved transcript with no native read, and the
+  # capture stays publishable after the re-index.
+  - name: publishable-retained-unknown-with-indexer-behind-reindexes-the-stored-copy
+    harness: claude-code
+    source: current
+    retained_unknown: true
+    stored_adapter: current
+    metadata_schema: current
+    pair: present
+    indexer: behind
+    publication: bound
+    want_seed_publishable: true
+    want_reason: refusal_reopened
+    want_lane: stored-index
+    want_native_read: false
+    want_pair_writes: []
+    want_indexed: true
+
+  - name: publishable-accounted-omission-with-indexer-behind-reindexes-the-stored-copy
+    harness: claude-code
+    source: current
+    record_limit_bytes: 2048
+    oversized_record_bytes: 4096
+    stored_adapter: current
+    metadata_schema: current
+    pair: present
+    indexer: behind
+    publication: bound
+    want_seed_publishable: true
+    want_reason: refusal_reopened
+    want_lane: stored-index
+    want_native_read: false
+    want_pair_writes: []
+    want_indexed: true
+
   - name: unbound-publication-binds-without-a-reparse
     harness: claude-code
     source: current

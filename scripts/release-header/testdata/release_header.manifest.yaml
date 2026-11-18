@@ -5,6 +5,10 @@ required_names:
   - missing-section-fails
   - duplicate-section-fails
   - fenced-headings-are-content
+  - unclosed-fence-in-the-tag-section-fails-closed
+  - unclosed-comment-in-the-tag-section-fails-closed
+  - unclosed-fence-before-the-tag-section-fails-closed
+  - unclosed-fence-in-an-older-section-does-not-block-the-release
   - commented-heading-does-not-count
   - final-section-excludes-global-link-definitions
   - crlf-section-preserves-line-endings

@@ -44,7 +44,10 @@ func section(changelog []byte, tag string) ([]byte, error) {
 	var fence byte
 	fenceLength := 0
 	inComment := false
-	for _, current := range lines {
+	// openedLine and openedAt are the line and byte offset where the fence or comment that is
+	// still open began, so a construct left open can be named.
+	openedLine, openedAt := 0, 0
+	for index, current := range lines {
 		text := current.text
 		trimmed := strings.TrimLeft(text, " ")
 		if inComment {
@@ -55,6 +58,9 @@ func section(changelog []byte, tag string) ([]byte, error) {
 		}
 		if fence == 0 && strings.HasPrefix(trimmed, "<!--") {
 			inComment = !strings.Contains(trimmed, "-->")
+			if inComment {
+				openedLine, openedAt = index+1, current.start
+			}
 			continue
 		}
 		// Markdown permits up to three spaces before a fenced code block.
@@ -69,6 +75,7 @@ func section(changelog []byte, tag string) ([]byte, error) {
 			if length >= 3 {
 				if fence == 0 {
 					fence, fenceLength = marker, length
+					openedLine, openedAt = index+1, current.start
 				} else if fence == marker && length >= fenceLength && strings.TrimSpace(trimmed[length:]) == "" {
 					fence = 0
 				}
@@ -88,6 +95,18 @@ func section(changelog []byte, tag string) ([]byte, error) {
 				start = current.start
 			}
 		}
+	}
+	// A fence or comment left open swallows every heading after it, so the
+	// section would run to the end of the file and publish every older release
+	// as this one's notes. An open construct that began after the section's end
+	// cannot change the section, so it is not this release's problem.
+	if (fence != 0 || inComment) && openedAt < end {
+		kind := "code fence"
+		closer := "a matching closing fence line"
+		if inComment {
+			kind, closer = "HTML comment", "-->"
+		}
+		return nil, fmt.Errorf("CHANGELOG.md has an unclosed %s opened on line %d, so the section for tag %q cannot be bounded and the release notes would include every older section; close it with %s before tagging", kind, openedLine, tag, closer)
 	}
 	if matches == 0 {
 		return nil, fmt.Errorf("CHANGELOG.md has no section for tag %q; add a heading like ## %s to the release commit before tagging", tag, want)

@@ -64,38 +64,20 @@ func NewRefreshReason(raw string) (RefreshReason, error) {
 	return "", fmt.Errorf("ingest: read refresh reason %q: this build defines no such decision reason; nothing was refreshed; use one of the named refresh reasons", raw)
 }
 
+var refreshOutcomeReasons = func() map[RefreshReason]OutcomeReason {
+	reasons := make(map[RefreshReason]OutcomeReason, len(AllRefreshReasons))
+	for _, reason := range AllRefreshReasons {
+		outcome, err := NewOutcomeReason(string(reason))
+		if err == nil && outcome.Kind() == OutcomeKindRefresh {
+			reasons[reason] = outcome
+		}
+	}
+	return reasons
+}()
+
 // OutcomeReason returns the run-outcome reason this decision records, or 0 for
 // source_compare and none, which write no outcome row.
-func (r RefreshReason) OutcomeReason() OutcomeReason {
-	switch r {
-	case RefreshReasonNew:
-		return OutcomeReasonRefreshNew
-	case RefreshReasonSourceChanged:
-		return OutcomeReasonRefreshSourceChanged
-	case RefreshReasonPairMissing:
-		return OutcomeReasonRefreshPairMissing
-	case RefreshReasonMetadataSchema:
-		return OutcomeReasonRefreshMetadataSchema
-	case RefreshReasonForced:
-		return OutcomeReasonRefreshForced
-	case RefreshReasonAdapterBehind:
-		return OutcomeReasonRefreshAdapterBehind
-	case RefreshReasonAdapterBehindNativeOnly:
-		return OutcomeReasonRefreshAdapterBehindNativeOnly
-	case RefreshReasonAdapterStampAbsent:
-		return OutcomeReasonRefreshAdapterStampAbsent
-	case RefreshReasonIndexerBehind:
-		return OutcomeReasonRefreshIndexerBehind
-	case RefreshReasonRefusalReopened:
-		return OutcomeReasonRefreshRefusalReopened
-	case RefreshReasonPublicationUnbound:
-		return OutcomeReasonRefreshPublicationUnbound
-	case RefreshReasonPublicationCaptureMissing:
-		return OutcomeReasonRefreshPublicationCaptureMissing
-	default:
-		return 0
-	}
-}
+func (r RefreshReason) OutcomeReason() OutcomeReason { return refreshOutcomeReasons[r] }
 
 // Refreshing reports whether the reason writes a refresh outcome row.
 func (r RefreshReason) Refreshing() bool { return r.OutcomeReason().Defined() }
@@ -145,6 +127,16 @@ type refreshEvidence struct {
 	// SourceChanged reports that the captured source bytes, clock or cursor
 	// moved past the stored evidence.
 	SourceChanged bool
+	// PublicationCannotBind and StructuralMismatch require native repair.
+	PublicationCannotBind bool
+	StructuralMismatch    bool
+	// OpenCodeClockMoved requires native comparison before a stored-index or no-op decision.
+	OpenCodeClockMoved bool
+	// Discovery freshness is a preliminary clock, schema and readiness hint.
+	FreshnessFutureSchema      bool
+	FreshnessClockMoved        bool
+	FreshnessSchemaOld         bool
+	FreshnessPublicationNeeded bool
 	// SourceClockMoved reports a source clock newer than the stored ingest
 	// clock. The bytes must be read before any stored lane may claim the source
 	// unchanged, so this outranks a behind producer.
@@ -206,7 +198,12 @@ type refreshEvidence struct {
 // stored transcript, so its bump never needs the native source. An adapter
 // produces the pair, so its bump needs the native source only when the adapter
 // cannot re-derive from the stored transcript.
-func decideRefresh(in refreshEvidence) RefreshDecision {
+func decideRefresh(in refreshEvidence) (decision RefreshDecision) {
+	defer func() {
+		if in.OpenCodeClockMoved && (decision.Lane == RefreshLaneStoredIndex || decision.Reason == RefreshReasonNone) {
+			decision = RefreshDecision{Reason: RefreshReasonSourceCompare, Lane: RefreshLaneNative}
+		}
+	}()
 	switch {
 	case in.Forced:
 		return RefreshDecision{Reason: RefreshReasonForced, Lane: RefreshLaneNative}
@@ -214,7 +211,7 @@ func decideRefresh(in refreshEvidence) RefreshDecision {
 		return RefreshDecision{Reason: RefreshReasonNew, Lane: RefreshLaneNative}
 	case in.PairMissing:
 		return RefreshDecision{Reason: RefreshReasonPairMissing, Lane: RefreshLaneNative}
-	case in.SourceChanged:
+	case in.SourceChanged, in.StructuralMismatch:
 		return RefreshDecision{Reason: RefreshReasonSourceChanged, Lane: RefreshLaneNative}
 	case in.SourceClockMoved:
 		return RefreshDecision{Reason: RefreshReasonSourceCompare, Lane: RefreshLaneNative}
@@ -247,6 +244,9 @@ func decideRefresh(in refreshEvidence) RefreshDecision {
 	case in.ContentPending:
 		return RefreshDecision{Reason: RefreshReasonIndexerBehind, Lane: RefreshLaneStoredIndex}
 	case in.PublicationUnbound:
+		if in.PublicationCannotBind {
+			return RefreshDecision{Reason: RefreshReasonSourceChanged, Lane: RefreshLaneNative}
+		}
 		return RefreshDecision{Reason: RefreshReasonPublicationUnbound, Lane: RefreshLaneStoredIndex}
 	case in.SourceCompared, in.SourceComparePending:
 		return RefreshDecision{Reason: RefreshReasonSourceCompare, Lane: RefreshLaneNative}
@@ -434,6 +434,10 @@ func (p *Pipeline) openCodeSessionClockMoved(ctx context.Context, session Discov
 // The pair is the metadata file; a stored file-only harvest proves the source
 // unchanged by reading it once and comparing the owned capture marker.
 func (p *Pipeline) refreshDecisionForFile(session DiscoveredSession, metadata *UnifiedMetadata, sourceCompare bool) RefreshDecision {
+	return decideRefresh(p.refreshEvidenceForFile(session, metadata, sourceCompare))
+}
+
+func (p *Pipeline) refreshEvidenceForFile(session DiscoveredSession, metadata *UnifiedMetadata, sourceCompare bool) refreshEvidence {
 	version, present := storedAdapterEvidence(SessionLocation{}, false, metadata)
 	in := refreshEvidence{
 		StoredRow:         metadata != nil,
@@ -469,7 +473,7 @@ func (p *Pipeline) refreshDecisionForFile(session DiscoveredSession, metadata *U
 			in.SourceChanged = true
 		}
 	}
-	return decideRefresh(in)
+	return in
 }
 
 func sameParentSession(a, b *SessionID) bool {
@@ -517,7 +521,7 @@ func (p *Pipeline) refreshDecisionForLocation(session DiscoveredSession, loc Ses
 // decide without opening the pair.
 func (p *Pipeline) refreshDecisionForIndexState(state *SessionIndexState, target HarvesterVersions, inputHashMatches bool, bindsPublication bool) RefreshDecision {
 	if state == nil {
-		return RefreshDecision{Reason: RefreshReasonIndexerBehind, Lane: RefreshLaneStoredIndex}
+		return decideRefresh(refreshEvidence{StoredRow: true})
 	}
 	in := refreshEvidence{
 		StoredRow:           true,

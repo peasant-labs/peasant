@@ -18,6 +18,8 @@ requiredNames:
   - legacy-unknown-preview-without-publication-does-not-churn
   - legacy-full-retained-unknown-acquires-publication
   - legacy-full-accounted-omission-acquires-publication
+  - publishable-retained-unknown-with-indexer-behind-reindexes-the-stored-copy
+  - publishable-accounted-omission-with-indexer-behind-reindexes-the-stored-copy
   - unbound-publication-binds-without-a-reparse
   - missing-publication-capture-is-acquired-natively
   - missing-publication-capture-outranks-behind-adapter

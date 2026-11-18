@@ -139,6 +139,7 @@ type refreshLaneBench struct {
 	versions         map[ingest.Harness]ingest.HarvesterVersions
 	metadataPath     string
 	transcriptPath   string
+	progress         *ingest.ProgressState
 }
 
 func newRefreshLaneBench(t *testing.T, fixture refreshLaneFixture, testCase refreshLaneCase) *refreshLaneBench {
@@ -275,6 +276,7 @@ func assertRefreshLaneOmission(t *testing.T, entries []schema.SessionEntry, fixt
 func (b *refreshLaneBench) pipeline(force bool, discover bool) *ingest.Pipeline {
 	b.t.Helper()
 	cfg := makePipelineConfig(b.outputDir)
+	cfg.Progress = b.progress
 	cfg.StalenessThreshold = 0
 	cfg.Force = force
 	if !discover {
@@ -336,6 +338,58 @@ func (b *refreshLaneBench) run(force bool, discover bool) *ingest.PipelineResult
 func (b *refreshLaneBench) runStoredOnly() *ingest.PipelineResult {
 	b.t.Helper()
 	return b.run(false, false)
+}
+
+func TestStoredCopyExtractProgressBytes(t *testing.T) {
+	fixture := loadRefreshLaneFixture(t)
+	for _, row := range fixture.Cases {
+		if row.Name != "adapter-behind-refreshes-metadata-from-the-stored-copy" {
+			continue
+		}
+		bench := newRefreshLaneBench(t, fixture, row)
+		bench.applyMutation(row)
+		transcript, err := bench.fs.ReadFile(bench.transcriptPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bench.progress = ingest.NewProgressState()
+		result := bench.run(false, true)
+		if got := bench.decision(result).Lane; got != ingest.RefreshLaneStoredMetadata {
+			t.Fatalf("lane = %s, want stored metadata", got)
+		}
+		stage := bench.progress.Snapshot()[ingest.StageExtract]
+		if stage.BytesTotal != int64(len(transcript)) || stage.BytesDone != stage.BytesTotal {
+			t.Fatalf("stored-copy progress = %+v, want %d completed bytes", stage, len(transcript))
+		}
+		return
+	}
+	t.Fatal("stored-copy fixture case is missing")
+}
+
+func TestStoredCopyIndexProgressBytes(t *testing.T) {
+	fixture := loadRefreshLaneFixture(t)
+	for _, row := range fixture.Cases {
+		if row.Name != "indexer-behind-reindexes-the-stored-copy" {
+			continue
+		}
+		bench := newRefreshLaneBench(t, fixture, row)
+		bench.applyMutation(row)
+		transcript, err := bench.fs.ReadFile(bench.transcriptPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bench.progress = ingest.NewProgressState()
+		result := bench.run(false, true)
+		if got := bench.decision(result).Lane; got != ingest.RefreshLaneStoredIndex {
+			t.Fatalf("lane = %s, want stored index", got)
+		}
+		stage := bench.progress.Snapshot()[ingest.StageIndex]
+		if stage.BytesTotal != int64(len(transcript)) || stage.BytesDone != stage.BytesTotal {
+			t.Fatalf("stored index progress = %+v, want %d completed bytes", stage, len(transcript))
+		}
+		return
+	}
+	t.Fatal("stored-index fixture case is missing")
 }
 
 func (b *refreshLaneBench) lastRun() int64 {

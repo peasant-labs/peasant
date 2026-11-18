@@ -33,5 +33,7 @@ cases:
   - name: adapter-bump-refresh-writes-a-refresh-row
   - name: forced-run-names-every-refresh-forced
   - name: dry-run-stores-nothing
+  - name: dry-run-prints-the-same-census-as-a-real-run
+  - name: reindex-dry-run-explains-why-census-is-unavailable
   - name: cancelled-run-stores-the-profile-it-measured
   - name: profiler-observations-scale-with-batches-sessions-and-stages

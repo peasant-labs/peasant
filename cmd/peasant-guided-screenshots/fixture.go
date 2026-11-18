@@ -256,6 +256,8 @@ type ingestProgressStateFixture struct {
 	WantContains []string            `yaml:"wantContains"`
 	WantAbsent   []string            `yaml:"wantAbsent"`
 	Candidates   *int                `yaml:"candidates"`
+	BytesTotal   int64               `yaml:"bytesTotal"`
+	BytesDone    int64               `yaml:"bytesDone"`
 	Lane         *struct {
 		Queued    int   `yaml:"queued"`
 		BusyMs    int64 `yaml:"busyMs"`

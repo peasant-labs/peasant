@@ -1,9 +1,9 @@
-requiredNames: [stored-census, incomplete-audit, unknown-census]
+requiredNames: [stored-census, incomplete-audit, unknown-census, dry-run-forecast, reindex-dry-run-unavailable]
 cases:
   - name: stored-census
     stored: true
     census: true
-    contains: ["refresh census: 1 sessions (includes failed attempts)", "native / new: 1", "indexed bytes measured: 1 KiB (may be partial)"]
+    contains: ["refresh census: 1 session (includes failed attempts)", "native / new: 1", "indexed bytes measured: 1 KiB (may be partial)"]
     absent: ["refresh census unavailable"]
   - name: incomplete-audit
     stored: false
@@ -15,3 +15,13 @@ cases:
     census: false
     contains: ["refresh census unavailable"]
     absent: ["refresh census: 0 sessions"]
+  - name: dry-run-forecast
+    census: true
+    forecast: true
+    contains: ["forecast (not stored", "native / new: 1"]
+    absent: ["refresh census unavailable"]
+  - name: reindex-dry-run-unavailable
+    forecast: true
+    reindexRouting: true
+    contains: ["reindex dry-run stops before source routing and index decisions", "run without --dry-run"]
+    absent: ["refresh census: 0 sessions", "forecast (not stored"]

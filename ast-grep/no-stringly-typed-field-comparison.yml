@@ -14,8 +14,12 @@ rule:
 constraints:
   FIELD:
     regex: '^(Publication|Pair|Source|NativeSource|RefusalIndexer|Refusal|Reason|Lane|Status|Outcome|Harness)$'
+  # The empty string is the zero value of a string field ("not set"), never a
+  # member of a closed set, so comparing to it is not a stringly-typed check.
   VALUE:
     kind: interpreted_string_literal
+    not:
+      regex: '^""$'
 ignores:
   - "vendor/**"
   - "**/vendor/**"

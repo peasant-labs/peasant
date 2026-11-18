@@ -121,7 +121,7 @@ func TestContentConcurrency(t *testing.T) {
 
 func runConcurrencySameCandidate(t *testing.T) {
 	s, root := openGenerationStore(t)
-	gateWriterBatchOpen(t, s, filepath.Join(filepath.Dir(root), "generations.db"))
+	verifyGate := gateWriterBatchOpen(t, s, filepath.Join(filepath.Dir(root), "generations.db"))
 	ctx, cancel := context.WithCancel(testwait.Context(t))
 	var workers sync.WaitGroup
 	defer func() {
@@ -172,6 +172,7 @@ func runConcurrencySameCandidate(t *testing.T) {
 		}
 		dispositions[r.outcome.Disposition]++
 	}
+	verifyGate()
 	if dispositions[ingest.ActivationCommittedNow] != 1 || dispositions[ingest.ActivationAlreadyCommitted] != 1 || len(dispositions) != 2 {
 		t.Fatalf("same candidate dispositions = %v", dispositions)
 	}
@@ -191,7 +192,7 @@ func runConcurrencySameCandidate(t *testing.T) {
 // writer that already owns the lock refuses the probe and commits. A writer
 // that deferred the lock lets the probe in, and the probe holds the lock until
 // the test ends, so that writer's first write fails with database is locked.
-func gateWriterBatchOpen(t *testing.T, s *Store, dbPath string) {
+func gateWriterBatchOpen(t *testing.T, s *Store, dbPath string) func() {
 	t.Helper()
 	probe, err := sqlite.OpenConn(dbPath, sqlite.OpenReadWrite)
 	if err != nil {
@@ -200,6 +201,8 @@ func gateWriterBatchOpen(t *testing.T, s *Store, dbPath string) {
 	probe.SetBusyTimeout(0)
 	var mu sync.Mutex
 	holding := false
+	hits, busy := 0, 0
+	var probeErr error
 	t.Cleanup(func() {
 		mu.Lock()
 		defer mu.Unlock()
@@ -214,8 +217,17 @@ func gateWriterBatchOpen(t *testing.T, s *Store, dbPath string) {
 		}
 		mu.Lock()
 		defer mu.Unlock()
-		if !holding && sqlitex.ExecuteTransient(probe, "BEGIN IMMEDIATE", nil) == nil {
-			holding = true
+		hits++
+		if !holding {
+			err := sqlitex.ExecuteTransient(probe, "BEGIN IMMEDIATE", nil)
+			switch {
+			case err == nil:
+				holding = true
+			case sqlite.ErrCode(err).ToPrimary() == sqlite.ResultBusy:
+				busy++
+			default:
+				probeErr = err
+			}
 		}
 		return sqlite.AuthResultOK
 	})
@@ -229,6 +241,13 @@ func gateWriterBatchOpen(t *testing.T, s *Store, dbPath string) {
 	}
 	s.pool.Put(first)
 	s.pool.Put(second)
+	return func() {
+		mu.Lock()
+		defer mu.Unlock()
+		if hits == 0 || busy == 0 || probeErr != nil {
+			t.Fatalf("writer lock probe: authorizer hits=%d busy refusals=%d unexpected error=%v", hits, busy, probeErr)
+		}
+	}
 }
 
 func runConcurrencyStagedCAS(t *testing.T) {

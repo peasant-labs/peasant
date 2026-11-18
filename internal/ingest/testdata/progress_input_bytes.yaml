@@ -1,0 +1,31 @@
+requiredNames:
+  - stored-copy-uses-retained-transcript-size
+  - virtual-legacy-uses-message-and-part-row-sizes
+  - virtual-current-uses-message-row-sizes
+  - virtual-session-with-no-payload-has-unknown-size
+  - opencode-json-tree-without-aggregate-size-is-unknown
+cases:
+  - name: stored-copy-uses-retained-transcript-size
+    kind: stored
+  - name: virtual-legacy-uses-message-and-part-row-sizes
+    kind: legacy
+    fixture: legacy-reader-pages
+    session: ses_reader_a
+    known: true
+    # Fixture DB: SUM(length(CAST(data AS BLOB))) for this session in message
+    # is 435 bytes and in part is 93 bytes, totaling 528.
+    wantBytes: 528
+  - name: virtual-current-uses-message-row-sizes
+    kind: current
+    fixture: current-reader-pages
+    session: ses_current_reader_a
+    known: true
+    # Fixture DB: SUM(length(CAST(data AS BLOB))) for this session in
+    # session_message is 145 bytes; unrelated sessions are excluded.
+    wantBytes: 145
+  - name: virtual-session-with-no-payload-has-unknown-size
+    kind: current
+    fixture: current-reader-pages
+    session: ses_absent_from_source
+  - name: opencode-json-tree-without-aggregate-size-is-unknown
+    kind: tree
