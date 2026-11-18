@@ -137,12 +137,10 @@ VALUES (?, ?, 'claude-code', 'synthetic-model', ?, ?, ?, ?, ?, '/synthetic/sessi
 		t.Fatal("the migration did not report its WAL growth")
 	}
 	// The report is a net WAL change at step completion, not the peak: a
-	// checkpoint can hide earlier growth. This assertion only compares the
-	// observed values, and does not establish an upper bound on disk usage.
-	used := stepWAL + max(afterInfo.Size()-info.Size(), 0)
-	if used > plan.RequiredFreeBytes {
-		t.Errorf("plan asked for %d bytes, but observed WAL net growth plus database growth was %d bytes", plan.RequiredFreeBytes, used)
-	}
+	// checkpoint can hide earlier growth. The database's whole-file growth
+	// also includes later schema-only steps (their catalog pages), which this
+	// step's session-table plan never claimed to cover, so compare the step's
+	// WAL plus the rebuilt tables' own growth.
 	updated, err := openReadOnlyNoSidecars(path)
 	if err != nil {
 		t.Fatal(err)
@@ -153,6 +151,10 @@ VALUES (?, ?, 'claude-code', 'synthetic-model', ?, ?, ?, ?, ?, '/synthetic/sessi
 		}
 	}()
 	updatedTruth := dbstatBytesOnConn(t, updated, `tbl_name IN ('sessions', 'daily_summary_harness')`)
+	used := stepWAL + max(updatedTruth-truth, 0)
+	if used > plan.RequiredFreeBytes {
+		t.Errorf("plan asked for %d bytes, but the rebuild's WAL plus session-table growth was %d bytes", plan.RequiredFreeBytes, used)
+	}
 	if c.MetadataParentBytes > 0 || c.EvidenceParentBytes > 0 {
 		wantLength := max(c.MetadataParentBytes, c.EvidenceParentBytes)
 		var longest int64

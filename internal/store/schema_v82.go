@@ -90,7 +90,7 @@ CREATE INDEX idx_annotations_owner_claim ON annotations(owner_claim_id);
 -- V82 adds sessions.owner_claim_id, so the exhaustive parent-state
 -- update trigger is redefined to fire on it. The trigger body is the
 -- shipped V73 text plus the new column; the parent rule is unchanged.
-DROP TRIGGER sessions_parent_state_au;
+DROP TRIGGER IF EXISTS sessions_parent_state_au;
 CREATE TRIGGER sessions_parent_state_au
 AFTER UPDATE OF parent_id, model_harness, model_id, opaque_host_id,
   project_hash, start_ms, end_ms, ingested_ms, source_path, source_format,

@@ -1,0 +1,6 @@
+requiredNames:
+  - user-show-no-network
+  - user-claim-json-parity
+cases:
+  - {name: user-show-no-network}
+  - {name: user-claim-json-parity}

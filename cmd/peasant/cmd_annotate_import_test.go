@@ -206,12 +206,12 @@ func TestCLI_AnnotateImportRoundTrip(t *testing.T) {
 		t.Errorf("expected annotation with type_id=%s value=approve; got rows: %+v",
 			testutil.TestTypeIDSessionApproval, rows)
 	}
-	claims, err := db2.OwnerClaims(ctx)
+	page, err := db2.OwnerClaims(ctx, "")
 	if err != nil {
 		t.Fatalf("claims after import: %v", err)
 	}
-	if len(claims) != 1 || claims[0].Source != "automatic" {
-		t.Fatalf("claims after import = %+v, want one automatic entry", claims)
+	if len(page.Claims) != 1 || page.Claims[0].Source != "automatic" {
+		t.Fatalf("claims after import = %+v, want one automatic entry", page.Claims)
 	}
 	counts, err := db2.OwnershipCounts(ctx)
 	if err != nil {
@@ -876,3 +876,43 @@ func TestCLI_AnnotateImportSupersede(t *testing.T) {
 
 // ptrFloat64 returns a pointer to the given float64. Test helper.
 func ptrFloat64(v float64) *float64 { return &v }
+
+// TestAnnotateImportSupersedeClaimsNewAnnotation proves the supersede path
+// claims the replacement annotation, not only the first import.
+func TestAnnotateImportSupersedeClaimsNewAnnotation(t *testing.T) {
+	t.Parallel()
+	dataHome := t.TempDir()
+	seedTestSessionInto(t, dataHome, testSessionUUID)
+	saveUserCommandCredentials(t, dataHome)
+
+	if _, err := executeAnnotateCmd(t, dataHome, []string{"create", testSessionUUID, testutil.TestTypeIDSessionApproval, "approve"}); err != nil {
+		t.Fatalf("seed the first annotation: %v", err)
+	}
+	db := openTestDB(t, dataHome)
+	exported, err := export.ExportAnnotations(t.Context(), db, testSessionUUID)
+	if err != nil {
+		t.Fatalf("export annotations: %v", err)
+	}
+	if len(exported) != 1 {
+		t.Fatalf("exported annotations = %d, want one", len(exported))
+	}
+	exported[0].Value = "deny"
+	path := filepath.Join(t.TempDir(), "supersede.jsonl")
+	writeJSONLFile(t, path, exported)
+
+	stdout, stderr, err := executeAnnotateImportCmd(t, dataHome, []string{"import", "--from-file", path})
+	if err != nil {
+		t.Fatalf("import the superseding annotation: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "imported 1 of 1 annotations") {
+		t.Fatalf("import stdout = %q, want one superseding annotation", stdout)
+	}
+
+	counts, err := db.OwnershipCounts(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts.TotalAnnotations != 2 || counts.ClaimedAnnotations != 2 {
+		t.Fatalf("annotation ownership after the supersede = %+v, want both the original and the replacement claimed", counts)
+	}
+}

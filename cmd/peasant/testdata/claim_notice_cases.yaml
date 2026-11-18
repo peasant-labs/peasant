@@ -1,0 +1,6 @@
+requiredNames:
+  - claim-existing-install-prompted-once
+cases:
+  - name: claim-existing-install-prompted-once
+    interactiveRuns: 2
+    wantNotices: 1

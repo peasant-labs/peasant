@@ -203,8 +203,8 @@ func TestWriteClaimOutcome(t *testing.T) {
 		want   string
 	}{
 		{name: "empty-store", result: store.ClaimResult{}, want: "nothing to claim yet"},
-		{name: "nothing-needed", result: store.ClaimResult{ClaimID: "oc_fixture", AlreadyClaimed: 3}, want: "No local artifacts needed this claim"},
-		{name: "claimed", result: store.ClaimResult{ClaimID: "oc_fixture", Claimed: 2, AlreadyClaimed: 1}, want: "Claimed 2 local artifacts (1 already claimed)"},
+		{name: "nothing-needed", result: store.ClaimResult{ClaimID: "oc_fixture", Stored: 3, AlreadyClaimed: 3}, want: "Nothing to claim"},
+		{name: "claimed", result: store.ClaimResult{ClaimID: "oc_fixture", Stored: 3, Claimed: 2, AlreadyClaimed: 1}, want: "Claimed 2 local artifacts (1 already claimed)"},
 	}
 	for _, test := range cases {
 		test := test

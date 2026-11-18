@@ -49,15 +49,15 @@ func TestHarvestClaimsNewSessionsWhenSignedIn(t *testing.T) {
 		t.Fatalf("open the harvest store: %v", err)
 	}
 	defer db.Close()
-	claims, err := db.OwnerClaims(t.Context())
+	page, err := db.OwnerClaims(t.Context(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(claims) != 1 {
-		t.Fatalf("claim entries = %+v, want one automatic entry", claims)
+	if len(page.Claims) != 1 {
+		t.Fatalf("claim entries = %+v, want one automatic entry", page.Claims)
 	}
-	if claims[0].Source != store.ClaimSourceAutomatic || claims[0].UsernameSnapshot != "alice" {
-		t.Fatalf("claim = %+v, want the signed-in automatic claim", claims[0])
+	if page.Claims[0].Source != store.ClaimSourceAutomatic || page.Claims[0].UsernameSnapshot != "alice" {
+		t.Fatalf("claim = %+v, want the signed-in automatic claim", page.Claims[0])
 	}
 	counts, err := db.OwnershipCounts(t.Context())
 	if err != nil {

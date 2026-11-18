@@ -375,6 +375,7 @@ func WithWriteConfig(cfg ingest.WriteConfig) OpenOption {
 func WithSkipLocalOwnerBootstrap() OpenOption {
 	return func(o *openOptions) { o.skipLocalOwnerBootstrap = true }
 }
+
 // WithPoolSize sets the SQLite connection-pool size for this Open. Use a small
 // value for callers that open many stores (e.g. tests, one-shot CLI commands)
 // to avoid eagerly opening DefaultPoolSize connections — only the connections

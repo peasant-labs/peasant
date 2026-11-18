@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	_ "embed"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -259,9 +260,13 @@ VALUES('village.example', 'ann-hash-a', 'pulled-a', 'remote-author', 'remote-aut
 			if state.snapshot.Credentials().UserID == "" {
 				t.Fatalf("%s requires a signed-in account", step.Kind)
 			}
-			source := store.ClaimSource(step.Source)
-			if source == "" {
-				source = store.ClaimSourceManual
+			sourceValue := step.Source
+			if sourceValue == "" {
+				sourceValue = string(store.ClaimSourceManual)
+			}
+			source, ok := store.ParseClaimSource(sourceValue)
+			if !ok {
+				t.Fatalf("%s: fixture source %q is outside the closed set", step.Kind, step.Source)
 			}
 			var err error
 			switch step.Kind {
@@ -285,9 +290,15 @@ VALUES('village.example', 'ann-hash-a', 'pulled-a', 'remote-author', 'remote-aut
 		}
 	}
 
-	claims, err := s.OwnerClaims(ctx)
+	page, err := s.OwnerClaims(ctx, "")
 	if err != nil {
 		t.Fatalf("read claims: %v", err)
+	}
+	claims := page.Claims
+	// Fixture expectations name claims in insertion order (oldest first); the
+	// page is newest first. Reverse a copy so the fixtures stay readable.
+	for i, j := 0, len(claims)-1; i < j; i, j = i+1, j-1 {
+		claims[i], claims[j] = claims[j], claims[i]
 	}
 	expect := testCase.Expect
 	if expect.OwnerStable != nil && *expect.OwnerStable {
@@ -443,12 +454,12 @@ func TestLocalOwnerFileIsAdoptedAfterDatabaseRebuild(t *testing.T) {
 	if adopted.ID != owner.ID || adopted.CreatedAt != owner.CreatedAt {
 		t.Fatalf("owner after rebuild = %+v, want %+v", *adopted, *owner)
 	}
-	claims, err := second.OwnerClaims(t.Context())
+	page, err := second.OwnerClaims(t.Context(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(claims) != 0 {
-		t.Fatalf("rebuilt store claims = %+v, want none (claims do not survive a rebuild)", claims)
+	if len(page.Claims) != 0 {
+		t.Fatalf("rebuilt store claims = %+v, want none (claims do not survive a rebuild)", page.Claims)
 	}
 }
 
@@ -509,12 +520,12 @@ func TestOwnerClaimsOrderedByClaimedAtThenInsertion(t *testing.T) {
 VALUES('oc_zzz', ?, ?, ?, 'first-inserted', 4000, 'manual')`, owner.ID, ownerTestVillageURL, ownerTestUserOne)
 	ownerTestExec(t, s, `INSERT INTO owner_claims(id, local_owner_id, village_url, user_id, username_snapshot, claimed_at, source)
 VALUES('oc_aaa', ?, ?, ?, 'second-inserted', 4000, 'manual')`, owner.ID, ownerTestVillageURL, ownerTestUserTwo)
-	claims, err := s.OwnerClaims(ctx)
+	page, err := s.OwnerClaims(ctx, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(claims) != 2 || claims[0].ID != "oc_zzz" || claims[1].ID != "oc_aaa" {
-		t.Fatalf("same-millisecond claim order = %+v, want insertion order oc_zzz then oc_aaa", claims)
+	if len(page.Claims) != 2 || page.Claims[0].ID != "oc_aaa" || page.Claims[1].ID != "oc_zzz" {
+		t.Fatalf("same-millisecond claim order = %+v, want newest insertion first oc_aaa then oc_zzz", page.Claims)
 	}
 }
 
@@ -531,15 +542,18 @@ func TestOwnerClaimsLogIsBounded(t *testing.T) {
 		ownerTestExec(t, s, `INSERT INTO owner_claims(id, local_owner_id, village_url, user_id, username_snapshot, claimed_at, source)
 VALUES(?, ?, ?, ?, ?, ?, 'manual')`, "oc_"+string(rune('a'+i%26))+"_"+string(rune('a'+i/26)), owner.ID, ownerTestVillageURL, ownerTestUserOne, "bounded", int64(1000+i))
 	}
-	claims, err := s.OwnerClaims(ctx)
+	page, err := s.OwnerClaims(ctx, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(claims) != store.OwnerClaimsPageSize {
-		t.Fatalf("claim page = %d, want %d", len(claims), store.OwnerClaimsPageSize)
+	if len(page.Claims) != store.OwnerClaimsPageSize {
+		t.Fatalf("claim page = %d, want %d", len(page.Claims), store.OwnerClaimsPageSize)
 	}
-	if claims[0].ClaimedAt != int64(1000+5) || claims[len(claims)-1].ClaimedAt != int64(1000+total-1) {
-		t.Fatalf("claim page bounds = %d..%d, want %d..%d", claims[0].ClaimedAt, claims[len(claims)-1].ClaimedAt, 1000+5, 1000+total-1)
+	if page.Claims[0].ClaimedAt != int64(1000+total-1) || page.Claims[len(page.Claims)-1].ClaimedAt != int64(1000+5) {
+		t.Fatalf("claim page bounds = %d..%d, want %d..%d", page.Claims[0].ClaimedAt, page.Claims[len(page.Claims)-1].ClaimedAt, 1000+total-1, 1000+5)
+	}
+	if page.NextBefore != page.Claims[len(page.Claims)-1].ID {
+		t.Fatalf("nextBefore = %q, want the oldest returned entry %q", page.NextBefore, page.Claims[len(page.Claims)-1].ID)
 	}
 	count, err := s.OwnerClaimCount(ctx)
 	if err != nil {
@@ -547,5 +561,129 @@ VALUES(?, ?, ?, ?, ?, ?, 'manual')`, "oc_"+string(rune('a'+i%26))+"_"+string(run
 	}
 	if count != total {
 		t.Fatalf("OwnerClaimCount = %d, want %d", count, total)
+	}
+}
+
+//go:embed testdata/owner_claims_paging.yaml
+var ownerClaimsPagingYAML []byte
+
+type ownerClaimsPagingFixture struct {
+	RequiredNames []string                `yaml:"requiredNames"`
+	Cases         []ownerClaimsPagingCase `yaml:"cases"`
+}
+
+type ownerClaimsPagingCase struct {
+	Name      string `yaml:"name"`
+	Total     int    `yaml:"total"`
+	PageSizes []int  `yaml:"pageSizes"`
+}
+
+func TestOwnerClaimsPagingFixture(t *testing.T) {
+	t.Parallel()
+	var fixture ownerClaimsPagingFixture
+	decoder := yaml.NewDecoder(strings.NewReader(string(ownerClaimsPagingYAML)))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&fixture); err != nil {
+		t.Fatalf("decode owner_claims_paging.yaml: %v", err)
+	}
+	names := make([]string, 0, len(fixture.Cases))
+	for _, testCase := range fixture.Cases {
+		names = append(names, testCase.Name)
+	}
+	if err := testutil.ValidateRequiredNames(testutil.RequiredNamesManifest{RequiredNames: fixture.RequiredNames}, names, "owner_claims_paging.yaml"); err != nil {
+		t.Fatal(err)
+	}
+	for _, testCase := range fixture.Cases {
+		testCase := testCase
+		t.Run(testCase.Name, func(t *testing.T) {
+			t.Parallel()
+			s := openTestStore(t)
+			ctx := t.Context()
+			owner, err := s.EnsureLocalOwner(ctx, 1000)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ownerTestExec(t, s, `INSERT INTO collective_observation_scopes(village_url, user_id, incarnation) VALUES(?, ?, 'paging-fixture')`, ownerTestVillageURL, ownerTestUserOne)
+			for i := 0; i < testCase.Total; i++ {
+				ownerTestExec(t, s, `INSERT INTO owner_claims(id, local_owner_id, village_url, user_id, username_snapshot, claimed_at, source)
+VALUES(?, ?, ?, ?, ?, ?, 'manual')`, fmt.Sprintf("oc_page_%03d", i), owner.ID, ownerTestVillageURL, ownerTestUserOne, "paging", int64(1000+i))
+			}
+			totalClaims, err := s.OwnerClaimCount(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if totalClaims != testCase.Total {
+				t.Fatalf("totalClaims = %d, want %d", totalClaims, testCase.Total)
+			}
+			before := ""
+			seen := 0
+			for pageIndex, wantSize := range testCase.PageSizes {
+				page, err := s.OwnerClaims(ctx, before)
+				if err != nil {
+					t.Fatalf("page %d: %v", pageIndex+1, err)
+				}
+				if len(page.Claims) != wantSize {
+					t.Fatalf("page %d size = %d, want %d", pageIndex+1, len(page.Claims), wantSize)
+				}
+				for i := 1; i < len(page.Claims); i++ {
+					if page.Claims[i].ClaimedAt > page.Claims[i-1].ClaimedAt {
+						t.Fatalf("page %d is not newest first at entry %d", pageIndex+1, i)
+					}
+				}
+				seen += len(page.Claims)
+				last := pageIndex == len(testCase.PageSizes)-1
+				if last {
+					if page.NextBefore != "" {
+						t.Fatalf("final page carries nextBefore %q, want none", page.NextBefore)
+					}
+				} else {
+					if page.NextBefore != page.Claims[len(page.Claims)-1].ID {
+						t.Fatalf("page %d nextBefore = %q, want %q", pageIndex+1, page.NextBefore, page.Claims[len(page.Claims)-1].ID)
+					}
+					before = page.NextBefore
+				}
+			}
+			if seen != testCase.Total {
+				t.Fatalf("pages covered %d entries, want %d", seen, testCase.Total)
+			}
+			if _, err := s.OwnerClaims(ctx, "oc_missing_page_cursor"); err == nil {
+				t.Fatal("an unknown cursor was accepted")
+			}
+		})
+	}
+}
+
+// TestOwnerFileMismatchRefused proves the owner file and database must agree:
+// a partly restored data directory is refused with both ids and the file path.
+func TestOwnerFileMismatchRefused(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "peasant.db")
+	first, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := first.LocalOwner(t.Context())
+	if err != nil || owner == nil {
+		t.Fatalf("read owner = %+v, %v", owner, err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	filePath := store.LocalOwnerFilePath(path)
+	fileID := "lo_different_owner"
+	data := []byte(`{"id":"` + fileID + `","createdAt":42}` + "\n")
+	if err := os.WriteFile(filePath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// ast-grep-ignore: no-migrating-store-open-in-tests -- the refused open is the subject.
+	if _, err := store.Open(path); err == nil {
+		t.Fatal("a mismatched owner file was accepted")
+	} else {
+		for _, want := range []string{owner.ID, fileID, filePath} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("mismatch error = %q, want it to name %q", err, want)
+			}
+		}
 	}
 }

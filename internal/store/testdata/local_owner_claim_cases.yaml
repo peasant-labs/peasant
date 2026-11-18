@@ -4,7 +4,9 @@
 # guard the set in both directions; owner_test.go decodes this file strictly.
 #
 # The four automatic-claim B1 cases live in internal/ingest/testdata because
-# they exercise the pipeline's DiffNew selection, not the store.
+# they exercise the pipeline's FirstStored write flag, not the store. The
+# already-signed-in notice case lives in cmd/peasant/testdata because it counts
+# two interactive runs, not store rows.
 requiredNames:
   - owner-created-without-village-login
   - owner-survives-sign-out
@@ -14,10 +16,15 @@ requiredNames:
   - claim-username-snapshot-only
   - claim-username-reuse-different-uuid
   - claim-reassign-other-account-retains-entries
-  - claim-existing-install-prompted-once
+  - claim-default-nothing-to-move-appends-entry
+  - claim-empty-store-appends-entry
   - claim-never-touches-pulled-transcripts
   - claim-harvest-covers-entry-targets
   - auto-claim-leaves-other-account-rows
+  - auto-claim-leaves-other-account-annotations
+  - auto-claim-after-reassign-back
+  - auto-claim-after-own-manual-claim
+  - auto-claim-reuses-newest-automatic
 
 cases:
   - name: owner-created-without-village-login
@@ -119,17 +126,6 @@ cases:
       sessions:
         owner-session-a: second
 
-  - name: claim-existing-install-prompted-once
-    steps:
-      - {kind: seed, sessions: [owner-session-a]}
-      - {kind: signIn, user: one, username: alice}
-      - {kind: claimDefault, source: sign_in_prompt, nowMs: 2000}
-    expect:
-      claimCount: 1
-      claimSources: [sign_in_prompt]
-      sessions:
-        owner-session-a: first
-
   - name: claim-never-touches-pulled-transcripts
     steps:
       - {kind: seed, sessions: [owner-session-a]}
@@ -171,3 +167,78 @@ cases:
         owner-session-c: first
         owner-session-d: second
         owner-session-e: second
+
+  - name: claim-default-nothing-to-move-appends-entry
+    steps:
+      - {kind: seed, sessions: [owner-session-a]}
+      - {kind: signIn, user: one, username: alice}
+      - {kind: claimDefault, source: manual, nowMs: 1000}
+      - {kind: claimDefault, source: manual, nowMs: 2000}
+    expect:
+      claimCount: 2
+      claimSources: [manual, manual]
+      sessions:
+        owner-session-a: first
+
+  - name: claim-empty-store-appends-entry
+    steps:
+      - {kind: signIn, user: one, username: alice}
+      - {kind: claimDefault, source: manual, nowMs: 1000}
+    expect:
+      claimCount: 1
+      claimSources: [manual]
+
+  - name: auto-claim-leaves-other-account-annotations
+    steps:
+      - {kind: seed, sessions: [owner-session-a], annotations: [owner-session-a]}
+      - {kind: signIn, user: one, username: alice}
+      - {kind: claimDefault, source: manual, nowMs: 1000}
+      - {kind: signIn, user: two, username: bob}
+      - {kind: claimSessions, sessions: [owner-session-a], source: automatic, nowMs: 2000}
+    expect:
+      claimCount: 2
+      claimUserIDs: [one, two]
+      sessions:
+        owner-session-a: first
+      annotations:
+        owner-session-a: first
+
+  - name: auto-claim-after-reassign-back
+    steps:
+      - {kind: seed, sessions: [owner-session-a]}
+      - {kind: signIn, user: one, username: alice}
+      - {kind: claimDefault, source: manual, nowMs: 1000}
+      - {kind: signIn, user: two, username: bob}
+      - {kind: claimAll, source: manual, nowMs: 2000}
+      - {kind: signIn, user: one, username: alice}
+      - {kind: claimSessions, sessions: [owner-session-a], source: automatic, nowMs: 3000}
+    expect:
+      claimCount: 3
+      claimSources: [manual, manual, automatic]
+      claimUserIDs: [one, two, one]
+      sessions:
+        owner-session-a: second
+
+  - name: auto-claim-after-own-manual-claim
+    steps:
+      - {kind: seed, sessions: [owner-session-a]}
+      - {kind: signIn, user: one, username: alice}
+      - {kind: claimDefault, source: manual, nowMs: 1000}
+      - {kind: claimSessions, sessions: [owner-session-a], source: automatic, nowMs: 2000}
+    expect:
+      claimCount: 2
+      claimSources: [manual, automatic]
+      sessions:
+        owner-session-a: first
+
+  - name: auto-claim-reuses-newest-automatic
+    steps:
+      - {kind: seed, sessions: [owner-session-a]}
+      - {kind: signIn, user: one, username: alice}
+      - {kind: claimSessions, sessions: [owner-session-a], source: automatic, nowMs: 1000}
+      - {kind: claimSessions, sessions: [owner-session-a], source: automatic, nowMs: 2000}
+    expect:
+      claimCount: 1
+      claimSources: [automatic]
+      sessions:
+        owner-session-a: first

@@ -31,6 +31,10 @@ const (
 // AllClaimSources returns the closed claim-source set in contract order. The
 // migration CHECK constraint and ClaimSourceSetAreEqual test use it as the one
 // definition of the set.
+//
+// Follow-up: the schema contract now owns the same closed set as
+// schema.AllLocalClaimSources. Replace this copy with that type when Peasant
+// re-pins schema; it is kept local until then because this PR does not re-pin.
 func AllClaimSources() []ClaimSource {
 	return []ClaimSource{ClaimSourceSignInPrompt, ClaimSourceAutomatic, ClaimSourceManual}
 }
@@ -56,7 +60,7 @@ const LocalOwnerFileName = "local-owner.json"
 
 // localOwnerSchemaVersion is the migration that creates local_owner. A
 // skip-migrations open below this version has no owner table to bootstrap.
-const localOwnerSchemaVersion = 79
+const localOwnerSchemaVersion = 82
 
 // LocalOwner is the permanent owner of one Peasant data directory. It is not a
 // Village account, a username, or an email address.
@@ -87,8 +91,10 @@ type OwnerClaim struct {
 // current owner pointer this operation assigned; AlreadyClaimed counts artifacts
 // in scope that already carried a pointer and were left alone. Stored counts
 // every local artifact in scope, so an empty store is distinguishable from a
-// fully claimed one. ClaimID is empty when nothing needed claiming, in which
-// case no claim entry was appended.
+// fully claimed one. An explicit claim always appends an entry, so ClaimID names
+// it even when Claimed is zero. An automatic claim reuses its account's newest
+// entry only under strict reuse; otherwise it appends a decision entry too, even
+// when every artifact it was asked to cover already carries a pointer.
 type ClaimResult struct {
 	Claimed        int
 	AlreadyClaimed int
@@ -154,26 +160,86 @@ func (s *Store) LocalOwner(ctx context.Context) (*LocalOwner, error) {
 	return readLocalOwnerOnConn(conn)
 }
 
-// OwnerClaims returns the most recent page of the append-only claim log in
-// claim order: claimed_at then insertion order (rowid). The page is bounded so
-// a long-lived installation's log cannot make `user show` unbounded. TotalClaims
-// reports the full log size.
-func (s *Store) OwnerClaims(ctx context.Context) ([]OwnerClaim, error) {
+// OwnerClaimsPage is one newest-first page of the append-only claim log.
+// NextBefore is the id of the last (oldest) returned entry, present exactly when
+// an older entry exists. The contract uses it as the next page's cursor.
+type OwnerClaimsPage struct {
+	Claims     []OwnerClaim
+	NextBefore string
+}
+
+// ownerClaimsPageSQL is the one page read. The owner and claimed_at index
+// supplies the order; rowid is the implicit tie-break SQLite appends to the
+// index, so no temporary B-tree is needed. The extra row decides nextBefore.
+func ownerClaimsPageSQL(hasBefore bool) string {
+	query := `SELECT id, local_owner_id, village_url, user_id, username_snapshot, claimed_at, source
+FROM owner_claims
+WHERE local_owner_id = ?1`
+	if hasBefore {
+		query += `
+  AND (claimed_at, rowid) < (?2, ?3)`
+	}
+	limitArg := 2
+	if hasBefore {
+		limitArg = 4
+	}
+	return query + `
+ORDER BY claimed_at DESC, rowid DESC
+LIMIT ?` + fmt.Sprint(limitArg)
+}
+
+// ownerClaimCursorSQL resolves the cursor id to its (claimed_at, rowid) order
+// key, scoped to this local owner.
+const ownerClaimCursorSQL = `SELECT claimed_at, rowid FROM owner_claims WHERE local_owner_id = ? AND id = ?`
+
+// newestOwnerClaimSQL reads the newest entry of the whole log for one local
+// owner, the only entry strict reuse may reuse.
+const newestOwnerClaimSQL = `SELECT id, village_url, user_id, source FROM owner_claims
+WHERE local_owner_id = ?
+ORDER BY claimed_at DESC, rowid DESC LIMIT 1`
+
+// OwnerClaims returns the most recent page of the append-only claim log for
+// this local owner, newest first: claimed_at descending, then insertion order
+// (rowid) descending. A non-empty before continues after that entry. The read
+// fetches the bound plus one row to decide whether an older page exists, and it
+// is served by the (local_owner_id, claimed_at) index with no temporary sort.
+func (s *Store) OwnerClaims(ctx context.Context, before string) (OwnerClaimsPage, error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("read owner claims: take SQLite connection: %w", err)
+		return OwnerClaimsPage{}, fmt.Errorf("read owner claims: take SQLite connection: %w", err)
 	}
 	defer s.pool.Put(conn)
+	owner, err := readLocalOwnerOnConn(conn)
+	if err != nil {
+		return OwnerClaimsPage{}, err
+	}
+	if owner == nil {
+		return OwnerClaimsPage{}, nil
+	}
+	query := ownerClaimsPageSQL(before != "")
+	args := []any{owner.ID}
+	if before != "" {
+		var claimedAt, rowid int64
+		found := false
+		if err := sqlitex.ExecuteTransient(conn, ownerClaimCursorSQL, &sqlitex.ExecOptions{
+			Args: []any{owner.ID, before},
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				claimedAt, rowid = stmt.ColumnInt64(0), stmt.ColumnInt64(1)
+				found = true
+				return nil
+			},
+		}); err != nil {
+			return OwnerClaimsPage{}, fmt.Errorf("read owner claims: resolve the before cursor %q: %w; no ownership was changed; retry after repairing local store access", before, err)
+		}
+		if !found {
+			return OwnerClaimsPage{}, fmt.Errorf("read owner claims: the before cursor %q names no claim entry for this local owner; no ownership was changed; pass a nextBefore value from a previous page", before)
+		}
+		args = append(args, claimedAt, rowid)
+	}
+	args = append(args, OwnerClaimsPageSize+1)
 	var claims []OwnerClaim
-	if err := sqlitex.ExecuteTransient(conn, `SELECT id, local_owner_id, village_url, user_id, username_snapshot, claimed_at, source
-FROM (
-  SELECT rowid, id, local_owner_id, village_url, user_id, username_snapshot, claimed_at, source
-    FROM owner_claims
-   ORDER BY claimed_at DESC, rowid DESC
-   LIMIT ?
-)
-ORDER BY claimed_at, rowid`, &sqlitex.ExecOptions{
-		Args: []any{OwnerClaimsPageSize},
+	if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
+		Args: args,
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			claims = append(claims, OwnerClaim{
 				ID:               stmt.ColumnText(0),
@@ -187,9 +253,14 @@ ORDER BY claimed_at, rowid`, &sqlitex.ExecOptions{
 			return nil
 		},
 	}); err != nil {
-		return nil, fmt.Errorf("read owner claims: %w; no ownership was changed; retry after repairing local store access", err)
+		return OwnerClaimsPage{}, fmt.Errorf("read owner claims: %w; no ownership was changed; retry after repairing local store access", err)
 	}
-	return claims, nil
+	page := OwnerClaimsPage{Claims: claims}
+	if len(claims) > OwnerClaimsPageSize {
+		page.Claims = claims[:OwnerClaimsPageSize]
+		page.NextBefore = page.Claims[len(page.Claims)-1].ID
+	}
+	return page, nil
 }
 
 // OwnerClaimsPageSize bounds one claim-log read. The contract exposes the most
@@ -204,8 +275,16 @@ func (s *Store) OwnerClaimCount(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("count owner claims: take SQLite connection: %w", err)
 	}
 	defer s.pool.Put(conn)
+	owner, err := readLocalOwnerOnConn(conn)
+	if err != nil {
+		return 0, err
+	}
+	if owner == nil {
+		return 0, nil
+	}
 	var count int
-	if err := sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM owner_claims`, &sqlitex.ExecOptions{
+	if err := sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM owner_claims WHERE local_owner_id = ?`, &sqlitex.ExecOptions{
+		Args:       []any{owner.ID},
 		ResultFunc: func(stmt *sqlite.Stmt) error { count = int(stmt.ColumnInt64(0)); return nil },
 	}); err != nil {
 		return 0, fmt.Errorf("count owner claims: %w; no ownership was changed; retry after repairing local store access", err)
@@ -276,15 +355,11 @@ func (s *Store) ClaimArtifacts(ctx context.Context, snapshot auth.CredentialSnap
 		result.Stored = int(sessionsTotal + annotationsTotal)
 		if all {
 			result.AlreadyClaimed = 0
-			if result.Stored == 0 {
-				return nil
-			}
 		} else {
 			result.AlreadyClaimed = int(sessionsClaimed + annotationsClaimed)
-			if result.Stored == result.AlreadyClaimed {
-				return nil
-			}
 		}
+		// An explicit claim always appends its decision, even on an empty store
+		// or when every artifact already carries a pointer.
 		claimID, err := appendOrReuseOwnerClaim(conn, owner.ID, base, user, username, nowMs, source)
 		if err != nil {
 			return err
@@ -406,9 +481,6 @@ func (s *Store) ClaimSessionIDs(ctx context.Context, snapshot auth.CredentialSna
 		}
 		result.Stored = int(sessionsTotal + annotationsTotal)
 		result.AlreadyClaimed = int(sessionsClaimed + annotationsClaimed)
-		if result.Stored == result.AlreadyClaimed {
-			return nil
-		}
 		claimID, err := appendOrReuseOwnerClaim(conn, owner.ID, base, user, username, nowMs, source)
 		if err != nil {
 			return err
@@ -488,9 +560,6 @@ func (s *Store) ClaimAnnotationIDs(ctx context.Context, snapshot auth.Credential
 		}
 		result.Stored = int(total)
 		result.AlreadyClaimed = int(claimed)
-		if total == claimed {
-			return nil
-		}
 		claimID, err := appendOrReuseOwnerClaim(conn, owner.ID, base, user, username, nowMs, source)
 		if err != nil {
 			return err
@@ -527,27 +596,38 @@ func validateClaimRequest(source ClaimSource, nowMs int64) error {
 }
 
 // appendOrReuseOwnerClaim inserts one claim entry for an explicit claim, or
-// reuses the account's latest entry for an automatic claim. Reuse bounds the
-// log: automatic harvesting does not append one entry per run. The account
-// scope row is ensured idempotently first: claim code creates no observation
-// and advances no collective-observation invocation sequence.
+// reuses an automatic entry only under strict reuse: the newest entry of the
+// whole log must be this account's automatic entry. Otherwise it appends, so
+// replaying the log in insertion order always names the account that receives
+// new artifacts. The account scope row is ensured idempotently first: claim code
+// creates no observation and advances no collective-observation invocation
+// sequence.
 func appendOrReuseOwnerClaim(conn *sqlite.Conn, localOwnerID, villageURL, userID, usernameSnapshot string, claimedAt int64, source ClaimSource) (string, error) {
 	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO collective_observation_scopes(village_url, user_id, incarnation)
 VALUES(?, ?, ?) ON CONFLICT(village_url, user_id) DO NOTHING`, &sqlitex.ExecOptions{Args: []any{villageURL, userID, uuid.NewString()}}); err != nil {
 		return "", fmt.Errorf("ensure the claim account scope: %w", err)
 	}
 	if source == ClaimSourceAutomatic {
-		var existing string
-		if err := sqlitex.ExecuteTransient(conn, `SELECT id FROM owner_claims
-WHERE local_owner_id = ? AND village_url = ? AND user_id = ?
-ORDER BY claimed_at DESC, rowid DESC LIMIT 1`, &sqlitex.ExecOptions{
-			Args:       []any{localOwnerID, villageURL, userID},
-			ResultFunc: func(stmt *sqlite.Stmt) error { existing = stmt.ColumnText(0); return nil },
+		// Strict reuse: only the newest entry of the whole log for this local
+		// owner decides. Reuse it when it is this account's automatic entry;
+		// otherwise append, so replaying the log in insertion order always names
+		// the account that receives new artifacts.
+		var existingID, existingURL, existingUser string
+		var existingSource ClaimSource
+		if err := sqlitex.ExecuteTransient(conn, newestOwnerClaimSQL, &sqlitex.ExecOptions{
+			Args: []any{localOwnerID},
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				existingID = stmt.ColumnText(0)
+				existingURL = stmt.ColumnText(1)
+				existingUser = stmt.ColumnText(2)
+				existingSource = ClaimSource(stmt.ColumnText(3))
+				return nil
+			},
 		}); err != nil {
-			return "", fmt.Errorf("find the account's latest claim entry: %w", err)
+			return "", fmt.Errorf("find the newest claim entry: %w", err)
 		}
-		if existing != "" {
-			return existing, nil
+		if existingID != "" && existingSource == ClaimSourceAutomatic && existingURL == villageURL && existingUser == userID {
+			return existingID, nil
 		}
 	}
 	claimID := "oc_" + uuid.NewString()
@@ -635,15 +715,22 @@ func readLocalOwnerFile(path string) (*LocalOwner, error) {
 }
 
 // ensureLocalOwnerFile writes the owner file once. An existing file is never
-// replaced, so a later database rebuild can still adopt the original id.
+// replaced, so a later database rebuild can still adopt the original id. A file
+// that names a different owner is refused with both ids: adopting either side
+// silently would make the next rebuild switch owners.
 func ensureLocalOwnerFile(path string, owner LocalOwner) error {
 	if path == "" {
 		return nil
 	}
-	if _, err := os.Stat(path); err == nil {
+	existing, err := readLocalOwnerFile(path)
+	if err != nil {
+		return err
+	}
+	if existing != nil {
+		if existing.ID != owner.ID {
+			return fmt.Errorf("refuse to open: the local owner file %q names owner %q, but the database names owner %q; the two id sources disagree, so a rebuild would silently switch owners; repair it by moving the wrong source aside, or restore the matching file and database from one backup, then reopen", path, existing.ID, owner.ID)
+		}
 		return nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("stat the local owner file %q: %w; the owner record was not changed; fix the data-directory permissions and retry", path, err)
 	}
 	data, err := json.MarshalIndent(localOwnerFile{ID: owner.ID, CreatedAt: owner.CreatedAt}, "", "  ")
 	if err != nil {

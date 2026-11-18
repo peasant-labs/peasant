@@ -190,6 +190,7 @@ commands:
     subcommands:
       - use: show
         flags:
+          - { name: before, type: string, default: "" }
           - { name: json, type: bool, default: "false" }
       - use: claim
         flags:

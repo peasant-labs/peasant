@@ -207,6 +207,15 @@ func BuildQuickV78Store(t *testing.T, path string) {
 		}
 	}()
 	if err := sqlitex.ExecuteScript(conn, undoImportProfileScript+undoSourceDiagnosticLanesScript+`
+DROP TRIGGER IF EXISTS sessions_parent_state_au;
+DROP INDEX IF EXISTS idx_sessions_owner_claim;
+DROP INDEX IF EXISTS idx_annotations_owner_claim;
+DROP INDEX IF EXISTS idx_owner_claims_owner_order;
+DROP INDEX IF EXISTS idx_owner_claims_scope_order;
+DROP TABLE IF EXISTS owner_claims;
+DROP TABLE IF EXISTS local_owner;
+ALTER TABLE sessions DROP COLUMN owner_claim_id;
+ALTER TABLE annotations DROP COLUMN owner_claim_id;
 PRAGMA user_version = 78;`, nil); err != nil {
 		t.Fatalf("restore the v78 shape: %v", err)
 	}

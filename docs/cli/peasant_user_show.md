@@ -4,11 +4,12 @@ Show the local owner, claim log, and ownership counts
 
 ### Synopsis
 
-Show this data directory's permanent local owner, its ordered claim log, and
-how many local sessions and annotations carry an owner.
+Show this data directory's permanent local owner, its newest-first claim
+log, and how many local sessions and annotations carry an owner.
 
 This reads local state only. It needs no peasant online login and makes no
-network request, so a signed-out report is still a successful report.
+network request, so a signed-out report is still a successful report. Pass
+--before with a previous nextBefore value to read an older page.
 
 ```
 peasant user show [flags]
@@ -17,8 +18,9 @@ peasant user show [flags]
 ### Options
 
 ```
-  -h, --help   help for show
-      --json   Output as JSON instead of human-readable
+      --before string   Read the claim page older than this claim id (a previous nextBefore)
+  -h, --help            help for show
+      --json            Output as JSON instead of human-readable
 ```
 
 ### Options inherited from parent commands

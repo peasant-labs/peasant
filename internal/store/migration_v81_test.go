@@ -124,8 +124,8 @@ VALUES(?,'claude-code','fixture-model','source-lanes-host','source-lanes-project
 				t.Fatalf("opening the predecessor returned %v, want a schema-behind refusal", err)
 			}
 			plan := mustPlan(t, path)
-			if plan.From != 80 || plan.To != 81 || len(plan.Steps) != 1 {
-				t.Fatalf("upgrade plan = %+v; want one step from 80 to 81", plan)
+			if plan.From != 80 || plan.To != 82 || len(plan.Steps) != 2 {
+				t.Fatalf("upgrade plan = %+v; want the lane step and the owner step from 80 to 82", plan)
 			}
 			if plan.HasLongStep() != planCase.WantLong {
 				t.Fatalf("upgrade plan = %+v; want one step, long=%t", plan, planCase.WantLong)

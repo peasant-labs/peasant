@@ -25,8 +25,11 @@ type claimSessionsCase struct {
 }
 
 type claimSessionsResult struct {
-	ID     string `yaml:"id"`
-	Status string `yaml:"status"`
+	ID          string `yaml:"id"`
+	Status      string `yaml:"status"`
+	FirstStored bool   `yaml:"firstStored"`
+	Error       bool   `yaml:"error"`
+	Excluded    bool   `yaml:"excluded"`
 }
 
 func TestClaimableSessionIDs(t *testing.T) {
@@ -56,10 +59,16 @@ func TestClaimableSessionIDs(t *testing.T) {
 					status = DiffUpdated
 				case "unchanged":
 					status = DiffUnchanged
+				case "active":
+					status = DiffActive
 				default:
 					t.Fatalf("unknown fixture status %q", result.Status)
 				}
-				results = append(results, SessionResult{SessionID: SessionID(result.ID), Status: status})
+				var err error
+				if result.Error {
+					err = fmt.Errorf("fixture failure")
+				}
+				results = append(results, SessionResult{SessionID: SessionID(result.ID), Status: status, FirstStored: result.FirstStored, Error: err, ExcludedBySelection: result.Excluded})
 			}
 			got := claimableSessionIDs(results)
 			if strings.Join(got, ",") != strings.Join(test.Want, ",") {

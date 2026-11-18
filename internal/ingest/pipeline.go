@@ -184,6 +184,11 @@ type SessionResult struct {
 	// ExcludedBySelection marks a session the saved selection left out. Its
 	// Status stays DiffUnchanged for callers that only skip it.
 	ExcludedBySelection bool
+	// FirstStored is true only when the session had no sessions row and no
+	// saved pair under peasant-sync/ before this run. Automatic claiming reads
+	// this flag, never the diff status: a session first seen while active is
+	// claimed, and a forced or rebuilt re-process is not.
+	FirstStored bool
 	// Prevent the same invocation's stale-index sweep from bypassing a failed
 	// reconciliation. This is execution state, not a serialized success marker.
 	mirrorPending bool
@@ -4458,6 +4463,7 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry, wr
 	return workerResult{
 		transcriptKept:        kept.transcript,
 		commitCaptureComplete: commitCaptureComplete,
+		savedPairExisted:      metadataPath != "",
 		result:                result,
 		capturedSource:        capturedSource,
 		cwdProvenance:         publicationCWDProvenance(meta, session),

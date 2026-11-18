@@ -57,11 +57,12 @@ func (p *Pipeline) claimRunSessions(ctx context.Context, logPrefix string, sessi
 }
 
 // claimableSessionIDs names the sessions an automatic claim may cover: every
-// successful DiffNew result, deduplicated in first-seen order. Updated,
-// reindexed, rebuilt, unchanged, active, excluded, and failed sessions are left
-// out: an automatic claim covers only artifacts the run stored for the first
-// time. An existing installation's older rows stay unclaimed until the sign-in
-// prompt or `peasant user claim` explicitly claims them.
+// successful result whose FirstStored flag says the session had no row and no
+// saved pair before this run, deduplicated in first-seen order. Diff status
+// decides nothing: a first-seen active session is claimed, while a forced
+// re-process, the web one-session ingest, a reindex, and a rebuild from saved
+// copies are not. An existing installation's older rows stay unclaimed until the
+// sign-in prompt or `peasant user claim` explicitly claims them.
 func claimableSessionIDs(sessionResults []SessionResult) []string {
 	seen := make(map[SessionID]struct{}, len(sessionResults))
 	ids := make([]string, 0, len(sessionResults))
@@ -79,7 +80,7 @@ func claimableSessionIDs(sessionResults []SessionResult) []string {
 		if result.Error != nil || result.ExcludedBySelection {
 			continue
 		}
-		if result.Status != DiffNew {
+		if !result.FirstStored {
 			continue
 		}
 		add(result.SessionID)

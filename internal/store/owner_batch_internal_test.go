@@ -82,12 +82,12 @@ VALUES('batch-e', 'claude-code', 'fixture-model', 'batch-host', 'batch-project',
 	if !interrupted || result.ClaimID != "" {
 		t.Fatalf("interrupted claim = %+v, noticed=%v; want a failed partial claim", result, interrupted)
 	}
-	claims, err := s.OwnerClaims(ctx)
+	page, err := s.OwnerClaims(ctx, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(claims) != 1 {
-		t.Fatalf("claims after interruption = %+v, want the one appended entry", claims)
+	if len(page.Claims) != 1 {
+		t.Fatalf("claims after interruption = %+v, want the one appended entry", page.Claims)
 	}
 	claimedAfterInterruption := claimCountForTest(t, s)
 	if claimedAfterInterruption == 0 || claimedAfterInterruption >= 5 {
@@ -99,20 +99,20 @@ VALUES('batch-e', 'claude-code', 'fixture-model', 'batch-host', 'batch-project',
 	if err != nil {
 		t.Fatalf("resume claim: %v", err)
 	}
-	if resumed.ClaimID != claims[0].ID {
-		t.Fatalf("resumed claim id = %q, want the reused entry %q", resumed.ClaimID, claims[0].ID)
+	if resumed.ClaimID != page.Claims[0].ID {
+		t.Fatalf("resumed claim id = %q, want the reused entry %q", resumed.ClaimID, page.Claims[0].ID)
 	}
-	claims, err = s.OwnerClaims(ctx)
+	page, err = s.OwnerClaims(ctx, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(claims) != 1 {
-		t.Fatalf("claims after resume = %+v, want the automatic claim to reuse its entry", claims)
+	if len(page.Claims) != 1 {
+		t.Fatalf("claims after resume = %+v, want the automatic claim to reuse its entry", page.Claims)
 	}
 	if got := claimCountForTest(t, s); got != 5 {
 		t.Fatalf("claimed rows after resume = %d, want 5", got)
 	}
-	if got := claimPointerCountForTest(t, s, claims[0].ID); got != 5 {
+	if got := claimPointerCountForTest(t, s, page.Claims[0].ID); got != 5 {
 		t.Fatalf("rows pointing at the reused entry = %d, want 5", got)
 	}
 }

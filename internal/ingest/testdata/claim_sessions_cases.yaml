@@ -1,28 +1,28 @@
-# Automatic claims cover only DiffNew sessions. Updated, reindexed, and rebuilt
-# sessions stay unclaimed until an explicit `peasant user claim` or the sign-in
-# prompt claims them. Each case maps pipeline session results to the ids an
-# automatic claim may name.
+# Automatic claims read the pipeline's FirstStored flag, never the diff status.
+# These cases pin the filter itself; the production write site is covered by the
+# pipeline-level auto-claim tests in claim_test.go.
 requiredNames:
-  - auto-claim-skips-updated-unclaimed-session
-  - auto-claim-skips-reindexed-sessions
-  - auto-claim-skips-rebuilt-sessions
-  - auto-claim-after-decline-covers-only-new-sessions
+  - first-stored-new-included
+  - first-stored-active-included
+  - not-first-stored-skipped
+  - failed-or-excluded-skipped
 cases:
-  - name: auto-claim-skips-updated-unclaimed-session
+  - name: first-stored-new-included
     results:
-      - {id: updated-unclaimed, status: updated}
-    want: []
-  - name: auto-claim-skips-reindexed-sessions
-    results:
-      - {id: reindexed-a, status: updated}
-      - {id: reindexed-b, status: updated}
-    want: []
-  - name: auto-claim-skips-rebuilt-sessions
-    results:
-      - {id: rebuilt-from-files, status: updated}
-    want: []
-  - name: auto-claim-after-decline-covers-only-new-sessions
-    results:
-      - {id: declined-old, status: unchanged}
-      - {id: new-session, status: new}
+      - {id: new-session, status: new, firstStored: true}
     want: [new-session]
+  - name: first-stored-active-included
+    results:
+      - {id: active-session, status: active, firstStored: true}
+    want: [active-session]
+  - name: not-first-stored-skipped
+    results:
+      - {id: updated-session, status: updated, firstStored: false}
+      - {id: rebuilt-session, status: updated, firstStored: false}
+    want: []
+  - name: failed-or-excluded-skipped
+    results:
+      - {id: failed-session, status: new, firstStored: true, error: true}
+      - {id: excluded-session, status: new, firstStored: true, excluded: true}
+      - {id: kept-session, status: new, firstStored: true}
+    want: [kept-session]

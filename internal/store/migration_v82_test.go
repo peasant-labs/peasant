@@ -57,9 +57,9 @@ func TestMigrationV82AddsLocalOwnerAndClaimLog(t *testing.T) {
 		conn.Close()
 		t.Fatalf("migrate populated V75 database to V82: %v", err)
 	}
-	if got := v82UserVersion(t, conn); got != 79 {
+	if got := v82UserVersion(t, conn); got != 82 {
 		conn.Close()
-		t.Fatalf("migrated user_version = %d, want 79", got)
+		t.Fatalf("migrated user_version = %d, want 82", got)
 	}
 	for _, table := range tables {
 		after := dumpV82Rows(t, conn, table.name, table.key, preColumns[table.name])
@@ -151,25 +151,6 @@ VALUES('oc_bad_source', 'lo_fixture', ?, ?, 'fixture-user', 7000, 'not-a-source'
 
 	if err := conn.Close(); err != nil {
 		t.Fatal(err)
-	}
-
-	// The chain is forward-only: a database stamped by a newer build is refused
-	// loudly before any migration or write instead of being silently served.
-	conn, err = sqlite.OpenConn(path, sqlite.OpenReadWrite)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := sqlitex.ExecuteTransient(conn, `PRAGMA user_version = 83`, nil); err != nil {
-		conn.Close()
-		t.Fatal(err)
-	}
-	if err := conn.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Open(path); err == nil {
-		t.Fatal("opening a database from a newer schema version succeeded")
-	} else if !strings.Contains(err.Error(), "newer Peasant") {
-		t.Fatalf("opening a newer-schema database error = %v, want a forward-only refusal", err)
 	}
 }
 

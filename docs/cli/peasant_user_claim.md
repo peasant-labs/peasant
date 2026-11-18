@@ -9,8 +9,10 @@ peasant online account.
 
 By default only unclaimed artifacts are claimed. --all is an explicit
 reassignment of every local session and annotation; it appends a new claim
-entry and never rewrites earlier entries. Pulled transcripts and pulled
-annotations are foreign and are never claimed.
+entry and never rewrites earlier entries. An explicit claim always appends an
+entry, even when it finds nothing to move. A non-terminal run does not need
+--yes: only an interactive terminal asks for confirmation. Pulled transcripts
+and pulled annotations are foreign and are never claimed.
 
 ```
 peasant user claim [flags]
@@ -22,7 +24,7 @@ peasant user claim [flags]
       --all    Reassign every local session and annotation, not only unclaimed ones
   -h, --help   help for claim
       --json   Output as JSON instead of human-readable
-  -y, --yes    Confirm --all without asking on a terminal
+  -y, --yes    Confirm --all on an interactive terminal (non-terminal runs do not ask)
 ```
 
 ### Options inherited from parent commands

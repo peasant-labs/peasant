@@ -103,7 +103,7 @@ func runUpgradeRecountPlanCase(t *testing.T, _ storeUpgradeCase) {
 	t.Run("crossing 77 with sessions", func(t *testing.T) {
 		path := seedTurnCountRecountStore(t, fixture, 76)
 		plan := planOf(t, path)
-		requireSteps(t, "a schema-76 store with sessions", plan, schemaStep(77), wantRecountStep(), schemaStep(78), schemaStep(79), schemaStep(80), emptySourceDiagnosticStep())
+		requireSteps(t, "a schema-76 store with sessions", plan, schemaStep(77), wantRecountStep(), schemaStep(78), schemaStep(79), schemaStep(80), emptySourceDiagnosticStep(), schemaStep(82))
 		if !plan.HasLongStep() {
 			t.Error("the recount is a long step; the plan must say so, so every entry point applies its long-step policy")
 		}
@@ -111,7 +111,7 @@ func runUpgradeRecountPlanCase(t *testing.T, _ storeUpgradeCase) {
 	t.Run("crossing 77 without sessions", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "empty.db")
 		buildBehindStore(t, path, 76, nil)
-		requireSteps(t, "a schema-76 store with no sessions", planOf(t, path), schemaStep(77), schemaStep(78), schemaStep(79), schemaStep(80), emptySourceDiagnosticStep())
+		requireSteps(t, "a schema-76 store with no sessions", planOf(t, path), schemaStep(77), schemaStep(78), schemaStep(79), schemaStep(80), emptySourceDiagnosticStep(), schemaStep(82))
 		// The plan's prediction agrees with the shipped migration: it
 		// writes no marker either.
 		if _, err := Upgrade(t.Context(), path, UpgradeOptions{}); err != nil {
@@ -123,7 +123,7 @@ func runUpgradeRecountPlanCase(t *testing.T, _ storeUpgradeCase) {
 	})
 	t.Run("schema 77 with its marker", func(t *testing.T) {
 		path := buildRecountOwedStore(t, fixture, 77)
-		requireSteps(t, "a schema-77 store a killed 0.17.0 open left", planOf(t, path), wantRecountStep(), schemaStep(78), schemaStep(79), schemaStep(80), emptySourceDiagnosticStep())
+		requireSteps(t, "a schema-77 store a killed 0.17.0 open left", planOf(t, path), wantRecountStep(), schemaStep(78), schemaStep(79), schemaStep(80), emptySourceDiagnosticStep(), schemaStep(82))
 	})
 	t.Run("head schema with its marker", func(t *testing.T) {
 		path := buildRecountOwedStore(t, fixture, head)
@@ -249,8 +249,8 @@ func runUpgradeRecountCancelledCase(t *testing.T, c storeUpgradeCase) {
 	}
 	requireUnrecountedState(t, fixture, counts, "the cancelled recount")
 
-	if plan := mustPlan(t, path); !slices.Equal(plan.Steps, []UpgradeStep{wantRecountStep(), schemaStep(78), schemaStep(79), schemaStep(80), emptySourceDiagnosticStep()}) {
-		t.Fatalf("plan after the cancel = %+v, want the recount, then 78 through 81", plan.Steps)
+	if plan := mustPlan(t, path); !slices.Equal(plan.Steps, []UpgradeStep{wantRecountStep(), schemaStep(78), schemaStep(79), schemaStep(80), emptySourceDiagnosticStep(), schemaStep(82)}) {
+		t.Fatalf("plan after the cancel = %+v, want the recount, then 78 through 82", plan.Steps)
 	}
 	if _, err := Upgrade(t.Context(), path, UpgradeOptions{}); err != nil {
 		t.Fatalf("resume after the cancelled recount: %v", err)
@@ -261,9 +261,9 @@ func runUpgradeRecountCancelledCase(t *testing.T, c storeUpgradeCase) {
 func runUpgradeRecountInOrderCase(t *testing.T, c storeUpgradeCase) {
 	fixture := loadTurnCountRecountFixture(t)
 	path := seedTurnCountRecountStore(t, fixture, c.From)
-	want := []UpgradeStep{schemaStep(77), wantRecountStep(), schemaStep(78), schemaStep(79), schemaStep(80), emptySourceDiagnosticStep()}
-	if c.From != 76 || CurrentSchemaVersion() != 81 {
-		t.Fatalf("this case pins the upgrade of a 0.16.2 store (schema 76) by a build at schema 81; the build is at %d; add the new steps to its want list", CurrentSchemaVersion())
+	want := []UpgradeStep{schemaStep(77), wantRecountStep(), schemaStep(78), schemaStep(79), schemaStep(80), emptySourceDiagnosticStep(), schemaStep(82)}
+	if c.From != 76 || CurrentSchemaVersion() != 82 {
+		t.Fatalf("this case pins the upgrade of a 0.16.2 store (schema 76) by a build at schema 82; the build is at %d; add the new steps to its want list", CurrentSchemaVersion())
 	}
 
 	type seen struct {
@@ -295,8 +295,8 @@ func runUpgradeRecountInOrderCase(t *testing.T, c storeUpgradeCase) {
 	if !slices.Equal(events, wantEvents) {
 		t.Fatalf("step events = %+v, want %+v", events, wantEvents)
 	}
-	if report.From != 76 || report.To != 81 || len(report.Steps) != len(want) {
-		t.Fatalf("report = %d -> %d with %d steps, want 76 -> 81 with %d", report.From, report.To, len(report.Steps), len(want))
+	if report.From != 76 || report.To != 82 || len(report.Steps) != len(want) {
+		t.Fatalf("report = %d -> %d with %d steps, want 76 -> 82 with %d", report.From, report.To, len(report.Steps), len(want))
 	}
 	for i, result := range report.Steps {
 		if result.Step != want[i] {
@@ -311,16 +311,16 @@ func runUpgradeRecountInOrderCase(t *testing.T, c storeUpgradeCase) {
 	if last != (UpgradeEvent{Kind: last.Kind, Step: last.Step, Index: last.Index, Total: last.Total, Done: sessions, Of: sessions, Unit: UpgradeUnitSessions, WALBytes: last.WALBytes, Elapsed: last.Elapsed}) {
 		t.Errorf("last recount progress = %+v, want %d/%d sessions", last, sessions, sessions)
 	}
-	if got := mustVersionAt(t, path); got != 81 {
-		t.Fatalf("store is at schema %d after the upgrade, want 81", got)
+	if got := mustVersionAt(t, path); got != 82 {
+		t.Fatalf("store is at schema %d after the upgrade, want 82", got)
 	}
 	requireRecounted(t, fixture, path, "the upgrade from 0.16.2")
 }
 
 func runUpgradeRecountDoneInOrderCase(t *testing.T, c storeUpgradeCase) {
 	fixture := loadTurnCountRecountFixture(t)
-	if CurrentSchemaVersion() != 81 {
-		t.Fatalf("this case pins the upgrade of a 0.17.0 store (schema 77) by a build at schema 81; the build is at %d; add the new steps to its want list", CurrentSchemaVersion())
+	if CurrentSchemaVersion() != 82 {
+		t.Fatalf("this case pins the upgrade of a 0.17.0 store (schema 77) by a build at schema 82; the build is at %d; add the new steps to its want list", CurrentSchemaVersion())
 	}
 	// A 0.17.0 open that finished its recount: schema 77, the marker
 	// deleted, and the counts it wrote (the sentinel stands for them).
@@ -340,9 +340,9 @@ func runUpgradeRecountDoneInOrderCase(t *testing.T, c storeUpgradeCase) {
 	writeTurnCountSentinel(t, path, fixture.Sessions[0].SessionID, sentinel)
 	countsBefore, _, _ := readTurnCountRecountState(t, path)
 
-	want := []UpgradeStep{schemaStep(78), schemaStep(79), schemaStep(80), emptySourceDiagnosticStep()}
+	want := []UpgradeStep{schemaStep(78), schemaStep(79), schemaStep(80), emptySourceDiagnosticStep(), schemaStep(82)}
 	if plan := mustPlan(t, path); plan.From != c.From || !slices.Equal(plan.Steps, want) {
-		t.Fatalf("plan = %d -> %d with %+v, want %d -> 81 with %+v", plan.From, plan.To, plan.Steps, c.From, want)
+		t.Fatalf("plan = %d -> %d with %+v, want %d -> 82 with %+v", plan.From, plan.To, plan.Steps, c.From, want)
 	}
 	var started []UpgradeStep
 	report, err := Upgrade(t.Context(), path, UpgradeOptions{
@@ -363,8 +363,8 @@ func runUpgradeRecountDoneInOrderCase(t *testing.T, c storeUpgradeCase) {
 		t.Fatalf("started steps %+v and %d finished, want %+v", started, len(report.Steps), want)
 	}
 	counts, pending, version := readTurnCountRecountState(t, path)
-	if version != 81 || pending {
-		t.Fatalf("store is at schema %d with the marker pending=%t, want 81 with no marker", version, pending)
+	if version != 82 || pending {
+		t.Fatalf("store is at schema %d with the marker pending=%t, want 82 with no marker", version, pending)
 	}
 	if !maps.Equal(counts, countsBefore) {
 		t.Errorf("stored counts changed across the upgrade: %+v, want %+v", counts, countsBefore)

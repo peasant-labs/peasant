@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	_ "embed"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -12,6 +13,8 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
+	"github.com/peasant-labs/peasant/internal/testutil"
+	"gopkg.in/yaml.v3"
 )
 
 func openUserCommandStore(t *testing.T, dir string) *store.Store {
@@ -45,7 +48,7 @@ func saveUserCommandCredentials(t *testing.T, dir string) auth.Credentials {
 	return creds
 }
 
-func TestUserShowReportsLocalOwnerWithoutLogin(t *testing.T) {
+func runUserShowNoNetwork(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	db := openUserCommandStore(t, dir)
@@ -65,9 +68,17 @@ func TestUserShowReportsLocalOwnerWithoutLogin(t *testing.T) {
 			ID        string `json:"id"`
 			CreatedAt string `json:"createdAt"`
 		} `json:"owner"`
-		Claims      []any `json:"claims"`
-		TotalClaims int   `json:"totalClaims"`
-		Ownership   struct {
+		Claims      []any   `json:"claims"`
+		TotalClaims int     `json:"totalClaims"`
+		NextBefore  *string `json:"nextBefore"`
+		Prompt      struct {
+			State   string `json:"state"`
+			Account *struct {
+				VillageURL string `json:"villageUrl"`
+				UserID     string `json:"userId"`
+			} `json:"account"`
+		} `json:"prompt"`
+		Ownership struct {
 			Sessions struct {
 				Total     int `json:"total"`
 				Claimed   int `json:"claimed"`
@@ -83,6 +94,12 @@ func TestUserShowReportsLocalOwnerWithoutLogin(t *testing.T) {
 	}
 	if len(report.Claims) != 0 || report.Claims == nil || report.TotalClaims != 0 {
 		t.Fatalf("claims = %#v total %d, want an empty array", report.Claims, report.TotalClaims)
+	}
+	if report.NextBefore != nil {
+		t.Fatalf("nextBefore = %q, want none on a short page", *report.NextBefore)
+	}
+	if report.Prompt.State != "not_applicable" || report.Prompt.Account != nil {
+		t.Fatalf("prompt = %+v, want not_applicable without an account", report.Prompt)
 	}
 	if report.Ownership.Sessions.Total != 2 || report.Ownership.Sessions.Claimed != 0 || report.Ownership.Sessions.Unclaimed != 2 {
 		t.Fatalf("session counts = %+v, want 2 total and 2 unclaimed", report.Ownership.Sessions)
@@ -141,9 +158,9 @@ func TestUserShowPrintsClaimLogInOrder(t *testing.T) {
 	if len(report.Claims) != 2 || report.TotalClaims != 2 {
 		t.Fatalf("claims = %+v total %d, want two ordered entries", report.Claims, report.TotalClaims)
 	}
-	if report.Claims[0].UserID != "11111111-1111-4111-8111-111111111111" || report.Claims[0].Username != "alice" ||
-		report.Claims[1].UserID != "22222222-2222-4222-8222-222222222222" || report.Claims[1].Username != "bob" {
-		t.Fatalf("claim order = %+v, want alice then bob", report.Claims)
+	if report.Claims[0].UserID != "22222222-2222-4222-8222-222222222222" || report.Claims[0].Username != "bob" ||
+		report.Claims[1].UserID != "11111111-1111-4111-8111-111111111111" || report.Claims[1].Username != "alice" {
+		t.Fatalf("claim order = %+v, want newest first: bob then alice", report.Claims)
 	}
 	for _, claim := range report.Claims {
 		if claim.ID == "" || claim.LocalOwnerID == "" || claim.VillageURL != "https://village.example/team" || claim.ClaimedAt == "" || claim.Source != string(store.ClaimSourceManual) {
@@ -199,12 +216,15 @@ func TestUserClaimDefaultThenAll(t *testing.T) {
 	var second struct {
 		Claimed int    `json:"claimed"`
 		ClaimID string `json:"claimId"`
+		Outcome struct {
+			Kind string `json:"kind"`
+		} `json:"outcome"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &second); err != nil {
 		t.Fatalf("decode second claim json: %v\n%s", err, stdout)
 	}
-	if second.Claimed != 0 || second.ClaimID != "" {
-		t.Fatalf("second claim = %+v, want nothing to claim and no entry", second)
+	if second.Claimed != 0 || second.ClaimID == "" || second.Outcome.Kind != "nothing_to_claim" {
+		t.Fatalf("second claim = %+v, want nothing moved but a recorded entry", second)
 	}
 
 	storetest.SeedSession(t, db, "user-claim-session-c")
@@ -213,22 +233,25 @@ func TestUserClaimDefaultThenAll(t *testing.T) {
 		t.Fatalf("claim all: %v\n%s", err, stdout)
 	}
 	var all struct {
-		All     bool   `json:"all"`
 		Claimed int    `json:"claimed"`
 		ClaimID string `json:"claimId"`
+		Outcome struct {
+			All  bool   `json:"all"`
+			Kind string `json:"kind"`
+		} `json:"outcome"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &all); err != nil {
 		t.Fatalf("decode claim all json: %v\n%s", err, stdout)
 	}
-	if !all.All || all.Claimed != 3 || all.ClaimID == "" {
+	if !all.Outcome.All || all.Claimed != 3 || all.ClaimID == "" || all.Outcome.Kind != "claimed" {
 		t.Fatalf("claim all = %+v, want three reassigned sessions with an entry", all)
 	}
-	claims, err := db.OwnerClaims(t.Context())
+	page, err := db.OwnerClaims(t.Context(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(claims) != 2 {
-		t.Fatalf("claim log entries = %d, want two (default then all)", len(claims))
+	if len(page.Claims) != 3 {
+		t.Fatalf("claim log entries = %d, want three (default, no-op decision, all)", len(page.Claims))
 	}
 }
 
@@ -251,7 +274,7 @@ func TestUserCommandJSONWritesOneDocument(t *testing.T) {
 	}
 }
 
-func TestUserClaimJSONParity(t *testing.T) {
+func runUserClaimJSONParity(t *testing.T) {
 	t.Parallel()
 	jsonDir := t.TempDir()
 	textDir := t.TempDir()
@@ -267,29 +290,68 @@ func TestUserClaimJSONParity(t *testing.T) {
 		t.Fatalf("user claim --json: %v\n%s", err, jsonOut)
 	}
 	var report struct {
-		Status  string `json:"status"`
-		Claimed int    `json:"claimed"`
-		ClaimID string `json:"claimId"`
-		URL     string `json:"villageUrl"`
-		UserID  string `json:"userId"`
-		User    string `json:"username"`
+		Status struct {
+			Owner struct {
+				ID        string `json:"id"`
+				CreatedAt string `json:"createdAt"`
+			} `json:"owner"`
+			Claims      []any `json:"claims"`
+			TotalClaims int   `json:"totalClaims"`
+			Prompt      struct {
+				State   string `json:"state"`
+				Account *struct {
+					VillageURL string `json:"villageUrl"`
+					UserID     string `json:"userId"`
+				} `json:"account"`
+			} `json:"prompt"`
+			Ownership struct {
+				Sessions struct {
+					Total     int `json:"total"`
+					Claimed   int `json:"claimed"`
+					Unclaimed int `json:"unclaimed"`
+				} `json:"sessions"`
+				Annotations struct {
+					Total     int `json:"total"`
+					Claimed   int `json:"claimed"`
+					Unclaimed int `json:"unclaimed"`
+				} `json:"annotations"`
+			} `json:"ownership"`
+		} `json:"status"`
+		Claimed        int    `json:"claimed"`
+		AlreadyClaimed int    `json:"alreadyClaimed"`
+		ClaimID        string `json:"claimId"`
+		Outcome        struct {
+			Kind       string `json:"kind"`
+			All        bool   `json:"all"`
+			Stored     int    `json:"stored"`
+			VillageURL string `json:"villageUrl"`
+			UserID     string `json:"userId"`
+			Username   string `json:"username"`
+		} `json:"outcome"`
 	}
-	if err := json.Unmarshal([]byte(jsonOut), &report); err != nil {
-		t.Fatalf("decode claim json: %v\n%s", err, jsonOut)
+	decoder := json.NewDecoder(strings.NewReader(jsonOut))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&report); err != nil {
+		t.Fatalf("decode claim json with unknown fields refused: %v\n%s", err, jsonOut)
 	}
-	if report.Status != "claimed" || report.Claimed != 2 || report.ClaimID == "" || report.User != "alice" {
+	if report.Outcome.Kind != "claimed" || report.Claimed != 2 || report.ClaimID == "" || report.Outcome.Username != "alice" {
 		t.Fatalf("claim json = %+v, want two claimed artifacts for alice", report)
 	}
-	if report.URL != "https://village.example/team" || report.UserID != "11111111-1111-4111-8111-111111111111" {
-		t.Fatalf("claim scope = %s %s, want the normalized URL and user id", report.URL, report.UserID)
+	if report.Outcome.VillageURL != "https://village.example/team" || report.Outcome.UserID != "11111111-1111-4111-8111-111111111111" {
+		t.Fatalf("claim scope = %s %s, want the normalized URL and user id", report.Outcome.VillageURL, report.Outcome.UserID)
+	}
+	if report.Status.Owner.ID == "" || report.Status.TotalClaims != 1 || len(report.Status.Claims) != 1 {
+		t.Fatalf("nested status = %+v, want the owner and the appended claim", report.Status)
 	}
 
 	textOut, _, err := executeWithDataDirStreams(t, BuildUserCommand(), textDir, []string{"claim"})
 	if err != nil {
 		t.Fatalf("user claim text: %v\n%s", err, textOut)
 	}
-	if !strings.Contains(textOut, "Claimed 2 local artifacts") || !strings.Contains(textOut, "alice") {
-		t.Fatalf("claim text = %q, want the same count and username as the JSON facts", textOut)
+	for _, want := range []string{"Claimed 2 local artifacts", "alice", report.Outcome.VillageURL, report.Outcome.UserID, "Claim entry: oc_"} {
+		if !strings.Contains(textOut, want) {
+			t.Fatalf("claim text = %q, want the JSON fact %q", textOut, want)
+		}
 	}
 }
 
@@ -327,13 +389,15 @@ func TestUserClaimNormalizesVillageURL(t *testing.T) {
 		t.Fatalf("user claim: %v\n%s", err, stdout)
 	}
 	var report struct {
-		URL string `json:"villageUrl"`
+		Outcome struct {
+			URL string `json:"villageUrl"`
+		} `json:"outcome"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
 		t.Fatalf("decode claim json: %v\n%s", err, stdout)
 	}
-	if report.URL != "https://village.example/team" {
-		t.Fatalf("claim URL = %q, want the normalized scope", report.URL)
+	if report.Outcome.URL != "https://village.example/team" {
+		t.Fatalf("claim URL = %q, want the normalized scope", report.Outcome.URL)
 	}
 	show, _, err := executeWithDataDirStreams(t, BuildUserCommand(), dir, []string{"show", "--json"})
 	if err != nil {
@@ -347,7 +411,49 @@ func TestUserClaimNormalizesVillageURL(t *testing.T) {
 	if err := json.Unmarshal([]byte(show), &shown); err != nil {
 		t.Fatalf("decode show json: %v\n%s", err, show)
 	}
-	if len(shown.Claims) != 1 || shown.Claims[0].URL != report.URL {
+	if len(shown.Claims) != 1 || shown.Claims[0].URL != report.Outcome.URL {
 		t.Fatalf("show claims = %+v, want the same normalized URL as claim output", shown.Claims)
+	}
+}
+
+//go:embed testdata/user_command_cases.yaml
+var userCommandCasesYAML []byte
+
+type userCommandFixture struct {
+	RequiredNames []string          `yaml:"requiredNames"`
+	Cases         []userCommandCase `yaml:"cases"`
+}
+
+type userCommandCase struct {
+	Name string `yaml:"name"`
+}
+
+// TestUserCommandNamedCases keeps the required-name manifest over the user
+// command cases and dispatches each named case to its runner.
+func TestUserCommandNamedCases(t *testing.T) {
+	t.Parallel()
+	var fixture userCommandFixture
+	decoder := yaml.NewDecoder(bytes.NewReader(userCommandCasesYAML))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&fixture); err != nil {
+		t.Fatalf("decode user_command_cases.yaml: %v", err)
+	}
+	names := make([]string, 0, len(fixture.Cases))
+	for _, testCase := range fixture.Cases {
+		names = append(names, testCase.Name)
+	}
+	if err := testutil.ValidateRequiredNames(testutil.RequiredNamesManifest{RequiredNames: fixture.RequiredNames}, names, "user_command_cases.yaml"); err != nil {
+		t.Fatal(err)
+	}
+	runners := map[string]func(*testing.T){
+		"user-show-no-network":   runUserShowNoNetwork,
+		"user-claim-json-parity": runUserClaimJSONParity,
+	}
+	for _, testCase := range fixture.Cases {
+		run, ok := runners[testCase.Name]
+		if !ok {
+			t.Fatalf("user_command_cases.yaml case %q has no runner", testCase.Name)
+		}
+		t.Run(testCase.Name, run)
 	}
 }

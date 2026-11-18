@@ -76,21 +76,24 @@ func promptSignInClaim(ctx context.Context, creds *auth.Credentials, deps signIn
 	}
 }
 
-// writeClaimOutcome reports one completed claim on the progress stream.
+// writeClaimOutcome reports one completed claim on the progress stream. An
+// explicit claim always appends, so even the empty and nothing-to-move
+// outcomes name the recorded entry.
 func writeClaimOutcome(out io.Writer, result store.ClaimResult) {
 	switch {
-	case result.ClaimID == "" && result.Stored == 0:
-		fmt.Fprintln(out, "There is nothing to claim yet: this store has no local sessions or annotations.")
-	case result.ClaimID == "":
-		fmt.Fprintln(out, "Nothing to claim: every local session and annotation already has an owner.")
+	case result.Stored == 0:
+		fmt.Fprintln(out, "There is nothing to claim yet: this store has no local sessions or annotations. The claim was still recorded.")
 	case result.Claimed == 0:
-		fmt.Fprintln(out, "No local artifacts needed this claim; earlier claim entries were kept.")
+		fmt.Fprintln(out, "Nothing to claim: every local session and annotation already has an owner. The claim was still recorded.")
 	default:
 		fmt.Fprintf(out, "Claimed %d local artifacts", result.Claimed)
 		if result.AlreadyClaimed > 0 {
 			fmt.Fprintf(out, " (%d already claimed)", result.AlreadyClaimed)
 		}
 		fmt.Fprintln(out, ".")
+	}
+	if result.ClaimID != "" {
+		fmt.Fprintf(out, "Claim entry: %s\n", result.ClaimID)
 	}
 }
 

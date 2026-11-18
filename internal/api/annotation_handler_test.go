@@ -732,12 +732,12 @@ func TestAnnotationHandler_ClaimsWebAnnotation(t *testing.T) {
 		t.Fatalf("POST /api/v1/annotations: status = %d, want %d; body: %s", resp.StatusCode, http.StatusCreated, bodyBytes)
 	}
 
-	claims, err := s.OwnerClaims(t.Context())
+	page, err := s.OwnerClaims(t.Context(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(claims) != 1 || claims[0].Source != store.ClaimSourceAutomatic || claims[0].UsernameSnapshot != "alice" {
-		t.Fatalf("claims = %+v, want one automatic alice entry", claims)
+	if len(page.Claims) != 1 || page.Claims[0].Source != store.ClaimSourceAutomatic || page.Claims[0].UsernameSnapshot != "alice" {
+		t.Fatalf("claims = %+v, want one automatic alice entry", page.Claims)
 	}
 	counts, err := s.OwnershipCounts(t.Context())
 	if err != nil {

@@ -284,12 +284,12 @@ func TestAnnotateCreateClaimsNewAnnotations(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	claims, err := db.OwnerClaims(t.Context())
+	page, err := db.OwnerClaims(t.Context(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(claims) != 1 || claims[0].Source != "automatic" {
-		t.Fatalf("claims = %+v, want one reused automatic entry", claims)
+	if len(page.Claims) != 1 || page.Claims[0].Source != "automatic" {
+		t.Fatalf("claims = %+v, want one reused automatic entry", page.Claims)
 	}
 	counts, err := db.OwnershipCounts(t.Context())
 	if err != nil {
@@ -297,5 +297,38 @@ func TestAnnotateCreateClaimsNewAnnotations(t *testing.T) {
 	}
 	if counts.ClaimedAnnotations != 2 || counts.UnclaimedAnnotations != 0 {
 		t.Fatalf("annotation counts = %+v, want both new annotations claimed", counts)
+	}
+}
+
+// TestAnnotateCreateProjectClaimsNewAnnotation proves `annotate create-project`
+// points the just-created project annotation at the signed-in account.
+func TestAnnotateCreateProjectClaimsNewAnnotation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	seedTestSessionInto(t, dir, testSessionUUID)
+	saveUserCommandCredentials(t, dir)
+
+	output, err := executeAnnotateCmd(t, dir, []string{"create-project", string(testutil.TestProjectHash), testutil.TestTypeIDSessionApproval, "approve"})
+	if err != nil {
+		t.Fatalf("annotate create-project: %v\noutput: %s", err, output)
+	}
+	db, err := openPreparedStore(t, string(defaults.ResolveDBFilePathWith(dir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	page, err := db.OwnerClaims(t.Context(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Claims) != 1 || page.Claims[0].Source != "automatic" {
+		t.Fatalf("claims = %+v, want one automatic entry", page.Claims)
+	}
+	counts, err := db.OwnershipCounts(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts.TotalAnnotations != 1 || counts.ClaimedAnnotations != 1 {
+		t.Fatalf("annotation counts = %+v, want the project annotation claimed", counts)
 	}
 }
