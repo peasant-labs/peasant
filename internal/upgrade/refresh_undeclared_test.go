@@ -184,7 +184,7 @@ func TestShippedProducersDeclareTheirStoredLaneScopes(t *testing.T) {
 			t.Fatal(err)
 		}
 		for harness, factory := range ingest.DefaultAdapterRegistry {
-			if !ingest.AdapterDeclaresChangeScope(factory) {
+			if !ingest.AdapterDeclaresChangeScope(factory(nil, nil, salt.Salt{})) {
 				t.Errorf("shipped adapter %s withholds its change scope", harness)
 			}
 			declared := 0

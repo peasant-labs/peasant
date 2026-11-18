@@ -316,11 +316,13 @@ func (p *Pipeline) adapterSupportsStoredExtraction(harness Harness) bool {
 }
 
 // adapterDeclaresChangeScope reads the registered adapter's change-scope
-// declaration through the one shared reading. An unregistered harness has no
-// adapter to declare anything, and no adapter-behind decision to make.
+// declaration through the one shared reading. The adapter is built with the
+// pipeline's own dependencies, as adapterSupportsStoredExtraction builds it: a
+// registered factory may require a real filesystem. An unregistered harness
+// has no adapter to declare anything, and no adapter-behind decision to make.
 func (p *Pipeline) adapterDeclaresChangeScope(harness Harness) bool {
 	factory, ok := p.adapters[harness]
-	return !ok || AdapterDeclaresChangeScope(factory)
+	return !ok || AdapterDeclaresChangeScope(factory(p.fs, p.git, p.salt))
 }
 
 func (p *Pipeline) adapterDeclaresOutputPreserving(harness Harness) bool {

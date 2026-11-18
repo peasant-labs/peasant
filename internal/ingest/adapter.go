@@ -46,13 +46,13 @@ type ChangeScopeWithholder interface {
 	WithholdsChangeScope() bool
 }
 
-// AdapterDeclaresChangeScope reports whether the adapter a factory builds
-// declares its output-preserving change scope. It is the one reading of the
-// declaration: the refresh decision's evidence and the upgrade planner's
-// declaration table both call it. The adapter's dependencies are never used,
-// so none are supplied.
-func AdapterDeclaresChangeScope(factory AdapterFactory) bool {
-	withholder, ok := factory(nil, nil, salt.Salt{}).(ChangeScopeWithholder)
+// AdapterDeclaresChangeScope reports whether an adapter declares its
+// output-preserving change scope. It is the one reading of the declaration:
+// the refresh decision's evidence and the upgrade planner's declaration table
+// both call it. It takes a constructed adapter rather than a factory, so each
+// caller builds the adapter with the dependencies it already holds.
+func AdapterDeclaresChangeScope(adapter SourceAdapter) bool {
+	withholder, ok := adapter.(ChangeScopeWithholder)
 	return !ok || !withholder.WithholdsChangeScope()
 }
 
