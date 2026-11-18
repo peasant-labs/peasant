@@ -33,25 +33,17 @@ type SessionRefresh struct {
 	// Effects lists pending migrations that change this session's evidence.
 	// A decision with a higher-priority reason can otherwise mask an index reset.
 	Effects []store.StampEffect
-	// FullStep names the registered producer whose declaration does not cover
-	// the stored lane the decision chose. It is nil when the decision's lane
-	// stands. A non-nil FullStep plans the full refresh step instead.
+	// FullStep names the registered producer that withholds its
+	// output-preserving change scope, which is why the decision chose the full
+	// native step instead of a stored lane. It is nil otherwise. The pipeline
+	// takes the same decision from the same evidence.
 	FullStep *UndeclaredProducer
 }
 
-// PlannedLane is the lane the plan charges this session: the decision's lane,
-// or the native lane when an undeclared producer forces the full step.
-func (s SessionRefresh) PlannedLane() ingest.RefreshLane {
-	if s.FullStep != nil {
-		return ingest.RefreshLaneNative
-	}
-	return s.Decision.Lane
-}
-
 // UndeclaredProducer names a producer that is in this build's registry but
-// declares no output-preserving change scope for the stored lane a session's
-// decision chose. The planner cannot charge that lane's skip, so it plans the
-// full refresh step and names the producer.
+// declares no output-preserving change scope for the stored lane its session
+// would otherwise take. The refresh decision runs the full step instead, both
+// in this plan and in a real run, and names the producer.
 //
 // It is distinct from an unknown harness, where nothing in the registry can
 // produce the session's targets: that session stays undecided and is listed in
@@ -59,38 +51,15 @@ func (s SessionRefresh) PlannedLane() ingest.RefreshLane {
 type UndeclaredProducer struct {
 	Kind ProducerKind
 	Name string
-	// Skipped is the stored lane the decision chose and the plan does not charge.
+	// Skipped is the stored lane the declaration would have allowed.
 	Skipped ingest.RefreshLane
-	// Required is the change scope the producer would have to declare for the
-	// stored lane to preserve the output it skips.
+	// Required is the change scope the producer would have to declare.
 	Required ChangeScope
 }
 
 // String names the producer as kind/name, as ProducerDeclaration does.
 func (u UndeclaredProducer) String() string {
 	return ProducerDeclaration{Kind: u.Kind, Name: u.Name}.String()
-}
-
-// storedLaneScope is the output-preserving declaration one stored lane needs:
-// the producer kind that does the lane's work and the change scope under which
-// that work leaves the rest of the stored pair unchanged. The native and none
-// lanes skip nothing and need no declaration.
-type storedLaneScope struct {
-	kind  ProducerKind
-	scope ChangeScope
-}
-
-// storedLaneScopeFor returns the declaration a lane needs, or false for a lane
-// that skips nothing.
-func storedLaneScopeFor(lane ingest.RefreshLane) (storedLaneScope, bool) {
-	switch lane {
-	case ingest.RefreshLaneStoredMetadata:
-		return storedLaneScope{ProducerKindAdapter, ChangeScopeMetadataOnly}, true
-	case ingest.RefreshLaneStoredIndex:
-		return storedLaneScope{ProducerKindIndexer, ChangeScopeIndexOnly}, true
-	default:
-		return storedLaneScope{}, false
-	}
 }
 
 // RefreshUnknown identifies unavailable evidence for a session.
@@ -101,8 +70,8 @@ type RefreshUnknown struct{ SessionID, Evidence string }
 type RefreshEstimate struct {
 	Sessions  int
 	Undecided int
-	// ByLane counts the planned lane, so a session an undeclared producer
-	// forces onto the full step counts as native.
+	// ByLane counts the decision's lane, so a session an undeclared producer
+	// sends to the full step counts as native.
 	ByLane   map[ingest.RefreshLane]int
 	ByReason map[ingest.RefreshReason]int
 	// FullStep counts the sessions each undeclared producer forced onto the
@@ -117,13 +86,13 @@ func PlanRefresh(ctx context.Context, path string) (RefreshPlan, error) {
 	if err != nil {
 		return RefreshPlan{}, fmt.Errorf("plan refresh producers: %w", err)
 	}
-	return PlanRefreshFor(ctx, path, declarations)
+	return planRefresh(ctx, path, declarations)
 }
 
-// PlanRefreshFor is PlanRefresh against a supplied declaration table. A
-// measurement build passes a table in which one registered producer declares
-// no change scope, to observe the full step that producer forces.
-func PlanRefreshFor(ctx context.Context, path string, declarations []ProducerDeclaration) (RefreshPlan, error) {
+// planRefresh plans against a declaration table. PlanRefresh passes this
+// build's own; only tests and the measurement build pass another, built from
+// an adapter registry in which one adapter withholds its change scope.
+func planRefresh(ctx context.Context, path string, declarations []ProducerDeclaration) (RefreshPlan, error) {
 	if err := ctx.Err(); err != nil {
 		return RefreshPlan{}, err
 	}
@@ -141,17 +110,15 @@ func PlanRefreshFor(ctx context.Context, path string, declarations []ProducerDec
 	type targets struct {
 		adapter, indexer int
 		canExtract       bool
+		// undeclared is the adapter's declaration read through the table,
+		// which reads it with ingest.AdapterDeclaresChangeScope.
+		undeclared bool
 	}
 	producers := make(map[string]targets)
-	scopes := make(map[string]map[ProducerKind]ChangeScope)
 	for _, d := range declarations {
 		if d.Kind != ProducerKindAdapter && d.Kind != ProducerKindIndexer {
 			continue
 		}
-		if scopes[d.Name] == nil {
-			scopes[d.Name] = make(map[ProducerKind]ChangeScope)
-		}
-		scopes[d.Name][d.Kind] = d.ChangeScope
 		version, err := strconv.Atoi(string(d.Current()))
 		if err != nil {
 			return RefreshPlan{}, fmt.Errorf("plan refresh producer %s: invalid target %q: %w", d.String(), d.Current(), err)
@@ -159,6 +126,7 @@ func PlanRefreshFor(ctx context.Context, path string, declarations []ProducerDec
 		target := producers[d.Name]
 		if d.Kind == ProducerKindAdapter {
 			target.adapter, target.canExtract = version, d.Input == ProducerInputStoredTranscript
+			target.undeclared = d.ChangeScope != ChangeScopeMetadataOnly
 		} else {
 			target.indexer = version
 		}
@@ -218,17 +186,28 @@ func PlanRefreshFor(ctx context.Context, path string, declarations []ProducerDec
 		if row.AdapterVersion != nil {
 			version = *row.AdapterVersion
 		}
-		decision := ingest.DecideRefresh(ingest.RefreshEvidence{StoredRow: true, MetadataSchemaOld: ingest.MetadataNeedsNativeRefresh(row.MetadataVersion), AdapterVersion: version, AdapterTarget: target.adapter, AdapterStampPresent: row.AdapterVersion != nil, AdapterCanExtract: target.canExtract, IndexerVersion: row.IndexerVersion, IndexerTarget: target.indexer, IndexProofPresent: row.IndexedInputHash != nil})
+		// Only a registered harness reaches here (the continue above keeps an
+		// unknown harness undecided), so an undeclared adapter is never
+		// confused with a harness nothing can produce.
+		decision := ingest.DecideRefresh(ingest.RefreshEvidence{
+			StoredRow:           true,
+			MetadataSchemaOld:   ingest.MetadataNeedsNativeRefresh(row.MetadataVersion),
+			AdapterVersion:      version,
+			AdapterTarget:       target.adapter,
+			AdapterStampPresent: row.AdapterVersion != nil,
+			AdapterCanExtract:   target.canExtract,
+			AdapterUndeclared:   target.undeclared,
+			IndexerVersion:      row.IndexerVersion,
+			IndexerTarget:       target.indexer,
+			IndexProofPresent:   row.IndexedInputHash != nil,
+		})
 		session := SessionRefresh{SessionID: row.SessionID, Harness: row.Harness, Decision: decision, Decided: true, Effects: effects}
-		if need, stored := storedLaneScopeFor(decision.Lane); stored && scopes[row.Harness][need.kind] != need.scope {
-			// The harness is registered, so this is not an unknown harness:
-			// its producer for this lane is present but does not declare
-			// the scope that lets the lane skip work. Plan the full step.
-			session.FullStep = &UndeclaredProducer{Kind: need.kind, Name: row.Harness, Skipped: decision.Lane, Required: need.scope}
+		if decision.AdapterUndeclared {
+			session.FullStep = &UndeclaredProducer{Kind: ProducerKindAdapter, Name: row.Harness, Skipped: ingest.RefreshLaneStoredMetadata, Required: ChangeScopeMetadataOnly}
 			plan.Estimate.FullStep[*session.FullStep]++
 		}
 		plan.Sessions = append(plan.Sessions, session)
-		plan.Estimate.ByLane[session.PlannedLane()]++
+		plan.Estimate.ByLane[decision.Lane]++
 		plan.Estimate.ByReason[decision.Reason]++
 	}
 	return plan, nil

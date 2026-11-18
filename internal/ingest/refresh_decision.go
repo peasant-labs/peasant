@@ -87,6 +87,11 @@ func (r RefreshReason) Refreshing() bool { return r.OutcomeReason().Defined() }
 type RefreshDecision struct {
 	Reason RefreshReason
 	Lane   RefreshLane
+	// AdapterUndeclared names the adapter as the reason the full native step
+	// was chosen: the adapter is registered and behind, but it declares no
+	// output-preserving change scope, so the stored-metadata lane cannot
+	// skip work for it. The reason is then adapter_behind_native_only.
+	AdapterUndeclared bool
 }
 
 // IsRefresh reports whether the decision records a refresh.
@@ -172,6 +177,10 @@ type refreshEvidence struct {
 	// AdapterCanExtract reports that the adapter implements stored-transcript
 	// metadata extraction.
 	AdapterCanExtract bool
+	// AdapterUndeclared reports a registered adapter that withholds its
+	// output-preserving change scope (see AdapterDeclaresChangeScope). The
+	// zero value is the declaration every shipped adapter makes.
+	AdapterUndeclared bool
 	// IndexerVersion and IndexerTarget describe the stored index producer.
 	IndexerVersion int
 	IndexerTarget  int
@@ -242,6 +251,11 @@ func decideRefresh(in refreshEvidence) (decision RefreshDecision) {
 		if !in.AdapterCanExtract {
 			return RefreshDecision{Reason: RefreshReasonAdapterBehindNativeOnly, Lane: RefreshLaneNative}
 		}
+		if in.AdapterUndeclared {
+			// The stored lane's skip rests on the adapter's declaration. Without
+			// it the full step runs, on the path a native-only adapter takes.
+			return RefreshDecision{Reason: RefreshReasonAdapterBehindNativeOnly, Lane: RefreshLaneNative, AdapterUndeclared: true}
+		}
 		if !in.AdapterStampPresent {
 			return RefreshDecision{Reason: RefreshReasonAdapterStampAbsent, Lane: RefreshLaneStoredMetadata}
 		}
@@ -299,6 +313,14 @@ func (p *Pipeline) adapterSupportsStoredExtraction(harness Harness) bool {
 	}
 	_, ok = factory(p.fs, p.git, p.salt).(TranscriptMetadataExtractor)
 	return ok
+}
+
+// adapterDeclaresChangeScope reads the registered adapter's change-scope
+// declaration through the one shared reading. An unregistered harness has no
+// adapter to declare anything, and no adapter-behind decision to make.
+func (p *Pipeline) adapterDeclaresChangeScope(harness Harness) bool {
+	factory, ok := p.adapters[harness]
+	return !ok || AdapterDeclaresChangeScope(factory)
 }
 
 func (p *Pipeline) adapterDeclaresOutputPreserving(harness Harness) bool {
@@ -390,6 +412,7 @@ func (p *Pipeline) refreshEvidenceForLocation(session DiscoveredSession, loc Ses
 		AdapterTarget:       target.AdapterVersion,
 		AdapterStampPresent: present,
 		AdapterCanExtract:   p.adapterSupportsStoredExtraction(session.Harness),
+		AdapterUndeclared:   !p.adapterDeclaresChangeScope(session.Harness),
 		IndexerVersion:      loc.IndexerVersion,
 		IndexerTarget:       target.IndexerVersion,
 		IndexProofPresent:   loc.IndexedInputHash != nil,
@@ -481,6 +504,7 @@ func (p *Pipeline) refreshEvidenceForFile(session DiscoveredSession, metadata *U
 		in.AdapterTarget = p.versionTargets()[session.Harness].AdapterVersion
 		in.AdapterStampPresent = present
 		in.AdapterCanExtract = p.adapterSupportsStoredExtraction(session.Harness)
+		in.AdapterUndeclared = !p.adapterDeclaresChangeScope(session.Harness)
 	}
 	if metadata != nil {
 		if metadata.Timestamp.Ingested != nil && !session.ModTime.IsZero() &&

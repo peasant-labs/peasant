@@ -61,6 +61,7 @@ func (p *Pipeline) adapterTargetNeedsWork(ctx context.Context, target reindexTar
 			AdapterTarget:       p.versionTargets()[target.session.Harness].AdapterVersion,
 			AdapterStampPresent: present,
 			AdapterCanExtract:   p.adapterSupportsStoredExtraction(target.session.Harness),
+			AdapterUndeclared:   !p.adapterDeclaresChangeScope(target.session.Harness),
 		})
 	}
 	return decision.Reason == RefreshReasonAdapterBehind ||
@@ -172,6 +173,7 @@ func (p *Pipeline) storedAdapterEntry(ctx context.Context, sid SessionID, native
 			AdapterTarget:       p.versionTargets()[reconstructed.Harness].AdapterVersion,
 			AdapterStampPresent: present,
 			AdapterCanExtract:   p.adapterSupportsStoredExtraction(reconstructed.Harness),
+			AdapterUndeclared:   !p.adapterDeclaresChangeScope(reconstructed.Harness),
 		})
 	}
 	if decision.Lane != RefreshLaneStoredMetadata && decision.Reason != RefreshReasonAdapterBehindNativeOnly && decision.Reason != RefreshReasonMetadataSchema {

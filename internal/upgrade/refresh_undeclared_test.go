@@ -2,15 +2,13 @@ package upgrade
 
 import (
 	_ "embed"
-	"path/filepath"
+	"maps"
 	"slices"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 //go:embed testdata/refresh_undeclared.yaml
@@ -19,104 +17,92 @@ var refreshUndeclaredCases []byte
 //go:embed testdata/refresh_undeclared.manifest.yaml
 var refreshUndeclaredManifest []byte
 
-type refreshUndeclaredCase struct {
-	Name          string `yaml:"name"`
-	Harness       string `yaml:"harness"`
-	Undeclare     string `yaml:"undeclare"`
-	Unregister    bool   `yaml:"unregister"`
-	AdapterOffset int    `yaml:"adapterOffset"`
-	IndexerOffset int    `yaml:"indexerOffset"`
-	MetadataOld   bool   `yaml:"metadataOld"`
-	Want          struct {
-		Decided        bool   `yaml:"decided"`
-		Lane           string `yaml:"lane"`
-		Reason         string `yaml:"reason"`
-		FullStep       string `yaml:"fullStep"`
-		Skipped        string `yaml:"skipped"`
-		UnknownHarness bool   `yaml:"unknownHarness"`
-	} `yaml:"want"`
+type refreshUndeclaredFixture struct {
+	StoredLaneScopes []struct {
+		Lane  string `yaml:"lane"`
+		Kind  string `yaml:"kind"`
+		Scope string `yaml:"scope"`
+	} `yaml:"storedLaneScopes"`
+	Cases []struct {
+		Name          string `yaml:"name"`
+		Undeclare     bool   `yaml:"undeclare"`
+		Unregister    bool   `yaml:"unregister"`
+		AdapterOffset int    `yaml:"adapterOffset"`
+		StampAbsent   bool   `yaml:"stampAbsent"`
+		IndexerOffset int    `yaml:"indexerOffset"`
+		MetadataOld   bool   `yaml:"metadataOld"`
+		Want          struct {
+			Decided        bool   `yaml:"decided"`
+			Lane           string `yaml:"lane"`
+			Reason         string `yaml:"reason"`
+			FullStep       string `yaml:"fullStep"`
+			UnknownHarness bool   `yaml:"unknownHarness"`
+		} `yaml:"want"`
+	} `yaml:"cases"`
 }
 
-// undeclaredTable returns this build's declaration table with the named
-// producer kind of one harness stripped of its change scope. The producer
-// stays registered, which is what separates it from an unknown harness.
-// unregister instead drops every producer of the harness, so nothing in the
-// table can produce its targets.
-func undeclaredTable(t *testing.T, harness ingest.Harness, raw string, unregister bool) []ProducerDeclaration {
+func loadRefreshUndeclared(t *testing.T) refreshUndeclaredFixture {
 	t.Helper()
-	declarations, err := ProducerDeclarations()
+	var fixture refreshUndeclaredFixture
+	if err := testutil.DecodeFixtureYAML(refreshUndeclaredCases, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	return fixture
+}
+
+// withholdingClaudeAdapter is the claude-code adapter registered as one that
+// withholds its change scope: an undeclared producer.
+type withholdingClaudeAdapter struct{ *ingest.ClaudeAdapter }
+
+func (withholdingClaudeAdapter) WithholdsChangeScope() bool { return true }
+
+var _ ingest.ChangeScopeWithholder = withholdingClaudeAdapter{}
+
+// refreshTable builds the declaration table the way the shipped one is
+// built, from registries; undeclare swaps in the withholding adapter, and
+// unregister drops every claude-code producer from the result.
+func refreshTable(t *testing.T, undeclare, unregister bool) []ProducerDeclaration {
+	t.Helper()
+	registries := currentProducerRegistries()
+	if undeclare {
+		registries.adapters = maps.Clone(registries.adapters)
+		registries.adapters[ingest.HarnessClaudeCode] = func(fs ingest.FileSystem, git ingest.GitResolver, s salt.Salt) ingest.SourceAdapter {
+			return withholdingClaudeAdapter{ingest.NewClaudeAdapter(fs, git, s)}
+		}
+	}
+	declarations, err := declareProducers(registries)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if unregister {
-		return slices.DeleteFunc(declarations, func(d ProducerDeclaration) bool { return d.Kind.PerHarness() && d.Name == string(harness) })
-	}
-	if raw == "" {
-		return declarations
-	}
-	kind, err := NewProducerKind(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	stripped := 0
-	for i := range declarations {
-		if declarations[i].Kind == kind && declarations[i].Name == string(harness) {
-			declarations[i].ChangeScope = ""
-			stripped++
-		}
-	}
-	if stripped != 1 {
-		t.Fatalf("stripped %d declarations of %s/%s, want 1", stripped, kind, harness)
+		declarations = slices.DeleteFunc(declarations, func(d ProducerDeclaration) bool {
+			return d.Kind.PerHarness() && d.Name == string(ingest.HarnessClaudeCode)
+		})
 	}
 	return declarations
 }
 
 // TestPlanRefreshUndeclaredProducer keeps an undeclared producer and an
-// unknown harness apart: the first plans the full step and names the
+// unknown harness apart: the first takes the full step and names the
 // producer, the second stays undecided and names no producer.
 func TestPlanRefreshUndeclaredProducer(t *testing.T) {
-	var fixture struct {
-		Cases []refreshUndeclaredCase `yaml:"cases"`
-	}
+	fixture := loadRefreshUndeclared(t)
 	var manifest struct {
 		RequiredNames []string `yaml:"requiredNames"`
-	}
-	if err := testutil.DecodeFixtureYAML(refreshUndeclaredCases, &fixture); err != nil {
-		t.Fatal(err)
 	}
 	if err := testutil.DecodeFixtureYAML(refreshUndeclaredManifest, &manifest); err != nil {
 		t.Fatal(err)
 	}
 	present := make(map[string]bool, len(fixture.Cases))
-	target := ingest.GenerationRepairTargets[ingest.HarnessClaudeCode]
 	for _, c := range fixture.Cases {
 		present[c.Name] = true
 		t.Run(c.Name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "current.db")
-			db, err := store.Open(path)
-			if err != nil {
-				t.Fatal(err)
+			seed := refreshSeed{ID: "session", Harness: ingest.HarnessClaudeCode, AdapterOffset: offset(c.AdapterOffset), IndexerOffset: c.IndexerOffset, MetadataOld: c.MetadataOld, Proof: true}
+			if c.StampAbsent {
+				seed.AdapterOffset = nil
 			}
-			if err := db.Close(); err != nil {
-				t.Fatal(err)
-			}
-			conn, err := sqlite.OpenConn(path, sqlite.OpenReadWrite)
-			if err != nil {
-				t.Fatal(err)
-			}
-			metadata := int(ingest.CurrentSchemaVersion)
-			if c.MetadataOld {
-				metadata = 1
-			}
-			err = sqlitex.ExecuteTransient(conn, `INSERT INTO sessions(session_id,model_harness,model_id,opaque_host_id,project_hash,start_ms,end_ms,ingested_ms,source_path,source_format,schema_version,adapter_version,index_version,indexed_input_hash) VALUES ('session', ?, 'model', 'host', 'project', 1, 2, 3, 'source', 'jsonl', ?, ?, ?, ?)`,
-				&sqlitex.ExecOptions{Args: []any{c.Harness, metadata, target.AdapterVersion + c.AdapterOffset, target.IndexerVersion + c.IndexerOffset, "0000000000000000000000000000000000000000000000000000000000000000"}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := conn.Close(); err != nil {
-				t.Fatal(err)
-			}
-			plan, err := PlanRefreshFor(t.Context(), path, undeclaredTable(t, ingest.HarnessClaudeCode, c.Undeclare, c.Unregister))
+			path := currentRefreshStore(t, seed)
+			plan, err := planRefresh(t.Context(), path, refreshTable(t, c.Undeclare, c.Unregister))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -147,34 +133,24 @@ func TestPlanRefreshUndeclaredProducer(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			mismatch := session.PlannedLane() != lane ||
+			mismatch := session.Decision.Lane != lane ||
 				session.Decision.Reason != reason ||
 				plan.Estimate.ByLane[lane] != 1 ||
 				plan.Estimate.Undecided != 0
 			if mismatch {
-				t.Fatalf("planned %s/%s, want %s/%s: %+v", session.PlannedLane(), session.Decision.Reason, lane, reason, plan.Estimate)
+				t.Fatalf("decided %+v, want %s/%s: %+v", session.Decision, lane, reason, plan.Estimate)
 			}
 			if c.Want.FullStep == "" {
-				if session.FullStep != nil || len(plan.Estimate.FullStep) != 0 {
-					t.Fatalf("named an undeclared producer: %+v", session.FullStep)
+				if session.FullStep != nil || session.Decision.AdapterUndeclared || len(plan.Estimate.FullStep) != 0 {
+					t.Fatalf("named an undeclared producer: %+v %+v", session.Decision, session.FullStep)
 				}
 				return
 			}
-			skipped, err := ingest.NewRefreshLane(c.Want.Skipped)
-			if err != nil {
-				t.Fatal(err)
+			if session.FullStep == nil || !session.Decision.AdapterUndeclared {
+				t.Fatalf("no full step named: %+v", session)
 			}
-			if session.FullStep == nil {
-				t.Fatalf("no full step, want %s skipping %s", c.Want.FullStep, skipped)
-			}
-			named := session.FullStep.String() == c.Want.FullStep &&
-				session.FullStep.Skipped == skipped &&
-				session.Decision.Lane == skipped
-			if !named {
-				t.Fatalf("full step = %+v, want %s skipping %s", session.FullStep, c.Want.FullStep, skipped)
-			}
-			if plan.Estimate.FullStep[*session.FullStep] != 1 {
-				t.Fatalf("full-step census = %+v", plan.Estimate.FullStep)
+			if session.FullStep.String() != c.Want.FullStep || plan.Estimate.FullStep[*session.FullStep] != 1 {
+				t.Fatalf("full step = %+v census %+v, want %s", session.FullStep, plan.Estimate.FullStep, c.Want.FullStep)
 			}
 		})
 	}
@@ -183,29 +159,48 @@ func TestPlanRefreshUndeclaredProducer(t *testing.T) {
 	}
 }
 
-// TestPlanRefreshDeclaresEveryRegisteredStoredLane proves this build's own
-// table names no undeclared producer: every registered adapter and indexer
-// declares the scope its stored lane needs.
-func TestPlanRefreshDeclaresEveryRegisteredStoredLane(t *testing.T) {
+// TestShippedProducersDeclareTheirStoredLaneScopes proves this build names no
+// undeclared producer: every registered producer of a stored lane's kind
+// declares the scope the fixture pins for that lane, exactly once.
+func TestShippedProducersDeclareTheirStoredLaneScopes(t *testing.T) {
+	fixture := loadRefreshUndeclared(t)
 	declarations, err := ProducerDeclarations()
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, lane := range ingest.AllRefreshLanes {
-		need, stored := storedLaneScopeFor(lane)
-		if !stored {
-			continue
+	lanes := make([]ingest.RefreshLane, 0, len(fixture.StoredLaneScopes))
+	for _, pin := range fixture.StoredLaneScopes {
+		lane, err := ingest.NewRefreshLane(pin.Lane)
+		if err != nil {
+			t.Fatal(err)
 		}
-		for harness := range ingest.HarvesterVersionRegistry {
-			found := false
+		lanes = append(lanes, lane)
+		kind, err := NewProducerKind(pin.Kind)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scope, err := NewChangeScope(pin.Scope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for harness, factory := range ingest.DefaultAdapterRegistry {
+			if !ingest.AdapterDeclaresChangeScope(factory) {
+				t.Errorf("shipped adapter %s withholds its change scope", harness)
+			}
+			declared := 0
 			for _, d := range declarations {
-				if d.Kind == need.kind && d.Name == string(harness) {
-					found = d.ChangeScope == need.scope
+				if d.Kind == kind && d.Name == string(harness) && d.ChangeScope == scope {
+					declared++
 				}
 			}
-			if !found {
-				t.Errorf("%s/%s does not declare %s for the %s lane", need.kind, harness, need.scope, lane)
+			if declared != 1 {
+				t.Errorf("%s/%s declares %s for the %s lane %d times, want once", kind, harness, scope, lane, declared)
 			}
+		}
+	}
+	for _, lane := range []ingest.RefreshLane{ingest.RefreshLaneStoredMetadata, ingest.RefreshLaneStoredIndex} {
+		if !slices.Contains(lanes, lane) {
+			t.Errorf("storedLaneScopes pins no scope for the %s lane", lane)
 		}
 	}
 }

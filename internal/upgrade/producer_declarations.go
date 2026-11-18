@@ -401,10 +401,16 @@ func adapterDeclaration(harness ingest.Harness, factory ingest.AdapterFactory, v
 	if _, ok := factory(nil, nil, salt.Salt{}).(ingest.TranscriptMetadataExtractor); ok {
 		input = ProducerInputStoredTranscript
 	}
+	// The scope is read through the same function the refresh decision's
+	// evidence uses, so the plan and a run agree on an undeclared adapter.
+	scope := ChangeScopeMetadataOnly
+	if !ingest.AdapterDeclaresChangeScope(factory) {
+		scope = ""
+	}
 	return ProducerDeclaration{
 		Kind: ProducerKindAdapter, Name: string(harness),
 		Versions:    versions,
-		ChangeScope: ChangeScopeMetadataOnly, Input: input,
+		ChangeScope: scope, Input: input,
 		OutputProof: []ProofName{ProofContentHash, ProofMetadataContextDigest},
 		Precheck:    PrecheckAdapterContextEquivalence, Fallback: StepActionParse,
 	}
