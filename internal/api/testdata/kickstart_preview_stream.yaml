@@ -1,7 +1,28 @@
+generated:
+  pairs: 6000
+  answerBytes: 512
 requiredNames:
   - open-sends-first-segment-unasked
+  - more-sends-exactly-one-segment
+  - short-segment-sent-without-waiting-for-a-read
+  - seq-is-monotone
+  - open-replaces-the-existing-capture
+  - close-frees-the-capture
+  - second-connection-never-receives-the-firsts-frames
+  - unreadable-source-errors-and-logs-carry-no-source-or-path
+  - idle-expiry-frees-the-capture
+  - setup-session-end-closes-the-capture
 cases:
   - name: open-sends-first-segment-unasked
     transcript: |
       {"type":"user","uuid":"u1","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"synthetic preview content"}}
       {"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"synthetic response"}]}}
+  - {name: more-sends-exactly-one-segment, long: true, operation: more}
+  - {name: short-segment-sent-without-waiting-for-a-read, long: true, operation: short}
+  - {name: seq-is-monotone, long: true, operation: more}
+  - {name: open-replaces-the-existing-capture, long: true, operation: reopen}
+  - {name: close-frees-the-capture, long: true, operation: close}
+  - {name: second-connection-never-receives-the-firsts-frames, long: true, operation: isolation}
+  - {name: unreadable-source-errors-and-logs-carry-no-source-or-path, operation: missing-source}
+  - {name: idle-expiry-frees-the-capture, long: true, operation: expire}
+  - {name: setup-session-end-closes-the-capture, long: true, operation: end-setup}

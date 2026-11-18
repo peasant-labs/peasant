@@ -36,7 +36,7 @@ type webPreview struct {
 	revision  string
 	ctx       context.Context
 	cancel    context.CancelFunc
-	timer     *time.Timer
+	stopIdle  func() bool
 	last      time.Time
 	busy      bool
 	opened    bool
@@ -93,8 +93,8 @@ func (r *previewRegistry) dispatch(ctx context.Context, conn *Conn, req schema.L
 		return
 	}
 	p.busy = true
-	if p.timer != nil {
-		p.timer.Stop()
+	if p.stopIdle != nil {
+		p.stopIdle()
 	}
 	r.mu.Unlock()
 	go r.advance(p)
@@ -209,7 +209,7 @@ func (r *previewRegistry) start(p *webPreview, listings []onboarding.SessionList
 	}
 	opened := schema.LocalKickstartPreviewEvent{Kind: schema.LocalKickstartPreviewOpened, SessionID: p.sessionID, RequestID: p.requestID, CaptureID: p.id, Header: header, Directory: p.directory(false), Continuation: schema.LocalKickstartPreviewContinuationMore}
 	if err := r.send(p, opened); err != nil {
-		r.remove(p.conn, schema.LocalKickstartPreviewSlowClient, false)
+		r.removeIf(p, schema.LocalKickstartPreviewSlowClient, true)
 		return
 	}
 	r.advance(p)
@@ -272,25 +272,6 @@ func (r *previewRegistry) advance(p *webPreview) {
 		r.removeIf(p, schema.LocalKickstartPreviewSlowClient, true)
 		return
 	}
-	r.mu.Lock()
-	if r.captures[p.conn] == p {
-		if final {
-			delete(r.captures, p.conn)
-			p.cancel()
-			go p.capture.Close()
-		} else {
-			p.busy = false
-			p.last = time.Now()
-			p.timer = time.AfterFunc(defaults.KickstartWebPreviewIdle, func() {
-				r.mu.Lock()
-				defer r.mu.Unlock()
-				if r.captures[p.conn] == p && !p.busy {
-					r.removeLocked(p, schema.LocalKickstartPreviewIdle, true)
-				}
-			})
-		}
-	}
-	r.mu.Unlock()
 }
 
 func (p *webPreview) directory(complete bool) *schema.LocalKickstartPreviewDirectory {
@@ -316,13 +297,34 @@ func (r *previewRegistry) send(p *webPreview, event schema.LocalKickstartPreview
 	}
 	if event.Kind != schema.LocalKickstartPreviewOpened {
 		event.Seq = p.seq + 1
+		p.seq = event.Seq
+		if !event.Directory.Complete {
+			p.busy = false
+			p.last = time.Now()
+			p.stopIdle = r.sessions.env.afterFunc(defaults.KickstartWebPreviewIdle, func() {
+				r.mu.Lock()
+				defer r.mu.Unlock()
+				if r.captures[p.conn] == p && !p.busy {
+					r.removeLocked(p, schema.LocalKickstartPreviewIdle, true)
+				}
+			})
+		}
 	}
 	r.mu.Unlock()
 	err := p.conn.SendWait(p.ctx, ServerMessage{Type: schema.MsgKickstartPreview, Topic: TopicKickstart, Data: event})
+	if err != nil && event.Kind == schema.LocalKickstartPreviewSegmentEvent {
+		r.mu.Lock()
+		p.seq = event.Seq - 1
+		r.mu.Unlock()
+	}
 	if err == nil {
 		r.mu.Lock()
-		p.seq = event.Seq
 		p.opened = true
+		if event.Directory.Complete && r.captures[p.conn] == p {
+			delete(r.captures, p.conn)
+			p.cancel()
+			go p.capture.Close()
+		}
 		r.mu.Unlock()
 	}
 	return err
@@ -346,8 +348,8 @@ func (r *previewRegistry) fail(p *webPreview, err error) {
 		return
 	}
 	delete(r.captures, p.conn)
-	if p.timer != nil {
-		p.timer.Stop()
+	if p.stopIdle != nil {
+		p.stopIdle()
 	}
 	p.cancel()
 	if p.capture != nil {
@@ -391,8 +393,8 @@ func (r *previewRegistry) removeIf(p *webPreview, reason schema.LocalKickstartPr
 
 func (r *previewRegistry) removeLocked(p *webPreview, reason schema.LocalKickstartPreviewCloseReason, notify bool) <-chan struct{} {
 	delete(r.captures, p.conn)
-	if p.timer != nil {
-		p.timer.Stop()
+	if p.stopIdle != nil {
+		p.stopIdle()
 	}
 	p.cancel()
 	if p.capture != nil {

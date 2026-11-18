@@ -28,6 +28,8 @@ import (
 //go:embed testdata/kickstart_preview_privacy.yaml
 var kickstartPreviewPrivacyYAML []byte
 
+const privacySessionRow = "session"
+
 type previewPrivacySecrets struct {
 	RepoPath    string `yaml:"repoPath"`
 	Branch      string `yaml:"branch"`
@@ -225,6 +227,9 @@ func TestKickstartPreviewPrivacy(t *testing.T) {
 				}
 			}
 			body := response.Body.String()
+			if c.Row == privacySessionRow && strings.Contains(body, s.Transcript) {
+				t.Error("HTTP session preview contains transcript content")
+			}
 			if c.Expected != "" && !strings.Contains(body, c.Expected) {
 				t.Errorf("body %q does not contain %q", body, c.Expected)
 			}
