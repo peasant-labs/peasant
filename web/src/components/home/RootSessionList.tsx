@@ -1,4 +1,5 @@
 'use client';
+import { LocalPublicationState as SchemaLocalPublicationState, LocalSyncPublicationFilter as SchemaLocalSyncPublicationFilter } from '@peasant-labs/schema';
 
 import { displayedTurnCount } from '@/lib/sessions/displayedTurnCount';
 import { useEffect, useMemo, useRef } from 'react';
@@ -204,7 +205,7 @@ export function RootSessionList({
   }, [visible, childGroups, expandedGroups]);
 
   const publishedOnScreen = useMemo(
-    () => renderRows.filter((row) => row.publication.state === 'published').map((row) => row.id),
+    () => renderRows.filter((row) => row.publication.state === SchemaLocalPublicationState.Published).map((row) => row.id),
     [renderRows],
   );
   const audience = usePublicationAudience(publishedOnScreen, rows);
@@ -357,7 +358,7 @@ export function RootSessionList({
 
   return (
     <section ref={top} aria-label="sessions" aria-busy={reading || undefined} className="home-list" data-root-session-list="true">
-      {loading && visible.length === 0 ? <SkeletonList rows={6} label="Loading your sessions" /> : visible.length === 0 && filter === 'all' && total === 0 ? (
+      {loading && visible.length === 0 ? <SkeletonList rows={6} label="Loading your sessions" /> : visible.length === 0 && filter === SchemaLocalSyncPublicationFilter.All && total === 0 ? (
         // Nothing recorded at all: say so, and link to the docs that teach recording.
         <IngestTeach />
       ) : visible.length === 0 ? (

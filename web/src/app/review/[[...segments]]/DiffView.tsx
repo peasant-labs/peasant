@@ -1,4 +1,5 @@
 'use client';
+import { DiffLineKind as SchemaDiffLineKind } from '@peasant-labs/schema';
 
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
@@ -81,13 +82,13 @@ export function DiffView({
               )}
             </div>
             {h.lines.map((l, li) => {
-              const o = l.kind === 'add' ? '' : String(oldLine);
-              const n = l.kind === 'del' ? '' : String(newLine);
-              if (l.kind !== 'add') oldLine++;
-              if (l.kind !== 'del') newLine++;
+              const o = l.kind === SchemaDiffLineKind.Add ? '' : String(oldLine);
+              const n = l.kind === SchemaDiffLineKind.Delete ? '' : String(newLine);
+              if (l.kind !== SchemaDiffLineKind.Add) oldLine++;
+              if (l.kind !== SchemaDiffLineKind.Delete) newLine++;
               const rowBg =
-                l.kind === 'add' ? 'bg-diff-add' : l.kind === 'del' ? 'bg-diff-del' : '';
-              const marker = l.kind === 'add' ? '+' : l.kind === 'del' ? MINUS : '';
+                l.kind === SchemaDiffLineKind.Add ? 'bg-diff-add' : l.kind === SchemaDiffLineKind.Delete ? 'bg-diff-del' : '';
+              const marker = l.kind === SchemaDiffLineKind.Add ? '+' : l.kind === SchemaDiffLineKind.Delete ? MINUS : '';
               return (
                 <div key={li} className={`flex ${rowBg}`}>
                   <span className="w-10 shrink-0 select-none border-r border-rule px-1 py-0.5 text-right tabular-nums text-ink-4">

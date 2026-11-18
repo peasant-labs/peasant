@@ -1,3 +1,4 @@
+import { Role as SchemaRole } from '@peasant-labs/schema';
 /**
  * Rule-based transcript phase detection.
  *
@@ -74,7 +75,7 @@ function extractFailedAttempts(turns: TurnDetail[]): Attempt[] {
 
   for (let i = 0; i < turns.length; i++) {
     const turn = turns[i];
-    if (turn.role === "user") {
+    if (turn.role === SchemaRole.User) {
       if (currentTools.length > 0 && startIdx >= 0) {
         currentTools = [];
         startIdx = -1;
@@ -171,7 +172,7 @@ function classifyTurn(
   }
 
   // User correction detection
-  if (turn.role === "user") {
+  if (turn.role === SchemaRole.User) {
     const correctionSignals = [
       /\bi already said\b/i, /\bi told you\b/i, /\bno,?\s+not that\b/i,
       /\bthat'?s not what i\b/i, /\bnot what i asked\b/i,
@@ -208,7 +209,7 @@ function classifyTurn(
   }
 
   // Planning: assistant turn with no tool calls and substantial content
-  if (turn.role === "assistant" && !turn.toolCalls?.length && turn.content.length > 100) {
+  if (turn.role === SchemaRole.Assistant && !turn.toolCalls?.length && turn.content.length > 100) {
     return "planning";
   }
 
@@ -264,8 +265,8 @@ export function detectPhases(turns: TurnDetail[]): Phase[] {
     const lastSegment = segments[segments.length - 1];
 
     // Abandonment detection
-    const hasEndError = hasError(lastTurn) && lastTurn.role === "assistant";
-    const hasTaskSwitch = lastTurn.role === "user" && /\b(let'?s move on|forget it|different approach|never mind)\b/i.test(lastTurn.content);
+    const hasEndError = hasError(lastTurn) && lastTurn.role === SchemaRole.Assistant;
+    const hasTaskSwitch = lastTurn.role === SchemaRole.User && /\b(let'?s move on|forget it|different approach|never mind)\b/i.test(lastTurn.content);
     const lastQuarter = turns.slice(Math.floor(turns.length * 0.8));
     const noWritesInLastQuarter = !lastQuarter.some((t) => hasTools(t, WRITE_TOOLS));
 

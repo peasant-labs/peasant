@@ -74,18 +74,16 @@ rules:
     web/src/app/page.pages.test.tsx: 3
     web/src/app/page.root-list.test.tsx: 11
     web/src/app/page.test.tsx: 7
-    web/src/app/page.tsx: 6
+    web/src/app/page.tsx: 4
     web/src/app/projects/[[...segments]]/ProjectsRouter.test.tsx: 6
     web/src/app/projects/[[...segments]]/ProjectsRouter.tsx: 11
     web/src/app/projects/[[...segments]]/transcriptContextNavigation.mounted.test.tsx: 2
-    web/src/app/review/[[...segments]]/ChangeDetail.tsx: 3
-    web/src/app/review/[[...segments]]/DiffView.tsx: 6
+    web/src/app/review/[[...segments]]/ChangeDetail.tsx: 1
     web/src/app/review/[[...segments]]/ReviewRouter.test.tsx: 10
     web/src/app/review/[[...segments]]/ReviewRouter.tsx: 4
     web/src/app/review/[[...segments]]/ReviewSurface.diff.mounted.test.tsx: 6
     web/src/app/review/[[...segments]]/ReviewSurface.test.tsx: 5
     web/src/app/review/[[...segments]]/ReviewSurface.tsx: 7
-    web/src/app/review/[[...segments]]/caption.ts: 1
     web/src/app/review/[[...segments]]/changeGraphLayout.test.ts: 5
     web/src/app/review/[[...segments]]/timelineNavigation.fixture.ts: 1
     web/src/app/review/[[...segments]]/timelineNavigation.test.ts: 3
@@ -97,7 +95,7 @@ rules:
     web/src/app/share/ShareWizardClient.linked-sessions.test.tsx: 1
     web/src/app/share/ShareWizardClient.mounted.test.tsx: 6
     web/src/app/share/ShareWizardClient.redaction-flow.test.tsx: 6
-    web/src/app/share/ShareWizardClient.tsx: 11
+    web/src/app/share/ShareWizardClient.tsx: 10
     web/src/app/share/ShareWizardClient.wire-decode.test.tsx: 2
     web/src/app/share/publishPopupStates.mounted.test.tsx: 17
     web/src/app/share/testdata/grouped-sync.ts: 1
@@ -114,7 +112,7 @@ rules:
     web/src/components/LocalSidebar.test.tsx: 1
     web/src/components/ProjectIdentityProblem.tsx: 1
     web/src/components/home/LegacyHomeBrowse.tsx: 5
-    web/src/components/home/RootSessionList.tsx: 4
+    web/src/components/home/RootSessionList.tsx: 2
     web/src/components/map/MapCanvas.tsx: 1
     web/src/components/map/MapSquareNode.test.tsx: 1
     web/src/components/map/MapSquareNode.tsx: 5
@@ -131,35 +129,29 @@ rules:
     web/src/components/session-detail/v2/SessionDetailV2.test.tsx: 12
     web/src/components/session-detail/v2/SessionNotIndexed.tsx: 6
     web/src/components/session-detail/v2/lib/relationshipLink.test.ts: 3
-    web/src/components/session-detail/v2/lib/scopeTurns.ts: 4
-    web/src/components/session-detail/v2/lib/useEntryLabels.ts: 1
-    web/src/components/session-detail/v2/publish/automaticPublishing.ts: 4
+    web/src/components/session-detail/v2/lib/scopeTurns.ts: 1
     web/src/components/session-detail/v2/publish/publishModel.test.ts: 4
-    web/src/components/session-detail/v2/publish/publishModel.ts: 24
+    web/src/components/session-detail/v2/publish/publishModel.ts: 1
     web/src/components/session-detail/v2/publish/segmentConsent.test.ts: 3
-    web/src/components/session-detail/v2/publish/useTranscriptPublish.tsx: 50
+    web/src/components/session-detail/v2/publish/useTranscriptPublish.tsx: 45
     web/src/components/sessions/GroupedSessionsSection.tsx: 3
     web/src/components/settings/AutoPublishRules.tsx: 1
     web/src/components/settings/CustomPatterns.tsx: 5
     web/src/components/settings/SettingKeyRow.tsx: 4
     web/src/components/settings/VillageAccountRow.tsx: 4
-    web/src/components/share/PushStep.tsx: 16
+    web/src/components/share/PushStep.tsx: 14
     web/src/components/share/RedactionStep.test.tsx: 6
     web/src/components/share/RedactionStep.tsx: 2
     web/src/components/share/SessionPicker.tsx: 1
-    web/src/contexts/WebSocketContext.tsx: 9
     web/src/contexts/__tests__/PublishContext.test.tsx: 1
     web/src/contexts/__tests__/WebSocketContext.test.tsx: 16
-    web/src/hooks/useHomeSessions.ts: 2
-    web/src/hooks/useRootSessions.ts: 1
+    web/src/hooks/useHomeSessions.ts: 1
     web/src/hooks/useTheme.ts: 2
     web/src/lib/api/discovery.ts: 1
     web/src/lib/api/grouped.test.ts: 9
     web/src/lib/api/map.test.ts: 18
     web/src/lib/api/session-extras.test.ts: 1
-    web/src/lib/home/publishState.ts: 8
-    web/src/lib/home/viewState.ts: 1
-    web/src/lib/insights/phase-detection.ts: 10
+    web/src/lib/insights/phase-detection.ts: 5
     web/src/lib/kickstart/model.test.ts: 1
     web/src/lib/kickstart/model.ts: 1
     web/src/lib/kickstart/useVillageSignIn.ts: 2
@@ -178,7 +170,7 @@ rules:
     web/src/lib/share/redactions.test.ts: 1
     web/src/lib/share/scanFailure.ts: 1
     web/src/lib/village/observations.test.ts: 4
-    web/src/lib/village/presentation.ts: 4
+    web/src/lib/village/presentation.ts: 3
     web/src/schemaRuntimeArchitecture.test.ts: 2
     web/src/test/contextNavigationFixture.ts: 2
     web/src/test/fixtures/graphAdapterContract.ts: 2

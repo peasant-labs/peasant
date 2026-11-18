@@ -1,4 +1,5 @@
 'use client';
+import { SessionListItemKind as SchemaSessionListItemKind } from '@peasant-labs/schema';
 
 import { displayedTurnCount } from '@/lib/sessions/displayedTurnCount';
 import { useCallback, useState, useEffect, useMemo, useRef } from 'react';
@@ -226,7 +227,7 @@ async function fetchRealSessions(linkedIds: readonly string[]): Promise<ShareDis
   const helperContexts: ShareHelperContext[] = [];
   const groupedItems: LocalSessionListItem[] = grouped.items;
   for (const item of groupedItems) {
-    if (item.kind === 'context_container') {
+    if (item.kind === SchemaSessionListItemKind.ContextContainer) {
       if (!item.context) continue;
       helperContexts.push({
         groupId: item.context.groupId,
