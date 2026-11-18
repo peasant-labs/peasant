@@ -1294,7 +1294,30 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		rootEntries = append(rootEntries, e)
 	}
 
-	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageExtract, Total: toProcess})
+	// Only expose a byte denominator when every source has a measurable file.
+	// Virtual sources and stored-copy refreshes cannot be estimated from the
+	// native file's size.
+	byteSizes := make(map[SessionID]int64, len(toProcessEntries))
+	var extractBytes int64
+	for _, entry := range toProcessEntries {
+		if prog == nil {
+			break
+		}
+		session := entry.Session
+		if session.TranscriptOrigin != TranscriptOriginFile || session.SourcePath.String() == "" ||
+			entry.Decision.Lane == RefreshLaneStoredIndex || entry.Decision.Lane == RefreshLaneStoredMetadata {
+			extractBytes = 0
+			break
+		}
+		info, statErr := p.fs.Stat(session.SourcePath.String())
+		if statErr != nil || !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > int64(^uint64(0)>>1)-extractBytes {
+			extractBytes = 0
+			break
+		}
+		byteSizes[session.SessionID] = info.Size()
+		extractBytes += info.Size()
+	}
+	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageExtract, Total: toProcess, BytesTotal: extractBytes})
 	var extractDoneAtomic atomic.Int64
 	workers := parallelWorkers(p.config)
 
@@ -1360,7 +1383,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 			wr.schedulingParentID = OperationalParentID(entry.Session)
 			wr.schedulingResolved = true
 			extractDoneAtomic.Add(1)
-			emitAdvance(prog, StageExtract, 1, toProcess)
+			emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageExtract, Delta: 1, Total: toProcess, BytesDelta: byteSizes[entry.Session.SessionID]})
 			staging.Add(ctx, wr)
 			// The root's heap payload must not outlive transfer to the arena,
 			// including while this worker walks a large descendant subtree.
@@ -1376,7 +1399,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 				cwr.schedulingParentID = OperationalParentID(childEntry.Session)
 				cwr.schedulingResolved = true
 				extractDoneAtomic.Add(1)
-				emitAdvance(prog, StageExtract, 1, toProcess)
+				emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageExtract, Delta: 1, Total: toProcess, BytesDelta: byteSizes[childEntry.Session.SessionID]})
 				staging.Add(ctx, cwr)
 				// Enqueue grandchildren (if any).
 				queue = append(queue, childrenOf[childID]...)

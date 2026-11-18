@@ -106,6 +106,10 @@ type ProgressEvent struct {
 	// final value (the full count on success, the reached count on error).
 	// KindAdvance ignores it; a KindAdvance caller adds through Delta instead.
 	Done int
+	// BytesTotal is known only when every item has a measured size.
+	// BytesDelta adds the size of a completed item on KindAdvance.
+	BytesTotal int64
+	BytesDelta int64
 	// Err is non-nil only on KindEnd when the stage encountered a fatal error.
 	Err error
 }
@@ -114,6 +118,8 @@ type ProgressEvent struct {
 type StageProgress struct {
 	Total           int
 	Done            int
+	BytesTotal      int64
+	BytesDone       int64
 	Started         bool
 	Ended           bool
 	HasErr          bool
@@ -200,6 +206,8 @@ func (ps *ProgressState) Update(ev ProgressEvent) {
 	case KindStart:
 		sp.Total = ev.Total
 		sp.Done = 0
+		sp.BytesTotal = ev.BytesTotal
+		sp.BytesDone = 0
 		sp.Started = true
 		sp.Ended = false
 		sp.HasErr = false
@@ -209,6 +217,9 @@ func (ps *ProgressState) Update(ev ProgressEvent) {
 		// finished, so completion order cannot move Done backwards.
 		if ev.Delta > 0 {
 			sp.Done += ev.Delta
+		}
+		if sp.BytesTotal > 0 && ev.BytesDelta > 0 {
+			sp.BytesDone += min(ev.BytesDelta, sp.BytesTotal-sp.BytesDone)
 		}
 		if ev.Total > sp.Total {
 			sp.Total = ev.Total
