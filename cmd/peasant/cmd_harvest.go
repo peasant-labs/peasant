@@ -496,6 +496,20 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 		}
 	}
 
+	// Upgrade a store that is behind BEFORE the renderer mounts. The upgrade
+	// prints its plan, may ask a question, and reports its steps on the
+	// terminal; a mounted renderer redraws over all three, so the prompt could
+	// be erased while a person is answering it. Here the terminal is not owned
+	// yet, so the upgrade uses its normal terminal flow. The store open below
+	// then finds a current store, and it refuses to write anything if it does
+	// not (storeUpgradeProgressMounted).
+	if !skipDB && !flags.dryRun {
+		dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
+		if err := ensureStoreCurrent(cmd, dbPath, storeEntryModeFor(cmd)); err != nil {
+			return fmt.Errorf("open analytics store: %w", err)
+		}
+	}
+
 	// Build and start the progress renderer before the store opens, so the
 	// one-time upgrade pass and the store open are visible as stage activity
 	// rather than a frozen terminal. The renderer reads progState; every stage,
@@ -545,7 +559,7 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 	// place an already-stored session on the branch the setup tree lists it under.
 	var storedSessions ingest.KnownSessionIndex
 	if !skipDB {
-		db, err := openRunStore(cmd, flags.dryRun, string(resolvedOutput), cfg.Write, storeUpgradeProgressPlain)
+		db, err := openRunStore(cmd, flags.dryRun, string(resolvedOutput), cfg.Write, storeUpgradeProgressMounted)
 		if err != nil {
 			return fmt.Errorf("open analytics store: %w", err)
 		}
