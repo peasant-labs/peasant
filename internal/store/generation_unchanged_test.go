@@ -166,6 +166,10 @@ func TestManagedGenerationUnchangedProof(t *testing.T) {
 				if tc.Mutation == "mutation-unsupported" {
 					query = `UPDATE sessions SET active_generation_id=? WHERE session_id=?`
 					id = "file_backed"
+					err = sqlitex.Execute(conn, `INSERT INTO session_projection_generations(session_id,generation_id,metadata_json,title_refs_json,source_evidence_digest,completeness,index_format_version,installed_at_ms) VALUES(?,?,'{}','[]',?,'complete',2,1)`, &sqlitex.ExecOptions{Args: []any{string(p.SessionID), id, strings.Repeat("b", 64)}})
+					if err != nil {
+						t.Fatal(err)
+					}
 					p.GenerationID = id
 				}
 				err = sqlitex.Execute(conn, query, &sqlitex.ExecOptions{Args: []any{id, string(p.SessionID)}})
