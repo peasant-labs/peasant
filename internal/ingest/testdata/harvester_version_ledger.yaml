@@ -8,6 +8,10 @@
 - id: pi-adapter-3
   harness: pi
   kind: adapter
+  change_scope: metadata-only
+  output_proof: [content-hash, metadata-context-digest]
+  precheck: adapter-context-equivalence
+  fallback: parse
   from: 2
   to: 3
   reason: adapter_behind
@@ -30,6 +34,10 @@
 - id: claude-adapter-4
   harness: claude-code
   kind: adapter
+  change_scope: metadata-only
+  output_proof: [content-hash, metadata-context-digest]
+  precheck: adapter-context-equivalence
+  fallback: parse
   from: 3
   to: 4
   reason: adapter_behind
@@ -66,6 +74,10 @@
 - id: opencode-adapter-4
   harness: opencode
   kind: adapter
+  change_scope: metadata-only
+  output_proof: [content-hash, metadata-context-digest]
+  precheck: adapter-context-equivalence
+  fallback: parse
   from: 3
   to: 4
   reason: adapter_behind_native_only
@@ -73,6 +85,10 @@
 - id: opencode-adapter-5-managed
   harness: opencode
   kind: adapter
+  change_scope: metadata-only
+  output_proof: [content-hash, metadata-context-digest]
+  precheck: adapter-context-equivalence
+  fallback: parse
   from: 4
   to: 5
   reason: adapter_behind_native_only
@@ -109,6 +125,10 @@
 - id: codex-adapter-3
   harness: codex
   kind: adapter
+  change_scope: metadata-only
+  output_proof: [content-hash, metadata-context-digest]
+  precheck: adapter-context-equivalence
+  fallback: parse
   from: 2
   to: 3
   reason: adapter_behind
@@ -116,6 +136,10 @@
 - id: codex-adapter-4-managed
   harness: codex
   kind: adapter
+  change_scope: metadata-only
+  output_proof: [content-hash, metadata-context-digest]
+  precheck: adapter-context-equivalence
+  fallback: parse
   from: 3
   to: 4
   reason: adapter_behind
@@ -152,6 +176,10 @@
 - id: cursor-adapter-1
   harness: cursor
   kind: adapter
+  change_scope: metadata-only
+  output_proof: [content-hash, metadata-context-digest]
+  precheck: adapter-context-equivalence
+  fallback: parse
   from: 0
   to: 1
   reason: adapter_behind
@@ -174,6 +202,10 @@
 - id: strike-adapter-3
   harness: strike
   kind: adapter
+  change_scope: metadata-only
+  output_proof: [content-hash, metadata-context-digest]
+  precheck: adapter-context-equivalence
+  fallback: parse
   from: 2
   to: 3
   reason: adapter_behind_native_only

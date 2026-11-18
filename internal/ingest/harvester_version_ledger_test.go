@@ -35,13 +35,17 @@ func (kind harvesterVersionKind) Validate() error {
 }
 
 type harvesterVersionLedgerRow struct {
-	ID      string               `yaml:"id"`
-	Harness ingest.Harness       `yaml:"harness"`
-	Kind    harvesterVersionKind `yaml:"kind"`
-	From    int                  `yaml:"from"`
-	To      int                  `yaml:"to"`
-	Reason  ingest.RefreshReason `yaml:"reason"`
-	Lane    ingest.RefreshLane   `yaml:"lane"`
+	ID          string               `yaml:"id"`
+	Harness     ingest.Harness       `yaml:"harness"`
+	Kind        harvesterVersionKind `yaml:"kind"`
+	From        int                  `yaml:"from"`
+	To          int                  `yaml:"to"`
+	Reason      ingest.RefreshReason `yaml:"reason"`
+	Lane        ingest.RefreshLane   `yaml:"lane"`
+	ChangeScope string               `yaml:"change_scope"`
+	OutputProof []string             `yaml:"output_proof"`
+	Precheck    string               `yaml:"precheck"`
+	Fallback    string               `yaml:"fallback"`
 }
 
 type harvesterVersionLedger struct {
@@ -199,6 +203,9 @@ func TestEveryVersionBumpNamesAReasonAndALane(t *testing.T) {
 		}
 		switch row.Kind {
 		case harvesterVersionAdapter:
+			if row.ChangeScope != "metadata-only" || !slices.Equal(row.OutputProof, []string{"content-hash", "metadata-context-digest"}) || row.Precheck != "adapter-context-equivalence" || row.Fallback != "parse" {
+				t.Fatalf("ledger row %s does not declare the adapter proof and fallback: %+v", row.ID, row)
+			}
 			switch lane {
 			case ingest.RefreshLaneStoredMetadata:
 				if reason != ingest.RefreshReasonAdapterBehind {
