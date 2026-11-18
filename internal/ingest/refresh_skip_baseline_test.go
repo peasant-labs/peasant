@@ -20,6 +20,7 @@ type refreshSkipCounts struct {
 	Proofs  int64 `yaml:"proofs"`
 	Settles int64 `yaml:"settles"`
 	Copies  int64 `yaml:"copies"`
+	Builds  int64 `yaml:"builds"`
 	Parses  int64 `yaml:"parses"`
 }
 
@@ -82,9 +83,7 @@ func TestRefreshSkipBaselineChangesTheExecutedPath(t *testing.T) {
 				if row := result.Census.Rows[0]; row.Lane != ingest.RefreshLaneStoredMetadata || row.Reason != ingest.OutcomeReasonRefreshAdapterBehind {
 					t.Fatalf("decision changed: summary %+v census %+v", result.Summary, result.Census)
 				}
-				// The managed-format builder is the parse: it reads the stored
-				// transcript and stages a generation candidate.
-				got := refreshSkipCounts{Proofs: counted.proofs.Load(), Settles: counted.settles.Load(), Copies: counted.calls.Load(), Parses: builds.Load() + parses.Load()}
+				got := refreshSkipCounts{Proofs: counted.proofs.Load(), Settles: counted.settles.Load(), Copies: counted.calls.Load(), Builds: builds.Load(), Parses: parses.Load()}
 				if got != mode.want {
 					t.Fatalf("executed %+v, want %+v", got, mode.want)
 				}
