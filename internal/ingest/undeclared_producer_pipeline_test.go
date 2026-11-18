@@ -97,7 +97,11 @@ func TestUndeclaredProducerTakesTheFullStep(t *testing.T) {
 			}
 			named := 0
 			for _, session := range result.Sessions {
-				if session.SessionID == id && session.Decision.Reason == reason && session.Decision.Lane == lane && session.Decision.AdapterUndeclared {
+				decision := session.Decision
+				if session.SessionID != id || decision.Reason != reason {
+					continue
+				}
+				if decision.Lane == lane && decision.AdapterUndeclared {
 					named++
 				}
 			}
