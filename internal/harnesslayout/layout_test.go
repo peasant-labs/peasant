@@ -332,7 +332,8 @@ func TestShapeJSONSelectsRecordsAndKeepsDocumentFields(t *testing.T) {
 }
 
 func TestPresenceLabelSeparatesMissingFromOtherErrors(t *testing.T) {
-	if got := harnesslayout.PresenceLabel(nil); got != "present" {
+	const presentLabel = "present"
+	if got := harnesslayout.PresenceLabel(nil); got != presentLabel {
 		t.Fatalf("nil = %q", got)
 	}
 	if got := harnesslayout.PresenceLabel(fs.ErrNotExist); got != "absent" {

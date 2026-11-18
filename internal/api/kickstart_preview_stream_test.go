@@ -221,7 +221,7 @@ func TestKickstartPreviewStream(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if tc.Operation == "capacity" || tc.Operation == "capacity-race" {
+			if tc.Operation == "busy-capacity" || tc.Operation == "capacity-race" {
 				// Occupy the parse worker so both registered captures are busy.
 				hub.previews.worker <- struct{}{}
 				defer func() { <-hub.previews.worker }()
@@ -426,7 +426,7 @@ func TestKickstartPreviewStream(t *testing.T) {
 				if len(state.Segments[0].Turns) != 1 || !state.Segments[0].Turns[0].Truncated {
 					t.Fatal("oversized turn was not sent alone and truncated")
 				}
-			case "more":
+			case "load-next":
 				write(ClientMessage{Type: schema.MsgKickstartPreview, Preview: &schema.LocalKickstartPreviewRequest{Op: schema.LocalKickstartPreviewMore, RequestID: "next", SessionID: "setup", CaptureID: state.CaptureID, After: state.Seq}})
 				event := read()
 				next, err := schema.MergeLocalKickstartPreview(state, event)
@@ -442,7 +442,7 @@ func TestKickstartPreviewStream(t *testing.T) {
 				if closed.Kind != schema.LocalKickstartPreviewClosed || closed.Reason != schema.LocalKickstartPreviewReplaced || closed.CaptureID != state.CaptureID || opened.Kind != schema.LocalKickstartPreviewOpened || opened.CaptureID == state.CaptureID {
 					t.Fatal("replacement did not close the old capture before opening the new capture")
 				}
-			case "close":
+			case "close-preview":
 				write(ClientMessage{Type: schema.MsgKickstartPreview, Preview: &schema.LocalKickstartPreviewRequest{Op: schema.LocalKickstartPreviewClose, RequestID: "close", SessionID: "setup", CaptureID: state.CaptureID}})
 				closed := read()
 				if closed.Kind != schema.LocalKickstartPreviewClosed || closed.Reason != schema.LocalKickstartPreviewClosedByClient {

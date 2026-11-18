@@ -900,6 +900,7 @@ const (
 	// codexRoleDeveloper is Codex's system-injected developer prompt (permissions,
 	// AGENTS.md context). Distinct from user/assistant on the wire.
 	codexRoleDeveloper CodexRole = "developer"
+	codexRoleSystem    CodexRole = "system"
 
 	codexEventTokenCount   = "token_count"
 	codexEventTaskComplete = "task_complete"

@@ -109,7 +109,8 @@ func TestCodexRetainedUnknown(t *testing.T) {
 			if row.Name == "envelope" && !strings.Contains(string(record.Payload), "9007199254740993") {
 				t.Fatal("number precision lost")
 			}
-			if result.Entries[0].ContentPreview == nil || *result.Entries[0].ContentPreview != "known" || result.Entries[len(result.Entries)-1].ContentPreview == nil || *result.Entries[len(result.Entries)-1].ContentPreview != "known" {
+			const siblingContent = "known"
+			if result.Entries[0].ContentPreview == nil || *result.Entries[0].ContentPreview != siblingContent || result.Entries[len(result.Entries)-1].ContentPreview == nil || *result.Entries[len(result.Entries)-1].ContentPreview != siblingContent {
 				t.Fatal("known siblings lost")
 			}
 		})

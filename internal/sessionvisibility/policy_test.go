@@ -19,6 +19,10 @@ import (
 //go:embed testdata/policy.yaml
 var policyFixtureBytes []byte
 
+const policyFixtureVisible = "visible"
+const policyFixtureHidden = "hidden"
+const policyFixtureError = "error"
+
 var requiredPolicyBehaviorNames = []string{
 	"all_mode",
 	"selected_empty",
@@ -107,26 +111,26 @@ func loadPolicyFixture(data []byte) (policyFixture, error) {
 		if tc.ZeroPolicy && (configured || tc.DiscoveryResult == "") {
 			return policyFixture{}, fmt.Errorf("zero-policy fixture %q must exercise discovery without configured selection", tc.Name)
 		}
-		if tc.Name == "" || (tc.Result != "visible" && tc.Result != "hidden" && tc.Result != "error") {
+		if tc.Name == "" || (tc.Result != policyFixtureVisible && tc.Result != policyFixtureHidden && tc.Result != policyFixtureError) {
 			return policyFixture{}, fmt.Errorf("policy fixture case %q is incomplete: result must be exactly visible, hidden, or error", tc.Name)
 		}
 		if _, duplicate := names[tc.Name]; duplicate {
 			return policyFixture{}, fmt.Errorf("policy fixture repeats case name %q", tc.Name)
 		}
 		names[tc.Name] = struct{}{}
-		if (tc.Result == "error") != (tc.ErrorContains != "") {
+		if (tc.Result == policyFixtureError) != (tc.ErrorContains != "") {
 			return policyFixture{}, fmt.Errorf("policy fixture case %q must set error_contains if and only if result is error", tc.Name)
 		}
 		if tc.Candidate.ClonePath != "" && (!filepath.IsAbs(tc.Candidate.ClonePath) || filepath.Clean(tc.Candidate.ClonePath) != tc.Candidate.ClonePath) {
 			return policyFixture{}, fmt.Errorf("policy fixture case %q has non-exact clone_path %q", tc.Name, tc.Candidate.ClonePath)
 		}
-		if tc.DiscoveryResult != "" && tc.DiscoveryResult != "visible" && tc.DiscoveryResult != "hidden" && tc.DiscoveryResult != "error" {
+		if tc.DiscoveryResult != "" && tc.DiscoveryResult != policyFixtureVisible && tc.DiscoveryResult != policyFixtureHidden && tc.DiscoveryResult != policyFixtureError {
 			return policyFixture{}, fmt.Errorf("policy fixture case %q has discovery_result %q: it must be exactly visible, hidden, or error when set", tc.Name, tc.DiscoveryResult)
 		}
 		if (tc.Candidate.Origin != "") != (tc.DiscoveryResult != "") {
 			return policyFixture{}, fmt.Errorf("policy fixture case %q must state discovery_result if and only if the candidate names an origin", tc.Name)
 		}
-		if (tc.DiscoveryResult == "error") != (tc.DiscoveryErrorContains != "") {
+		if (tc.DiscoveryResult == policyFixtureError) != (tc.DiscoveryErrorContains != "") {
 			return policyFixture{}, fmt.Errorf("policy fixture case %q must set discovery_error_contains if and only if discovery_result is error", tc.Name)
 		}
 	}
@@ -161,7 +165,7 @@ func TestPolicyFixture(t *testing.T) {
 			}
 			assertDiscoveryScope(t, policy, candidate, tc)
 			selected, err := policy.SelectedForIngest(candidate)
-			if tc.Result == "error" {
+			if tc.Result == policyFixtureError {
 				if err == nil || !strings.Contains(err.Error(), tc.ErrorContains) {
 					t.Fatalf("SelectedForIngest error = %v, want containing %q", err, tc.ErrorContains)
 				}
@@ -170,7 +174,7 @@ func TestPolicyFixture(t *testing.T) {
 			if err != nil {
 				t.Fatalf("SelectedForIngest: %v", err)
 			}
-			wantSelected := tc.Result == "visible"
+			wantSelected := tc.Result == policyFixtureVisible
 			if selected != wantSelected {
 				t.Fatalf("SelectedForIngest = %v, want %v", selected, wantSelected)
 			}
@@ -223,7 +227,7 @@ func assertDiscoveryScope(t *testing.T, policy sessionvisibility.Policy, candida
 		return
 	}
 	visible, err := policy.VisibleForDiscovery(candidate)
-	if tc.DiscoveryResult == "error" {
+	if tc.DiscoveryResult == policyFixtureError {
 		if err == nil || !strings.Contains(err.Error(), tc.DiscoveryErrorContains) {
 			t.Fatalf("VisibleForDiscovery error = %v, want containing %q", err, tc.DiscoveryErrorContains)
 		}
@@ -235,7 +239,7 @@ func assertDiscoveryScope(t *testing.T, policy sessionvisibility.Policy, candida
 	if err != nil {
 		t.Fatalf("VisibleForDiscovery: %v", err)
 	}
-	if want := tc.DiscoveryResult == "visible"; visible != want {
+	if want := tc.DiscoveryResult == policyFixtureVisible; visible != want {
 		t.Fatalf("VisibleForDiscovery = %v, want %v", visible, want)
 	}
 }

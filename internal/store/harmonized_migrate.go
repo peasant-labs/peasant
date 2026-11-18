@@ -383,10 +383,11 @@ func (p MigratePlan) CheckDisk() error {
 // dbMainFileOnConn reads the main database file from the connection's
 // own database list, so the disk probe needs no stored path.
 func dbMainFileOnConn(conn *sqlite.Conn) string {
+	const mainDatabase = "main"
 	file := ""
 	_ = sqlitex.ExecuteTransient(conn, `PRAGMA database_list`, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
-			if stmt.ColumnText(1) == "main" {
+			if stmt.ColumnText(1) == mainDatabase {
 				file = stmt.ColumnText(2)
 			}
 			return nil

@@ -33,11 +33,11 @@ cases:
     transcript: |
       {"type":"user","uuid":"u1","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"synthetic preview content"}}
       {"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"synthetic response"}]}}
-  - {name: more-sends-exactly-one-segment, long: true, operation: more}
+  - {name: more-sends-exactly-one-segment, long: true, operation: load-next}
   - {name: short-segment-sent-without-waiting-for-a-read, long: true, operation: short}
-  - {name: seq-is-monotone, long: true, operation: more}
+  - {name: seq-is-monotone, long: true, operation: load-next}
   - {name: open-replaces-the-existing-capture, long: true, operation: reopen}
-  - {name: close-frees-the-capture, long: true, operation: close}
+  - {name: close-frees-the-capture, long: true, operation: close-preview}
   - {name: second-connection-never-receives-the-firsts-frames, long: true, operation: isolation}
   - {name: unreadable-source-errors-and-logs-carry-no-source-or-path, operation: missing-source}
   - {name: idle-expiry-frees-the-capture, long: true, operation: expire}
@@ -45,10 +45,10 @@ cases:
   - {name: oversized-turn-stays-within-frame-cap, operation: bounded-turn}
   - {name: socket-disconnect-frees-capture, long: true, operation: disconnect}
   - {name: rescan-frees-capture, long: true, operation: rescan}
-  - {name: capacity-refusal-at-two-live-captures, operation: capacity}
+  - {name: capacity-refusal-at-two-live-captures, operation: busy-capacity}
   - {name: final-frame-without-segment-when-last-already-sent, long: true, operation: finish-without-segment}
   - {name: final-frame-repeats-sent-refs-unchanged, long: true, operation: finish-without-segment}
-  - {name: preview-close-carries-no-source-or-path, long: true, operation: close}
+  - {name: preview-close-carries-no-source-or-path, long: true, operation: close-preview}
   - {name: preview-cut-carries-no-source-or-path, long: true, operation: finish-without-segment}
   - {name: gated-read-close-discards-late-result, long: true, operation: gated-close}
   - {name: gated-read-replacement-orders-frames, long: true, operation: gated-reopen}

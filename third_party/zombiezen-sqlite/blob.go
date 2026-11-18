@@ -307,10 +307,13 @@ func (blob *Blob) Close() error {
 
 var errInvalidBlob = errors.New("invalid blob")
 
+// mainDatabaseName is SQLite's name for the primary database.
+const mainDatabaseName = "main"
+
 // cDBName converts a database name into a C string.
 func cDBName(dbn string) (uintptr, func(), error) {
 	switch dbn {
-	case "", "main":
+	case "", mainDatabaseName:
 		return mainCString, func() {}, nil
 	case "temp":
 		return tempCString, func() {}, nil

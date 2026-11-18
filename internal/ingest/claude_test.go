@@ -583,7 +583,8 @@ func TestClaudeAdapter_ExtractMetadata_NoGitAtAll(t *testing.T) {
 	}
 
 	// Branch: git resolver fails but gitBranch is set from JSONL ("main").
-	if meta.Git.Branch == nil || *meta.Git.Branch != "main" {
+	const fixtureBranch = "main"
+	if meta.Git.Branch == nil || *meta.Git.Branch != fixtureBranch {
 		t.Errorf("Git.Branch = %v, want %q (from JSONL field)", meta.Git.Branch, "main")
 	}
 
