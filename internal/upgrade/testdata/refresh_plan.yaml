@@ -1,0 +1,6 @@
+cases:
+  - {name: ordinary, version: 11, effect: none}
+  - {name: index, version: 10, effect: index-invalidated}
+  - {name: rename, version: 33, effect: harness-rename}
+  - {name: search, version: 62, effect: search-invalidated}
+  - {name: recount, version: 77, effect: recount-owed}
