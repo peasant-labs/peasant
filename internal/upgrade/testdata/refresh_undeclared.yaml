@@ -1,0 +1,36 @@
+# An undeclared producer and an unknown harness are two different plans.
+#
+# undeclare names the producer kind whose change scope the test build drops
+# for the claude-code harness; the producer stays registered. unregister drops
+# every claude-code producer from the table, so nothing in the registry can
+# produce the session's targets: an unknown harness, which stays undecided.
+cases:
+  - name: declared-adapter-keeps-its-stored-lane
+    harness: claude-code
+    adapterOffset: -1
+    want: {decided: true, lane: stored-metadata, reason: adapter_behind}
+  - name: undeclared-adapter-plans-the-full-step
+    harness: claude-code
+    undeclare: metadata-adapter
+    adapterOffset: -1
+    want: {decided: true, lane: native, reason: adapter_behind, fullStep: metadata-adapter/claude-code, skipped: stored-metadata}
+  - name: undeclared-indexer-plans-the-full-step
+    harness: claude-code
+    undeclare: transcript-indexer
+    indexerOffset: -1
+    want: {decided: true, lane: native, reason: indexer_behind, fullStep: transcript-indexer/claude-code, skipped: stored-index}
+  - name: undeclared-adapter-with-nothing-to-skip-names-nothing
+    harness: claude-code
+    undeclare: metadata-adapter
+    want: {decided: true, lane: none, reason: none}
+  - name: undeclared-adapter-already-native-names-nothing
+    harness: claude-code
+    undeclare: metadata-adapter
+    adapterOffset: -1
+    metadataOld: true
+    want: {decided: true, lane: native, reason: metadata_schema}
+  - name: unknown-harness-stays-undecided
+    harness: claude-code
+    unregister: true
+    adapterOffset: -1
+    want: {decided: false, unknownHarness: true}

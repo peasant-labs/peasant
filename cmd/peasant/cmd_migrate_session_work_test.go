@@ -11,6 +11,9 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/upgrade"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
@@ -132,5 +135,63 @@ func TestMigrateDryRunSessionWorkEvidenceError(t *testing.T) {
 	}
 	if len(doc.Schema) == 0 || doc.Work.Available || !strings.Contains(doc.Work.Error, "model_harness") {
 		t.Fatalf("missing error or schema: %s", out)
+	}
+}
+
+// TestSessionWorkNamesUndeclaredProducer proves the dry-run surface names a
+// registered producer that forced the full step, apart from the unknown
+// evidence an unregistered harness leaves. The build's own table declares
+// every producer, so the plan comes from a table with one adapter's scope
+// dropped.
+func TestSessionWorkNamesUndeclaredProducer(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "current.db")
+	db, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := sqlite.OpenConn(path, sqlite.OpenReadWrite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := ingest.GenerationRepairTargets[ingest.HarnessClaudeCode]
+	err = sqlitex.ExecuteTransient(conn, `INSERT INTO sessions(session_id,model_harness,model_id,opaque_host_id,project_hash,start_ms,end_ms,ingested_ms,source_path,source_format,schema_version,adapter_version,index_version,indexed_input_hash) VALUES ('session', ?, 'model', 'host', 'project', 1, 2, 3, 'source', 'jsonl', ?, ?, ?, ?)`,
+		&sqlitex.ExecOptions{Args: []any{string(ingest.HarnessClaudeCode), int(ingest.CurrentSchemaVersion), target.AdapterVersion - 1, target.IndexerVersion, "0000000000000000000000000000000000000000000000000000000000000000"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	declarations, err := upgrade.ProducerDeclarations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range declarations {
+		if declarations[i].Kind == upgrade.ProducerKindAdapter && declarations[i].Name == string(ingest.HarnessClaudeCode) {
+			declarations[i].ChangeScope = ""
+		}
+	}
+	plan, err := upgrade.PlanRefreshFor(t.Context(), path, declarations)
+	work := summarizeSessionWork(plan, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var text bytes.Buffer
+	writeSessionWork(&text, work)
+	for _, want := range []string{
+		"full step, undeclared producer metadata-adapter/claude-code: 1",
+		"lane native: 1",
+		"reason adapter_behind: 1",
+		"undecided: 0",
+	} {
+		if !strings.Contains(text.String(), want) {
+			t.Errorf("missing %q in %s", want, text.String())
+		}
+	}
+	if work.FullStep["metadata-adapter/claude-code"] != 1 || len(work.Unknown) != 0 {
+		t.Fatalf("session work = %+v", work)
 	}
 }

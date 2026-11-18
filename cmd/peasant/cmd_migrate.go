@@ -577,11 +577,15 @@ type sessionWork struct {
 	Undecided        int                 `json:"undecided"`
 	ByLane           map[string]int      `json:"by_lane"`
 	ByReason         map[string]int      `json:"by_reason"`
-	Unknown          map[string]int      `json:"unknown"`
+	// FullStep counts the sessions each registered producer forced onto the
+	// full refresh step because it declares no output-preserving change scope
+	// for the stored lane its decision chose. Its key names the producer.
+	FullStep map[string]int `json:"full_step"`
+	Unknown  map[string]int `json:"unknown"`
 }
 
 func summarizeSessionWork(plan upgrade.RefreshPlan, err error) sessionWork {
-	work := sessionWork{Available: err == nil, ByLane: map[string]int{}, ByReason: map[string]int{}, Unknown: map[string]int{}}
+	work := sessionWork{Available: err == nil, ByLane: map[string]int{}, ByReason: map[string]int{}, FullStep: map[string]int{}, Unknown: map[string]int{}}
 	if err != nil {
 		work.Error = err.Error()
 		return work
@@ -594,6 +598,9 @@ func summarizeSessionWork(plan upgrade.RefreshPlan, err error) sessionWork {
 	}
 	for reason, count := range plan.Estimate.ByReason {
 		work.ByReason[string(reason)] = count
+	}
+	for producer, count := range plan.Estimate.FullStep {
+		work.FullStep[producer.String()] += count
 	}
 	for _, unknown := range plan.Unknown {
 		work.Unknown[unknown.Evidence]++
@@ -614,6 +621,7 @@ func writeSessionWork(out io.Writer, work sessionWork) {
 	}
 	writeSessionWorkCounts(out, "lane", work.ByLane)
 	writeSessionWorkCounts(out, "reason", work.ByReason)
+	writeSessionWorkCounts(out, "full step, undeclared producer", work.FullStep)
 	writeSessionWorkCounts(out, "unknown evidence", work.Unknown)
 	if work.LowerBound {
 		fmt.Fprintln(out, "  lower bound: pending schema changes may reveal more work; upgrade the schema and run the dry run again for a fuller census")
