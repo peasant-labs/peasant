@@ -9,6 +9,12 @@
 // budget matrix, 240 sessions x 1000 entries over 5 rounds; run it only on a
 // quiet machine. A smaller shape is a smoke run and its report says so.
 //
+// Exit condition: the harness exists to decide whether the conditional
+// legacy-row validation (#1036) and shared-mapping reuse (#1038) are worth
+// building. Once that decision is recorded on both issues, delete the harness
+// or shrink it to the new-session smoke case; the structural budget test and
+// the stored run profile then carry the evidence.
+//
 //	go run -tags skipbudget ./cmd/skip-budget -list
 //	go run -tags skipbudget ./cmd/skip-budget -case C1,C2,C3,C5,C6 -base "$(git merge-base HEAD origin/develop)"
 //	go run -tags skipbudget ./cmd/skip-budget -case C1 -base <rev> -sessions 2 -entries 10

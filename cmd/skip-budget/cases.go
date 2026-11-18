@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -18,6 +19,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/metrics"
+	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/upgrade"
@@ -58,9 +60,31 @@ type caseSpec struct {
 	wantLane ingest.RefreshLane
 	// check validates one sample against the case's expected execution.
 	check func(sessions int, a arm, s sample) error
-	// undeclared plans the base against a table in which the claude-code
-	// adapter declares no change scope.
+	// undeclared registers, for the baseline arm and its plan, a claude-code
+	// adapter that withholds its change scope. The baseline is then a real
+	// run in which the undeclared adapter makes the pipeline take the full
+	// step.
 	undeclared bool
+}
+
+// withholdingClaudeAdapter is the claude-code adapter registered as one that
+// withholds its change scope: an undeclared producer.
+type withholdingClaudeAdapter struct {
+	*ingest.ClaudeAdapter
+}
+
+func (*withholdingClaudeAdapter) WithholdsChangeScope() bool { return true }
+
+var _ ingest.ChangeScopeWithholder = (*withholdingClaudeAdapter)(nil)
+
+// undeclaredAdapters is the shipped registry with the claude-code adapter
+// replaced by one that withholds its change scope.
+func undeclaredAdapters() map[ingest.Harness]ingest.AdapterFactory {
+	adapters := maps.Clone(ingest.DefaultAdapterRegistry)
+	adapters[ingest.HarnessClaudeCode] = func(fs ingest.FileSystem, git ingest.GitResolver, s salt.Salt) ingest.SourceAdapter {
+		return &withholdingClaudeAdapter{ClaudeAdapter: ingest.NewClaudeAdapter(fs, git, s)}
+	}
+	return adapters
 }
 
 func disableSkips(cfg *ingest.PipelineConfig) { cfg.DisableRefreshSkips = true }
@@ -141,14 +165,17 @@ func caseSpecs() map[upgrade.MeasurementCase]caseSpec {
 		upgrade.MeasurementCaseUndeclaredProducer: {
 			id: upgrade.MeasurementCaseUndeclaredProducer, mutation: mutateAdapterStamp,
 			skipLabel:     "declared adapter, as shipped: unchanged proof and settle",
-			baselineLabel: "the full step the plan names for the undeclared adapter: native capture and parse (forced run)",
-			baseline:      forceNative, wantLane: ingest.RefreshLaneStoredMetadata, undeclared: true,
+			baselineLabel: "adapter registered as undeclared: the pipeline takes the full native step and parses",
+			wantLane:      ingest.RefreshLaneStoredMetadata, undeclared: true,
 			check: func(n int, a arm, s sample) error {
 				if a == armSkip {
 					return expect(a, s, settlesAll(n))
 				}
 				if err := expect(a, s, parsesAll(n)); err != nil {
 					return err
+				}
+				if s.UndeclaredDecisions != n {
+					return fmt.Errorf("%s arm: %d session decisions name the undeclared adapter, want %d", a, s.UndeclaredDecisions, n)
 				}
 				return expectLane(a, s, ingest.RefreshLaneNative, n)
 			},
@@ -175,14 +202,17 @@ type sample struct {
 	ParseMs      float64 `json:"parseMs"`
 	WriteMs      float64 `json:"writeMs"`
 	executed
-	ParsedBytes  int64                       `json:"parsedBytes"`
-	Outcomes     map[ingest.IndexOutcome]int `json:"outcomes"`
-	Census       []ingest.RefreshCensusRow   `json:"census"`
-	CensusLanes  map[ingest.RefreshLane]int  `json:"censusLanes"`
-	WriteLane    *ingest.WriteLaneStats      `json:"writeLane,omitempty"`
-	DBBytes      int64                       `json:"dbBytesBefore"`
-	DBBytesAfter int64                       `json:"dbBytesAfter"`
-	WALBytes     int64                       `json:"walBytesAfter"`
+	// UndeclaredDecisions counts session decisions that name the adapter as
+	// undeclared.
+	UndeclaredDecisions int                         `json:"undeclaredDecisions"`
+	ParsedBytes         int64                       `json:"parsedBytes"`
+	Outcomes            map[ingest.IndexOutcome]int `json:"outcomes"`
+	Census              []ingest.RefreshCensusRow   `json:"census"`
+	CensusLanes         map[ingest.RefreshLane]int  `json:"censusLanes"`
+	WriteLane           *ingest.WriteLaneStats      `json:"writeLane,omitempty"`
+	DBBytes             int64                       `json:"dbBytesBefore"`
+	DBBytesAfter        int64                       `json:"dbBytesAfter"`
+	WALBytes            int64                       `json:"walBytesAfter"`
 }
 
 // armSummary is the order statistics of one arm's samples.
@@ -305,7 +335,7 @@ func runCase(ctx context.Context, spec caseSpec, opts harnessOptions) (string, e
 		report.Notes = append(report.Notes, fmt.Sprintf("Smoke shape %d x %d: validates the case, not a budget. Budgets need %d x %d on a quiet machine.", opts.sessions, opts.entries, matrixSessions, matrixEntries))
 	}
 	if spec.undeclared {
-		report.Notes = append(report.Notes, "The pipeline does not read the declaration table; this build declares every adapter. The baseline arm runs the full step the plan names for the undeclared adapter.")
+		report.Notes = append(report.Notes, "The baseline arm registers the claude-code adapter as undeclared, for the plan and the run alike. Both read the declaration through the same refresh decision, so the run takes the full native step the plan names and each session decision names the adapter.")
 	}
 	path := filepath.Join(dir, "report.json")
 	data, err := json.MarshalIndent(report, "", "  ")
@@ -392,7 +422,7 @@ func openStore(dbPath, output string) (*store.Store, error) {
 
 // newPipeline wires the pipeline as `peasant harvest` does for one harness,
 // with the metrics engine and classifier.
-func newPipeline(db *store.Store, metricsStore ingest.MetricsStore, source, output string, profiler *ingest.IndexProfiler, configure func(*ingest.PipelineConfig)) (*ingest.Pipeline, error) {
+func newPipeline(db *store.Store, metricsStore ingest.MetricsStore, adapters map[ingest.Harness]ingest.AdapterFactory, source, output string, profiler *ingest.IndexProfiler, configure func(*ingest.PipelineConfig)) (*ingest.Pipeline, error) {
 	fsys := &ingest.OSFileSystem{}
 	cfg := ingest.PipelineConfig{
 		Sources: map[ingest.Harness]ingest.SourceConfig{
@@ -404,7 +434,7 @@ func newPipeline(db *store.Store, metricsStore ingest.MetricsStore, source, outp
 	if configure != nil {
 		configure(&cfg)
 	}
-	return ingest.NewPipeline(fsys, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg,
+	return ingest.NewPipeline(fsys, testutil.NoGitResolver(), adapters, cfg,
 		ingest.WithStore(db), ingest.WithMetricsStore(metricsStore), ingest.WithSalt(db.InstallationSalt()),
 		ingest.WithIndexers(ingest.NewIndexerRegistry(fsys, ingest.IndexerRegistryOptions{})),
 		ingest.WithLogger(db), ingest.WithIndexLogger(db),
@@ -430,7 +460,7 @@ func prepareBase(ctx context.Context, baseDir string, sessions, entries int, m m
 		return caseShape{}, err
 	}
 	defer db.Close()
-	pipeline, err := newPipeline(db, db, source, output, &ingest.IndexProfiler{}, nil)
+	pipeline, err := newPipeline(db, db, ingest.DefaultAdapterRegistry, source, output, &ingest.IndexProfiler{}, nil)
 	if err != nil {
 		return caseShape{}, err
 	}
@@ -503,16 +533,7 @@ func planBase(ctx context.Context, baseDir string, spec caseSpec, sessions int) 
 	plan := declared
 	evidence := planEvidence{}
 	if spec.undeclared {
-		declarations, err := upgrade.ProducerDeclarations()
-		if err != nil {
-			return planEvidence{}, err
-		}
-		for i := range declarations {
-			if declarations[i].Kind == upgrade.ProducerKindAdapter && declarations[i].Name == string(ingest.HarnessClaudeCode) {
-				declarations[i].ChangeScope = ""
-			}
-		}
-		if plan, err = upgrade.PlanRefreshFor(ctx, path, declarations); err != nil {
+		if plan, err = upgrade.PlanRefreshWithAdapters(ctx, path, undeclaredAdapters()); err != nil {
 			return planEvidence{}, err
 		}
 		want := upgrade.UndeclaredProducer{Kind: upgrade.ProducerKindAdapter, Name: string(ingest.HarnessClaudeCode), Skipped: ingest.RefreshLaneStoredMetadata, Required: upgrade.ChangeScopeMetadataOnly}
@@ -546,11 +567,15 @@ func runRound(ctx context.Context, spec caseSpec, baseDir, roundDir string, roun
 	counted := &countingStore{Store: db}
 	profiler := &ingest.IndexProfiler{}
 	var configure func(*ingest.PipelineConfig)
+	adapters := ingest.DefaultAdapterRegistry
 	if a == armBaseline {
 		configure = spec.baseline
+		if spec.undeclared {
+			adapters = undeclaredAdapters()
+		}
 	}
 	// Discovery reads the prepared source in place: it is never written.
-	pipeline, err := newPipeline(db, counted, filepath.Join(baseDir, "source"), output, profiler, configure)
+	pipeline, err := newPipeline(db, counted, adapters, filepath.Join(baseDir, "source"), output, profiler, configure)
 	if err != nil {
 		return sample{}, err
 	}
@@ -587,6 +612,11 @@ func runRound(ctx context.Context, spec caseSpec, baseDir, roundDir string, roun
 			s.ProofMs = float64(stage.Duration.Microseconds()) / 1000
 		case ingest.StageIndex:
 			s.IndexStageMs = float64(stage.Duration.Microseconds()) / 1000
+		}
+	}
+	for _, session := range result.Sessions {
+		if session.Decision.AdapterUndeclared {
+			s.UndeclaredDecisions++
 		}
 	}
 	if result.Census != nil {
