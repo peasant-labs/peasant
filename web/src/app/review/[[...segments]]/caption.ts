@@ -1,3 +1,4 @@
+import { EdgeViolationKind as SchemaEdgeViolationKind } from '@peasant-labs/schema';
 /**
  * Change-detail caption assembly: the deterministic sentence
  * built client-side from payload facts —
@@ -74,7 +75,7 @@ export function buildCaption(payload: DecodedChangeDetailPayload): CaptionFragme
   // Edges — new/removed import-edge deltas plus wrong-way violations.
   const added = payload.newEdges.length;
   const removed = payload.removedEdges.length;
-  const wrongWay = payload.violations.filter((v) => v.kind === 'wrong_way').length;
+  const wrongWay = payload.violations.filter((v) => v.kind === SchemaEdgeViolationKind.WrongWay).length;
   let edgesText: string;
   if (added > 0 && removed > 0) {
     edgesText = `+${added}/${MINUS}${removed} connections`;

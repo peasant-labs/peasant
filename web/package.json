@@ -11,7 +11,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "node scripts/assert-unstring-eslint-enabled.mjs && node scripts/assert-directive-prologue.mjs && eslint src --quiet",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:journey:support": "node --test scripts/journey/lifecycle.test.mjs scripts/journey/server-sandbox.test.mjs scripts/journey/provenance.test.mjs scripts/journey/selection.test.mjs scripts/journey/compiled-mutation.test.mjs scripts/journey/kickstart-journey.test.mjs",
@@ -43,11 +43,13 @@
     "sxs:smoke": "SURFACE_SET=smoke REF_DIR=smoke-baseline APP_DIR=smoke node scripts/visual/stitch-sxs.mjs scripts/visual",
     "shell:gate": "pnpm boot:shell && pnpm shell:offline",
     "visual:publish-states": "node scripts/visual/publish-states-shoot.mjs",
-    "visual:transcript-segments": "node scripts/visual/transcript-segments-shoot.mjs"
+    "visual:transcript-segments": "node scripts/visual/transcript-segments-shoot.mjs",
+    "test:unstring-guard": "node scripts/test-unstring-eslint-enabled.mjs",
+    "test:directive-guard": "node scripts/test-directive-prologue.mjs"
   },
   "dependencies": {
     "@peasant-labs/fairtrade": "0.0.71",
-    "@peasant-labs/schema": "0.54.0",
+    "@peasant-labs/schema": "0.57.0",
     "@xyflow/react": "^12.10.1",
     "clsx": "^2.1.1",
     "diff": "^9.0.0",
@@ -78,6 +80,9 @@
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.0",
     "vitest": "^2.0.0",
-    "yaml": "2.9.0"
+    "yaml": "2.9.0",
+    "eslint": "9.39.1",
+    "typescript-eslint": "8.46.4",
+    "eslint-plugin-unstring": "0.2.1"
   }
 }
