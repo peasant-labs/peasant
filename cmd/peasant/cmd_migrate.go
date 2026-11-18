@@ -222,6 +222,10 @@ func confirmMigrate(cmd *cobra.Command) (bool, error) {
 }
 
 func readMigrateConsent(in io.Reader, out io.Writer) (bool, error) {
+	const (
+		consentYes = "yes"
+		consentNo  = "no"
+	)
 	reader := bufio.NewReader(in)
 	fmt.Fprint(out, "\nWith no other writer running (stop any harvest), convert file-backed sessions in place? [y/yes/N/no]: ")
 	for {
@@ -230,9 +234,9 @@ func readMigrateConsent(in io.Reader, out io.Writer) (bool, error) {
 			return false, fmt.Errorf("read migration consent: %w; nothing was converted; re-run `peasant migrate --confirm` to proceed without a prompt", err)
 		}
 		switch strings.ToLower(strings.TrimSpace(line)) {
-		case "y", "yes":
+		case "y", consentYes:
 			return true, nil
-		case "", "n", "no":
+		case "", "n", consentNo:
 			return false, nil
 		default:
 			fmt.Fprint(out, "Please answer y/yes or n/no: ")

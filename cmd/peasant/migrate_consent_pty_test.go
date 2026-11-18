@@ -15,7 +15,8 @@ import (
 )
 
 func TestMigrateConsentAfterUpgradeMounted(t *testing.T) {
-	if os.Getenv("PEASANT_TEST_MIGRATE_CHILD") == "1" {
+	const childEnabled = "1"
+	if os.Getenv("PEASANT_TEST_MIGRATE_CHILD") == childEnabled {
 		root := newTestRoot()
 		root.AddCommand(BuildMigrateCommand())
 		dir := os.Getenv("PEASANT_TEST_MIGRATE_DIR")
@@ -32,7 +33,7 @@ func TestMigrateConsentAfterUpgradeMounted(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestMigrateConsentAfterUpgradeMounted$")
-	child.Env = append(os.Environ(), "PEASANT_TEST_MIGRATE_CHILD=1", "PEASANT_TEST_MIGRATE_DIR="+dir)
+	child.Env = append(os.Environ(), "PEASANT_TEST_MIGRATE_CHILD="+childEnabled, "PEASANT_TEST_MIGRATE_DIR="+dir)
 	child.Stdin, child.Stdout, child.Stderr = terminal, terminal, terminal
 	output := newSignalWriter("convert file-backed sessions in place?")
 	drained := make(chan error, 1)
