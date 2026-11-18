@@ -10,6 +10,10 @@ secrets:
   transcript: synthetic-transcript-marker
   readerError: synthetic-reader-error-marker
   cursor: synthetic-cursor-marker
+socketCases:
+  - unreadable-source-errors-and-logs-carry-no-source-or-path
+  - preview-close-carries-no-source-or-path
+  - preview-cut-carries-no-source-or-path
 requiredNames:
   - project-preview
   - branch-preview

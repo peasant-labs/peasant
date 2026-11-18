@@ -19,6 +19,8 @@ requiredNames:
   - capacity-refusal-at-two-live-captures
   - final-frame-without-segment-when-last-already-sent
   - final-frame-repeats-sent-refs-unchanged
+  - preview-close-carries-no-source-or-path
+  - preview-cut-carries-no-source-or-path
 cases:
   - name: open-sends-first-segment-unasked
     transcript: |
@@ -39,3 +41,5 @@ cases:
   - {name: capacity-refusal-at-two-live-captures, operation: capacity}
   - {name: final-frame-without-segment-when-last-already-sent, long: true, operation: finish-without-segment}
   - {name: final-frame-repeats-sent-refs-unchanged, long: true, operation: finish-without-segment}
+  - {name: preview-close-carries-no-source-or-path, long: true, operation: close}
+  - {name: preview-cut-carries-no-source-or-path, long: true, operation: finish-without-segment}

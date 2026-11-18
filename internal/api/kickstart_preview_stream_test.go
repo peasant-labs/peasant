@@ -46,6 +46,19 @@ func TestKickstartPreviewStream(t *testing.T) {
 	if err := testutil.DecodeNamedFixtureYAML(streamFixture, &fixture); err != nil {
 		t.Fatal(err)
 	}
+	var privacy previewPrivacyFixture
+	if err := testutil.DecodeNamedFixtureYAML(kickstartPreviewPrivacyYAML, &privacy); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range privacy.SocketCases {
+		found := false
+		for _, tc := range fixture.Cases {
+			found = found || tc.Name == name
+		}
+		if !found {
+			t.Fatalf("privacy socket case %q is missing", name)
+		}
+	}
 	for _, tc := range fixture.Cases {
 		t.Run(tc.Name, func(t *testing.T) {
 			var logs bytes.Buffer
@@ -55,6 +68,11 @@ func TestKickstartPreviewStream(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			path := filepath.Join(t.TempDir(), "session.jsonl")
+			t.Cleanup(func() {
+				if strings.Contains(logs.String(), path) || strings.Contains(logs.String(), privacy.Secrets.Transcript) {
+					t.Error("socket preview log disclosed source content or path")
+				}
+			})
 			content := tc.Transcript
 			if tc.Operation == "bounded-turn" {
 				content = fmt.Sprintf("{\"type\":\"user\",\"uuid\":\"u1\",\"timestamp\":\"2026-01-01T00:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"%s\"}}\n", strings.Repeat("x", fixture.Generated.OversizedBytes))
@@ -72,7 +90,11 @@ func TestKickstartPreviewStream(t *testing.T) {
 						parent = fmt.Sprintf(`"parentUuid":"a%d",`, i-1)
 					}
 					fmt.Fprintf(&data, "{\"type\":\"user\",\"uuid\":\"u%d\",%s\"timestamp\":\"2026-01-01T00:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"question\"}}\n", i, parent)
-					fmt.Fprintf(&data, "{\"type\":\"assistant\",\"uuid\":\"a%d\",\"parentUuid\":\"u%d\",\"timestamp\":\"2026-01-01T00:00:01Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"%s\"}]}}\n", i, i, strings.Repeat(character, fixture.Generated.AnswerBytes))
+					content := strings.Repeat(character, fixture.Generated.AnswerBytes)
+					if i == 0 {
+						content += privacy.Secrets.Transcript
+					}
+					fmt.Fprintf(&data, "{\"type\":\"assistant\",\"uuid\":\"a%d\",\"parentUuid\":\"u%d\",\"timestamp\":\"2026-01-01T00:00:01Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"%s\"}]}}\n", i, i, content)
 				}
 				content = data.String()
 			}
@@ -261,6 +283,11 @@ func TestKickstartPreviewStream(t *testing.T) {
 				var event schema.LocalKickstartPreviewEvent
 				if err := json.Unmarshal(envelope.Data, &event); err != nil {
 					t.Fatal(err)
+				}
+				if event.Kind == schema.LocalKickstartPreviewClosed || event.Continuation == schema.LocalKickstartPreviewContinuationCut {
+					if strings.Contains(string(envelope.Data), path) || strings.Contains(string(envelope.Data), privacy.Secrets.Transcript) {
+						t.Fatal("preview error or notice disclosed source content or path")
+					}
 				}
 				return event
 			}

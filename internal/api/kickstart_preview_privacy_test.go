@@ -72,6 +72,7 @@ type previewPrivacyCase struct {
 
 type previewPrivacyFixture struct {
 	Secrets       previewPrivacySecrets `yaml:"secrets"`
+	SocketCases   []string              `yaml:"socketCases"`
 	RequiredNames []string              `yaml:"requiredNames"`
 	Cases         []previewPrivacyCase  `yaml:"cases"`
 }
