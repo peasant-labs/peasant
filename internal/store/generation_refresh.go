@@ -329,17 +329,17 @@ func (s *Store) RefreshManagedGeneration(ctx context.Context, refresh ManagedGen
 		return result, fmt.Errorf("store: refresh managed generation %s for session %s: take a database connection: %w; nothing changed and the active generation is unchanged", refresh.SourceGenerationID, refresh.SessionID, err)
 	}
 	defer s.pool.Put(conn)
-	txnErr := error(nil)
 	end, err := sqlitex.ImmediateTransaction(conn)
 	if err != nil {
 		return result, fmt.Errorf("store: refresh managed generation %s for session %s: begin the activation transaction: %w; nothing changed and the active generation is unchanged", refresh.SourceGenerationID, refresh.SessionID, err)
 	}
-	defer end(&txnErr)
-	result, txnErr = s.refreshManagedGenerationOnConn(ctx, conn, refresh)
-	if txnErr != nil {
-		return result, txnErr
-	}
-	return result, nil
+	defer func() {
+		end(&err)
+		if err != nil {
+			result = ManagedGenerationRefreshResult{}
+		}
+	}()
+	return s.refreshManagedGenerationOnConn(ctx, conn, refresh)
 }
 
 // validateManagedGenerationRefresh validates the request shape before any
@@ -446,30 +446,22 @@ func (s *Store) refreshManagedGenerationOnConn(ctx context.Context, conn *sqlite
 			Detail: fmt.Sprintf("the refreshed capture names session %q but the source generation belongs to session %q; a metadata-only refresh cannot relabel a generation; rebuild the capture for this session or re-parse the source; nothing changed", refresh.Metadata.SessionID, refresh.SessionID),
 		}
 	}
-	// The refreshed capture owns the measured stats, but two counts are derived
-	// from the stored entries rather than the metadata capture: the distinct
-	// input submissions and the conversation turn count. The pair metadata an
-	// adapter refresh installs carries neither (the builder computes them from
-	// the parsed entries), and the entries are exactly what this refresh reuses.
-	// Preserve the active generation's stored counts when the metadata capture
-	// omits them, so a metadata-only refresh cannot drop an unchanged parse's
-	// count authority. A complete generation still requires the input count, so
-	// a missing source count is a refused refresh rather than a silent zero.
-	if refresh.Metadata.Stats.InputSubmissionCount == nil || refresh.Metadata.Stats.ConversationTurnCount == nil {
-		stats, statsErr := readCapturedStatsOnConn(conn, refresh.SessionID)
-		if statsErr != nil && !errors.Is(statsErr, ErrNoCapturedStats) {
-			return result, fmt.Errorf("store: read the stored counts of session %s before the metadata-only refresh: %w; nothing changed and the active generation is unchanged; restore database access and retry or re-parse the source", refresh.SessionID, statsErr)
-		}
-		if statsErr == nil {
-			if refresh.Metadata.Stats.InputSubmissionCount == nil {
-				refresh.Metadata.Stats.InputSubmissionCount = stats.InputSubmissionCount
-			}
-			if refresh.Metadata.Stats.ConversationTurnCount == nil && stats.ConversationTurnCount != nil {
-				conversation := int64(*stats.ConversationTurnCount)
-				refresh.Metadata.Stats.ConversationTurnCount = &conversation
-			}
+	// These three counts belong to the stored parse, not the adapter capture.
+	stats, statsErr := readCapturedStatsOnConn(conn, refresh.SessionID)
+	if statsErr != nil && !errors.Is(statsErr, ErrNoCapturedStats) {
+		return result, fmt.Errorf("store: read the stored counts of session %s before the metadata-only refresh: %w; nothing changed; restore database access and retry", refresh.SessionID, statsErr)
+	}
+	if statsErr != nil || stats.TurnCount == nil || stats.InputSubmissionCount == nil || stats.ConversationTurnCount == nil {
+		return result, &ManagedGenerationRefreshError{
+			SessionID: refresh.SessionID, SourceGenerationID: refresh.SourceGenerationID,
+			Reason: ManagedGenerationRefreshSourceUnsupported,
+			Detail: "the stored parse counts are incomplete; re-parse the source to restore authoritative counts",
 		}
 	}
+	refresh.Metadata.Stats.TurnCount = *stats.TurnCount
+	refresh.Metadata.Stats.InputSubmissionCount = stats.InputSubmissionCount
+	conversation := int64(*stats.ConversationTurnCount)
+	refresh.Metadata.Stats.ConversationTurnCount = &conversation
 	probe := indexformat.Generation{
 		ID:                   refresh.SourceGenerationID,
 		Completeness:         source.record.Completeness,

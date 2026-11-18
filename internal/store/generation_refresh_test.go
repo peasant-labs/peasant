@@ -51,7 +51,7 @@ const managedRefreshTestCaptureRevision = int64(7)
 // captured context segment, an alias, commits, associations, subagents,
 // diagnostics, a relationship, and title refs.
 func managedRefreshTestCandidate(sid schema.SessionID, generationID string) (indexformat.V2, map[schema.SourceEntryRef][]byte, schema.UnifiedMetadata) {
-	inputCount := int64(6)
+	inputCount := int64(9)
 	mainRef := func(i int) schema.SourceEntryRef { return schema.SourceEntryRef(fmt.Sprintf("e_%06d", i)) }
 	preview := func(text string) *string { return &text }
 	toolInput := `{"command":"ls"}`
@@ -535,14 +535,20 @@ func TestManagedGenerationMetadataRefreshInstallsNewAuthority(t *testing.T) {
 	}
 
 	// Mutable stats and the session mirrors carry the refresh.
-	if got := refreshQueryInt(t, s, `SELECT turn_count FROM session_captured_stats WHERE session_id = ?`, string(sid)); got != int64(refreshed.Stats.TurnCount) {
-		t.Errorf("captured turn_count = %d, want %d", got, refreshed.Stats.TurnCount)
+	if got := refreshQueryInt(t, s, `SELECT turn_count FROM session_captured_stats WHERE session_id = ?`, string(sid)); got != int64(sourceMetadata.Stats.TurnCount) {
+		t.Errorf("captured turn_count = %d, want %d", got, sourceMetadata.Stats.TurnCount)
+	}
+	if got := refreshQueryInt(t, s, `SELECT conversation_turn_count FROM session_captured_stats WHERE session_id = ?`, string(sid)); got != *sourceMetadata.Stats.ConversationTurnCount {
+		t.Errorf("captured conversation_turn_count = %d, want %d", got, *sourceMetadata.Stats.ConversationTurnCount)
+	}
+	if got := refreshQueryInt(t, s, `SELECT input_submission_count FROM session_captured_stats WHERE session_id = ?`, string(sid)); got != *sourceMetadata.Stats.InputSubmissionCount {
+		t.Errorf("captured input_submission_count = %d, want %d", got, *sourceMetadata.Stats.InputSubmissionCount)
 	}
 	if got := refreshQueryInt(t, s, `SELECT tool_call_count FROM session_captured_stats WHERE session_id = ?`, string(sid)); got != int64(refreshed.Stats.ToolCallCount) {
 		t.Errorf("captured tool_call_count = %d, want %d", got, refreshed.Stats.ToolCallCount)
 	}
-	if got := refreshQueryInt(t, s, `SELECT turn_count FROM session_metrics WHERE session_id = ?`, string(sid)); got != int64(refreshed.Stats.TurnCount) {
-		t.Errorf("metric turn_count = %d, want %d", got, refreshed.Stats.TurnCount)
+	if got := refreshQueryInt(t, s, `SELECT turn_count FROM session_metrics WHERE session_id = ?`, string(sid)); got != int64(sourceMetadata.Stats.TurnCount) {
+		t.Errorf("metric turn_count = %d, want %d", got, sourceMetadata.Stats.TurnCount)
 	}
 	if got := refreshQueryInt(t, s, `SELECT tool_calls FROM session_metrics WHERE session_id = ?`, string(sid)); got != int64(refreshed.Stats.ToolCallCount) {
 		t.Errorf("metric tool_calls = %d, want %d", got, refreshed.Stats.ToolCallCount)
@@ -553,8 +559,8 @@ func TestManagedGenerationMetadataRefreshInstallsNewAuthority(t *testing.T) {
 	if got := refreshQueryInt(t, s, `SELECT adapter_version FROM sessions WHERE session_id = ?`, string(sid)); got != 4 {
 		t.Errorf("session adapter_version = %d, want 4", got)
 	}
-	if got := refreshQueryInt(t, s, `SELECT input_submission_count FROM sessions WHERE session_id = ?`, string(sid)); got != *refreshed.Stats.InputSubmissionCount {
-		t.Errorf("session input_submission_count = %d, want %d", got, *refreshed.Stats.InputSubmissionCount)
+	if got := refreshQueryInt(t, s, `SELECT input_submission_count FROM sessions WHERE session_id = ?`, string(sid)); got != *sourceMetadata.Stats.InputSubmissionCount {
+		t.Errorf("session input_submission_count = %d, want %d", got, *sourceMetadata.Stats.InputSubmissionCount)
 	}
 	if got := refreshQueryInt(t, s, `SELECT COALESCE(indexed_publication_capture_revision, 0) FROM sessions WHERE session_id = ?`, string(sid)); got != managedRefreshTestCaptureRevision {
 		t.Errorf("indexed publication revision = %d, want the bound %d", got, managedRefreshTestCaptureRevision)
@@ -581,8 +587,8 @@ func TestManagedGenerationMetadataRefreshInstallsNewAuthority(t *testing.T) {
 	if snapshotMetadata.Project.Name != refreshed.Project.Name {
 		t.Errorf("snapshot project name = %q, want %q", snapshotMetadata.Project.Name, refreshed.Project.Name)
 	}
-	if snapshotMetadata.Stats.TurnCount != refreshed.Stats.TurnCount {
-		t.Errorf("snapshot turn count = %d, want %d", snapshotMetadata.Stats.TurnCount, refreshed.Stats.TurnCount)
+	if snapshotMetadata.Stats.TurnCount != sourceMetadata.Stats.TurnCount {
+		t.Errorf("snapshot turn count = %d, want %d", snapshotMetadata.Stats.TurnCount, sourceMetadata.Stats.TurnCount)
 	}
 	if !reflect.DeepEqual(snapshotMetadata.Relationships, refreshed.Relationships) {
 		t.Errorf("snapshot relationships = %+v, want the preserved %+v", snapshotMetadata.Relationships, refreshed.Relationships)
@@ -620,6 +626,65 @@ func TestManagedGenerationMetadataRefreshInstallsNewAuthority(t *testing.T) {
 	}
 	if got := refreshQueryInt(t, s, `SELECT COUNT(*) FROM session_content WHERE session_id = ?`, string(sid)); got != contentRowsBefore {
 		t.Errorf("session_content rows after reclaim = %d, want the shared %d", got, contentRowsBefore)
+	}
+}
+
+func TestManagedGenerationRefreshCommitFailureReachesIngest(t *testing.T) {
+	s, _ := openGenerationStore(t)
+	defer func() { _ = s.Close() }()
+	metadata, _, expected := seedManagedRefreshSource(t, s)
+	conn, err := s.pool.Take(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, query := range []string{
+		`CREATE TABLE refresh_commit_parent (id INTEGER PRIMARY KEY)`,
+		`CREATE TABLE refresh_commit_child (id INTEGER REFERENCES refresh_commit_parent(id) DEFERRABLE INITIALLY DEFERRED)`,
+		`CREATE TRIGGER refresh_commit_failure AFTER INSERT ON session_generations BEGIN INSERT INTO refresh_commit_child VALUES (123); END`,
+	} {
+		if err := sqlitex.Execute(conn, query, nil); err != nil {
+			s.pool.Put(conn)
+			t.Fatal(err)
+		}
+	}
+	s.pool.Put(conn)
+	outcome, err := s.RefreshManagedGenerationWithoutParse(t.Context(), ingest.ManagedGenerationRefreshRequest{
+		SessionID: ingest.SessionID(managedRefreshTestSession),
+		Metadata:  refreshedManagedMetadata(metadata), ExpectedState: expected,
+	})
+	if err == nil || outcome != (ingest.ManagedGenerationRefreshOutcome{}) {
+		t.Fatalf("commit failure returned outcome %+v, error %v; want error and no successful disposition", outcome, err)
+	}
+	if active := refreshQueryString(t, s, `SELECT active_generation_id FROM sessions WHERE session_id = ?`, string(managedRefreshTestSession)); active != managedRefreshTestGenerationID {
+		t.Fatalf("failed commit changed active generation to %q", active)
+	}
+	if got := refreshQueryInt(t, s, `SELECT count(*) FROM refresh_commit_child`); got != 0 {
+		t.Fatalf("failed commit left %d child rows", got)
+	}
+}
+
+func TestManagedGenerationRefreshMissingParseCountsRefuses(t *testing.T) {
+	s, _ := openGenerationStore(t)
+	defer func() { _ = s.Close() }()
+	metadata, _, expected := seedManagedRefreshSource(t, s)
+	conn, err := s.pool.Take(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = sqlitex.Execute(conn, `UPDATE session_captured_stats SET input_submission_count = NULL WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{string(managedRefreshTestSession)}})
+	s.pool.Put(conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := s.RefreshManagedGenerationWithoutParse(t.Context(), ingest.ManagedGenerationRefreshRequest{
+		SessionID: ingest.SessionID(managedRefreshTestSession),
+		Metadata:  refreshedManagedMetadata(metadata), ExpectedState: expected,
+	})
+	if !errors.Is(err, ErrManagedGenerationRefreshRefused) || outcome != (ingest.ManagedGenerationRefreshOutcome{}) {
+		t.Fatalf("missing counts returned outcome %+v, error %v; want refusal and no successful disposition", outcome, err)
+	}
+	if active := refreshQueryString(t, s, `SELECT active_generation_id FROM sessions WHERE session_id = ?`, string(managedRefreshTestSession)); active != managedRefreshTestGenerationID {
+		t.Fatalf("refusal changed active generation to %q", active)
 	}
 }
 
