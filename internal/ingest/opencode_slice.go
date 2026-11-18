@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
@@ -38,6 +39,9 @@ type TranscriptSliceCursor struct {
 	// last complete line it took. A line-oriented transcript needs nothing else
 	// to be resumed, so the other fields stay zero for it.
 	fileOffset int64
+	// fileLines is how many complete lines the file-origin slices so far took,
+	// so a refused record can be named by its line.
+	fileLines int64
 
 	// consumedBytes and consumedRows accumulate across slices: what every slice
 	// so far put into the preview. total* are the whole-session figures, read
@@ -92,6 +96,19 @@ type TranscriptSlice struct {
 // into the transcript.
 func (c TranscriptSliceCursor) FileOffset() int64 { return c.fileOffset }
 
+// FileLines reports how many complete lines the file-origin slices through this
+// cursor took.
+func (c TranscriptSliceCursor) FileLines() int64 { return c.fileLines }
+
+// CurrentSeq reports the native sequence of the last current OpenCode row the
+// slices through this cursor took, and false when none was taken.
+func (c TranscriptSliceCursor) CurrentSeq() (int64, bool) {
+	if c.current == nil {
+		return 0, false
+	}
+	return c.current.Seq().Value(), true
+}
+
 // ResumableTranscriptMaterializer is the OPTIONAL capability of a source
 // adapter that can read ONE budget-sized slice of a session starting where a
 // previous slice stopped.
@@ -118,6 +135,16 @@ var _ ResumableTranscriptMaterializer = (*OpenCodeAdapter)(nil)
 // keyset positions, reads one slice, and closes. Nothing stays open between
 // slices, so a reader who leaves the pane open holds no source handle.
 func (a *OpenCodeAdapter) MaterializeTranscriptSlice(ctx context.Context, session DiscoveredSession, budgetBytes int64, after TranscriptSliceCursor) (TranscriptSlice, error) {
+	return a.MaterializeTranscriptSliceWithin(ctx, session, budgetBytes, after, TranscriptSliceLimits{})
+}
+
+// MaterializeTranscriptSliceWithin is MaterializeTranscriptSlice with a ceiling
+// on one row. A current row whose payload is longer than the ceiling is refused
+// with a [*RecordExceedsBudgetError] before its payload is read, when the source
+// can report row lengths; the slice stops just before such a row when it has
+// already taken others. The legacy origin reads documents in pages and is not
+// bounded per row; its limits are ignored.
+func (a *OpenCodeAdapter) MaterializeTranscriptSliceWithin(ctx context.Context, session DiscoveredSession, budgetBytes int64, after TranscriptSliceCursor, limits TranscriptSliceLimits) (TranscriptSlice, error) {
 	if budgetBytes <= 0 {
 		return TranscriptSlice{}, fmt.Errorf("materialize a slice of OpenCode SQLite session %q failed before source access: the byte budget %d is not positive, so the read could not be proven bounded; no managed state was written; pass the preview slice budget", session.SessionID, budgetBytes)
 	}
@@ -126,7 +153,7 @@ func (a *OpenCodeAdapter) MaterializeTranscriptSlice(ctx context.Context, sessio
 	}
 	switch session.TranscriptOrigin {
 	case TranscriptOriginOpenCodeCurrentSQLite:
-		return a.materializeCurrentTranscriptSlice(ctx, session, budgetBytes, after)
+		return a.materializeCurrentTranscriptSlice(ctx, session, budgetBytes, after, openCodeRowCeiling{bytes: limits.RecordCeilingBytes, rowsBefore: after.consumedRows})
 	case TranscriptOriginOpenCodeLegacySQLite:
 		return a.materializeLegacyTranscriptSlice(ctx, session, budgetBytes, after)
 	default:
@@ -137,7 +164,7 @@ func (a *OpenCodeAdapter) MaterializeTranscriptSlice(ctx context.Context, sessio
 // materializeCurrentTranscriptSlice reads one slice of a current-schema
 // session. A current row is a whole message, so every slice boundary is a
 // message boundary and the seam needs no reconciliation.
-func (a *OpenCodeAdapter) materializeCurrentTranscriptSlice(ctx context.Context, session DiscoveredSession, budgetBytes int64, after TranscriptSliceCursor) (TranscriptSlice, error) {
+func (a *OpenCodeAdapter) materializeCurrentTranscriptSlice(ctx context.Context, session DiscoveredSession, budgetBytes int64, after TranscriptSliceCursor, ceiling openCodeRowCeiling) (TranscriptSlice, error) {
 	currentID, err := NewOpenCodeCurrentSessionID(string(session.SessionID))
 	if err != nil {
 		return TranscriptSlice{}, err
@@ -163,9 +190,15 @@ func (a *OpenCodeAdapter) materializeCurrentTranscriptSlice(ctx context.Context,
 			size = measured
 		}
 		var readErr error
-		projection, unknownControlTypes, _, stop, readErr = readOpenCodeCurrentProjectionSlice(ctx, source, currentID, pageSize, budgetBytes, size, after.current)
+		projection, unknownControlTypes, _, stop, readErr = readOpenCodeCurrentProjectionSlice(ctx, source, currentID, pageSize, budgetBytes, size, after.current, ceiling)
 		return readErr
 	}); err != nil {
+		var oversized *RecordExceedsBudgetError
+		if errors.As(err, &oversized) {
+			// A refused row is the caller's budget decision, not a malformed
+			// source; return it unwrapped so the caller can name the row.
+			return TranscriptSlice{}, oversized
+		}
 		return TranscriptSlice{}, fmt.Errorf("materialize a slice of current OpenCode SQLite session %q failed while reading selected session_message rows and closing the bounded source: %w; no partial managed artifact or store row was written; fix malformed current rows in OpenCode and retry", session.SessionID, err)
 	}
 	metadata, data, err := a.finishCurrentManagedProjection(ctx, session, projection, unknownControlTypes)
@@ -241,4 +274,57 @@ func (a *OpenCodeAdapter) materializeLegacyTranscriptSlice(ctx context.Context, 
 	next.totalRows = size.Rows
 	next.unit = MaterializeUnitRows
 	return TranscriptSlice{Metadata: metadata, Data: data, Next: next, More: !stop.exhausted}, nil
+}
+
+// TranscriptChangeMarker summarizes the part of a session a resumable read has
+// already taken, so a later read can tell that part changed underneath it.
+// Equal markers mean nothing already read was added, removed, edited or
+// resized. It carries no row content.
+type TranscriptChangeMarker struct {
+	Rows       int64
+	MaxUpdated int64
+	Bytes      int64
+}
+
+// ChangeMarkedTranscriptMaterializer is the OPTIONAL capability of a resumable
+// source that can compute a [TranscriptChangeMarker] for the rows a cursor
+// already covers. supported is false when the session's origin exposes no
+// update marker; a caller must then not continue a read it cannot check.
+type ChangeMarkedTranscriptMaterializer interface {
+	TranscriptChangeMarker(ctx context.Context, session DiscoveredSession, through TranscriptSliceCursor) (marker TranscriptChangeMarker, supported bool, err error)
+}
+
+var _ ChangeMarkedTranscriptMaterializer = (*OpenCodeAdapter)(nil)
+
+// TranscriptChangeMarker computes the change marker of the current-origin rows
+// at or before the cursor's last sequence. The legacy origin exposes no single
+// update marker over its message and part documents, so it reports
+// unsupported rather than guessing.
+func (a *OpenCodeAdapter) TranscriptChangeMarker(ctx context.Context, session DiscoveredSession, through TranscriptSliceCursor) (TranscriptChangeMarker, bool, error) {
+	if session.TranscriptOrigin != TranscriptOriginOpenCodeCurrentSQLite {
+		return TranscriptChangeMarker{}, false, nil
+	}
+	currentID, err := NewOpenCodeCurrentSessionID(string(session.SessionID))
+	if err != nil {
+		return TranscriptChangeMarker{}, false, err
+	}
+	if through.current == nil {
+		// Nothing read yet: the empty prefix has the zero marker.
+		return TranscriptChangeMarker{}, true, nil
+	}
+	var marker OpenCodeCurrentChangeMarker
+	supported := true
+	if err := a.withOpenCodeSQLiteSource(ctx, session.SourcePath.String(), func(source OpenCodeSQLiteSource) error {
+		marked, ok := source.(OpenCodeCurrentChangeMarkerSource)
+		if !ok {
+			supported = false
+			return nil
+		}
+		var readErr error
+		marker, readErr = marked.CurrentMessagesMarker(ctx, currentID, through.current.Seq())
+		return readErr
+	}); err != nil {
+		return TranscriptChangeMarker{}, false, fmt.Errorf("read the change marker of current OpenCode SQLite session %q failed while summarizing the rows already read: %w; nothing was written; retry once the OpenCode database is readable", session.SessionID, err)
+	}
+	return TranscriptChangeMarker{Rows: marker.Rows, MaxUpdated: marker.MaxUpdated, Bytes: marker.Bytes}, supported, nil
 }

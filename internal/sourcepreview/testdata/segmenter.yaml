@@ -1,0 +1,86 @@
+# Cases for the segmenter, driven by TestSegmenter
+# (internal/sourcepreview/segmenter_test.go).
+#
+# Each case writes a generated Claude Code transcript (pairs of a question and
+# an answer of answerBytes bytes; hugeAnswerBytes adds one answer of that size
+# in the middle), opens the production capture over it with the case's capture
+# options, and feeds the pages to the production segmenter.
+#
+# drive is how the segments are requested:
+#   drain:   every page is read first, then segments are cut until none is
+#            left, with final set (the capture has ended).
+#   perMore: the way the web asks: one segment per request; a source read
+#            happens only when no turn is buffered.
+#   once:    the first page is pushed and exactly one segment is requested.
+#
+# requiredNames names the cases that must stay present.
+requiredNames:
+  - segments-cut-at-the-contract-budget
+  - segments-equal-cut-transcript-segments-on-a-complete-read
+  - oversized-turn-alone-in-its-segment
+  - short-segment-when-read-exhausted
+  - refs-append-one-per-segment
+  - one-segment-per-more
+  - serialized-cap-cuts-with-notice
+  - frame-never-exceeds-cap
+
+cases:
+  - name: segments-cut-at-the-contract-budget
+    generate: {pairs: 300, answerBytes: 9000}
+    capture: {firstReadBytes: 67108864, sliceReadBytes: 67108864}
+    segmenter: {budgetBytes: 1048576}
+    drive: drain
+    expect: {minSegments: 3, eachWithinBudget: true}
+
+  # When the whole transcript arrives in one page, the preview's cut is the
+  # contract's cut of the same turns.
+  - name: segments-equal-cut-transcript-segments-on-a-complete-read
+    generate: {pairs: 300, answerBytes: 9000}
+    capture: {firstReadBytes: 67108864, sliceReadBytes: 67108864}
+    segmenter: {budgetBytes: 1048576}
+    drive: drain
+    expect: {minSegments: 3, equalsContractCut: true}
+
+  - name: oversized-turn-alone-in-its-segment
+    generate: {pairs: 6, answerBytes: 200, hugeAnswerBytes: 40000}
+    capture: {firstReadBytes: 1048576, sliceReadBytes: 1048576}
+    segmenter: {budgetBytes: 4096, frameCapBytes: 65536}
+    drive: drain
+    expect: {oversizedAloneAndTruncated: true, eachWithinBudget: true}
+
+  # The first read holds less than one segment's worth of turns; the segment
+  # goes out short instead of waiting for a second read.
+  - name: short-segment-when-read-exhausted
+    generate: {pairs: 400, answerBytes: 2000}
+    capture: {firstReadBytes: 20000, sliceReadBytes: 8388608}
+    segmenter: {budgetBytes: 1048576}
+    drive: once
+    expect: {segments: 1, firstSegmentShort: true, firstSegmentHasNewer: true}
+
+  - name: refs-append-one-per-segment
+    generate: {pairs: 200, answerBytes: 3000}
+    capture: {firstReadBytes: 65536, sliceReadBytes: 65536}
+    segmenter: {budgetBytes: 16384}
+    drive: perMore
+    expect: {minSegments: 10, refsContiguous: true, lastHasNoNewer: true}
+
+  - name: one-segment-per-more
+    generate: {pairs: 200, answerBytes: 3000}
+    capture: {firstReadBytes: 1048576, sliceReadBytes: 1048576}
+    segmenter: {budgetBytes: 16384}
+    drive: once
+    expect: {segments: 1, stillPendingAfterOne: true}
+
+  - name: serialized-cap-cuts-with-notice
+    generate: {pairs: 200, answerBytes: 3000}
+    capture: {firstReadBytes: 65536, sliceReadBytes: 65536}
+    segmenter: {budgetBytes: 16384, serializedCapBytes: 100000}
+    drive: perMore
+    expect: {serializedCut: true, minSegments: 2, noticeContains: ["the most one preview holds"]}
+
+  - name: frame-never-exceeds-cap
+    generate: {pairs: 6, answerBytes: 200, hugeAnswerBytes: 3000000}
+    capture: {firstReadBytes: 8388608, sliceReadBytes: 8388608}
+    segmenter: {budgetBytes: 1048576, frameCapBytes: 65536}
+    drive: drain
+    expect: {withinFrameCap: 65536, oversizedAloneAndTruncated: true}

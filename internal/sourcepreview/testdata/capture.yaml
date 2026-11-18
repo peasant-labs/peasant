@@ -1,0 +1,346 @@
+# Cases for the source preview capture, driven by TestCapture
+# (internal/sourcepreview/capture_test.go).
+#
+# Every case runs the production capture (sourcepreview.Reader.Open, then
+# Capture.Next until the capture ends) over a synthetic transcript written to a
+# test-owned temporary directory, or a synthetic OpenCode database the
+# testfixture package materializes. Only the filesystem is ever wrapped (to
+# hide the range read); the reader, the indexers, the projection and the
+# capture are the ones production runs.
+#
+# The property most cases assert is EQUIVALENCE: the turns of every page, in
+# order, equal the turns a whole read of the same transcript folds to, compared
+# by the digest of each turn's canonical JSON. A capture that re-sent, dropped,
+# split or changed a turn fails it.
+#
+# options are the capture's own options. sliceSweep runs the same case once per
+# listed slice size, so a seam landing in a different place each time cannot
+# hide. actions mutate the source after the named page (1-based) arrives.
+#
+# The {{PAD:n}} token in a line expands to n bytes of the letter x.
+#
+# requiredNames names the cases that must stay present; removing one fails by
+# name. Adding a case need not appear here.
+requiredNames:
+  - file-pages-concatenate-to-the-whole-read
+  - file-first-page-is-a-prefix-of-the-whole-read
+  - file-result-across-a-slice-stays-joined
+  - file-unresolved-call-is-held-back
+  - file-holdback-cap-emits-pending-call
+  - file-late-result-after-holdback-ends-with-late-result
+  - file-parent-and-suppressed-result-across-a-slice
+  - file-duplicate-record-in-a-later-slice-is-deduplicated
+  - file-usage-on-a-later-carrier-stays-joined
+  - file-oversized-line-is-bounded
+  - file-line-over-budget-cuts-before-reading
+  - file-truncated-under-capture-fails-closed
+  - file-replaced-under-capture-fails-closed
+  - file-rewritten-tail-fails-closed
+  - file-appended-after-open-ends-at-extent-with-notice
+  - file-without-range-reads-once
+  - sqlite-current-pages-share-one-index-space
+  - sqlite-legacy-reads-once-and-cuts-not-resumable
+  - sqlite-edited-read-row-fails-closed
+  - sqlite-row-over-budget-cuts-before-reading
+  - no-location-is-unavailable
+  - no-turns-is-a-note
+  - unsupported-harness-is-actionable
+  - web-source-cap-cuts-with-notice
+  - turn-cap-cuts-with-notice
+  - zero-source-cap-is-unbounded
+  - diagnostics-partial-is-monotone
+  - retained-unknown-rides-its-page
+  - attached-native-metadata-rides-its-page
+  - session-level-metadata-rides-the-header
+  - same-source-same-pages
+  - close-clears-the-prefix
+  - cancel-clears-the-prefix
+
+transcripts:
+  # Two tool calls whose results arrive on LATER lines. The result is a child
+  # record of the call's assistant record and is folded into that turn rather
+  # than shown as its own.
+  - name: tool-call-conversation
+    harness: claude-code
+    lines:
+      - '{"type":"user","uuid":"u1","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"run the ingest tests and tell me what fails. MUTABLE"}}'
+      - '{"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"running them now."}]}}'
+      - '{"type":"assistant","uuid":"a2","parentUuid":"a1","timestamp":"2026-01-01T00:00:02Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"call_one","name":"Bash","input":{"command":"go test ./internal/ingest/"}}]}}'
+      - '{"type":"user","uuid":"r1","parentUuid":"a2","timestamp":"2026-01-01T00:00:03Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_one","content":"UNMISTAKABLE_TOOL_OUTPUT ok github.com/example/ingest 1.2s"}]}}'
+      - '{"type":"assistant","uuid":"a3","parentUuid":"r1","timestamp":"2026-01-01T00:00:04Z","message":{"role":"assistant","content":[{"type":"text","text":"the ingest package passes."}]}}'
+      - '{"type":"assistant","uuid":"a4","parentUuid":"a3","timestamp":"2026-01-01T00:00:05Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"call_two","name":"Read","input":{"file_path":"/fixtures/pipeline.go"}}]}}'
+      - '{"type":"user","uuid":"r2","parentUuid":"a4","timestamp":"2026-01-01T00:00:06Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_two","content":"SECOND_TOOL_OUTPUT package ingest"}]}}'
+      - '{"type":"assistant","uuid":"a5","parentUuid":"r2","timestamp":"2026-01-01T00:00:07Z","message":{"role":"assistant","content":[{"type":"text","text":"that is the whole file."}]}}'
+
+  # A call whose result arrives only after several long turns, so a small
+  # holdback must let the call go out before its result is read.
+  - name: late-result-conversation
+    harness: claude-code
+    lines:
+      - '{"type":"user","uuid":"u1","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"start a long task."}}'
+      - '{"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"call_slow","name":"Bash","input":{"command":"sleep 60"}}]}}'
+      - '{"type":"assistant","uuid":"a2","parentUuid":"a1","timestamp":"2026-01-01T00:00:02Z","message":{"role":"assistant","content":[{"type":"text","text":"waiting {{PAD:600}}"}]}}'
+      - '{"type":"assistant","uuid":"a3","parentUuid":"a2","timestamp":"2026-01-01T00:00:03Z","message":{"role":"assistant","content":[{"type":"text","text":"still waiting {{PAD:600}}"}]}}'
+      - '{"type":"assistant","uuid":"a4","parentUuid":"a3","timestamp":"2026-01-01T00:00:04Z","message":{"role":"assistant","content":[{"type":"text","text":"still waiting more {{PAD:600}}"}]}}'
+      - '{"type":"user","uuid":"r1","parentUuid":"a4","timestamp":"2026-01-01T00:00:05Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_slow","content":"LATE_TOOL_OUTPUT done"}]}}'
+      - '{"type":"assistant","uuid":"a5","parentUuid":"r1","timestamp":"2026-01-01T00:00:06Z","message":{"role":"assistant","content":[{"type":"text","text":"the task finished."}]}}'
+
+  # The same record written twice, the second time after other records.
+  - name: duplicate-record-conversation
+    harness: claude-code
+    lines:
+      - '{"type":"user","uuid":"u1","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"hello there."}}'
+      - '{"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2026-01-01T00:00:01Z","message":{"id":"msg_1","role":"assistant","content":[{"type":"text","text":"hello, what do you need?"}]}}'
+      - '{"type":"user","uuid":"u2","parentUuid":"a1","timestamp":"2026-01-01T00:00:02Z","message":{"role":"user","content":"list the files."}}'
+      - '{"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2026-01-01T00:00:01Z","message":{"id":"msg_1","role":"assistant","content":[{"type":"text","text":"hello, what do you need?"}]}}'
+      - '{"type":"assistant","uuid":"a2","parentUuid":"u2","timestamp":"2026-01-01T00:00:03Z","message":{"id":"msg_2","role":"assistant","content":[{"type":"text","text":"there are three files."}]}}'
+
+  # A Codex rollout: each answer's token usage is written on a LATER record
+  # (event_msg token_count) than the answer itself.
+  - name: codex-usage-conversation
+    harness: codex
+    lines:
+      - '{"timestamp":"2024-01-02T03:00:00Z","type":"session_meta","payload":{"id":"019e7724-38f5-7660-b2d7-2eda237d4a7d","timestamp":"2024-01-02T03:00:00Z","cwd":"/synthetic/project","originator":"codex_cli","cli_version":"0.1.0-synthetic","source":"cli"}}'
+      - '{"timestamp":"2024-01-02T03:00:01Z","type":"turn_context","payload":{"cwd":"/synthetic/project","model":"gpt-5.5","turn_id":"00000000-0000-4000-8000-000000000001"}}'
+      - '{"timestamp":"2024-01-02T03:00:02Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"what is one plus one?"}]}}'
+      - '{"timestamp":"2024-01-02T03:00:03Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"one plus one is two."}]}}'
+      - '{"timestamp":"2024-01-02T03:00:04Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":12,"cached_input_tokens":0,"output_tokens":8,"reasoning_output_tokens":0,"total_tokens":20},"last_token_usage":{"input_tokens":12,"cached_input_tokens":0,"output_tokens":8,"reasoning_output_tokens":0,"total_tokens":20}}}}'
+      - '{"timestamp":"2024-01-02T03:00:05Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"and two plus two?"}]}}'
+      - '{"timestamp":"2024-01-02T03:00:06Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"two plus two is four."}]}}'
+      - '{"timestamp":"2024-01-02T03:00:07Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":30,"cached_input_tokens":0,"output_tokens":16,"reasoning_output_tokens":0,"total_tokens":46},"last_token_usage":{"input_tokens":18,"cached_input_tokens":0,"output_tokens":8,"reasoning_output_tokens":0,"total_tokens":26}}}}'
+
+  # One record far longer than the small slice budgets the cases use.
+  - name: oversized-record-conversation
+    harness: claude-code
+    lines:
+      - '{"type":"user","uuid":"b1","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"paste the log."}}'
+      - '{"type":"assistant","uuid":"b2","parentUuid":"b1","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"OVERSIZED_RECORD_MARKER {{PAD:6000}}"}]}}'
+      - '{"type":"assistant","uuid":"b3","parentUuid":"b2","timestamp":"2026-01-01T00:00:02Z","message":{"role":"assistant","content":[{"type":"text","text":"that is the end of the log."}]}}'
+
+  # A Claude record of a kind this build does not recognise, early, so the
+  # capture keeps it as retained evidence and marks the read partial.
+  - name: retained-unknown-conversation
+    harness: claude-code
+    lines:
+      - '{"type":"user","uuid":"u1","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"first question."}}'
+      - '{"type":"future_kind","uuid":"f1","parentUuid":"u1","timestamp":"2026-01-01T00:00:01Z","payload":{"value":1}}'
+      - '{"type":"assistant","uuid":"a1","parentUuid":"f1","timestamp":"2026-01-01T00:00:02Z","message":{"role":"assistant","content":[{"type":"text","text":"first answer."}]}}'
+      - '{"type":"user","uuid":"u2","parentUuid":"a1","timestamp":"2026-01-01T00:00:03Z","message":{"role":"user","content":"second question."}}'
+      - '{"type":"future_kind","uuid":"f2","parentUuid":"u2","timestamp":"2026-01-01T00:00:04Z","payload":{"value":2}}'
+      - '{"type":"assistant","uuid":"a2","parentUuid":"f2","timestamp":"2026-01-01T00:00:05Z","message":{"role":"assistant","content":[{"type":"text","text":"second answer."}]}}'
+
+  # A Pi session: one record per JSON document but not declared line-oriented,
+  # so the capture reads it whole. It carries session-level metadata (the
+  # session_info name), retained unknown records and attached evidence.
+  - name: pi-metadata-conversation
+    harness: pi
+    lines:
+      - '{"type":"session","version":3,"id":"11111111-2222-4333-8444-555555555555","cwd":"/synthetic/project"}'
+      - '{"type":"message","id":"u","parentId":null,"message":{"role":"user","content":"before"}}'
+      - '{"type":"future","id":"x","parentId":"u","payload":{"value":1}}'
+      - '{"type":"message","id":"a","parentId":"x","message":{"role":"assistant","model":"observed-model","content":[{"type":"text","text":"after"},{"type":"future","text":{"new":true}}]}}'
+      - '{"type":"session_info","id":"n","parentId":"a","name":"fixture title"}'
+      - '{"type":"custom","id":"c","parentId":"n","customType":"fixture","data":{"note":"session level"}}'
+      - '{"type":"custom_message","id":"cm","parentId":"c","customType":"fixture","content":[{"type":"text","text":"context"}],"display":false,"details":{"display":false}}'
+
+  - name: empty-transcript
+    harness: claude-code
+    lines: []
+
+  # Long enough to take many reads at small budgets: pairs of a question and an
+  # answer whose text is padded.
+  - name: long-conversation
+    harness: claude-code
+    generate: {pairs: 40, answerBytes: 300}
+
+cases:
+  - name: file-pages-concatenate-to-the-whole-read
+    transcript: tool-call-conversation
+    options: {firstReadBytes: 200, sliceReadBytes: 64}
+    sliceSweep: [64, 137, 320, 1048576]
+    expect: {continuation: end, equalsWholeRead: true}
+
+  - name: file-first-page-is-a-prefix-of-the-whole-read
+    transcript: long-conversation
+    options: {firstReadBytes: 900, sliceReadBytes: 900}
+    expect: {continuation: end, equalsWholeRead: true, firstPageIsProperPrefix: true, minPages: 3}
+
+  # The boundary falls between the call and its result: a per-slice fold would
+  # lose the output.
+  - name: file-result-across-a-slice-stays-joined
+    transcript: tool-call-conversation
+    options: {firstReadBytes: 320, sliceReadBytes: 320}
+    expect: {continuation: end, equalsWholeRead: true, toolOutputContains: [UNMISTAKABLE_TOOL_OUTPUT, SECOND_TOOL_OUTPUT], minPages: 2}
+
+  # The first read takes the question, the call and one turn after it, but not
+  # the result: the call's turn and everything after it wait, so the first page
+  # is the question alone.
+  - name: file-unresolved-call-is-held-back
+    transcript: late-result-conversation
+    options: {firstReadBytes: 1100, sliceReadBytes: 64}
+    expect: {continuation: end, equalsWholeRead: true, firstPageHoldsNoPendingCall: true, firstPageTurns: 1}
+
+  - name: file-holdback-cap-emits-pending-call
+    transcript: late-result-conversation
+    options: {firstReadBytes: 1600, sliceReadBytes: 64, holdbackBytes: 900}
+    expect: {closeReason: late_result, someTurnSentPending: true}
+
+  - name: file-late-result-after-holdback-ends-with-late-result
+    transcript: late-result-conversation
+    options: {firstReadBytes: 2400, sliceReadBytes: 2400, holdbackBytes: 200}
+    expect: {closeReason: late_result, minPages: 1}
+
+  - name: file-parent-and-suppressed-result-across-a-slice
+    transcript: tool-call-conversation
+    options: {firstReadBytes: 64, sliceReadBytes: 64}
+    sliceSweep: [64, 100, 250, 700]
+    expect: {continuation: end, equalsWholeRead: true, toolOutputContains: [UNMISTAKABLE_TOOL_OUTPUT]}
+
+  - name: file-duplicate-record-in-a-later-slice-is-deduplicated
+    transcript: duplicate-record-conversation
+    options: {firstReadBytes: 300, sliceReadBytes: 100}
+    sliceSweep: [100, 250]
+    expect: {continuation: end, equalsWholeRead: true}
+
+  - name: file-usage-on-a-later-carrier-stays-joined
+    transcript: codex-usage-conversation
+    options: {firstReadBytes: 900, sliceReadBytes: 120}
+    sliceSweep: [120, 400]
+    expect: {continuation: end, equalsWholeRead: true, minPages: 2}
+
+  - name: file-oversized-line-is-bounded
+    transcript: oversized-record-conversation
+    options: {firstReadBytes: 64, sliceReadBytes: 64}
+    expect: {continuation: end, equalsWholeRead: true}
+
+  - name: file-line-over-budget-cuts-before-reading
+    transcript: oversized-record-conversation
+    options: {firstReadBytes: 64, sliceReadBytes: 64, sourceCapBytes: 2000}
+    expect: {continuation: cut, cutReason: oversized_record, noticeContains: ["line 2", "at least"]}
+
+  - name: file-truncated-under-capture-fails-closed
+    transcript: long-conversation
+    options: {firstReadBytes: 2000, sliceReadBytes: 2000}
+    actions: [{afterPage: 1, do: truncate, bytes: 100}]
+    expect: {closeReason: source_changed}
+
+  - name: file-replaced-under-capture-fails-closed
+    transcript: long-conversation
+    options: {firstReadBytes: 2000, sliceReadBytes: 2000}
+    actions: [{afterPage: 1, do: replace}]
+    expect: {closeReason: source_changed}
+
+  - name: file-rewritten-tail-fails-closed
+    transcript: tool-call-conversation
+    options: {firstReadBytes: 900, sliceReadBytes: 64}
+    actions: [{afterPage: 1, do: rewrite, from: MUTABLE, to: MUTATE!}]
+    expect: {closeReason: source_changed}
+
+  - name: file-appended-after-open-ends-at-extent-with-notice
+    transcript: long-conversation
+    options: {firstReadBytes: 2000, sliceReadBytes: 2000}
+    actions:
+      - afterPage: 1
+        do: append
+        lines: ['{"type":"user","uuid":"later","timestamp":"2026-01-02T00:00:00Z","message":{"role":"user","content":"APPENDED_AFTER_OPEN"}}']
+    expect: {continuation: end, equalsWholeRead: true, noticeContains: ["has grown since the preview opened"], toolOutputAbsent: [APPENDED_AFTER_OPEN]}
+
+  - name: file-without-range-reads-once
+    transcript: tool-call-conversation
+    noRange: true
+    options: {firstReadBytes: 64, sliceReadBytes: 64}
+    expect: {continuation: end, equalsWholeRead: true, pages: 1}
+
+  - name: sqlite-current-pages-share-one-index-space
+    sqlite: semantic-parity-current
+    origin: opencode-current-sqlite
+    options: {firstReadBytes: 1, sliceReadBytes: 1}
+    expect: {continuation: end, minPages: 2, uniqueAscendingTurns: true, equalsWholeReadText: true}
+
+  - name: sqlite-legacy-reads-once-and-cuts-not-resumable
+    sqlite: legacy-scrollable-session
+    origin: opencode-legacy-sqlite
+    options: {firstReadBytes: 2000, sliceReadBytes: 2000}
+    expect: {continuation: cut, cutReason: origin_not_resumable, pages: 1, noticeContains: ["cannot be read further"]}
+
+  - name: sqlite-edited-read-row-fails-closed
+    sqlite: semantic-parity-current
+    origin: opencode-current-sqlite
+    options: {firstReadBytes: 1, sliceReadBytes: 1}
+    actions: [{afterPage: 1, do: sqliteTouch}]
+    expect: {closeReason: source_changed}
+
+  - name: sqlite-row-over-budget-cuts-before-reading
+    sqlite: semantic-parity-current
+    origin: opencode-current-sqlite
+    options: {firstReadBytes: 1, sliceReadBytes: 1, sourceCapBytes: 300}
+    expect: {continuation: cut, cutReason: oversized_record, noticeContains: ["row 2", "at least"]}
+
+  - name: no-location-is-unavailable
+    origin: none
+    options: {firstReadBytes: 64, sliceReadBytes: 64}
+    expect: {closeReason: unavailable}
+
+  - name: no-turns-is-a-note
+    transcript: empty-transcript
+    options: {firstReadBytes: 64, sliceReadBytes: 64}
+    expect: {closeReason: no_turns}
+
+  - name: unsupported-harness-is-actionable
+    transcript: tool-call-conversation
+    harness: no-such-harness
+    options: {firstReadBytes: 64, sliceReadBytes: 64}
+    expect: {closeReason: unreadable, errorContains: ["no transcript reader"]}
+
+  - name: web-source-cap-cuts-with-notice
+    transcript: long-conversation
+    options: {firstReadBytes: 1000, sliceReadBytes: 1000, sourceCapBytes: 3000}
+    expect: {continuation: cut, cutReason: source_budget, noticeContains: ["the most one preview reads"], prefixOfWholeRead: true}
+
+  - name: turn-cap-cuts-with-notice
+    transcript: long-conversation
+    options: {firstReadBytes: 1000, sliceReadBytes: 1000, turnCap: 5}
+    expect: {continuation: cut, cutReason: turn_budget, turns: 5, noticeContains: ["after 5 turns"], prefixOfWholeRead: true}
+
+  - name: zero-source-cap-is-unbounded
+    transcript: long-conversation
+    options: {firstReadBytes: 500, sliceReadBytes: 500, sourceCapBytes: 0, turnCap: 0}
+    expect: {continuation: end, equalsWholeRead: true, minPages: 5}
+
+  - name: diagnostics-partial-is-monotone
+    transcript: retained-unknown-conversation
+    options: {firstReadBytes: 64, sliceReadBytes: 64}
+    expect: {continuation: end, equalsWholeRead: true, partialFromFirstPage: true}
+
+  - name: retained-unknown-rides-its-page
+    transcript: retained-unknown-conversation
+    options: {firstReadBytes: 64, sliceReadBytes: 64}
+    sliceSweep: [64, 300]
+    expect: {continuation: end, equalsWholeRead: true, retainedEqualsWholeRead: true, minRetained: 2}
+
+  - name: attached-native-metadata-rides-its-page
+    transcript: pi-metadata-conversation
+    options: {firstReadBytes: 64, sliceReadBytes: 64}
+    expect: {continuation: end, equalsWholeRead: true, attachedMetadataEqualsWholeRead: true}
+
+  - name: session-level-metadata-rides-the-header
+    transcript: pi-metadata-conversation
+    options: {firstReadBytes: 64, sliceReadBytes: 64}
+    expect: {continuation: end, equalsWholeRead: true, headerMetadataEqualsWholeRead: true}
+
+  - name: same-source-same-pages
+    transcript: long-conversation
+    options: {firstReadBytes: 700, sliceReadBytes: 700}
+    expect: {continuation: end, equalsWholeRead: true, sameOnSecondRun: true}
+
+  - name: close-clears-the-prefix
+    transcript: long-conversation
+    options: {firstReadBytes: 2000, sliceReadBytes: 2000}
+    actions: [{afterPage: 1, do: close}]
+    expect: {closeReason: closed, retainedAfterEnd: 0}
+
+  - name: cancel-clears-the-prefix
+    transcript: long-conversation
+    options: {firstReadBytes: 2000, sliceReadBytes: 2000}
+    actions: [{afterPage: 1, do: cancel}]
+    expect: {closeReason: closed, retainedAfterEnd: 0}
