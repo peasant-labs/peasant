@@ -4,6 +4,9 @@ import (
 	"time"
 )
 
+// EstimateWindow is the common lookback for progress estimates.
+const EstimateWindow = 5 * time.Second
+
 // Estimator tracks completion samples and reports remaining time from the
 // recent windowed rate. It is domain-free: callers own eligibility (stable
 // totals, error and retry policy, focus) and feed it observations. A fast

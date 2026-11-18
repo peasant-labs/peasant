@@ -189,7 +189,7 @@ VALUES(?,'claude-code','fixture-model','source-lanes-host','source-lanes-project
 				}
 			}
 			for _, concurrent := range fixture.Concurrent {
-				t.Run(concurrent.Name, func(t *testing.T) {
+				t.Run(concurrent.Name+"-race-check", func(t *testing.T) {
 					sid, err := ingest.NewSessionID(concurrent.SessionID)
 					if err != nil {
 						t.Fatal(err)
@@ -213,6 +213,9 @@ VALUES(?,'claude-code','fixture-model','source-lanes-host','source-lanes-project
 							results <- err
 						}()
 					}
+					// This exercises concurrent writes; the ordered
+					// source_unavailability_upsert.yaml fixture proves a worse
+					// reason cannot overwrite a better one.
 					close(start)
 					for range concurrent.Reasons {
 						select {

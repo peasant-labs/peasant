@@ -1553,7 +1553,7 @@ func printSummaryWithForecast(w io.Writer, result *ingest.PipelineResult, verbos
 	if forecast && result.CensusForecastNeedsReindexRouting {
 		fmt.Fprintln(w, "refresh census unavailable: reindex dry-run stops before source routing and index decisions assign refresh reasons; run without --dry-run to record the actual census")
 	} else {
-		for _, line := range ingestprogress.CensusLines(census) {
+		for _, line := range ingest.CensusLines(census) {
 			fmt.Fprintln(w, line)
 		}
 	}

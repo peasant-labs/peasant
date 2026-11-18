@@ -139,10 +139,12 @@ func loadUpgradeProgressFixtures(t *testing.T) upgradeProgressFixtures {
 	return fixtures
 }
 
-// TestRunUpgradeWithProgressMounted exercises the actual terminal path. The
-// store pauses after the initial frame, then (when needed) until its notice
+// TestRunUpgradeWithProgressMountedRendering exercises the terminal path. The
+// stub pauses after the initial frame, then (when needed) until its notice
 // appears, so the notice really arrives while the live block owns the PTY.
-func TestRunUpgradeWithProgressMounted(t *testing.T) {
+// This mounted test stubs upgradeStore and proves rendering only. The real
+// Upgrade progress emission is tested in internal/store/upgrade_test.go.
+func TestRunUpgradeWithProgressMountedRendering(t *testing.T) {
 	previousUpgrade, previousConsent := upgradeStore, needsMigrationConsent
 	t.Cleanup(func() {
 		upgradeStore, needsMigrationConsent = previousUpgrade, previousConsent

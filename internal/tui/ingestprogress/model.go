@@ -13,8 +13,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 )
 
-const estimateWindow = 5 * time.Second
-
 type FinalOutcome uint8
 
 const (
@@ -159,7 +157,7 @@ func (m *Model) applyFinal(at time.Time, snapshot map[ingest.Stage]ingest.StageP
 			}
 		}
 		m.observations[stage] = observation{startedAt: startedAt, lastAt: lastAt, lastDone: sp.Done,
-			lastTotal: sp.Total, progress: sp, estimator: kit.NewEstimator(estimateWindow)}
+			lastTotal: sp.Total, progress: sp, estimator: kit.NewEstimator(kit.EstimateWindow)}
 	}
 }
 
@@ -182,7 +180,7 @@ func (m *Model) observe(at time.Time, snapshot map[ingest.Stage]ingest.StageProg
 		o, seen := m.observations[stage]
 		if !seen {
 			o = observation{startedAt: at, lastAt: at, lastDone: sp.Done, lastTotal: sp.Total, progress: sp,
-				estimateEligible: sp.Total > 0 && !sp.HasErr && !m.retry, estimator: kit.NewEstimator(estimateWindow)}
+				estimateEligible: sp.Total > 0 && !sp.HasErr && !m.retry, estimator: kit.NewEstimator(kit.EstimateWindow)}
 			o.estimator.Estimate(at, sp.Done, sp.Total)
 			m.observations[stage] = o
 			continue

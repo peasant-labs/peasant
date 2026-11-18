@@ -118,6 +118,28 @@ func scanReuseTestDir(t *testing.T) string {
 	return dir
 }
 
+func TestScanReuseAfterUpgradeSelectsHeadSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "upgrade.db")
+	buildBehindStore(t, path, knownSessionsReuseFloor, nil)
+	if _, err := Upgrade(t.Context(), path, UpgradeOptions{}); err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+	reader, err := OpenForScanReuse(path, ReadSurfaceKnownSessions, ReadSurfaceClaudeEvidence)
+	if err != nil {
+		t.Fatalf("open upgraded store: %v", err)
+	}
+	defer reader.Close()
+	if reader.SchemaVersion() != CurrentSchemaVersion() || !reader.IsCurrent() {
+		t.Fatalf("upgraded snapshot version=%d current=%v", reader.SchemaVersion(), reader.IsCurrent())
+	}
+	if _, err := reader.AllIngestedSessions(t.Context()); err != nil {
+		t.Fatalf("read upgraded sessions: %v", err)
+	}
+	if _, _, err := reader.LoadClaudeEvidenceCompletely(t.Context()); err != nil {
+		t.Fatalf("read upgraded evidence: %v", err)
+	}
+}
+
 func scanReuseExec(t *testing.T, conn *sqlite.Conn, query string, args ...any) {
 	t.Helper()
 	if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{Args: args}); err != nil {
@@ -453,12 +475,12 @@ func runScanReuseBoundary(t *testing.T, dir string, c scanReuseCase, fixture sca
 		if err != nil {
 			t.Fatal(err)
 		}
-		conn, err := reader.store.pool.Take(t.Context())
+		conn, err := reader.pool.Take(t.Context())
 		if err != nil {
 			t.Fatal(err)
 		}
 		scanReuseExec(t, conn, "ROLLBACK")
-		reader.store.pool.Put(conn)
+		reader.pool.Put(conn)
 		if _, _, err := reader.LoadClaudeEvidenceCompletely(t.Context()); err == nil {
 			t.Fatal("an ended snapshot silently allowed a new read")
 		}
@@ -550,7 +572,7 @@ func assertScanReuseReadOnly(t *testing.T, path string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	conn, err := reader.store.pool.Take(context.Background())
+	conn, err := reader.pool.Take(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -568,7 +590,7 @@ func assertScanReuseReadOnly(t *testing.T, path string) {
 		t.Fatal("read-only connection accepted a write after query_only was disabled")
 	}
 	scanReuseExec(t, conn, `PRAGMA query_only = ON`)
-	reader.store.pool.Put(conn)
+	reader.pool.Put(conn)
 	if err := reader.Close(); err != nil {
 		t.Fatal(err)
 	}

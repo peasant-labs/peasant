@@ -144,13 +144,13 @@ func (s *Store) ClaudeTeammateSpawnsForPaths(ctx context.Context, paths []ingest
 			err)
 	}
 	defer s.pool.Put(conn)
-	return s.claudeTeammateSpawnsForPathsOnConn(ctx, conn, paths)
+	return claudeTeammateSpawnsForPathsOnConn(conn, paths)
 }
 
 // claudeTeammateSpawnsForPathsOnConn is the connection-scoped form, so a caller
 // already holding the pool connection (the by-path evidence read) does not take
 // a second one.
-func (s *Store) claudeTeammateSpawnsForPathsOnConn(ctx context.Context, conn *sqlite.Conn, paths []ingest.ResolvedPath) (map[ingest.ResolvedPath][]ingest.ClaudeTeammateIdentity, error) {
+func claudeTeammateSpawnsForPathsOnConn(conn *sqlite.Conn, paths []ingest.ResolvedPath) (map[ingest.ResolvedPath][]ingest.ClaudeTeammateIdentity, error) {
 	spawns := make(map[ingest.ResolvedPath][]ingest.ClaudeTeammateIdentity)
 	unique := make([]string, 0, len(paths))
 	seen := make(map[string]struct{}, len(paths))

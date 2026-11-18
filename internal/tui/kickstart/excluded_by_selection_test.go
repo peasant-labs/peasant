@@ -6,9 +6,28 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 )
+
+func TestProgramDoneShowsReportedCensus(t *testing.T) {
+	result := &ftue.IngestResult{CensusReported: true, Census: &ingest.RefreshCensus{
+		Rows: []ingest.RefreshCensusRow{{Reason: ingest.OutcomeReasonRefreshNew, Lane: ingest.RefreshLaneNative, Sessions: 3}},
+	}}
+	program, _ := newTestProgram(t, kickstart.ProgramDeps{AlreadyConnected: true, Ingest: func(context.Context) (*ftue.IngestResult, error) { return result, nil }})
+	program.SetSize(120, 40)
+	program = drainProgram(program, program.Init())
+	program, command := advanceToCommit(program)
+	program = drainCmds(t, program, command)
+	if program.Phase() != kickstart.PhaseDone {
+		t.Fatalf("phase = %s, want done", program.Phase())
+	}
+	view := strings.Join(strings.Fields(ansi.Strip(program.View())), " ")
+	if !strings.Contains(view, "refresh census: 3 sessions (includes failed attempts)") {
+		t.Fatalf("completion omits census: %s", view)
+	}
+}
 
 // TestProgramDoneShowsSessionsExcludedBySelection: the local import result
 // no longer counts sessions the selection left out as unchanged, so the

@@ -109,10 +109,6 @@ type FinalMsg struct {
 	Err     error
 }
 
-// estimateWindow is the lookback the counted-step estimate uses, matching the
-// ingest progress surface.
-const estimateWindow = 5 * time.Second
-
 // estimateEpoch is the fixed time origin the estestimator samples use. The
 // event's elapsed duration is the only time coordinate, so the estimate is a
 // pure function of the events and a capture renders it deterministically.
@@ -202,7 +198,7 @@ func (m Model) applyEvent(event store.UpgradeEvent) (Model, tea.Cmd) {
 	}
 	state := m.steps[event.Index]
 	if state == nil {
-		state = &stepState{estimator: kit.NewEstimator(estimateWindow)}
+		state = &stepState{estimator: kit.NewEstimator(kit.EstimateWindow)}
 		m.steps[event.Index] = state
 	}
 	state.last = event

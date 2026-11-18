@@ -1346,7 +1346,7 @@ func (p Program) doneContent() string {
 			lines = append(lines, styles.Base.Render(fmt.Sprintf("%d excluded by selection", p.ingestRes.ExcludedBySelection)))
 		}
 		if p.ingestRes.CensusReported {
-			for _, line := range ingestprogress.CensusLines(p.ingestRes.Census) {
+			for _, line := range ingest.CensusLines(p.ingestRes.Census) {
 				lines = append(lines, styles.Base.Render(line))
 			}
 		}

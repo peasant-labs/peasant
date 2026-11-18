@@ -555,8 +555,12 @@ func (s *Store) AllIngestedSessions(ctx context.Context) ([]IngestedSessionRow, 
 	}
 	defer s.pool.Put(conn)
 
+	return allIngestedSessionsOnConn(conn)
+}
+
+func allIngestedSessionsOnConn(conn *sqlite.Conn) ([]IngestedSessionRow, error) {
 	var rows []IngestedSessionRow
-	err = sqlitex.ExecuteTransient(conn, sqlAllIngestedSessions, &sqlitex.ExecOptions{
+	err := sqlitex.ExecuteTransient(conn, sqlAllIngestedSessions, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			rows = append(rows, IngestedSessionRow{
 				SessionID:     stmt.ColumnText(0),
