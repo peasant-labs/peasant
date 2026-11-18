@@ -276,6 +276,32 @@ func TestKickstartPreviewStream(t *testing.T) {
 				if closed.Kind != schema.LocalKickstartPreviewClosed || closed.Reason != schema.LocalKickstartPreviewSessionClosed || closed.CaptureID != state.CaptureID {
 					t.Fatal("ending setup did not close its capture")
 				}
+			case "disconnect":
+				hub.previews.mu.Lock()
+				var held *webPreview
+				for _, candidate := range hub.previews.captures {
+					if candidate.id == state.CaptureID {
+						held = candidate
+					}
+				}
+				hub.previews.mu.Unlock()
+				if held == nil {
+					t.Fatal("opened capture is missing")
+				}
+				if err := conn.CloseNow(); err != nil {
+					t.Fatal(err)
+				}
+				select {
+				case <-held.ctx.Done():
+				case <-ctx.Done():
+					t.Fatal("disconnect did not cancel the capture")
+				}
+				hub.previews.mu.Lock()
+				remaining := hub.previews.captures[held.conn]
+				hub.previews.mu.Unlock()
+				if remaining != nil {
+					t.Fatal("disconnect did not free its registry slot")
+				}
 			default:
 				t.Fatalf("unknown fixture operation %q", tc.Operation)
 			}
