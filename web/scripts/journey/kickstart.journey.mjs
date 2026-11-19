@@ -936,7 +936,14 @@ async function openPreviewPage() {
     });
     previewHold.forward = (message) => ws.send(message);
   });
+  // After the story's saved setup this is the selection page. Run on its own
+  // (`--grep=preview-`), the computer is not set up, the page is sent to setup,
+  // and the wizard's own selection stop is the same step.
   await page.goto('/selection/');
+  const selection = title(page).filter({ hasText: 'choose sessions to import' });
+  const setup = page.getByRole('button', { name: Labels.No, exact: true });
+  await expect(selection.or(setup)).toBeVisible({ timeout: 20000 });
+  if (await selection.count() === 0) await setup.click();
   await expect(title(page)).toHaveText('choose sessions to import');
   pageGHref = page.url();
   return page;

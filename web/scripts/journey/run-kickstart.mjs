@@ -171,6 +171,8 @@ try {
   };
 
   const requestedProjects = process.argv.slice(2).filter((argument) => !argument.startsWith('-'));
+  // `--grep=<pattern>` runs only the cases whose names match, on the same built and proven server.
+  const grep = process.argv.slice(2).filter((argument) => argument.startsWith('--grep='));
   const projects = fixture.projects.filter((candidate) => requestedProjects.length === 0 || requestedProjects.includes(candidate.name));
   if (!projects.length) throw new Error(`No theme project matches ${JSON.stringify(requestedProjects)}; the journey has ${fixture.projects.map((p) => p.name).join(', ')}`);
 
@@ -207,7 +209,7 @@ try {
       KICKSTART_SEEDED: seededPath,
     };
     await bounded(
-      launch(process.execPath, [require.resolve('@playwright/test/cli'), 'test', '--config', 'playwright.kickstart.config.mjs', '--project', theme.name], { cwd: web, env: journeyEnv }).done,
+      launch(process.execPath, [require.resolve('@playwright/test/cli'), 'test', '--config', 'playwright.kickstart.config.mjs', '--project', theme.name, ...grep], { cwd: web, env: journeyEnv }).done,
       420000,
       `the ${theme.name} journey`,
     );
