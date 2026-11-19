@@ -1133,8 +1133,9 @@ test('preview-cut-shows-the-server-sentence', async () => {
   expect(previewReceived.at(-1).continuation, 'the capture was cut').toBe(LocalKickstartPreviewContinuation.Cut);
   expect(previewReceived.at(-1).cutReason, 'by a record too large to show').toBe(LocalKickstartPreviewCutReason.OversizedRecord);
   await expect(pane(pageG).locator('.ks-preview-notice')).toContainText(fixture.preview.cutNotice);
-  await pane(pageG).locator('.ks-preview-notice').scrollIntoViewIfNeeded();
-  await expect(pane(pageG).locator('.ks-preview-notice')).toBeInViewport();
+  // The whole notice in view, not an edge of it: the screen is about the stop.
+  await pane(pageG).locator('.ks-preview-notice').evaluate((notice) => notice.scrollIntoView({ block: 'center' }));
+  await expect(pane(pageG).locator('.ks-preview-notice')).toBeInViewport({ ratio: 1 });
   // A record the preview could not show is an error: the app's error card.
   const tone = await noticeTone(pageG);
   expect(tone.role, 'the oversized-record stop is announced as an alert').toBe('alert');
@@ -1148,8 +1149,9 @@ test('preview-source-cap-stays-neutral', async () => {
   await loadToEnd(pageG);
   expect(previewReceived.at(-1).continuation, 'the capture was cut').toBe(LocalKickstartPreviewContinuation.Cut);
   expect(previewReceived.at(-1).cutReason, 'at the source cap').toBe(LocalKickstartPreviewCutReason.SourceBudget);
-  await pane(pageG).locator('.ks-preview-notice').scrollIntoViewIfNeeded();
-  await expect(pane(pageG).locator('.ks-preview-notice')).toBeInViewport();
+  // The whole notice in view, not an edge of it: the screen is about the stop.
+  await pane(pageG).locator('.ks-preview-notice').evaluate((notice) => notice.scrollIntoView({ block: 'center' }));
+  await expect(pane(pageG).locator('.ks-preview-notice')).toBeInViewport({ ratio: 1 });
   // A designed limit is information, not an error.
   const tone = await noticeTone(pageG);
   expect(tone.role, 'the source-cap stop is a status').toBe('status');
