@@ -5,7 +5,7 @@
 VERSION ?=
 
 # Static guard against stringly-typed values, pinned to the published tool.
-UNSTRING ?= go run github.com/peasant-labs/infra/unstring/cmd/unstring@v0.0.2
+UNSTRING ?= go run github.com/peasant-labs/infra/unstring/cmd/unstring@v0.2.1
 
 define build_peasant_cli
 set -e; \

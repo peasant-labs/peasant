@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/upgrade"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
@@ -18,6 +20,8 @@ import (
 const (
 	migrateSessionWorkSQL    = "testdata/migrate-session-work.sql"
 	migrateSessionWorkGolden = "testdata/migrate-session-work.golden.json"
+	// migrateSessionWorkUndeclaredGolden pins a census with a non-empty full step.
+	migrateSessionWorkUndeclaredGolden = "testdata/migrate-session-work-undeclared.golden.json"
 )
 
 func migrateBehindFixture(t *testing.T) (string, string) {
@@ -132,5 +136,50 @@ func TestMigrateDryRunSessionWorkEvidenceError(t *testing.T) {
 	}
 	if len(doc.Schema) == 0 || doc.Work.Available || !strings.Contains(doc.Work.Error, "model_harness") {
 		t.Fatalf("missing error or schema: %s", out)
+	}
+}
+
+// TestSessionWorkNamesUndeclaredProducer proves the dry-run surface names a
+// registered producer that forced the full step, apart from the unknown
+// evidence an unregistered harness leaves. The build declares every producer,
+// so the planner's own output for an undeclared adapter is covered in the
+// upgrade package; this test pins how such a plan is summarized and printed.
+func TestSessionWorkNamesUndeclaredProducer(t *testing.T) {
+	adapter := upgrade.UndeclaredProducer{Kind: upgrade.ProducerKindAdapter, Name: string(ingest.HarnessClaudeCode), Skipped: ingest.RefreshLaneStoredMetadata, Required: upgrade.ChangeScopeMetadataOnly}
+	plan := upgrade.RefreshPlan{
+		Approximate:     true,
+		EvidenceNotRead: []string{"latest_attempt"},
+		Estimate: upgrade.RefreshEstimate{
+			Sessions: 2,
+			ByLane:   map[ingest.RefreshLane]int{ingest.RefreshLaneNative: 1, ingest.RefreshLaneStoredMetadata: 1},
+			ByReason: map[ingest.RefreshReason]int{ingest.RefreshReasonAdapterBehindNativeOnly: 1, ingest.RefreshReasonAdapterBehind: 1},
+			FullStep: map[upgrade.UndeclaredProducer]int{adapter: 1},
+		},
+	}
+	work := summarizeSessionWork(plan, nil)
+	var text bytes.Buffer
+	writeSessionWork(&text, work)
+	for _, want := range []string{
+		"full step, undeclared producer metadata-adapter/claude-code: 1",
+		"lane native: 1",
+		"reason adapter_behind_native_only: 1",
+		"undecided: 0",
+	} {
+		if !strings.Contains(text.String(), want) {
+			t.Errorf("missing %q in %s", want, text.String())
+		}
+	}
+	formatted, err := json.MarshalIndent(work, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	formatted = append(formatted, '\n')
+	golden, err := os.ReadFile(migrateSessionWorkUndeclaredGolden)
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden = bytes.ReplaceAll(golden, []byte("\r\n"), []byte("\n"))
+	if !bytes.Equal(formatted, golden) {
+		t.Fatalf("undeclared session work golden mismatch:\n%s", formatted)
 	}
 }

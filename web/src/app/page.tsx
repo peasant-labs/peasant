@@ -1,5 +1,6 @@
 "use client";
 
+import { LocalPublicationState as SchemaLocalPublicationState, LocalSyncPublicationFilter as SchemaLocalSyncPublicationFilter } from '@peasant-labs/schema';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Layers, Search, SlidersHorizontal, X } from 'lucide-react';
 import { Button, FeedbackPanel, PublishStateLabel } from '@/lib/ft-ui';
@@ -54,7 +55,7 @@ function SearchDetail({ row }: { row: LocalSessionRow }) {
   const snippet = row.matches?.[0]?.snippet;
   return <div className="mt-1 flex flex-col gap-1">
     {snippet && <p className="m-0 text-base text-ink-2 [overflow-wrap:anywhere]"><span className="font-mono text-sm text-ink-3">{row.matches?.[0]?.role === 'user' ? 'you' : row.matches?.[0]?.role}: </span>{snippet}</p>}
-    {publication && <PublishStateLabel state={publication.state === 'published' ? 'published' : publication.autoPublish ? 'auto-publish' : 'not-published'} />}
+    {publication && <PublishStateLabel state={publication.state === SchemaLocalPublicationState.Published ? 'published' : publication.autoPublish ? 'auto-publish' : 'not-published'} />}
   </div>;
 }
 
@@ -223,7 +224,7 @@ function HomeView() {
 
   // The filters: the server-owned publish-state filter and the project the
   // list is scoped to. Each set filter counts once on the trigger.
-  const filterCount = (view.publication !== 'all' ? 1 : 0) + (view.project ? 1 : 0);
+  const filterCount = (view.publication !== SchemaLocalSyncPublicationFilter.All ? 1 : 0) + (view.project ? 1 : 0);
   const projectChoices = currentProject && !projectOptions.some(option => option.projectHash === currentProject.projectHash)
     ? [currentProject, ...projectOptions]
     : projectOptions;

@@ -1,3 +1,4 @@
+import { CollectiveObservationState as SchemaCollectiveObservationState } from '@peasant-labs/schema';
 import type { CollectiveFetchDomainSummary, LocalContributionEvidenceKind, LocalContributionHistoryResponse } from '@peasant-labs/schema';
 import type { ObservationState } from './observations';
 import { defaultOnlineUrl } from './links';
@@ -79,7 +80,7 @@ export function presentObservations(state: ObservationState, handle?: string | n
     collectives: catalog?.collectives.map(row => ({
       id: row.id, name: row.name, description: row.description ?? undefined,
       reasons: row.reasons, observedAt: row.observedAt,
-      state: row.state === 'observed' ? 'dated observation; not current permission' : `${row.state}; retained dated evidence only`,
+      state: row.state === SchemaCollectiveObservationState.Observed ? 'dated observation; not current permission' : `${row.state}; retained dated evidence only`,
       policy: [row.acceptanceMode, row.dataAccess].filter(Boolean).join(', ') || undefined,
       tracking: row.reasons.includes('explicit'),
     })) ?? [],

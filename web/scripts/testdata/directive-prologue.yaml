@@ -1,0 +1,45 @@
+cases:
+  - name: client-first
+    source: '"use client"; import x from "x";'
+  - name: server-first-with-comments
+    source: "/* comment */\n'use server';\nexport const x = 1;"
+  - name: absent
+    source: 'import x from "x"; export default x;'
+  - name: string-data
+    source: 'const x = "use client";'
+  - name: client-after-import
+    rejected: true
+    source: 'import x from "x"; "use client";'
+  - name: server-after-statement
+    rejected: true
+    source: 'const x = 1; "use server";'
+  - name: nested-directive
+    rejected: true
+    source: 'function f() { "use client"; }'
+  - name: second-directive
+    rejected: true
+    source: '"use client"; "use server";'
+  - name: inline-server-action
+    source: 'export async function action() { "use server"; return 1; }'
+  - name: misplaced-function-directive
+    rejected: true
+    source: 'export async function action() { const x = 1; "use server"; return x; }'
+  - name: parenthesized-client
+    rejected: true
+    source: '("use client");'
+  - name: single-quoted-client
+    source: "'use client'; export const x = 1;"
+  - name: leading-comment
+    source: '/* leading comment */ "use client"; export const x = 1;'
+  # ECMAScript directive raw spelling keeps escapes; Next requires the exact
+  # unescaped string, so an escape that decodes to a boundary is rejected.
+  - name: escaped-client
+    rejected: true
+    source: '"use\u0020client";'
+  - name: action-after-strict-directive
+    source: 'export async function action() { "use strict"; "use server"; }'
+  - name: async-arrow-action
+    source: 'export const action = async () => { "use server"; };'
+  - name: non-async-action
+    rejected: true
+    source: 'export function action() { "use server"; }'

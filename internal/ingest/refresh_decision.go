@@ -19,6 +19,12 @@ type RefreshReason string
 // The values are variables rather than typed constants because their spelling
 // is owned by outcome_reason.go. A switch on them is an ordinary expression
 // switch and stays exhaustive-checkable through AllRefreshReasons.
+//
+// RefreshReasonAdapterBehindNativeOnly is an adapter bump the stored lane
+// cannot serve, for one of two causes: the adapter cannot re-derive metadata
+// from the stored transcript, or it withholds the metadata-only change scope
+// (see AdapterDeclaresChangeScope). The decision's AdapterUndeclared field and
+// the dry-run full_step census name the second cause.
 var (
 	RefreshReasonNew                                     = RefreshReason(OutcomeReasonRefreshNew.Code())
 	RefreshReasonSourceChanged                           = RefreshReason(OutcomeReasonRefreshSourceChanged.Code())
@@ -87,6 +93,11 @@ func (r RefreshReason) Refreshing() bool { return r.OutcomeReason().Defined() }
 type RefreshDecision struct {
 	Reason RefreshReason
 	Lane   RefreshLane
+	// AdapterUndeclared names the adapter as the reason the full native step
+	// was chosen: the adapter is registered and behind, but it declares no
+	// output-preserving change scope, so the stored-metadata lane cannot
+	// skip work for it. The reason is then adapter_behind_native_only.
+	AdapterUndeclared bool
 }
 
 // IsRefresh reports whether the decision records a refresh.
@@ -172,6 +183,10 @@ type refreshEvidence struct {
 	// AdapterCanExtract reports that the adapter implements stored-transcript
 	// metadata extraction.
 	AdapterCanExtract bool
+	// AdapterUndeclared reports a registered adapter that withholds its
+	// output-preserving change scope (see AdapterDeclaresChangeScope). The
+	// zero value is the declaration every shipped adapter makes.
+	AdapterUndeclared bool
 	// IndexerVersion and IndexerTarget describe the stored index producer.
 	IndexerVersion int
 	IndexerTarget  int
@@ -242,6 +257,11 @@ func decideRefresh(in refreshEvidence) (decision RefreshDecision) {
 		if !in.AdapterCanExtract {
 			return RefreshDecision{Reason: RefreshReasonAdapterBehindNativeOnly, Lane: RefreshLaneNative}
 		}
+		if in.AdapterUndeclared {
+			// The stored lane's skip rests on the adapter's declaration. Without
+			// it the full step runs, on the path a native-only adapter takes.
+			return RefreshDecision{Reason: RefreshReasonAdapterBehindNativeOnly, Lane: RefreshLaneNative, AdapterUndeclared: true}
+		}
 		if !in.AdapterStampPresent {
 			return RefreshDecision{Reason: RefreshReasonAdapterStampAbsent, Lane: RefreshLaneStoredMetadata}
 		}
@@ -288,17 +308,72 @@ func storedAdapterEvidence(loc SessionLocation, hasLocation bool, metadata *Unif
 	return storedAdapterRevision(nil), false
 }
 
+// adapterCapability is what a registered adapter declares about itself: a
+// type property of the adapter, not of any session.
+type adapterCapability struct {
+	// canExtract reports that the adapter re-derives metadata from the
+	// stored transcript (TranscriptMetadataExtractor).
+	canExtract bool
+	// declaresScope reports that the adapter declares its output-preserving
+	// change scope (AdapterDeclaresChangeScope).
+	declaresScope bool
+}
+
+// adapterCapabilityFor builds the harness's adapter once per pipeline, with the
+// pipeline's own dependencies (a registered factory may need a real
+// filesystem), and caches what it declares. Every refresh decision reads the
+// cache instead of building an adapter per session. The mutex makes the first
+// build safe from concurrent workers. A factory's only effect is the adapter
+// it returns, so building it once suppresses nothing. ok is false for an
+// unregistered harness.
+func (p *Pipeline) adapterCapabilityFor(harness Harness) (capability adapterCapability, ok bool) {
+	p.adapterCapabilitiesMu.Lock()
+	defer p.adapterCapabilitiesMu.Unlock()
+	if capability, ok = p.adapterCapabilities[harness]; ok {
+		return capability, true
+	}
+	factory, ok := p.adapters[harness]
+	if !ok {
+		return adapterCapability{}, false
+	}
+	adapter := factory(p.fs, p.git, p.salt)
+	_, capability.canExtract = adapter.(TranscriptMetadataExtractor)
+	capability.declaresScope = AdapterDeclaresChangeScope(adapter)
+	if p.adapterCapabilities == nil {
+		p.adapterCapabilities = make(map[Harness]adapterCapability)
+	}
+	p.adapterCapabilities[harness] = capability
+	return capability, true
+}
+
 // adapterSupportsStoredExtraction reports whether the registered adapter can
 // re-derive its metadata from the stored transcript. It asks the real interface
 // rather than naming a harness list, so a new native-only adapter is covered
 // without a second definition of the set.
 func (p *Pipeline) adapterSupportsStoredExtraction(harness Harness) bool {
-	factory, ok := p.adapters[harness]
-	if !ok {
-		return false
-	}
-	_, ok = factory(p.fs, p.git, p.salt).(TranscriptMetadataExtractor)
-	return ok
+	capability, ok := p.adapterCapabilityFor(harness)
+	return ok && capability.canExtract
+}
+
+// adapterDeclaresChangeScope reads the registered adapter's change-scope
+// declaration. An unregistered harness has no adapter to declare anything, and
+// no adapter-behind decision to make.
+func (p *Pipeline) adapterDeclaresChangeScope(harness Harness) bool {
+	capability, ok := p.adapterCapabilityFor(harness)
+	return !ok || capability.declaresScope
+}
+
+// withAdapterEvidence fills every adapter fact of a refresh decision: the
+// stored revision and stamp, this build's target, and what the registered
+// adapter declares. Every site that decides an adapter refresh calls it, so
+// none can leave the declaration at its zero value.
+func (p *Pipeline) withAdapterEvidence(in refreshEvidence, harness Harness, version int, present bool) refreshEvidence {
+	in.AdapterVersion = version
+	in.AdapterTarget = p.versionTargets()[harness].AdapterVersion
+	in.AdapterStampPresent = present
+	in.AdapterCanExtract = p.adapterSupportsStoredExtraction(harness)
+	in.AdapterUndeclared = !p.adapterDeclaresChangeScope(harness)
+	return in
 }
 
 func (p *Pipeline) adapterDeclaresOutputPreserving(harness Harness) bool {
@@ -379,22 +454,18 @@ func (p *Pipeline) refreshEvidenceForClassification(session DiscoveredSession, c
 func (p *Pipeline) refreshEvidenceForLocation(session DiscoveredSession, loc SessionLocation, metadata *UnifiedMetadata) refreshEvidence {
 	target := p.versionTargets()[session.Harness]
 	version, present := storedAdapterEvidence(loc, true, metadata)
-	return refreshEvidence{
+	return p.withAdapterEvidence(refreshEvidence{
 		StoredRow:             loc.IngestedMs != nil,
 		Forced:                p.config.Force,
 		MetadataSchemaOld:     metadataNeedsNativeRefresh(loc.SchemaVersion),
 		CaptureRecoveryNeeded: loc.ContentFailureCode == ContentCaptureLegacyPreviewOnly && len(loc.SourceFingerprint) > 0,
 		PublicationCaptureMissing: loc.CaptureRevision == 0 && loc.SourceEvidenceSupported &&
 			len(loc.SourceFingerprint) > 0 && (!permanentCaptureRefusal(loc.ContentFailureCode) || loc.ContentPublishable),
-		AdapterVersion:      version,
-		AdapterTarget:       target.AdapterVersion,
-		AdapterStampPresent: present,
-		AdapterCanExtract:   p.adapterSupportsStoredExtraction(session.Harness),
-		IndexerVersion:      loc.IndexerVersion,
-		IndexerTarget:       target.IndexerVersion,
-		IndexProofPresent:   loc.IndexedInputHash != nil,
-		PermanentRefusal:    permanentCaptureRefusal(loc.ContentFailureCode),
-	}
+		IndexerVersion:    loc.IndexerVersion,
+		IndexerTarget:     target.IndexerVersion,
+		IndexProofPresent: loc.IndexedInputHash != nil,
+		PermanentRefusal:  permanentCaptureRefusal(loc.ContentFailureCode),
+	}, session.Harness, version, present)
 }
 
 // storedMetadataForDecision reads the saved metadata half of the pair without
@@ -477,10 +548,7 @@ func (p *Pipeline) refreshEvidenceForFile(session DiscoveredSession, metadata *U
 		// The owned marker or a current-schema artifact makes the source
 		// worth proving again. An old artifact with neither evidence is left
 		// on the clock hint, exactly as the file fallback leaves it.
-		in.AdapterVersion = version
-		in.AdapterTarget = p.versionTargets()[session.Harness].AdapterVersion
-		in.AdapterStampPresent = present
-		in.AdapterCanExtract = p.adapterSupportsStoredExtraction(session.Harness)
+		in = p.withAdapterEvidence(in, session.Harness, version, present)
 	}
 	if metadata != nil {
 		if metadata.Timestamp.Ingested != nil && !session.ModTime.IsZero() &&

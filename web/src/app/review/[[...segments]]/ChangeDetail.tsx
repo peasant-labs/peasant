@@ -1,4 +1,5 @@
 'use client';
+import { ChangeBinding as SchemaChangeBinding } from '@peasant-labs/schema';
 
 /* DEPRECATED — prior-version review surface (the richer change detail (treemap + WorkSection + structure-impact + signals + diffs)).
    SUPERSEDED by the lifted <Changes>/<ChangeDetail> from @peasant-labs/fairtrade/graph,
@@ -658,7 +659,7 @@ function ConversationPeek({
                   {title}
                 </span>
                 <span className="shrink-0 font-mono text-[11px] text-ink-3">{s.harness}</span>
-                <BindingTag candidate={s.binding === 'candidate'} />
+                <BindingTag candidate={s.binding === SchemaChangeBinding.Candidate} />
               </div>
               {touchingTasks.length > 0 && (
                 <ul className="flex flex-col gap-0.5 pl-2 border-l border-rule">
@@ -823,7 +824,7 @@ function WorkSession({
   session: ChangeSession;
   onHighlight: HighlightHandler;
 }) {
-  const candidate = session.binding === 'candidate';
+  const candidate = session.binding === SchemaChangeBinding.Candidate;
   const [tasksExpanded, setTasksExpanded] = useState(false);
 
   // The distinct files this session edited across all its tasks — the hover
