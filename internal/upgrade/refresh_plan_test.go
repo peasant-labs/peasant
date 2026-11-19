@@ -80,18 +80,13 @@ func TestPlanRefreshBehind(t *testing.T) {
 	if sha256.Sum256(data) != before {
 		t.Fatal("planning changed database")
 	}
-	if !plan.LowerBound || len(plan.Sessions) != 1 || plan.Sessions[0].Harness != string(ingest.HarnessClaudeCode) {
+	if !plan.LowerBound || plan.Estimate.Sessions != 1 || plan.Estimate.Undecided != 0 {
 		t.Fatalf("unexpected plan: %+v", plan)
 	}
 	if !plan.Approximate || !slices.Contains(plan.EvidenceNotRead, "content_pending") ||
 		!slices.Contains(plan.UnappliedEffects, store.StampEffectSearchInvalidated) ||
 		!slices.Contains(plan.UnappliedEffects, store.StampEffectRecountOwed) {
 		t.Fatalf("missing census limitations: %+v", plan)
-	}
-	for _, effect := range []store.StampEffect{store.StampEffectHarnessRename, store.StampEffectIndexInvalidated} {
-		if !slices.Contains(plan.Sessions[0].Effects, effect) {
-			t.Errorf("session census omitted migration effect %s", effect)
-		}
 	}
 	for _, field := range []string{"adapter_version", "indexed_input_hash"} {
 		if !slices.Contains(plan.Unknown, RefreshUnknown{"old-session", field}) {
@@ -164,7 +159,7 @@ func TestPlanRefreshUsesManagedProducerTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.Sessions) != 1 || plan.Sessions[0].Decision.Reason != ingest.RefreshReasonAdapterBehind {
+	if plan.Estimate.Sessions != 1 || plan.Estimate.ByReason[ingest.RefreshReasonAdapterBehind] != 1 {
 		t.Fatalf("managed adapter target not used: %+v", plan)
 	}
 }
@@ -225,13 +220,8 @@ func TestPlanRefreshDelegates(t *testing.T) {
 	if !maps.Equal(plan.Estimate.ByReason, reasons) || !maps.Equal(plan.Estimate.ByLane, lanes) {
 		t.Fatalf("census = %+v, want reasons %v lanes %v", plan.Estimate, reasons, lanes)
 	}
-	if len(plan.Sessions) != len(decisions) {
-		t.Fatalf("sessions = %+v, want %v", plan.Sessions, decisions)
-	}
-	for _, session := range plan.Sessions {
-		if !session.Decided || session.Decision != decisions[session.SessionID] {
-			t.Errorf("session = %+v want %+v", session, decisions[session.SessionID])
-		}
+	if plan.Estimate.Sessions != len(decisions) {
+		t.Fatalf("sessions = %d, want %d", plan.Estimate.Sessions, len(decisions))
 	}
 	for _, c := range fixture.Cases {
 		if decisions[c.Name].Reason != c.Reason {
@@ -260,13 +250,8 @@ func TestPlanRefreshDelegates(t *testing.T) {
 	if !slices.Contains(behind.UnappliedEffects, store.StampEffectSearchInvalidated) || !slices.Contains(behind.UnappliedEffects, store.StampEffectRecountOwed) {
 		t.Fatalf("unapplied effects = %v", behind.UnappliedEffects)
 	}
-	if len(behind.Sessions) != len(decisions) {
-		t.Fatalf("behind sessions = %+v", behind.Sessions)
-	}
-	for _, session := range behind.Sessions {
-		if !session.Decided || session.Decision != decisions[session.SessionID] {
-			t.Errorf("pending effects changed %s: %+v, want %+v", session.SessionID, session.Decision, decisions[session.SessionID])
-		}
+	if behind.Estimate.Sessions != len(decisions) || !maps.Equal(behind.Estimate.ByLane, lanes) || !maps.Equal(behind.Estimate.ByReason, reasons) {
+		t.Errorf("pending effects changed census: %+v", behind.Estimate)
 	}
 }
 
@@ -389,22 +374,18 @@ func TestPlanRefreshHistoricalHarnessRename(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(plan.Sessions) != 1 {
-				t.Fatalf("sessions = %+v", plan.Sessions)
-			}
-			session := plan.Sessions[0]
-			if session.Harness != c.Output || slices.Contains(session.Effects, store.StampEffectHarnessRename) != c.Renamed {
-				t.Fatalf("session = %+v", session)
+			if plan.Estimate.Sessions != 1 {
+				t.Fatalf("sessions = %d", plan.Estimate.Sessions)
 			}
 			unknown := slices.Contains(plan.Unknown, RefreshUnknown{"old-session", "harness"})
 			if unknown != c.Unknown {
 				t.Fatalf("unknown evidence = %+v", plan.Unknown)
 			}
 			if c.Unknown {
-				if session.Decided || plan.Estimate.Undecided != 1 || len(plan.Estimate.ByLane) != 0 || len(plan.Estimate.ByReason) != 0 {
+				if plan.Estimate.Undecided != 1 || len(plan.Estimate.ByLane) != 0 || len(plan.Estimate.ByReason) != 0 {
 					t.Fatalf("unknown harness was decided: %+v", plan)
 				}
-			} else if !session.Decided || plan.Estimate.Undecided != 0 {
+			} else if plan.Estimate.Undecided != 0 || len(plan.Estimate.ByLane) != 1 {
 				t.Fatalf("known harness was not decided: %+v", plan)
 			}
 		})

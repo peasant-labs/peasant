@@ -13,32 +13,15 @@ import (
 // RefreshPlan is a read-only estimate based on the evidence available in the store.
 type RefreshPlan struct {
 	Schema   store.UpgradePlan
-	Sessions []SessionRefresh
 	Unknown  []RefreshUnknown
 	Estimate RefreshEstimate
 	// LowerBound means pending schema work can reveal additional work.
 	LowerBound bool
 	// Approximate remains true even on a current schema: not all evidence is read.
-	Approximate      bool
-	EvidenceNotRead  []string
+	Approximate     bool
+	EvidenceNotRead []string
 	// UnappliedEffects names pending schema effects that the census cannot model.
 	UnappliedEffects []store.StampEffect
-}
-
-// SessionRefresh records the decision made for one stored session.
-type SessionRefresh struct {
-	SessionID string
-	Harness   string
-	Decision  ingest.RefreshDecision
-	Decided   bool
-	// Effects lists pending migrations that change this session's evidence.
-	// A decision with a higher-priority reason can otherwise mask an index reset.
-	Effects []store.StampEffect
-	// FullStep names the registered producer that withholds its
-	// output-preserving change scope, which is why the decision chose the full
-	// native step instead of a stored lane. It is nil otherwise. The pipeline
-	// takes the same decision from the same evidence.
-	FullStep *UndeclaredProducer
 }
 
 // UndeclaredProducer names a producer that is in this build's registry but
@@ -157,7 +140,6 @@ func planRefresh(ctx context.Context, path string, declarations []ProducerDeclar
 		if row.IndexedInputHash == nil {
 			plan.Unknown = append(plan.Unknown, RefreshUnknown{row.SessionID, "indexed_input_hash"})
 		}
-		var effects []store.StampEffect
 		// Historical identifiers are intentionally rejected by NewHarness.
 		// Preserve them (and unknown values) until the rename step is applied.
 		historicalHarness := defaults.Harness(row.Harness)
@@ -168,16 +150,13 @@ func planRefresh(ctx context.Context, path string, declarations []ProducerDeclar
 				case defaults.LegacyHarnessClaude:
 					historicalHarness = defaults.HarnessClaudeCode
 					row.Harness = string(historicalHarness)
-					effects = append(effects, step.StampEffect)
 				case defaults.LegacyHarnessGemini:
 					historicalHarness = defaults.HarnessGeminiCLI
 					row.Harness = string(historicalHarness)
-					effects = append(effects, step.StampEffect)
 				}
 			case store.StampEffectIndexInvalidated:
 				row.IndexerVersion = 0
 				row.IndexedInputHash = nil
-				effects = append(effects, step.StampEffect)
 			}
 		}
 		target, found := producers[row.Harness]
@@ -185,7 +164,6 @@ func planRefresh(ctx context.Context, path string, declarations []ProducerDeclar
 		if !found {
 			plan.Unknown = append(plan.Unknown, RefreshUnknown{row.SessionID, "harness"})
 			plan.Estimate.Undecided++
-			plan.Sessions = append(plan.Sessions, SessionRefresh{SessionID: row.SessionID, Harness: row.Harness, Effects: effects})
 			continue
 		}
 
@@ -208,12 +186,10 @@ func planRefresh(ctx context.Context, path string, declarations []ProducerDeclar
 			IndexerTarget:       target.indexer,
 			IndexProofPresent:   row.IndexedInputHash != nil,
 		})
-		session := SessionRefresh{SessionID: row.SessionID, Harness: row.Harness, Decision: decision, Decided: true, Effects: effects}
 		if decision.AdapterUndeclared {
-			session.FullStep = &UndeclaredProducer{Kind: ProducerKindAdapter, Name: row.Harness, Skipped: ingest.RefreshLaneStoredMetadata, Required: ChangeScopeMetadataOnly}
-			plan.Estimate.FullStep[*session.FullStep]++
+			producer := UndeclaredProducer{Kind: ProducerKindAdapter, Name: row.Harness, Skipped: ingest.RefreshLaneStoredMetadata, Required: ChangeScopeMetadataOnly}
+			plan.Estimate.FullStep[producer]++
 		}
-		plan.Sessions = append(plan.Sessions, session)
 		plan.Estimate.ByLane[decision.Lane]++
 		plan.Estimate.ByReason[decision.Reason]++
 	}
