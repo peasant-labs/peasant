@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/testkit/gitconfig"
+
 	"github.com/peasant-labs/peasant/internal/ingest"
 )
 
@@ -16,5 +18,5 @@ func TestMain(m *testing.M) {
 	// dropped UTC normalization becomes observable; install it before any test
 	// runs. This is a no-op in the normal (parent) process.
 	installForcedNonUTCLocalZoneIfRequested()
-	os.Exit(m.Run())
+	os.Exit(gitconfig.RunWithIsolatedGitConfig(m))
 }

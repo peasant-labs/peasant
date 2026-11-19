@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/testkit/gitconfig"
+
 	"github.com/peasant-labs/peasant/internal/ingest"
 )
 
@@ -21,7 +23,7 @@ func TestMain(m *testing.M) {
 		// Runtime startup precedes TestMain; setting the env alone only affects children.
 		debug.SetMemoryLimit(2 * 1024 * 1024 * 1024)
 	}
-	code := m.Run()
+	code := gitconfig.RunWithIsolatedGitConfig(m)
 	removePeasantBuildDir()
 	os.Exit(code)
 }

@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/testkit/gitconfig"
+
 	"github.com/peasant-labs/peasant/internal/defaults"
 )
 
@@ -21,7 +23,6 @@ import (
 // are named once here rather than repeated as literals.
 const (
 	envHome              = "HOME"
-	envGitConfigNoSystem = "GIT_CONFIG_NOSYSTEM"
 	envGitTerminalPrompt = "GIT_TERMINAL_PROMPT"
 )
 
@@ -36,7 +37,7 @@ var originalEnvironment []string
 // XDG_CONFIG_HOME, so redirecting both at a throwaway directory means a
 // developer's own git settings - including any hooks directory they configured
 // - can never reach a disposable repository and steer a write out of it.
-// GIT_CONFIG_NOSYSTEM closes the last door, /etc/gitconfig.
+// Git configuration isolation also excludes system and injected settings.
 //
 // os.Setenv (not t.Setenv) is used deliberately: these settings are constant
 // for the whole binary, so no test is marked non-parallelizable by them.
@@ -51,10 +52,9 @@ func TestMain(m *testing.M) {
 	os.Setenv(defaults.EnvXDGConfigHome.String(), filepath.Join(home, ".config"))
 	os.Setenv(defaults.EnvXDGDataHome.String(), filepath.Join(home, ".local", "share"))
 	os.Setenv(defaults.EnvXDGStateHome.String(), filepath.Join(home, ".local", "state"))
-	os.Setenv(envGitConfigNoSystem, "1")
 	os.Setenv(envGitTerminalPrompt, "0")
 
-	code := m.Run()
+	code := gitconfig.RunWithIsolatedGitConfig(m)
 	_ = os.RemoveAll(home)
 	os.Exit(code)
 }

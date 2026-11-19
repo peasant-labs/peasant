@@ -5,6 +5,41 @@ See [`AGENTS.md`](AGENTS.md) for the test and fixture writing rules and
 [`README.md`](README.md#package-map) for the package map; the documentation map below links each
 test layer to its entry point.
 
+### Tests never read your git configuration
+
+A test result must not depend on the machine. Every package whose tests start a
+process (git, a shell script, `go`) has a `TestMain` that calls
+`gitconfig.RunWithIsolatedGitConfig` (`internal/testkit/gitconfig/gitconfig.go`). Packages with other TestMain duties
+may call `gitconfig.IsolateGitConfig` before their runner. Before any test runs it sets `GIT_CONFIG_GLOBAL=/dev/null` and `GIT_CONFIG_NOSYSTEM=1`,
+and unsets `GIT_CONFIG_COUNT`, `GIT_CONFIG_PARAMETERS` and the repository
+location variables (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`,
+`GIT_COMMON_DIR`, `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`)
+that a hook or `rebase -x` exports. A global `commit.gpgsign`, a
+`url.*.insteadOf` rewrite or injected `GIT_CONFIG_*` values therefore never
+reach a child, and a test's git never acts on an outer repository.
+`GIT_CONFIG_GLOBAL` needs git 2.32 or newer; older git ignores it. Do not add
+per-call `-c commit.gpgsign=false` or `GIT_CONFIG_GLOBAL` workarounds. Set the
+commit identity per call (`GIT_AUTHOR_*`, `GIT_COMMITTER_*`), as the existing
+helpers do.
+
+`TestEveryPackageThatStartsProcessesIsolatesGitConfig`
+(`internal/testkit/gitconfig/gitconfig_guard_test.go`) fails when a `_test.go` file
+imports `os/exec` and its package has no `TestMain` that calls the helper in a
+file without a build constraint. Its scanner cases live in
+`internal/testkit/gitconfig/testdata/git_isolation_scanner.yaml`.
+`TestIsolatedChildGitReadsNoHostileSource` runs a real child git under every
+hostile source and checks that it reads none of them once isolated.
+
+The guard cannot see:
+
+- a test that starts git only through non-test code (it checks `_test.go`
+  imports only);
+- a process started without `os/exec` (`os.StartProcess`, `syscall.Exec`);
+- git run by a dependency outside the module;
+- a `TestMain` that calls the helper on only some paths;
+- a child whose environment a test rebuilds from scratch without the isolation
+  variables.
+
 ### E2E documentation map
 
 | Layer | Runs in | Entry point |
