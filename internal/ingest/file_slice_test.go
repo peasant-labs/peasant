@@ -3,6 +3,7 @@ package ingest_test
 import (
 	"bytes"
 	_ "embed"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -29,6 +30,9 @@ type fileSliceCase struct {
 	MaxSlices            int   `yaml:"max_slices"`
 	ExpectMultipleSlices bool  `yaml:"expect_multiple_slices"`
 	NoTrailingNewline    bool  `yaml:"no_trailing_newline"`
+	// TruncateAfterFirst, when set, cuts the file to that share of its size
+	// after the first slice; the next slice must refuse the shorter file.
+	TruncateAfterFirst float64 `yaml:"truncate_after_first"`
 }
 
 type fileSliceDoc struct {
@@ -90,6 +94,12 @@ func TestFileTranscriptSlicer(t *testing.T) {
 			slices, oversizedWhole := 0, false
 			for slices < c.MaxSlices {
 				slice, err := slicer.MaterializeTranscriptSlice(t.Context(), session, c.BudgetBytes, cursor)
+				if c.TruncateAfterFirst > 0 && slices >= 1 && err != nil {
+					if !errors.Is(err, ingest.ErrTranscriptShrank) {
+						t.Fatalf("slice %d after truncation failed with %v, want ErrTranscriptShrank", slices+1, err)
+					}
+					return
+				}
 				if err != nil {
 					t.Fatalf("slice %d: %v", slices+1, err)
 				}
@@ -108,12 +118,20 @@ func TestFileTranscriptSlicer(t *testing.T) {
 				}
 				rebuilt = append(rebuilt, slice.Data...)
 				cursor = slice.Next
+				if c.TruncateAfterFirst > 0 && slices == 1 {
+					if err := os.Truncate(path, int64(float64(len(content))*c.TruncateAfterFirst)); err != nil {
+						t.Fatal(err)
+					}
+				}
 				if !slice.More {
 					break
 				}
 				if len(slice.Data) == 0 {
 					t.Fatalf("slice %d read nothing yet reported more to come; the read cannot make progress", slices)
 				}
+			}
+			if c.TruncateAfterFirst > 0 {
+				t.Fatalf("the read of a file truncated after its first slice ended after %d slices without refusing the shorter file", slices)
 			}
 			if cursor.FileOffset() != int64(len(content)) {
 				t.Fatalf("the read stopped at byte %d of a %d byte file after %d slices", cursor.FileOffset(), len(content), slices)

@@ -21,7 +21,6 @@ requiredNames:
   - web-live-captures
   - web-parse-workers
   - web-idle-seconds
-  - holdback-bytes
 budgets:
   - {name: first-read-bytes, value: 262144}
   - {name: continuation-read-bytes, value: 8388608}
@@ -39,5 +38,4 @@ budgets:
   - {name: web-live-captures, value: 2}
   - {name: web-parse-workers, value: 1}
   - {name: web-idle-seconds, value: 300}
-  - {name: holdback-bytes, value: 1048576}
 unboundedOptions: {sourceCapBytes: 0, turnCap: 0}

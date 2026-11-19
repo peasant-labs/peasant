@@ -148,6 +148,11 @@ func (s FileTranscriptSlicer) MaterializeTranscriptSliceWithin(_ context.Context
 	if err != nil {
 		return TranscriptSlice{}, err
 	}
+	if int64(len(data)) < length {
+		// The range lies inside the extent the first slice measured, so a
+		// short read means the file is now shorter than it was then.
+		return TranscriptSlice{}, shrankError(offset+int64(len(data)), total)
+	}
 	complete, err := s.completeLines(ranged, path, offset, data, total, limits.RecordCeilingBytes)
 	if err != nil {
 		var oversized *RecordExceedsBudgetError
@@ -217,8 +222,8 @@ func (s FileTranscriptSlicer) completeLines(ranged RangeReadableFileSystem, path
 		if err != nil {
 			return nil, err
 		}
-		if len(more) == 0 {
-			break
+		if int64(len(more)) < chunk {
+			return nil, shrankError(readOffset+int64(len(more)), total)
 		}
 		readOffset += int64(len(more))
 		if cut := bytes.IndexByte(more, '\n'); cut >= 0 {
@@ -255,6 +260,16 @@ var (
 	_ LimitedResumableTranscriptMaterializer = FileTranscriptSlicer{}
 	_ LimitedResumableTranscriptMaterializer = (*OpenCodeAdapter)(nil)
 )
+
+// ErrTranscriptShrank reports a slice read that found the file shorter than the
+// extent the first slice measured: the file was truncated or rewritten after a
+// preview began reading it. Continuing would read bytes that never belonged to
+// that extent, so the caller ends the read.
+var ErrTranscriptShrank = errors.New("the transcript is shorter than when its first slice was read")
+
+func shrankError(at, total int64) error {
+	return fmt.Errorf("%w: the file ended at byte %d of the %d bytes it held when the first slice was read; nothing past it was read; open the transcript again from its start", ErrTranscriptShrank, at, total)
+}
 
 // ErrRecordExceedsBudget matches every [*RecordExceedsBudgetError].
 var ErrRecordExceedsBudget = errors.New("a transcript record is larger than the read may hold")

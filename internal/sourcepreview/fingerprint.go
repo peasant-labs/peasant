@@ -27,6 +27,11 @@ func (c *Capture) verifyFile(path string) error {
 	if info.Size() < consumed {
 		return captureError(CloseSourceChanged, nil, "the transcript is %d bytes, shorter than the %d already read", info.Size(), consumed)
 	}
+	if extent := c.cursor.TotalBytes(); info.Size() < extent {
+		// Appending is not a change; losing bytes the preview was going to
+		// read is.
+		return captureError(CloseSourceChanged, nil, "the transcript is %d bytes, shorter than the %d it held when the preview opened", info.Size(), extent)
+	}
 	comparable := c.identity != nil && osBacked(c.identity) && osBacked(info)
 	if comparable && !os.SameFile(c.identity, info) {
 		return captureError(CloseSourceChanged, nil, "the transcript was replaced by another file after %d bytes were read", consumed)

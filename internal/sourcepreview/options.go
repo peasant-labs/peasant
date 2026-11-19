@@ -14,11 +14,7 @@
 // the web caller passes its caps, the terminal passes its own.
 package sourcepreview
 
-import (
-	"fmt"
-
-	"github.com/peasant-labs/peasant/internal/defaults"
-)
+import "fmt"
 
 // CaptureOptions bound one capture. A zero cap means unbounded.
 type CaptureOptions struct {
@@ -34,10 +30,6 @@ type CaptureOptions struct {
 	SourceCapBytes int64
 	// TurnCap is the most turns this capture may emit. Zero is unbounded.
 	TurnCap int
-	// HoldbackBytes is the most the capture holds back waiting for tool
-	// results before it emits the oldest held turns with their calls pending.
-	// Zero uses defaults.SourcePreviewHoldbackBytes.
-	HoldbackBytes int
 }
 
 // Validate refuses options a capture cannot be proven bounded under.
@@ -52,17 +44,8 @@ func (o CaptureOptions) Validate() error {
 		return fmt.Errorf("capture options refused at %s: the source cap is %d bytes; a cap is zero (unbounded) or positive; nothing was read; pass 0 or a positive cap", where, o.SourceCapBytes)
 	case o.TurnCap < 0:
 		return fmt.Errorf("capture options refused at %s: the turn cap is %d; a cap is zero (unbounded) or positive; nothing was read; pass 0 or a positive cap", where, o.TurnCap)
-	case o.HoldbackBytes < 0:
-		return fmt.Errorf("capture options refused at %s: the holdback is %d bytes; it is zero (the default) or positive; nothing was read; pass 0 or a positive bound", where, o.HoldbackBytes)
 	}
 	return nil
-}
-
-func (o CaptureOptions) holdback() int {
-	if o.HoldbackBytes > 0 {
-		return o.HoldbackBytes
-	}
-	return defaults.SourcePreviewHoldbackBytes
 }
 
 // SegmenterOptions bound the segments one capture sends. A zero cap means

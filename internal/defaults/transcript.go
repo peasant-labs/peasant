@@ -146,12 +146,6 @@ const (
 // grow with the prefix. The terminal sets no turn cap.
 const KickstartTerminalPreviewSourceCapBytes int64 = 32 << 20
 
-// SourcePreviewHoldbackBytes is the most a capture holds back while waiting for
-// tool results. Past it, the oldest held turns are emitted with their calls
-// still pending, so a session that never answers a call cannot stall the
-// preview. It is one contract segment, for every surface.
-const SourcePreviewHoldbackBytes = schema.TranscriptSegmentBudgetBytes
-
 // The capture benchmark reads a 32 MiB synthetic Claude transcript to the web
 // source cap. The targets warn; the ceiling fails closed and exists to
 // catch a catastrophic regression (a re-parse per turn, an unbounded read),

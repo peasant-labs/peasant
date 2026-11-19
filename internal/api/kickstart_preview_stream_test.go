@@ -98,9 +98,7 @@ func TestKickstartPreviewStream(t *testing.T) {
 				}
 			})
 			content := tc.Transcript
-			if tc.Operation == "late-result" {
-				content = strings.ReplaceAll(content, "{{PAD}}", strings.Repeat("x", 600))
-			}
+			content = strings.ReplaceAll(content, "{{PAD}}", strings.Repeat("x", 600))
 			if tc.Operation == "bounded-turn" {
 				content = fmt.Sprintf("{\"type\":\"user\",\"uuid\":\"u1\",\"timestamp\":\"2026-01-01T00:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"%s\"}}\n", strings.Repeat("x", fixture.Generated.OversizedBytes))
 			}
@@ -181,7 +179,7 @@ func TestKickstartPreviewStream(t *testing.T) {
 			hub := NewHub(&mockDataProvider{})
 			hub.attachKickstart(st)
 			if tc.Operation == "late-result" {
-				hub.previews.captureOptions = sourcepreview.CaptureOptions{FirstReadBytes: 2400, SliceReadBytes: 2400, HoldbackBytes: 200}
+				hub.previews.captureOptions = sourcepreview.CaptureOptions{FirstReadBytes: 1300, SliceReadBytes: 400}
 			}
 			idReached, idRelease := make(chan struct{}), make(chan struct{})
 			if tc.Operation == "refuse-reopen" {
@@ -543,10 +541,28 @@ func TestKickstartPreviewStream(t *testing.T) {
 					t.Fatal("changed source did not close with its reason")
 				}
 			case "late-result":
-				write(ClientMessage{Type: schema.MsgKickstartPreview, Preview: &schema.LocalKickstartPreviewRequest{Op: schema.LocalKickstartPreviewMore, RequestID: "next", SessionID: "setup", CaptureID: state.CaptureID, After: state.Seq}})
-				event := read()
-				if event.Kind != schema.LocalKickstartPreviewClosed || event.Reason != schema.LocalKickstartPreviewLateResult || event.Code != schema.LocalKickstartErrorPreviewLateResult || !strings.Contains(event.Message, "read it again") {
-					t.Fatal("late result did not offer a fresh read")
+				// Load until the second answer is read; the capture must close
+				// as a late result, never complete as if nothing happened.
+				for loads := 0; ; loads++ {
+					if loads > 20 {
+						t.Fatal("the late result never closed the capture")
+					}
+					write(ClientMessage{Type: schema.MsgKickstartPreview, Preview: &schema.LocalKickstartPreviewRequest{Op: schema.LocalKickstartPreviewMore, RequestID: "next", SessionID: "setup", CaptureID: state.CaptureID, After: state.Seq}})
+					event := read()
+					if event.Kind == schema.LocalKickstartPreviewClosed {
+						if event.Reason != schema.LocalKickstartPreviewLateResult || event.Code != schema.LocalKickstartErrorPreviewLateResult || !strings.Contains(event.Message, "read it again") || strings.Contains(event.Message, "changed") {
+							t.Fatalf("late result closed with %s %q, want a late result offering a fresh read without claiming a change", event.Reason, event.Message)
+						}
+						break
+					}
+					next, err := schema.MergeLocalKickstartPreview(state, event)
+					if err != nil {
+						t.Fatalf("merge load %d: %v", loads+1, err)
+					}
+					if next.Directory.Complete {
+						t.Fatal("the capture completed although a shown call was answered again later")
+					}
+					state = next
 				}
 			case "refuse-reopen":
 				write(ClientMessage{Type: schema.MsgKickstartPreview, Preview: &schema.LocalKickstartPreviewRequest{Op: schema.LocalKickstartPreviewOpen, RequestID: "rejected-request", SessionID: "setup", NodeID: "row"}})

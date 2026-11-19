@@ -12,6 +12,11 @@ import (
 // that extent, so the newer part needs a new preview.
 const GrownNotice = "this session has grown since the preview opened. open the preview again to read the newer part."
 
+// PendingResultNotice follows a cut notice when the last turns shown hold a
+// tool call whose result lies past the limit: the call is shown without it,
+// and nothing in the session changed.
+const PendingResultNotice = "a tool call shown last has its result further on, beyond what this preview reads."
+
 // The cut notices say what the preview shows, why it stopped and that the
 // session itself is whole. They name sizes and counts only: never a path, an
 // identifier or source text.

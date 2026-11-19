@@ -56,13 +56,16 @@ cases:
   - {name: refused-open-keeps-existing-preview, long: true, operation: refuse-reopen}
   - {name: two-opens-race-for-last-slot, operation: capacity-race}
   - {name: source-changed-closes-with-reason, long: true, operation: alter-source}
+  # A call shown with its answer is answered again by a later record: the
+  # shown turn is stale, so the capture closes as a late result with a read
+  # again offer, in words that do not claim the file changed.
   - name: late-result-cuts-with-read-again
     operation: late-result
     transcript: |
-      {"type":"user","uuid":"u1","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"start a long task."}}
-      {"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"call_slow","name":"Bash","input":{"command":"wait"}}]}}
-      {"type":"assistant","uuid":"a2","parentUuid":"a1","timestamp":"2026-01-01T00:00:02Z","message":{"role":"assistant","content":[{"type":"text","text":"waiting {{PAD}}"}]}}
-      {"type":"assistant","uuid":"a3","parentUuid":"a2","timestamp":"2026-01-01T00:00:03Z","message":{"role":"assistant","content":[{"type":"text","text":"waiting {{PAD}}"}]}}
-      {"type":"assistant","uuid":"a4","parentUuid":"a3","timestamp":"2026-01-01T00:00:04Z","message":{"role":"assistant","content":[{"type":"text","text":"waiting {{PAD}}"}]}}
-      {"type":"user","uuid":"r1","parentUuid":"a4","timestamp":"2026-01-01T00:00:05Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_slow","content":"finished"}]}}
-      {"type":"assistant","uuid":"a5","parentUuid":"r1","timestamp":"2026-01-01T00:00:06Z","message":{"role":"assistant","content":[{"type":"text","text":"the task finished."}]}}
+      {"type":"user","uuid":"u1","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"run it."}}
+      {"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"call_twice","name":"Bash","input":{"command":"true"}}]}}
+      {"type":"user","uuid":"r1","parentUuid":"a1","timestamp":"2026-01-01T00:00:02Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_twice","content":"first answer"}]}}
+      {"type":"assistant","uuid":"a2","parentUuid":"r1","timestamp":"2026-01-01T00:00:03Z","message":{"role":"assistant","content":[{"type":"text","text":"done {{PAD}}"}]}}
+      {"type":"user","uuid":"u2","parentUuid":"a2","timestamp":"2026-01-01T00:00:04Z","message":{"role":"user","content":"next {{PAD}}"}}
+      {"type":"user","uuid":"r2","parentUuid":"u2","timestamp":"2026-01-01T00:00:05Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_twice","content":"second answer"}]}}
+      {"type":"assistant","uuid":"a3","parentUuid":"r2","timestamp":"2026-01-01T00:00:06Z","message":{"role":"assistant","content":[{"type":"text","text":"that is all."}]}}

@@ -30,7 +30,7 @@ export const PREVIEW_CLOSED_SENTENCE = Object.freeze({
   [LocalKickstartPreviewCloseReason.Evicted]: 'another tab opened a preview, so this one closed. read it again from the start.',
   [LocalKickstartPreviewCloseReason.Shutdown]: 'the app on this computer stopped, so the preview closed. start it, then read this session again.',
   [LocalKickstartPreviewCloseReason.SourceChanged]: "this session's transcript changed after part of it was shown. read it again from the start.",
-  [LocalKickstartPreviewCloseReason.LateResult]: 'part of this session changed after it was shown. read it again from the start.',
+  [LocalKickstartPreviewCloseReason.LateResult]: 'a later part of this session answers a tool call in a turn already shown. read it again from the start to see the answer in place.',
   [LocalKickstartPreviewCloseReason.Unreadable]: 'the preview could not be read. check that the transcript is readable, then read it again.',
   [LocalKickstartPreviewCloseReason.OutOfOrder]: 'the preview request was out of order. read it again from the start.',
   [LocalKickstartPreviewCloseReason.SlowClient]: 'this tab fell behind the preview, so it closed. read it again from the start.',

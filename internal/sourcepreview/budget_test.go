@@ -41,7 +41,6 @@ func productionBudgets() map[string]int64 {
 		"web-live-captures":        defaults.KickstartWebPreviewLiveCaptures,
 		"web-parse-workers":        defaults.KickstartWebPreviewParseWorkers,
 		"web-idle-seconds":         int64(defaults.KickstartWebPreviewIdle.Seconds()),
-		"holdback-bytes":           defaults.SourcePreviewHoldbackBytes,
 	}
 }
 
