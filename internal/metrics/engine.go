@@ -326,7 +326,11 @@ func (e *Engine) computeMetrics(ctx context.Context, sessionIDs []ingest.Session
 
 		// Persist.
 		if err := e.store.SaveMetrics(ctx, merged); err != nil {
-			return computed, fmt.Errorf("metrics: save %s: %w", sid, err)
+			if reportFailures {
+				return computed, fmt.Errorf("metrics: save %s: %w", sid, err)
+			}
+			slog.Warn("metrics: save failed; prior metrics preserved for retry", "session_id", sid, "error", err)
+			continue
 		}
 		computed++
 	}

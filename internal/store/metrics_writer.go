@@ -144,6 +144,8 @@ func upsertDerivedStatsOnConn(conn *sqlite.Conn, m *ingest.SessionMetrics) (bool
 	}
 	// Computation is based on the captured row, even if its clock is ahead of
 	// ours. Preserve its timestamp while allowing this derived update to win.
+	// Both callers hold the write transaction across this read and upsert; the
+	// upsert's timestamp guard remains the arbiter of whether a write applies.
 	if err := sqlitex.ExecuteTransient(conn, `SELECT updated_at_ms FROM session_captured_stats WHERE session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(m.SessionID)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {

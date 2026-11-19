@@ -2,7 +2,6 @@ cases:
   - {name: decimal-1665, minutes: 16.65, milliseconds: 999000}
   - {name: one-third, minutes: 0.3333333333333333, milliseconds: 20000}
   - {name: floating-sum, minutes: 0.30000000000000004, milliseconds: 18000}
-  - {name: milliseconds-derived, minutes: 16.65, milliseconds: 999000}
   - {name: tiny, minutes: 0.000000001, milliseconds: 0}
   - {name: zero, minutes: 0.0, milliseconds: 0}
   - {name: large, minutes: 100000000.25, milliseconds: 6000000015000}

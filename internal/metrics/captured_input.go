@@ -93,7 +93,24 @@ func (e *Engine) computeCapturedSession(ctx context.Context, backing ingest.Metr
 	if git.Result != nil {
 		mergeSessionMetrics(merged, git.Result)
 	}
-	// Hash the value the reader returns.
+	// The derived upsert preserves existing captured knowledge for fields the
+	// computation could not determine. Hash that same retained value.
+	if input.Retained != nil {
+		if merged.DurationMinutes == nil {
+			merged.DurationMinutes = input.Retained.DurationMinutes
+		}
+		if merged.SubagentCount == nil {
+			merged.SubagentCount = input.Retained.SubagentCount
+		}
+		if merged.OutputTokens == nil {
+			merged.OutputTokens = input.Retained.OutputTokens
+		}
+		if merged.ToolCalls == nil {
+			merged.ToolCalls = input.Retained.ToolCalls
+		}
+	}
+	// Hash the value the reader returns. Current producers use integer
+	// milliseconds; canonicalization also protects future metric functions.
 	if merged.DurationMinutes != nil {
 		duration := ingest.CanonicalDurationMinutes(*merged.DurationMinutes)
 		merged.DurationMinutes = &duration

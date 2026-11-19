@@ -67,6 +67,26 @@ func (s *Store) readMetricInputOnConn(conn *sqlite.Conn, sid ingest.SessionID, i
 	if err != nil {
 		return nil, err
 	}
+	if input.GenerationID != "" {
+		err = sqlitex.Execute(conn, `SELECT duration_ms, subagent_count, tokens_out, tool_call_count FROM session_captured_stats WHERE session_id = ?`, &sqlitex.ExecOptions{
+			Args: []any{string(sid)},
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				values := &ingest.RetainedMetricValues{}
+				if stmt.ColumnType(0) != sqlite.TypeNull {
+					duration := ingest.DurationMsToMinutes(stmt.ColumnInt64(0))
+					values.DurationMinutes = &duration
+				}
+				values.SubagentCount = nullableIntCol(stmt, 1)
+				values.OutputTokens = nullableIntCol(stmt, 2)
+				values.ToolCalls = nullableIntCol(stmt, 3)
+				input.Retained = values
+				return nil
+			},
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
 	input.Existing, err = getMetricsOnConn(conn, sid)
 	if err != nil {
 		return nil, err
@@ -143,7 +163,7 @@ func (s *Store) SaveMetricsForInput(ctx context.Context, expected *ingest.Metric
 	if current.Existing != nil && current.Existing.ComputeVersion != nil && *current.Existing.ComputeVersion > *metrics.ComputeVersion {
 		return fmt.Errorf("save metrics for session %s: stored compute version is newer; prior values and producer were preserved; upgrade Peasant before retrying", metrics.SessionID)
 	}
-	if current.DatabaseHash != expected.DatabaseHash || !reflect.DeepEqual(current.Existing, expected.Existing) {
+	if current.DatabaseHash != expected.DatabaseHash || !reflect.DeepEqual(current.Existing, expected.Existing) || !reflect.DeepEqual(current.Retained, expected.Retained) {
 		return fmt.Errorf("save metrics for session %s: captured inputs or prior result changed during computation; current values were preserved; retry metrics with a fresh snapshot", metrics.SessionID)
 	}
 	if err := saveMetricsOnConn(conn, metrics, metrics.InputHash, metrics.OutputHash); err != nil {

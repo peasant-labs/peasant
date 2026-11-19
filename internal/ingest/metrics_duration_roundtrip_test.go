@@ -31,13 +31,16 @@ var metricsDurationRoundtripManifestYAML []byte
 func TestManagedMetricsDurationRoundtrip(t *testing.T) {
 	var fixture struct {
 		Cases []struct {
-			Name        string `yaml:"name"`
-			Entries     int    `yaml:"entries"`
-			DurationMS  int64  `yaml:"durationMs"`
-			Refresh     bool   `yaml:"refresh"`
-			Recovery    bool   `yaml:"recovery"`
-			SpanNS      int64  `yaml:"spanNs"`
-			FutureClock bool   `yaml:"futureClock"`
+			Name                 string `yaml:"name"`
+			Entries              int    `yaml:"entries"`
+			DurationMS           int64  `yaml:"durationMs"`
+			Refresh              bool   `yaml:"refresh"`
+			Recovery             bool   `yaml:"recovery"`
+			SpanNS               int64  `yaml:"spanNs"`
+			FutureClock          bool   `yaml:"futureClock"`
+			RetainedDurationMS   int64  `yaml:"retainedDurationMs"`
+			RetainedOutputTokens int    `yaml:"retainedOutputTokens"`
+			NoMetrics            bool   `yaml:"noMetrics"`
 		} `yaml:"cases"`
 	}
 	if err := testutil.DecodeFixtureYAML(metricsDurationRoundtripYAML, &fixture); err != nil {
@@ -62,7 +65,7 @@ func TestManagedMetricsDurationRoundtrip(t *testing.T) {
 			db := durationStore(t, filepath.Join(root, "store.db"), output)
 			defer db.Close()
 			durationCorpus(t, source, row.Entries, row.SpanNS)
-			pipeline := durationPipeline(t, db, source, output)
+			pipeline := durationPipeline(t, db, source, output, false)
 			result, err := pipeline.Run(t.Context())
 			if err != nil || result.Summary.Indexed != 1 {
 				t.Fatalf("import: %+v %v", result, err)
@@ -129,11 +132,52 @@ func TestManagedMetricsDurationRoundtrip(t *testing.T) {
 					t.Fatalf("read future-clock metrics: %v", err)
 				}
 			}
+			if row.RetainedDurationMS != 0 {
+				conn, err := db.Pool().Take(t.Context())
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, statement := range []string{
+					`UPDATE sessions SET start_ms = 2, end_ms = 1 WHERE session_id = ?`,
+					`UPDATE session_metrics SET output_hash = NULL WHERE session_id = ?`,
+				} {
+					if err := sqlitex.ExecuteTransient(conn, statement, &sqlitex.ExecOptions{Args: []any{string(sid)}}); err != nil {
+						db.Pool().Put(conn)
+						t.Fatal(err)
+					}
+				}
+				if row.NoMetrics {
+					if err := sqlitex.ExecuteTransient(conn, `DELETE FROM session_metrics WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{string(sid)}}); err != nil {
+						db.Pool().Put(conn)
+						t.Fatal(err)
+					}
+				}
+				err = sqlitex.ExecuteTransient(conn, `UPDATE session_captured_stats SET seed_json = NULL, duration_ms = ?, tokens_out = ? WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{row.RetainedDurationMS, row.RetainedOutputTokens, string(sid)}})
+				db.Pool().Put(conn)
+				if err != nil {
+					t.Fatal(err)
+				}
+				pipeline = durationPipeline(t, db, source, output, true)
+				computed, current, err := metrics.NewEngineWithModels(db, db).EnsureSessionMetrics(t.Context(), sid)
+				if err != nil || !computed || !current {
+					t.Fatalf("metrics did not retain uncomputed stats: computed=%v current=%v err=%v", computed, current, err)
+				}
+				if err := metrics.NewClassifierAnnotator(db, db).Annotate(t.Context(), sid); err != nil {
+					t.Fatalf("classify retained metrics: %v", err)
+				}
+				input, err = db.ReadMetricInput(t.Context(), sid, true)
+				if err != nil || input == nil {
+					t.Fatalf("read retained stats: %v", err)
+				}
+				if input.Existing == nil || input.Existing.OutputTokens == nil || *input.Existing.OutputTokens != row.RetainedOutputTokens {
+					t.Errorf("retained output tokens not reflected in metrics: %+v", input.Existing)
+				}
+			}
 			if !metrics.MetricsCurrentForInput(input) {
 				t.Errorf("reread metrics do not prove captured input current: %+v", input.Existing)
 			}
 			if input.Existing == nil || input.Existing.DurationMinutes == nil || *input.Existing.DurationMinutes != float64(row.DurationMS)/60000 {
-				t.Errorf("reread duration does not equal %d milliseconds", row.DurationMS)
+				t.Errorf("reread duration does not equal %d milliseconds: %+v", row.DurationMS, input.Existing)
 			}
 			state, err := db.GetAnnotationRunState(t.Context(), sid)
 			if err != nil || state == nil {
@@ -164,7 +208,7 @@ func TestManagedMetricsDurationRoundtrip(t *testing.T) {
 	}
 }
 
-func durationPipeline(tb testing.TB, db *store.Store, source, output string) *ingest.Pipeline {
+func durationPipeline(tb testing.TB, db *store.Store, source, output string, storedOnly bool) *ingest.Pipeline {
 	tb.Helper()
 	fs := &ingest.OSFileSystem{}
 	cfg := ingest.PipelineConfig{
@@ -172,6 +216,9 @@ func durationPipeline(tb testing.TB, db *store.Store, source, output string) *in
 			ingest.HarnessClaudeCode: {Enabled: true, Paths: []ingest.ResolvedPath{ingest.ResolvedPath(source)}},
 		},
 		OutputDir: ingest.ResolvedPath(output),
+	}
+	if storedOnly {
+		cfg.SessionFilter = func(ingest.DiscoveredSession) bool { return false }
 	}
 	options := []ingest.PipelineOption{
 		ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithSalt(db.InstallationSalt()),
@@ -226,15 +273,23 @@ func durationTranscript(sessionID string, entries int, filler string, spanNS int
 	var content strings.Builder
 	for n := range entries {
 		atTime := time.Unix(1_700_000_000+int64(n), 0)
-		if spanNS != 0 {
+		if spanNS > 0 {
 			atTime = time.Unix(1_700_000_000, int64(n)*spanNS)
 		}
 		at := atTime.UTC().Format(time.RFC3339Nano)
+		timestamp := fmt.Sprintf(`,"timestamp":"%s"`, at)
+		if spanNS < 0 {
+			timestamp = ""
+		}
 		if n%2 == 0 {
-			fmt.Fprintf(&content, `{"type":"user","sessionId":"%s","uuid":"u%d","cwd":"/work/project","timestamp":"%s","message":{"role":"user","content":"prompt %d: %s"}}`+"\n", sessionID, n, at, n, filler)
+			fmt.Fprintf(&content, `{"type":"user","sessionId":"%s","uuid":"u%d","cwd":"/work/project"%s,"message":{"role":"user","content":"prompt %d: %s"}}`+"\n", sessionID, n, timestamp, n, filler)
 			continue
 		}
-		fmt.Fprintf(&content, `{"type":"assistant","sessionId":"%s","uuid":"a%d","parentUuid":"u%d","cwd":"/work/project","timestamp":"%s","message":{"role":"assistant","model":"claude-synthetic","content":[{"type":"text","text":"reply %d: %s"}],"usage":{"input_tokens":120,"output_tokens":80}}}`+"\n", sessionID, n, n-1, at, n, filler)
+		usage := `,"usage":{"input_tokens":120,"output_tokens":80}`
+		if spanNS < 0 {
+			usage = ""
+		}
+		fmt.Fprintf(&content, `{"type":"assistant","sessionId":"%s","uuid":"a%d","parentUuid":"u%d","cwd":"/work/project"%s,"message":{"role":"assistant","model":"claude-synthetic","content":[{"type":"text","text":"reply %d: %s"}]%s}}`+"\n", sessionID, n, n-1, timestamp, n, filler, usage)
 	}
 	return content.String()
 }

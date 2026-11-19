@@ -5,3 +5,5 @@ requiredNames:
   - truncated-row-recovery
   - submillisecond-source
   - future-capture-clock
+  - retained-duration
+  - retained-output-tokens

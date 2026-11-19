@@ -23,3 +23,15 @@ cases:
     entries: 1000
     durationMs: 999000
     futureClock: true
+  - name: retained-duration
+    entries: 2
+    durationMs: 12345
+    retainedDurationMs: 12345
+    spanNs: -1
+    noMetrics: true
+  - name: retained-output-tokens
+    entries: 2
+    durationMs: 23456
+    retainedDurationMs: 23456
+    retainedOutputTokens: 37
+    spanNs: -1
