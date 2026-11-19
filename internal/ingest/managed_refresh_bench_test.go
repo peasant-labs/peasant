@@ -661,9 +661,9 @@ WHERE p.capture_revision > 0
 		if sample.Outcomes[string(ingest.IndexOutcomeSkipped)] != shape.Sessions {
 			tb.Fatalf("%s refresh skipped outcomes = %d, want %d (%v)", lane, sample.Outcomes[string(ingest.IndexOutcomeSkipped)], shape.Sessions, sample.Outcomes)
 		}
-		settles := managedRefreshDispositionCount(sample.OutcomeReasons, string(ingest.ManagedGenerationRefreshUnchanged))
+		settles := managedRefreshDispositionCount(sample.OutcomeReasons, "unchanged")
 		if settles != shape.Sessions {
-			tb.Fatalf("%s refresh disposition %q count = %d, want %d (%v)", lane, ingest.ManagedGenerationRefreshUnchanged, settles, shape.Sessions, sample.OutcomeReasons)
+			tb.Fatalf("%s refresh disposition %q count = %d, want %d (%v)", lane, "unchanged", settles, shape.Sessions, sample.OutcomeReasons)
 		}
 		sample.GenerationInstalls = 0
 		if sample.StatsUpdatedAfter <= sample.StatsUpdatedBefore {

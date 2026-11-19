@@ -216,7 +216,7 @@ func TestManagedGenerationUnchangedSettle(t *testing.T) {
 	p.Metadata.Stats.ConversationTurnCount = &conversation
 	p.Metadata.Stats.InputSubmissionCount = &count
 	result, err := s.SettleManagedGenerationUnchanged(context.Background(), p)
-	if err != nil || result.Disposition != ManagedGenerationRefreshUnchanged {
+	if err != nil || result.GenerationID != p.GenerationID {
 		t.Fatalf("settlement = %+v, error = %v", result, err)
 	}
 	after, err := wal.CountWALCommitFrames(dbPath)
@@ -388,7 +388,7 @@ func TestManagedGenerationUnchangedSettleRefusesMovedPointer(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := s.SettleManagedGenerationUnchanged(context.Background(), p)
-	if err == nil || result.Disposition == ManagedGenerationRefreshUnchanged {
+	if err == nil {
 		t.Fatalf("moved generation settled: %+v, %v", result, err)
 	}
 }
