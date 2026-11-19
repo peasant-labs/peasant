@@ -2335,6 +2335,11 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 		forceParse := false
 		_, canProve := p.metricsStore.(ManagedGenerationUnchangedProver)
 		if input.managedGenerationRefresh && canProve && input.metadata != nil && input.expected != nil && p.adapterSupportsStoredExtraction(input.session.Harness) {
+			// Once the proof is attempted the session parses, unless the
+			// proof holds and the store settles it. A metadata-only copy of
+			// the stored generation measured no cheaper than the parse, so
+			// there is no intermediate path.
+			forceParse = true
 			proofStart := time.Now()
 			proof, proofErr := p.proveManagedGenerationUnchanged(ctx, input)
 			proven := 0
@@ -2343,9 +2348,6 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 			}
 			p.config.IndexProfiler.RecordStage(StageRefreshProof, time.Since(proofStart), proven, 1)
 			slog.Info(logPrefix+": refresh proof", "session_id", im.session.SessionID, "proven", proof.Proven, "mismatch", proof.Mismatch, "error", proofErr)
-			if proofErr != nil {
-				forceParse = true
-			}
 			if proofErr == nil && !proof.Proven {
 				validation := p.validateRefresh(ctx, input)
 				switch validation.Outcome {
@@ -2356,19 +2358,13 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 					proof.Mismatch = validation.Mismatch
 				}
 			}
-			if proofErr == nil && !proof.Proven {
-				if p.adapterDeclaresOutputPreserving(input.session.Harness) {
-					p.reportDiagnostic(DiagnosticEntry{
-						ErrorType:   "output_preserving_proof_failed",
-						Location:    string(input.session.SessionID),
-						Message:     fmt.Sprintf("the %s producer declared output-preserving but its unchanged proof was not proven (%s); the transcript will be parsed", input.session.Harness, proof.Mismatch),
-						Remediation: "Review the producer declaration and proof mismatch before relying on an unchanged-output optimization.",
-					})
-				}
-				// A failed proof parses. A metadata-only copy of the stored
-				// generation measured no cheaper than the parse, so there is no
-				// intermediate path between the settle and the parse.
-				forceParse = true
+			if proofErr == nil && !proof.Proven && p.adapterDeclaresOutputPreserving(input.session.Harness) {
+				p.reportDiagnostic(DiagnosticEntry{
+					ErrorType:   "output_preserving_proof_failed",
+					Location:    string(input.session.SessionID),
+					Message:     fmt.Sprintf("the %s producer declared output-preserving but its unchanged proof was not proven (%s); the transcript will be parsed", input.session.Harness, proof.Mismatch),
+					Remediation: "Review the producer declaration and proof mismatch before relying on an unchanged-output optimization.",
+				})
 			}
 			if proofErr == nil && proof.Proven {
 				outcome, duration, settleErr := p.settleManagedGenerationUnchanged(ctx, input, writeLane)
@@ -2381,7 +2377,6 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 					return result
 				}
 				slog.Warn(logPrefix+": unchanged generation settlement refused", "session_id", im.session.SessionID, "error", settleErr)
-				forceParse = true
 			}
 		}
 		if !forceParse && p.capturedInputBindsWithoutReparse(input) {
@@ -2594,8 +2589,8 @@ const indexBindWithoutReparseReason = "stored index already matches captured inp
 
 // indexManagedRefreshReason is the index-log reason of a managed generation
 // settled by the unchanged proof. The disposition the store reported is
-// appended. The text is kept as it was when a metadata copy could also settle
-// a session, so run reports stay comparable across builds.
+// appended. Its wording is kept deliberately, from when a metadata copy could
+// also settle a session, so run reports stay comparable across builds.
 const indexManagedRefreshReason = "stored index already matches captured input; refreshed the managed generation metadata without a parse"
 
 // bindPublicationIndex performs the bind-only index write the rule "bind
