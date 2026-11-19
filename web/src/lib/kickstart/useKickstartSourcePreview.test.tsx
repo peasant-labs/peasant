@@ -203,6 +203,9 @@ async function runPreviewStep(step: PreviewStep, spec: StreamSpec, state: Conver
       expect(window.location.href, `${at}: the URL`).toBe(state.href);
       expect(state.history.push, `${at}: history.pushState`).not.toHaveBeenCalled();
       expect(state.history.replace, `${at}: history.replaceState`).not.toHaveBeenCalled();
+      const pane = mounted.container.querySelector('[data-preview-session]');
+      const links = pane === null ? [] : [...pane.querySelectorAll('a[href]')].map((link) => link.getAttribute('href'));
+      expect(links, `${at}: links in the preview, any of which would change the URL`).toEqual([]);
     }
     if (check === PreviewPrivacy.Clipboard) {
       expect(state.clipboard, `${at}: navigator.clipboard.writeText`).not.toHaveBeenCalled();

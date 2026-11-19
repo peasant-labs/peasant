@@ -31,6 +31,8 @@ import { cookSegment } from '@/components/session-detail/v2/lib/transcriptSegmen
  * redacted, which is why it never leaves this computer.
  */
 
+const NO_TRAIL: never[] = [];
+
 const NO_CAPABILITIES = Object.freeze({
   canEdit: false,
   canLabel: false,
@@ -90,8 +92,19 @@ export default function SessionPreview({ sessionId, nodeId, label, scanGeneratio
       { tail },
     );
     // The row's label is the title: a first prompt often opens with harness
-    // markup, which must not become the heading.
-    return { ...adapted, session: { ...adapted.session, title: label } };
+    // markup, which must not become the heading. The header counts the turns
+    // the directory says are held, the same numbers the position labels read
+    // against, rather than the capture header's own count.
+    const wire = held.directory;
+    return {
+      ...adapted,
+      session: {
+        ...adapted.session,
+        title: label,
+        turnCount: wire.loadedTurns,
+        conversationTurnCount: wire.loadedConversationTurns ?? undefined,
+      },
+    };
   }, [held, label, tail]);
 
   const segments = useMemo(
@@ -137,6 +150,9 @@ export default function SessionPreview({ sessionId, nodeId, label, scanGeneratio
           viewModel={viewModel}
           theme={theme}
           headingLevel={3}
+          // No trail: the viewer's default one links to `#`, which would write
+          // to the URL. The tree beside the pane already says where it is.
+          breadcrumb={NO_TRAIL}
           capabilities={NO_CAPABILITIES}
           allowMarkdownImages={false}
           allowClipboard={false}
