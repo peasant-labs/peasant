@@ -145,7 +145,7 @@ recordings:
         # preview opens lie beyond the extent it fixed.
         - {name: growing, branch: main, startedAt: "2026-02-09T09:00:00Z", prompts: ["Watch the ledger grow.", "Keep going."], exchanges: 20, replyBytes: 24000}
         # One reply of 17 MiB after a short start: more than the 16 MiB a web
-    # preview reads, so the capture stops before it with the server's sentence.
+        # preview reads, so the capture stops before it with the server's sentence.
         - {name: oversized, branch: main, startedAt: "2026-02-10T09:00:00Z", prompts: ["Paste the ledger export.", "Keep going."], exchanges: 4, replyBytes: 24000, oversizedReplyBytes: 17825792}
   # Generated sessions that a scan reads but the journey never selects: enough that
   # the scan's progress is on screen long enough to be seen.
