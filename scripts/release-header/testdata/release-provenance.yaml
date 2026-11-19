@@ -3,6 +3,8 @@ provenance_config:
   automation_author: app/peasant-labs-releaser
   bot_branches:
     release: automation/release
+provenance_permissions:
+  pull-requests: read
 provenance_examples:
   bot: &provenance-bot
     merged_at: "2026-01-01T00:00:00Z"

@@ -22,10 +22,11 @@ var releaseAdoptionFixture []byte
 // under test are real.
 func TestReleaseCandidateProvenance(t *testing.T) {
 	var fixture struct {
-		Candidate string         `yaml:"provenance_candidate"`
-		Config    map[string]any `yaml:"provenance_config"`
-		Required  []string       `yaml:"provenance_required"`
-		Cases     []struct {
+		Candidate   string            `yaml:"provenance_candidate"`
+		Config      map[string]any    `yaml:"provenance_config"`
+		Required    []string          `yaml:"provenance_required"`
+		Permissions map[string]string `yaml:"provenance_permissions"`
+		Cases       []struct {
 			Name          string             `yaml:"name"`
 			Candidate     string             `yaml:"candidate"`
 			Config        map[string]any     `yaml:"config"`
@@ -52,8 +53,13 @@ func TestReleaseCandidateProvenance(t *testing.T) {
 	}
 	job := provenanceMappingChild(provenanceMappingChild(doc.Content[0], "jobs"), "plan")
 	permissions := provenanceMappingChild(job, "permissions")
-	if pr := provenanceMappingChild(permissions, "pull-requests"); pr == nil || pr.Value != "read" {
-		t.Fatal("plan job must grant pull-requests: read")
+	if len(fixture.Permissions) == 0 {
+		t.Fatal("fixture names no required plan job permissions")
+	}
+	for scope, level := range fixture.Permissions {
+		if granted := provenanceMappingChild(permissions, scope); granted == nil || granted.Value != level {
+			t.Fatalf("plan job must grant %s: %s", scope, level)
+		}
 	}
 	steps := provenanceMappingChild(job, "steps")
 	if steps == nil {
@@ -150,7 +156,8 @@ func TestReleaseCandidateProvenance(t *testing.T) {
 			if strings.Contains(string(actual), "UNEXPECTED_STUB_ARGUMENTS:") {
 				t.Fatalf("stub received unexpected arguments:\n%s", actual)
 			}
-			if exit != c.ExpectedExit || (c.ExpectedExit != 0 && (c.ErrorContains == "" || !strings.Contains(string(actual), c.ErrorContains))) {
+			namesError := c.ErrorContains != "" && strings.Contains(string(actual), c.ErrorContains)
+			if exit != c.ExpectedExit || (c.ExpectedExit != 0 && !namesError) {
 				t.Fatalf("provenance step exit %d, want %d with %q:\n%s", exit, c.ExpectedExit, c.ErrorContains, actual)
 			}
 		})
