@@ -75,7 +75,7 @@ export function LayoutShell({ children }: { children: ReactNode }) {
           {/* Sends the person to setup from any top-level page until setup has been saved,
               and holds a page that starts something on mount until that is decided. */}
           <FirstRunProvider>
-            <AppSidebarLayout sidebar={<LocalSidebar />} viewport={viewport} notice={<PageNotices />} topBar={pathname === '/kickstart' ? <h1 className="ks-page-title">set up peasant</h1> : undefined} mainAs="main">
+            <AppSidebarLayout sidebar={<LocalSidebar />} viewport={viewport} notice={<PageNotices />} mainAs="main">
               {children}
             </AppSidebarLayout>
           </FirstRunProvider>

@@ -64,7 +64,7 @@ export interface Step {
   expectText?: string[];
   expectNoText?: string[];
   /** Assert a control by role and accessible name. */
-  expectControl?: { role: string; name: string; present?: boolean; disabled?: boolean; checked?: boolean; valueNow?: number };
+  expectControl?: { role: string; name: string; present?: boolean; disabled?: boolean; checked?: boolean; valueNow?: number; level?: number; count?: number };
   /** No control of this role has an accessible name matching the pattern. */
   expectNoControlMatching?: { role: string; pattern: string };
   /** No request was made whose `METHOD path` matches the pattern. */
@@ -551,8 +551,9 @@ export async function runSteps(steps: readonly Step[], mounted: Mounted, where?:
       expect(q.queryAllByText(text, { exact: false }), `${at}: expected no text ${JSON.stringify(text)}`).toHaveLength(0);
     }
     if (step.expectControl) {
-      const { role, name, present = true, disabled, checked, valueNow } = step.expectControl;
-      const found = q.queryAllByRole(role as never, { name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') });
+      const { role, name, present = true, disabled, checked, valueNow, level, count } = step.expectControl;
+      const found = q.queryAllByRole(role as never, { name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'), ...(level === undefined ? {} : { level }) });
+      if (count !== undefined) expect(found, `${at}: expected exactly ${count} ${role} named ${name}`).toHaveLength(count);
       if (!present) {
         expect(found, `${at}: expected no ${role} named ${name}`).toHaveLength(0);
       } else {

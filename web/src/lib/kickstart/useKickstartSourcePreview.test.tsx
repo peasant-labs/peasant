@@ -35,6 +35,7 @@ interface PreviewStep {
   clickTwice?: string;
   jump?: true;
   expectHighlight?: string;
+  expectSessionMeta?: { reads?: string[]; lacks?: string[] };
 }
 const PREVIEW_KEYS = Object.freeze({
   serve: true,
@@ -47,6 +48,7 @@ const PREVIEW_KEYS = Object.freeze({
   clickTwice: true,
   jump: true,
   expectHighlight: true,
+  expectSessionMeta: true,
 } satisfies Record<keyof PreviewStep, true>);
 /** Where the stream must not reach: the closed set an `expectPrivacy` step names. */
 const PreviewPrivacy = Object.freeze({
@@ -185,6 +187,21 @@ async function runPreviewStep(step: PreviewStep, spec: StreamSpec, state: Conver
     await waitFor(() => expect(screen.getAllByText(step.expectHighlight!, { exact: false }).length, `${at}: highlights say ${step.expectHighlight}`).toBeGreaterThan(0));
     const other = step.expectHighlight === 'final response' ? 'latest loaded response' : null;
     if (other !== null) expect(screen.queryAllByText(other, { exact: false }), `${at}: highlights do not say ${other}`).toHaveLength(0);
+  }
+  if (step.expectSessionMeta !== undefined) {
+    const { reads = [], lacks = [] } = step.expectSessionMeta;
+    // The viewer's metadata row, by its DOM class: the region's accessible name is Fairtrade's copy.
+    const region = await waitFor(() => {
+      const found = mounted.container.querySelector('.txn-meta');
+      if (found === null) throw new Error(`${at}: the viewer drew no session metadata`);
+      return found;
+    });
+    // Each figure is one item; read them word by word so `2 turns` never matches `12 turns`.
+    const items = [...region.children].map((item) => (item.textContent ?? '').replace(/\s+/g, ' ').trim());
+    for (const figure of reads) expect(items, `${at}: the header reads ${figure}`).toContain(figure);
+    for (const word of lacks) {
+      expect(items.filter((item) => item.split(' ').includes(word)), `${at}: the header shows no ${word} figure`).toEqual([]);
+    }
   }
   for (const check of step.expectPrivacy ?? []) {
     if (!PRIVACY.includes(check)) throw new Error(`${at}: expectPrivacy names ${check}; it is one of ${PRIVACY.join(', ')}`);

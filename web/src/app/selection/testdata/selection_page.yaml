@@ -99,6 +99,8 @@ cases:
       - expectCalls: {route: "POST /api/v1/kickstart/sessions", count: 1}
       - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-selection/tree", count: 1}
       - expectText: [choose sessions, choose sessions to import, step 1 of 3, fix the ledger rounding]
+      # A scoped flow keeps its own visible page title as its one h1.
+      - expectControl: {role: heading, name: choose sessions, level: 1, count: 1}
       - expectRows: [p-ledger, g-main, s-one, s-two, p-locked]
       - expectControl: {role: checkbox, name: fix the ledger rounding, checked: true}
       - expectControl: {role: checkbox, name: add a CSV export, checked: false}

@@ -57,6 +57,24 @@ function directoryVM(held: LocalKickstartPreviewState): SegmentDirectoryVM {
   };
 }
 
+type PreviewSessionVM = ReturnType<typeof adaptTranscript>['session'];
+
+/** The header figures a capture does not measure; see {@link withoutUnmeasuredCounts}. */
+const UNMEASURED_COUNTS = ['durationMins', 'totalTokens', 'tokensIn', 'tokensOut', 'toolCallCount'] as const;
+
+/**
+ * The adapted session without the figures the capture never measured. The
+ * viewer's type lists them as numbers, but its header leaves out any figure that
+ * is absent (fairtrade 0.1.1: "a figure that was not measured is left out,
+ * never shown as unknown or as zero"), and nothing else in the viewer reads
+ * them, so leaving them out is how the preview says it does not know them.
+ */
+function withoutUnmeasuredCounts(session: PreviewSessionVM): PreviewSessionVM {
+  const copy: Partial<PreviewSessionVM> = { ...session };
+  for (const key of UNMEASURED_COUNTS) delete copy[key];
+  return copy as PreviewSessionVM;
+}
+
 export interface SessionPreviewProps {
   /** The setup session the tree belongs to. */
   readonly sessionId: string;
@@ -95,11 +113,17 @@ export default function SessionPreview({ sessionId, nodeId, label, scanGeneratio
     // markup, which must not become the heading. The header counts the turns
     // the directory says are held, the same numbers the position labels read
     // against, rather than the capture header's own count.
+    //
+    // The capture's header is the session as far as it is read, before any
+    // import: the server measures no duration, tokens or tool calls for it, and
+    // the wire's required numbers arrive as zero. The viewer leaves a figure it
+    // is not given out of the header, so those are not given: a preview never
+    // shows a count that was not measured.
     const wire = held.directory;
     return {
       ...adapted,
       session: {
-        ...adapted.session,
+        ...withoutUnmeasuredCounts(adapted.session),
         title: label,
         turnCount: wire.loadedTurns,
         conversationTurnCount: wire.loadedConversationTurns ?? undefined,

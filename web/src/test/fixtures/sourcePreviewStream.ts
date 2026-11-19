@@ -67,13 +67,18 @@ function numbered(spec: StreamSpec): Json[][] {
   return spec.segments.map((turns) => turns.map((turn) => wireTurn(turn, next++)));
 }
 
+/**
+ * The capture's header as the server sends it: the session as far as it is
+ * read, with the figures it never measures (duration, tokens, tool calls) at
+ * the wire's required zero.
+ */
 function header(spec: StreamSpec, loadedTurns: number): Json {
   return {
     id: spec.sessionId,
     harness: Harness.ClaudeCode,
     startTime: new Date(START).toISOString(),
     endTime: new Date(START + Math.max(loadedTurns, 1) * 1000).toISOString(),
-    durationMins: 1,
+    durationMins: 0,
     tokensIn: 0,
     tokensOut: 0,
     totalTokens: 0,

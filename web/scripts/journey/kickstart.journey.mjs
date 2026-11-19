@@ -61,7 +61,7 @@ const Tab = Object.freeze({ A: 'A', B: 'B', C: 'C', D: 'D', E: 'E', F: 'F', G: '
 const Css = Object.freeze({ None: 'none', Hidden: 'hidden' });
 const Labels = Object.freeze({
   Continue: 'continue', SaveAndImport: 'save and import', ImportFinished: 'import finished',
-  SetUp: 'set up peasant', Yes: 'yes', No: 'no', Back: 'back', ScanAgain: 'scan again',
+  SetUp: 'set up peasant', Breadcrumb: 'Breadcrumb', Sidebar: 'peasant', ThemeToggle: /^switch to (light|dark) mode$/, Yes: 'yes', No: 'no', Prev: 'prev', ScanAgain: 'scan again',
   ScanProgress: 'scan progress', AutoIngest: /auto-ingest new branches/,
   PublishLater: 'plan to publish later', RedactionExample: 'example for redaction level',
   SetupSaved: 'your setup is saved', TakeTheirs: /^take theirs for/,
@@ -107,6 +107,8 @@ let ingestCounts = null;
 // Where the connection stop's answers and the next stop's `continue` were laid
 // out, and the narrow foot they were measured beside.
 let footAlignment = null;
+/** Where the fresh-install setup page lays out its chrome, measured at the desktop viewport. */
+let setupGeometry = null;
 // The sign-in reads a burst of window focuses caused on `/village`: the page's
 // own read, then the burst's leading and trailing reads.
 let focusBurstReads = null;
@@ -316,7 +318,7 @@ test.beforeAll(async ({ browser }) => {
 
 test.afterAll(async () => {
   writeFileSync(join(artifacts, `${theme()}-evidence.json`), JSON.stringify({
-    theme: theme(), shots, probes, consoleErrors, failedResponses, walked, offerSeen, ingestCounts, importNowCounts, importNowStates, laterImports, importedAfterSetup, savedSelection, storedRemotes, footAlignment, focusBurstReads,
+    theme: theme(), shots, probes, consoleErrors, failedResponses, walked, offerSeen, ingestCounts, importNowCounts, importNowStates, laterImports, importedAfterSetup, savedSelection, storedRemotes, footAlignment, setupGeometry, focusBurstReads,
     frames: frames.map(({ tab, kind, revision, reason, scan, ingest }) => ({ tab, kind, revision, reason, scan, ingest })),
     requests: requests.filter((entry) => entry.path.startsWith('/api/')).map((entry) => `${entry.tab} ${entry.method} ${entry.path}${entry.scope === undefined ? '' : ` (scope ${entry.scope})`}`),
   }, null, 2));
@@ -355,7 +357,11 @@ test('fresh-install-redirects-to-setup', async () => {
   await pageA.goto('/');
   await expect(pageA).toHaveURL(/\/kickstart\/?$/);
 
-  await expect(pageA.getByRole('heading', { level: 1, name: Labels.SetUp })).toBeVisible();
+  // The page's one h1 names it for assistive technology; the trail's last crumb
+  // is what a sighted reader sees. No band is drawn above the page.
+  await expect(pageA.getByRole('heading', { level: 1 })).toHaveCount(1);
+  await expect(pageA.getByRole('heading', { level: 1, name: Labels.SetUp, exact: true })).toHaveCount(1);
+  await expect(pageA.getByRole('navigation', { name: Labels.Breadcrumb })).toContainText(Labels.SetUp);
   await expect(title(pageA)).toHaveText('peasant online');
   await seen(pageA);
   // The opening scan may still be running when the first stop is drawn; its
@@ -369,6 +375,34 @@ test('fresh-install-redirects-to-setup', async () => {
   expect(first.index).toBe(1);
   expect(first.total, 'the page counts the stops the server shows').toBe(expectedStops);
   await expect.poll(() => frames.some((frame) => frame.tab === Tab.A && frame.kind === LocalKickstartEventKind.Session && frame.sessionId === id), 'the topic sends the session snapshot on subscribe').toBe(true);
+  // The chrome fits the window: the sidebar starts at the top, its foot (the
+  // settings gear and the theme toggle) is wholly on screen, and so is the
+  // wizard foot's bottom border.
+  const sidebar = pageA.getByRole('complementary', { name: Labels.Sidebar });
+  const gear = sidebar.getByRole('link', { name: Labels.Settings, exact: true });
+  const toggle = sidebar.getByRole('button', { name: Labels.ThemeToggle });
+  const box = async (locator) => (await locator.evaluate((element) => element.getBoundingClientRect().toJSON()));
+  setupGeometry = await pageA.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  setupGeometry.sidebar = await box(sidebar);
+  setupGeometry.gear = await box(gear);
+  setupGeometry.toggle = await box(toggle);
+  setupGeometry.wizardFoot = await box(pageA.locator('.swz-foot'));
+  setupGeometry.wizardFootBorderBottom = await pageA.locator('.swz-foot').evaluate((foot) => {
+    // The frame's bottom border is drawn by the foot or by the frame around it, whichever has one.
+    for (let element = foot; element; element = element.parentElement) {
+      const style = getComputedStyle(element);
+      if (parseFloat(style.borderBottomWidth) > 0) return { element: element.className, bottom: element.getBoundingClientRect().bottom };
+    }
+    return null;
+  });
+  const { height } = setupGeometry;
+  expect(setupGeometry.sidebar.top, 'the sidebar starts at the top of the window').toBeLessThanOrEqual(0.5);
+  for (const part of ['gear', 'toggle']) {
+    expect(setupGeometry[part].top, `the sidebar foot's ${part} starts inside the window`).toBeGreaterThanOrEqual(0);
+    expect(setupGeometry[part].bottom, `the sidebar foot's ${part} ends inside the window`).toBeLessThanOrEqual(height);
+  }
+  expect(setupGeometry.wizardFootBorderBottom, 'the wizard frame draws a bottom border').not.toBeNull();
+  expect(setupGeometry.wizardFootBorderBottom.bottom, "the wizard foot's bottom border is inside the window").toBeLessThanOrEqual(height);
   await shoot(pageA, '01-village');
 });
 
@@ -410,8 +444,9 @@ test('answers-sit-where-continue-sits', async () => {
   footAlignment = { answer, proceed, narrow };
 
   // Leave the walk where the story left it: the next case answers the
-  // connection stop itself.
-  await pageA.getByRole('button', { name: Labels.Back }).click();
+  // connection stop itself. The foot's backward control reads `prev`, as in
+  // the Fairtrade demo; exact, so no `preview …` row button matches it.
+  await pageA.getByRole('button', { name: Labels.Prev, exact: true }).click();
   await expect(title(pageA)).toHaveText('peasant online');
 });
 
@@ -481,9 +516,9 @@ test('scan-progress-and-tree-selection', async () => {
   expect((await stepOf(pageA)).total, 'the count after the choice is the server list').toBe(visibleStops(view).length);
   expect(visibleStops(view).map((stop) => stop.key), 'the auto-ingest stop is in the server list').toContain('auto-ingest');
 
-  // A row's preview is the server's reading of the real transcript.
-  await row(pageA, chosenSessions[0].prompt).focus();
-  await expect(pageA.locator('.ks-preview')).toContainText(chosenSessions[0].prompt);
+  // A row's preview is the server's reading of the real transcript. It opens
+  // from the row's title, not from the checkbox, and choosing nothing.
+  await openPreview(pageA, chosenSessions[0]);
   await shoot(pageA, '03-selection-tree');
 });
 
@@ -816,7 +851,7 @@ test('selection-page-saves-only-selection', async () => {
   expect((await snapshot(pageC.request)).id).toBe(wizard);
   await expect(pageC.getByRole('heading', { name: Labels.SetupSaved })).toHaveCount(0);
   for (const stop of ['privacy', 'auto-publish', 'publication']) {
-    await pageC.getByRole('button', { name: Labels.Back }).click();
+    await pageC.getByRole('button', { name: Labels.Prev, exact: true }).click();
     await expect(title(pageC)).toHaveText(stop);
   }
   await expect(pageC.getByRole('radio', { name: Labels.KeepLocal }), 'the wizard kept its unsaved answer').toBeChecked();
