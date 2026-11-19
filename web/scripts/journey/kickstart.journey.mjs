@@ -61,7 +61,7 @@ const Tab = Object.freeze({ A: 'A', B: 'B', C: 'C', D: 'D', E: 'E', F: 'F', G: '
 const Css = Object.freeze({ None: 'none', Hidden: 'hidden' });
 const Labels = Object.freeze({
   Continue: 'continue', SaveAndImport: 'save and import', ImportFinished: 'import finished',
-  SetUp: 'set up peasant', Yes: 'yes', No: 'no', Back: 'back', ScanAgain: 'scan again',
+  SetUp: 'set up peasant', Yes: 'yes', No: 'no', Prev: 'prev', ScanAgain: 'scan again',
   ScanProgress: 'scan progress', AutoIngest: /auto-ingest new branches/,
   PublishLater: 'plan to publish later', RedactionExample: 'example for redaction level',
   SetupSaved: 'your setup is saved', TakeTheirs: /^take theirs for/,
@@ -410,8 +410,9 @@ test('answers-sit-where-continue-sits', async () => {
   footAlignment = { answer, proceed, narrow };
 
   // Leave the walk where the story left it: the next case answers the
-  // connection stop itself.
-  await pageA.getByRole('button', { name: Labels.Back }).click();
+  // connection stop itself. The foot's backward control reads `prev`, as in
+  // the Fairtrade demo; exact, so no `preview …` row button matches it.
+  await pageA.getByRole('button', { name: Labels.Prev, exact: true }).click();
   await expect(title(pageA)).toHaveText('peasant online');
 });
 
@@ -816,7 +817,7 @@ test('selection-page-saves-only-selection', async () => {
   expect((await snapshot(pageC.request)).id).toBe(wizard);
   await expect(pageC.getByRole('heading', { name: Labels.SetupSaved })).toHaveCount(0);
   for (const stop of ['privacy', 'auto-publish', 'publication']) {
-    await pageC.getByRole('button', { name: Labels.Back }).click();
+    await pageC.getByRole('button', { name: Labels.Prev, exact: true }).click();
     await expect(title(pageC)).toHaveText(stop);
   }
   await expect(pageC.getByRole('radio', { name: Labels.KeepLocal }), 'the wizard kept its unsaved answer').toBeChecked();
