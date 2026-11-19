@@ -1,0 +1,34 @@
+# Required merge_gate_cases in verdict_inheritance.yaml: every accepted
+# state and every refusal the merge-gate step must keep.
+requiredNames:
+  - pr-code-change-passes
+  - group-code-change-passes
+  - push-code-change-passes
+  - push-post-merge-evidence-skip-passes
+  - group-docs-only-passes
+  - release-group-full-passes
+  - release-group-inherited-passes
+  - release-pr-inherited-passes
+  - check-failure-is-refused
+  - cancelled-windows-is-refused
+  - failed-classifier-is-refused
+  - skipped-classifier-is-refused
+  - missing-code-is-refused
+  - unknown-release-is-refused
+  - missing-candidate-is-refused
+  - unknown-release-only-is-refused
+  - unknown-inherit-is-refused
+  - release-group-without-candidate-is-refused
+  - skipped-check-without-inheritance-is-refused
+  - skipped-windows-without-inheritance-is-refused
+  - skipped-harvester-guard-without-inheritance-is-refused
+  - release-candidate-not-release-only-needs-check
+  - release-group-skipped-cgo0-is-refused
+  - inherited-check-ran-is-refused
+  - inherited-windows-ran-is-refused
+  - inherited-without-release-only-is-refused
+  - inherited-without-candidate-is-refused
+  - inherited-on-push-is-refused
+  - inherited-release-group-skipped-arm64-is-refused
+  - inherited-release-group-skipped-e2e-is-refused
+  - inherited-release-group-skipped-packaging-is-refused

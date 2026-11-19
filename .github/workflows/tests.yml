@@ -2,7 +2,9 @@ name: Tests
 
 # Every PR and merge group gets an always-reporting merge-gate. The first job
 # classifies changed paths and the live merge-group entry; heavy jobs run for
-# relevant changes and the release group. Push CI remains until same-SHA queue
+# relevant changes and the release group. A release-only release candidate
+# inherits its base commit's queue verdict instead of rerunning the jobs that
+# verdict proved; see merge-gate. Push CI remains until same-SHA queue
 # evidence justifies removing it. The check job stubs the dashboard; the web
 # jobs build and exercise the actual embedded frontend.
 on:
@@ -21,15 +23,25 @@ permissions:
   contents: read
 
 jobs:
+  # Classifies the run. Only the bot release PR, or a merge group whose entry
+  # is that PR, builds release-intent; every other run skips the build and
+  # records no release group, no candidate and no inheritance.
   changes:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # A merge group may wait up to 20 minutes for its base's queue verdict.
+    timeout-minutes: 30
     permissions:
       contents: read
       pull-requests: read
+      checks: read
+      actions: read
     outputs:
       code: ${{ steps.diff.outputs.code }}
       release: ${{ steps.entry.outputs.release }}
+      release_candidate: ${{ steps.entry.outputs.candidate }}
+      release_only: ${{ steps.inherit.outputs.release_only || 'false' }}
+      inherit: ${{ steps.inherit.outputs.inherit || 'false' }}
+      inherited_from: ${{ steps.inherit.outputs.inherited_from }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -37,8 +49,42 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
+      # A cheap pre-filter so an ordinary run never builds release-intent:
+      # only a bot PR, or a merge group whose entry PR, has the release bot
+      # branch as its head builds the tool. classify stays the authority (it
+      # also checks the author), so this check can only skip the build; a
+      # queue ref it cannot read builds the tool and lets classify decide.
+      # RELEASE_BRANCH is bot_branches.release in .github/release-intent.yaml;
+      # a test keeps the two equal.
+      - name: Pre-check the release entry
+        id: precheck
+        env:
+          EVENT: ${{ github.event_name }}
+          GROUP_REF: ${{ github.ref }}
+          PR_AUTHOR_TYPE: ${{ github.event.pull_request.user.type }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          RELEASE_BRANCH: automation/release
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          head=
+          case "$EVENT" in
+            pull_request)
+              if [ "$PR_AUTHOR_TYPE" = Bot ]; then head="$PR_HEAD_REF"; fi
+              ;;
+            merge_group)
+              if [[ "$GROUP_REF" =~ ^refs/heads/gh-readonly-queue/.+/pr-([0-9]+)-[0-9a-f]{40}$ ]]; then
+                head="$(gh api "repos/$GITHUB_REPOSITORY/pulls/${BASH_REMATCH[1]}" --jq .head.ref)"
+              else
+                head="$RELEASE_BRANCH"
+              fi
+              ;;
+          esac
+          build=false
+          if [ -n "$head" ] && [ "$head" = "$RELEASE_BRANCH" ]; then build=true; fi
+          echo "build=$build" >> "$GITHUB_OUTPUT"
       - name: Checkout release-intent
-        if: github.event_name == 'merge_group'
+        if: steps.precheck.outputs.build == 'true'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: peasant-labs/infra
@@ -47,34 +93,80 @@ jobs:
           sparse-checkout: tools/release
           persist-credentials: false
       - name: Set up Go
-        if: github.event_name == 'merge_group'
+        if: steps.precheck.outputs.build == 'true'
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version-file: infra-tool/tools/release/go.mod
           cache: false
       - name: Build release-intent
-        if: github.event_name == 'merge_group'
+        if: steps.precheck.outputs.build == 'true'
         env:
           GOWORK: "off"
         run: go build -C infra-tool/tools/release -o "${RUNNER_TEMP}/release-intent" ./cmd/release-intent
-      - name: Classify the merge-group entry
+      # candidate: this run is the bot release PR, or a merge group whose entry
+      # is. release: a candidate merge group, which runs the release gates. A
+      # run the pre-check filtered out never built the tool and is neither.
+      - name: Classify the release entry
         id: entry
         env:
-          GH_TOKEN: ${{ github.token }}
+          BUILD: ${{ steps.precheck.outputs.build }}
           EVENT: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if [ "$EVENT" != merge_group ]; then
+          if [ "$BUILD" != true ]; then
             echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "candidate=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           export PATH="$RUNNER_TEMP:$PATH"
-          kind="$(bash scripts/release-group-entry)"
-          if [ "$kind" = 'kind=release' ]; then
-            echo "release=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "release=false" >> "$GITHUB_OUTPUT"
+          kind=
+          case "$EVENT" in
+            merge_group)
+              kind="$(bash scripts/release-group-entry)"
+              ;;
+            pull_request)
+              payload="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json author,headRefName)"
+              author="$(jq -er '.author.login | select(length > 0)' <<< "$payload")"
+              branch="$(jq -er '.headRefName | select(length > 0)' <<< "$payload")"
+              kind="$(release-intent classify --author "$author" --head-branch "$branch" --rev "$BASE")"
+              ;;
+          esac
+          candidate=false
+          if [ "$kind" = 'kind=release' ]; then candidate=true; fi
+          release=false
+          if [ "$candidate" = true ] && [ "$EVENT" = merge_group ]; then release=true; fi
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+          echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
+      # A candidate whose whole base..head change is release content (the
+      # changelog) inherits the verdict its exact base recorded in that
+      # commit's merge-queue run instead of rerunning the jobs that verdict
+      # proved. A release-only candidate whose base verdict is missing,
+      # pending past the wait, failed or ambiguous fails here; it never falls
+      # back to the suite. A merge group may be built on a group still ahead
+      # of it in the queue, so it waits for that verdict. The step always runs
+      # (no step-level if); every other run records no inheritance.
+      - name: Inherit the base commit's queue verdict
+        id: inherit
+        env:
+          EVENT: ${{ github.event_name }}
+          CANDIDATE: ${{ steps.entry.outputs.candidate }}
+          BASE: ${{ github.event.merge_group.base_sha || github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.merge_group.head_sha || github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "$CANDIDATE" != true ]; then
+            echo "release_only=false" >> "$GITHUB_OUTPUT"
+            echo "inherit=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          wait=0s
+          if [ "$EVENT" = merge_group ]; then wait=20m; fi
+          git fetch --no-tags origin "$BASE" "$HEAD"
+          "$RUNNER_TEMP/release-intent" inherit-verdict --base "$BASE" --head "$HEAD" --repo "$GITHUB_REPOSITORY" --wait "$wait"
       - name: Classify changed paths
         id: diff
         env:
@@ -160,7 +252,7 @@ jobs:
 
   schema-parity:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.inherit != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -267,7 +359,8 @@ jobs:
           -repo "${{ github.repository }}"
 
   # Push evidence may skip the post-merge check only when it proves the
-  # previously tested tree. Group and PR builds use the path decision above.
+  # previously tested tree. Group and PR builds use the path decision above,
+  # and a release-only candidate with an inherited verdict skips it.
   check:
     name: make check
     # The probe governs only the push runs; a skipped or failed probe runs the
@@ -279,7 +372,8 @@ jobs:
       !cancelled() &&
       (needs.post-merge-evidence.result != 'success' ||
        needs.post-merge-evidence.outputs.skip != 'true') &&
-      needs.changes.outputs.code == 'true'
+      needs.changes.outputs.code == 'true' &&
+      needs.changes.outputs.inherit != 'true'
     # Routed to the x86_64 pool. `make check` needs only the Go toolchain, a C
     # compiler for `go vet`/cgo, and the ast-grep binary. It does not need the
     # Nix devShell. The pool hands a lone
@@ -583,7 +677,7 @@ jobs:
   # minutes and starved the -race suite. It runs for PR and group changes.
   harvester-version-guard:
     name: harvester version guard
-    if: needs.changes.outputs.code == 'true' && (github.event_name == 'pull_request' || github.event_name == 'merge_group')
+    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.inherit != 'true' && (github.event_name == 'pull_request' || github.event_name == 'merge_group')
     # Routed to the container pool. The guard needs no Nix: it shells out only
     # to git, tar, and `go test -race` (see scripts/harvester-version-guard),
     # and the pool image already carries git, tar, and the C compiler the race
@@ -705,7 +799,7 @@ jobs:
   # //go:embed all:web/out directive so `go list ./cmd/peasant` can load.
   third-party-notices:
     name: third-party license notices
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.inherit != 'true'
     needs: [changes, determine-runner]
     permissions:
       contents: read
@@ -748,7 +842,7 @@ jobs:
   # regenerating the lockfile.
   web-lockfiles-in-sync:
     name: web lockfiles in sync
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.inherit != 'true'
     needs: [changes, determine-runner]
     permissions:
       contents: read
@@ -781,7 +875,7 @@ jobs:
   # (not the web-stub notice). Artifact workflows enforce the same invariant.
   web-pnpm-build:
     name: web real pnpm build (no stub fallback)
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.inherit != 'true'
     needs: [changes, determine-runner]
     permissions:
       contents: read
@@ -859,7 +953,7 @@ jobs:
   # outage cannot fail it.
   home-phone-gate:
     name: mounted Home table scroll at phone width
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.inherit != 'true'
     needs: [changes, determine-runner, web-pnpm-build]
     permissions:
       contents: read
@@ -914,7 +1008,7 @@ jobs:
   windows:
     name: windows-latest
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.inherit != 'true'
     permissions:
       contents: read
     runs-on: windows-latest
@@ -973,6 +1067,17 @@ jobs:
           go build -o peasant.exe ./cmd/peasant
           ./peasant.exe version
 
+  # The required queue check. A run that did not inherit a verdict needs every
+  # path-filtered job to succeed for a code change in a pull request or merge
+  # group. A release-only candidate that inherited its base's queue verdict
+  # skips exactly the jobs that verdict proved (INHERITED_JOBS), and the gate
+  # accepts the skip only with that proof. The release gates (release content,
+  # vendor hash, the arm64 subset, CGO=0, e2e and packaging) never ran on an
+  # ordinary base, so a release group still runs and requires them. The last
+  # three steps record where this run's verdict came from; exactly one runs on
+  # a passing gate. A later release candidate built on this commit reads them
+  # back through release-intent inherit-verdict, so an inherited verdict
+  # always traces back to a run where make check ran.
   merge-gate:
     name: merge-gate
     needs: [changes, determine-runner, post-merge-evidence, check, check-arm64, harvester-version-guard, cgo0, third-party-notices, web-lockfiles-in-sync, web-pnpm-build, home-phone-gate, windows, release-content, vendor-hash, schema-parity, e2e, release-validate]
@@ -982,16 +1087,56 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Require successful or intentionally skipped jobs
+      - name: Require the gate jobs or a proven inherited verdict
         env:
           RESULTS: ${{ toJSON(needs) }}
+          EVENT: ${{ github.event_name }}
+          CODE: ${{ needs.changes.outputs.code }}
           RELEASE: ${{ needs.changes.outputs.release }}
+          RELEASE_CANDIDATE: ${{ needs.changes.outputs.release_candidate }}
+          RELEASE_ONLY: ${{ needs.changes.outputs.release_only }}
+          INHERIT: ${{ needs.changes.outputs.inherit }}
+          INHERITED_JOBS: check harvester-version-guard third-party-notices web-lockfiles-in-sync web-pnpm-build home-phone-gate windows schema-parity
+          RELEASE_JOBS: release-content vendor-hash check-arm64 cgo0 e2e release-validate
         run: |
           set -euo pipefail
-          jq -e 'all(.[]; .result == "success" or .result == "skipped")' <<< "$RESULTS"
-          test "$(jq -r '.changes.result' <<< "$RESULTS")" = success
-          if [ "$RELEASE" = true ]; then
-            for job in release-content vendor-hash check-arm64 cgo0 e2e release-validate; do
-              test "$(jq -r --arg job "$job" '.[$job].result' <<< "$RESULTS")" = success
+          fail() { echo "::error::merge-gate: $*"; exit 1; }
+          result() { jq -r --arg job "$1" '.[$job].result' <<< "$RESULTS"; }
+          jq -e 'to_entries | all(.[]; .value.result == "success" or .value.result == "skipped")' <<< "$RESULTS" > /dev/null || fail "a needed job failed or was cancelled"
+          [ "$(result changes)" = success ] || fail "the changes job did not succeed"
+          case "$CODE" in true|false) ;; *) fail "changed-path classification is missing or invalid" ;; esac
+          case "$RELEASE" in true|false) ;; *) fail "release group classification is missing or invalid" ;; esac
+          case "$RELEASE_CANDIDATE" in true|false) ;; *) fail "release candidate classification is missing or invalid" ;; esac
+          case "$RELEASE_ONLY" in true|false) ;; *) fail "release-only classification is missing or invalid" ;; esac
+          case "$INHERIT" in true|false) ;; *) fail "verdict inheritance is missing or invalid" ;; esac
+          if [ "$RELEASE" = true ] && [ "$RELEASE_CANDIDATE" != true ]; then
+            fail "a release group must be a release candidate"
+          fi
+          if [ "$INHERIT" = true ]; then
+            case "$EVENT" in pull_request|merge_group) ;; *) fail "only pull_request and merge_group runs inherit a verdict" ;; esac
+            [ "$RELEASE_CANDIDATE" = true ] || fail "only a release candidate inherits a verdict"
+            [ "$RELEASE_ONLY" = true ] || fail "an inherited verdict needs a release-only change"
+            for job in $INHERITED_JOBS; do
+              [ "$(result "$job")" = skipped ] || fail "$job ran although the verdict was inherited"
+            done
+          elif [ "$CODE" = true ] && { [ "$EVENT" = pull_request ] || [ "$EVENT" = merge_group ]; }; then
+            for job in $INHERITED_JOBS; do
+              [ "$(result "$job")" = success ] || fail "$job is required for a code change"
             done
           fi
+          if [ "$RELEASE" = true ]; then
+            for job in $RELEASE_JOBS; do
+              [ "$(result "$job")" = success ] || fail "$job is required for a release group"
+            done
+          fi
+      - name: "verdict-source: full"
+        if: needs.check.result == 'success'
+        run: echo "verdict-source=full" >> "$GITHUB_STEP_SUMMARY"
+      - name: "verdict-source: inherited"
+        if: needs.changes.outputs.inherit == 'true' && needs.check.result == 'skipped'
+        env:
+          INHERITED_FROM: ${{ needs.changes.outputs.inherited_from }}
+        run: echo "verdict-source=inherited:${INHERITED_FROM}" >> "$GITHUB_STEP_SUMMARY"
+      - name: "verdict-source: unaffected"
+        if: needs.changes.outputs.inherit != 'true' && needs.check.result == 'skipped'
+        run: echo "verdict-source=unaffected" >> "$GITHUB_STEP_SUMMARY"

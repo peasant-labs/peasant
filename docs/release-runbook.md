@@ -42,6 +42,17 @@ needed, opens or updates `chore(nix): update vendor hash` on
 ordinary PR hash check is a report; the release PR's group build makes it a
 hard gate. No workflow repairs the hash after a tag.
 
+When the release PR changes only `CHANGELOG.md`, its runs inherit the
+`merge-gate` verdict of the exact base commit's merge-queue run instead of
+rerunning `make check`, the harvester guard, the license notices, the web
+jobs, the mounted Home gate, the Windows job and schema parity. A missing,
+pending, failed or ambiguous base verdict fails the `changes` job; it never
+falls back to the suite. The group still runs release content, the vendor
+hash, the arm64 subset, CGO=0, e2e and packaging validation, because an
+ordinary base group never ran them. If a base verdict fails, rerun the base
+commit's merge-queue run or let another change land, then requeue the release
+PR.
+
 For a forced release use the `cut-release` dispatch with `patch` or `minor`;
 it creates an empty bot PR and the queue drives the normal release. Never
 create, move, or delete tags by hand. A failed publication burns its tag; fix

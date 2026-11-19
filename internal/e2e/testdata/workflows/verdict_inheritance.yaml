@@ -1,0 +1,387 @@
+# Verdict inheritance in .github/workflows/tests.yml, checked by
+# TestMergeGateVerdict, TestChangesPreCheck, TestReleaseEntryClassification
+# and TestVerdictInheritanceWiring. The required-name manifests beside this
+# file guard every case list against deletion.
+#
+# verdict_markers mirrors infra's exported marker step set at the pinned
+# release tool (tools/release/internal/intent/testdata/verdict_markers.yaml,
+# intent.VerdictMarkerStepNames and intent.VerdictMarkersVersion). The tool
+# reads these names back from a base commit's merge-queue run, so a change on
+# either side bumps the version and moves both together at a re-pin.
+verdict_markers:
+  version: 1
+  names:
+    - "verdict-source: full"
+    - "verdict-source: inherited"
+    - "verdict-source: unaffected"
+
+policy_file: .github/release-queue.policy.yml
+workflow_file: .github/workflows/tests.yml
+release_config: .github/release-intent.yaml
+aggregator_job: merge-gate
+full_suite_job: check
+merge_gate_step: Require the gate jobs or a proven inherited verdict
+
+# The aggregator's final steps, in order, with the condition that selects
+# each. Peasant has a path filter and a push-only post-merge probe, so the
+# unaffected marker runs whenever make check is skipped without inheritance.
+marker_steps:
+  - {name: "verdict-source: full", if: "needs.check.result == 'success'"}
+  - {name: "verdict-source: inherited", if: "needs.changes.outputs.inherit == 'true' && needs.check.result == 'skipped'"}
+  - {name: "verdict-source: unaffected", if: "needs.changes.outputs.inherit != 'true' && needs.check.result == 'skipped'"}
+
+# The jobs an inherited verdict replaces, in the order of merge-gate's
+# INHERITED_JOBS. Each runs in an ordinary merge group for a code change, so
+# the base's verdict proves it, and none reads CHANGELOG.md, the only path a
+# release-only diff changes. Each is skipped exactly when the verdict was
+# inherited.
+inherited_jobs:
+  - job: check
+    if: "!cancelled() && (needs.post-merge-evidence.result != 'success' || needs.post-merge-evidence.outputs.skip != 'true') && needs.changes.outputs.code == 'true' && needs.changes.outputs.inherit != 'true'"
+  - job: harvester-version-guard
+    if: "needs.changes.outputs.code == 'true' && needs.changes.outputs.inherit != 'true' && (github.event_name == 'pull_request' || github.event_name == 'merge_group')"
+  - job: third-party-notices
+    if: "needs.changes.outputs.code == 'true' && needs.changes.outputs.inherit != 'true'"
+  - job: web-lockfiles-in-sync
+    if: "needs.changes.outputs.code == 'true' && needs.changes.outputs.inherit != 'true'"
+  - job: web-pnpm-build
+    if: "needs.changes.outputs.code == 'true' && needs.changes.outputs.inherit != 'true'"
+  - job: home-phone-gate
+    if: "needs.changes.outputs.code == 'true' && needs.changes.outputs.inherit != 'true'"
+  - job: windows
+    if: "needs.changes.outputs.code == 'true' && needs.changes.outputs.inherit != 'true'"
+  - job: schema-parity
+    if: "needs.changes.outputs.code == 'true' && needs.changes.outputs.inherit != 'true'"
+
+# Jobs the aggregator needs that an inherited verdict does NOT replace. Their
+# conditions never read the inheritance output.
+kept_jobs:
+  - job: determine-runner
+    reason: cgo0 still runs in an inherited release group and is routed by it.
+  - job: post-merge-evidence
+    reason: push-only probe; inheritance is never granted on push.
+  - job: release-content
+    reason: rechecks the release content against the live default branch; the base verdict cannot prove that.
+  - job: vendor-hash
+    reason: release-group gate; an ordinary base group never ran it.
+  - job: check-arm64
+    reason: release-group gate; an ordinary base group never ran it, so the base verdict carries no arm64 signal to inherit.
+  - job: cgo0
+    reason: release-group gate; an ordinary base group never ran it, so the base verdict carries no CGO=0 signal to inherit.
+  - job: e2e
+    reason: release-group gate; an ordinary base group never ran it.
+  - job: release-validate
+    reason: release-group gate that validates packaging of the exact tree being tagged; an ordinary base group never ran it.
+
+# merge-gate's RELEASE_JOBS: required to succeed in every release group,
+# inherited or not.
+release_jobs:
+  - release-content
+  - vendor-hash
+  - check-arm64
+  - cgo0
+  - e2e
+  - release-validate
+
+# The classifier job always runs, and the proof step always runs and never
+# fails softly. The token scopes are the ones inherit-verdict reads with.
+classifier_job: changes
+precheck_step: precheck
+classify_step: entry
+inherit_step: inherit
+# Every step that checks out, sets up or builds the tool carries tool_if, and
+# the pre-check's RELEASE_BRANCH equals bot_branches.release in the release
+# config.
+tool_if: "steps.precheck.outputs.build == 'true'"
+tool_steps:
+  - Checkout release-intent
+  - Set up Go
+  - Build release-intent
+classifier_permissions:
+  contents: read
+  pull-requests: read
+  checks: read
+  actions: read
+
+# Each case runs the real pre-check step with a stub gh that answers the
+# entry PR's head ref. When the pre-check skips the build, the real classify
+# and inherit steps run next and must record no release group, no candidate
+# and no inheritance without ever calling release-intent or git. An omitted
+# event is merge_group; expected_gh is the one gh call the pre-check makes.
+precheck_cases:
+  - name: human-pr-skips-build
+    event: pull_request
+    pr_author_type: User
+    pr_head_ref: fix/ingest-sweep
+    expected_build: false
+  - name: human-pr-on-release-branch-skips-build
+    event: pull_request
+    pr_author_type: User
+    pr_head_ref: automation/release
+    expected_build: false
+  - name: dependabot-pr-skips-build
+    event: pull_request
+    pr_author_type: Bot
+    pr_head_ref: dependabot/go_modules/golang.org/x/text-0.31.0
+    expected_build: false
+  - name: vendor-hash-bot-pr-skips-build
+    event: pull_request
+    pr_author_type: Bot
+    pr_head_ref: automation/vendor-hash
+    expected_build: false
+  - name: release-bot-pr-builds
+    event: pull_request
+    pr_author_type: Bot
+    pr_head_ref: automation/release
+    expected_build: true
+  - name: normal-merge-group-skips-build
+    group_ref: refs/heads/gh-readonly-queue/develop/pr-1113-0123456789abcdef0123456789abcdef01234567
+    gh_head: fix/ingest-sweep
+    expected_gh: "api repos/peasant-labs/peasant/pulls/1113 --jq .head.ref"
+    expected_build: false
+  - name: release-merge-group-builds
+    group_ref: refs/heads/gh-readonly-queue/develop/pr-1092-0123456789abcdef0123456789abcdef01234567
+    gh_head: automation/release
+    expected_gh: "api repos/peasant-labs/peasant/pulls/1092 --jq .head.ref"
+    expected_build: true
+  - name: unreadable-queue-ref-builds-for-classify
+    group_ref: refs/heads/develop
+    expected_build: true
+  - name: failed-head-lookup-fails-the-step
+    group_ref: refs/heads/gh-readonly-queue/develop/pr-1113-0123456789abcdef0123456789abcdef01234567
+    gh_exit: 1
+    expected_gh: "api repos/peasant-labs/peasant/pulls/1113 --jq .head.ref"
+    expected_exit: 1
+  - name: push-skips-build
+    event: push
+    expected_build: false
+  - name: dispatch-skips-build
+    event: workflow_dispatch
+    expected_build: false
+
+# Each case runs the real classify step, after a pre-check that built the
+# tool, with a stub release-intent that answers classify with stub_kind. A
+# merge group resolves its entry through scripts/release-group-entry; a pull
+# request classifies against its base. Only a release merge group is a
+# release group; a release PR is a candidate.
+classify_cases:
+  - name: release-merge-group-is-release-group
+    event: merge_group
+    stub_kind: kind=release
+    expected_release: "true"
+    expected_candidate: "true"
+    expected_calls:
+      - "group-pr --ref refs/heads/gh-readonly-queue/develop/pr-1092-0123456789abcdef0123456789abcdef01234567"
+      - "classify --author app/peasant-labs-releaser --head-branch automation/release --rev HEAD"
+  - name: ordinary-merge-group-entry-is-neither
+    event: merge_group
+    stub_kind: kind=ordinary
+    expected_release: "false"
+    expected_candidate: "false"
+    expected_calls:
+      - "group-pr --ref refs/heads/gh-readonly-queue/develop/pr-1092-0123456789abcdef0123456789abcdef01234567"
+      - "classify --author app/peasant-labs-releaser --head-branch automation/release --rev HEAD"
+  - name: release-pr-is-candidate-not-release-group
+    event: pull_request
+    stub_kind: kind=release
+    expected_release: "false"
+    expected_candidate: "true"
+    expected_calls:
+      - "classify --author app/peasant-labs-releaser --head-branch automation/release --rev 1111111111111111111111111111111111111111"
+  - name: ordinary-bot-pr-is-neither
+    event: pull_request
+    stub_kind: kind=ordinary
+    expected_release: "false"
+    expected_candidate: "false"
+    expected_calls:
+      - "classify --author app/peasant-labs-releaser --head-branch automation/release --rev 1111111111111111111111111111111111111111"
+
+# Named needs results. Every profile names exactly the aggregator's needs, so
+# a job added to or removed from merge-gate needs every profile updated.
+result_profiles:
+  pr-code:
+    {changes: success, determine-runner: success, post-merge-evidence: skipped, check: success, check-arm64: skipped, harvester-version-guard: success, cgo0: skipped, third-party-notices: success, web-lockfiles-in-sync: success, web-pnpm-build: success, home-phone-gate: success, windows: success, release-content: skipped, vendor-hash: success, schema-parity: success, e2e: skipped, release-validate: skipped}
+  group-code:
+    {changes: success, determine-runner: success, post-merge-evidence: skipped, check: success, check-arm64: skipped, harvester-version-guard: success, cgo0: skipped, third-party-notices: success, web-lockfiles-in-sync: success, web-pnpm-build: success, home-phone-gate: success, windows: success, release-content: skipped, vendor-hash: skipped, schema-parity: success, e2e: skipped, release-validate: skipped}
+  group-docs-only:
+    {changes: success, determine-runner: skipped, post-merge-evidence: skipped, check: skipped, check-arm64: skipped, harvester-version-guard: skipped, cgo0: skipped, third-party-notices: skipped, web-lockfiles-in-sync: skipped, web-pnpm-build: skipped, home-phone-gate: skipped, windows: skipped, release-content: skipped, vendor-hash: skipped, schema-parity: skipped, e2e: skipped, release-validate: skipped}
+  push-code:
+    {changes: success, determine-runner: success, post-merge-evidence: success, check: success, check-arm64: skipped, harvester-version-guard: skipped, cgo0: skipped, third-party-notices: success, web-lockfiles-in-sync: success, web-pnpm-build: success, home-phone-gate: success, windows: success, release-content: skipped, vendor-hash: skipped, schema-parity: success, e2e: skipped, release-validate: skipped}
+  push-evidence-skip:
+    {changes: success, determine-runner: success, post-merge-evidence: success, check: skipped, check-arm64: skipped, harvester-version-guard: skipped, cgo0: skipped, third-party-notices: success, web-lockfiles-in-sync: success, web-pnpm-build: success, home-phone-gate: success, windows: success, release-content: skipped, vendor-hash: skipped, schema-parity: success, e2e: skipped, release-validate: skipped}
+  release-group-full:
+    {changes: success, determine-runner: success, post-merge-evidence: skipped, check: success, check-arm64: success, harvester-version-guard: success, cgo0: success, third-party-notices: success, web-lockfiles-in-sync: success, web-pnpm-build: success, home-phone-gate: success, windows: success, release-content: success, vendor-hash: success, schema-parity: success, e2e: success, release-validate: success}
+  release-group-inherited:
+    {changes: success, determine-runner: success, post-merge-evidence: skipped, check: skipped, check-arm64: success, harvester-version-guard: skipped, cgo0: success, third-party-notices: skipped, web-lockfiles-in-sync: skipped, web-pnpm-build: skipped, home-phone-gate: skipped, windows: skipped, release-content: success, vendor-hash: success, schema-parity: skipped, e2e: success, release-validate: success}
+  release-pr-inherited:
+    {changes: success, determine-runner: skipped, post-merge-evidence: skipped, check: skipped, check-arm64: skipped, harvester-version-guard: skipped, cgo0: skipped, third-party-notices: skipped, web-lockfiles-in-sync: skipped, web-pnpm-build: skipped, home-phone-gate: skipped, windows: skipped, release-content: skipped, vendor-hash: success, schema-parity: skipped, e2e: skipped, release-validate: skipped}
+
+# Each case runs the real merge-gate shell step over a profile with its
+# overrides. An omitted event is merge_group; omitted code is "true";
+# omitted release, release_candidate, release_only and inherit are "false".
+# A reject names the ::error:: text it must fail with, so a jq or shell fault
+# cannot pass as a rejection. An accepting case names the one marker step
+# whose condition holds for it.
+merge_gate_cases:
+  - name: pr-code-change-passes
+    event: pull_request
+    profile: pr-code
+    expected_marker: "verdict-source: full"
+  - name: group-code-change-passes
+    profile: group-code
+    expected_marker: "verdict-source: full"
+  - name: push-code-change-passes
+    event: push
+    profile: push-code
+    expected_marker: "verdict-source: full"
+  - name: push-post-merge-evidence-skip-passes
+    event: push
+    profile: push-evidence-skip
+    expected_marker: "verdict-source: unaffected"
+  - name: group-docs-only-passes
+    code: "false"
+    profile: group-docs-only
+    expected_marker: "verdict-source: unaffected"
+  - name: release-group-full-passes
+    release: "true"
+    release_candidate: "true"
+    profile: release-group-full
+    expected_marker: "verdict-source: full"
+  - name: release-group-inherited-passes
+    release: "true"
+    release_candidate: "true"
+    release_only: "true"
+    inherit: "true"
+    profile: release-group-inherited
+    expected_marker: "verdict-source: inherited"
+  - name: release-pr-inherited-passes
+    event: pull_request
+    code: "false"
+    release_candidate: "true"
+    release_only: "true"
+    inherit: "true"
+    profile: release-pr-inherited
+    expected_marker: "verdict-source: inherited"
+  - name: check-failure-is-refused
+    profile: group-code
+    overrides: {check: failure}
+    expected_error: "a needed job failed or was cancelled"
+  - name: cancelled-windows-is-refused
+    profile: group-code
+    overrides: {windows: cancelled}
+    expected_error: "a needed job failed or was cancelled"
+  - name: failed-classifier-is-refused
+    profile: group-docs-only
+    overrides: {changes: failure}
+    expected_error: "a needed job failed or was cancelled"
+  - name: skipped-classifier-is-refused
+    profile: group-docs-only
+    overrides: {changes: skipped}
+    expected_error: "the changes job did not succeed"
+  - name: missing-code-is-refused
+    code: ""
+    profile: group-code
+    expected_error: "changed-path classification is missing or invalid"
+  - name: unknown-release-is-refused
+    release: "maybe"
+    profile: group-code
+    expected_error: "release group classification is missing or invalid"
+  - name: missing-candidate-is-refused
+    release_candidate: ""
+    profile: group-code
+    expected_error: "release candidate classification is missing or invalid"
+  - name: unknown-release-only-is-refused
+    release_only: "maybe"
+    profile: group-code
+    expected_error: "release-only classification is missing or invalid"
+  - name: unknown-inherit-is-refused
+    inherit: "maybe"
+    profile: group-code
+    expected_error: "verdict inheritance is missing or invalid"
+  - name: release-group-without-candidate-is-refused
+    release: "true"
+    profile: release-group-full
+    expected_error: "a release group must be a release candidate"
+  - name: skipped-check-without-inheritance-is-refused
+    profile: group-code
+    overrides: {check: skipped}
+    expected_error: "check is required for a code change"
+  - name: skipped-windows-without-inheritance-is-refused
+    event: pull_request
+    profile: pr-code
+    overrides: {windows: skipped}
+    expected_error: "windows is required for a code change"
+  - name: skipped-harvester-guard-without-inheritance-is-refused
+    profile: group-code
+    overrides: {harvester-version-guard: skipped}
+    expected_error: "harvester-version-guard is required for a code change"
+  - name: release-candidate-not-release-only-needs-check
+    release: "true"
+    release_candidate: "true"
+    profile: release-group-full
+    overrides: {check: skipped}
+    expected_error: "check is required for a code change"
+  - name: release-group-skipped-cgo0-is-refused
+    release: "true"
+    release_candidate: "true"
+    profile: release-group-full
+    overrides: {cgo0: skipped}
+    expected_error: "cgo0 is required for a release group"
+  - name: inherited-check-ran-is-refused
+    release: "true"
+    release_candidate: "true"
+    release_only: "true"
+    inherit: "true"
+    profile: release-group-inherited
+    overrides: {check: success}
+    expected_error: "check ran although the verdict was inherited"
+  - name: inherited-windows-ran-is-refused
+    release: "true"
+    release_candidate: "true"
+    release_only: "true"
+    inherit: "true"
+    profile: release-group-inherited
+    overrides: {windows: success}
+    expected_error: "windows ran although the verdict was inherited"
+  - name: inherited-without-release-only-is-refused
+    release: "true"
+    release_candidate: "true"
+    inherit: "true"
+    profile: release-group-inherited
+    expected_error: "an inherited verdict needs a release-only change"
+  - name: inherited-without-candidate-is-refused
+    release_only: "true"
+    inherit: "true"
+    profile: release-group-inherited
+    expected_error: "only a release candidate inherits a verdict"
+  - name: inherited-on-push-is-refused
+    event: push
+    release_candidate: "true"
+    release_only: "true"
+    inherit: "true"
+    profile: release-group-inherited
+    expected_error: "only pull_request and merge_group runs inherit a verdict"
+  - name: inherited-release-group-skipped-arm64-is-refused
+    release: "true"
+    release_candidate: "true"
+    release_only: "true"
+    inherit: "true"
+    profile: release-group-inherited
+    overrides: {check-arm64: skipped}
+    expected_error: "check-arm64 is required for a release group"
+  - name: inherited-release-group-skipped-e2e-is-refused
+    release: "true"
+    release_candidate: "true"
+    release_only: "true"
+    inherit: "true"
+    profile: release-group-inherited
+    overrides: {e2e: skipped}
+    expected_error: "e2e is required for a release group"
+  - name: inherited-release-group-skipped-packaging-is-refused
+    release: "true"
+    release_candidate: "true"
+    release_only: "true"
+    inherit: "true"
+    profile: release-group-inherited
+    overrides: {release-validate: skipped}
+    expected_error: "release-validate is required for a release group"

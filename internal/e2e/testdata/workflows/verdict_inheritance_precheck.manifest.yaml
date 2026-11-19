@@ -1,0 +1,13 @@
+# Required precheck_cases in verdict_inheritance.yaml.
+requiredNames:
+  - human-pr-skips-build
+  - human-pr-on-release-branch-skips-build
+  - dependabot-pr-skips-build
+  - vendor-hash-bot-pr-skips-build
+  - release-bot-pr-builds
+  - normal-merge-group-skips-build
+  - release-merge-group-builds
+  - unreadable-queue-ref-builds-for-classify
+  - failed-head-lookup-fails-the-step
+  - push-skips-build
+  - dispatch-skips-build
