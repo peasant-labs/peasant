@@ -107,6 +107,8 @@ let ingestCounts = null;
 // Where the connection stop's answers and the next stop's `continue` were laid
 // out, and the narrow foot they were measured beside.
 let footAlignment = null;
+/** Where the fresh-install setup page lays out its chrome, measured at the desktop viewport. */
+let setupGeometry = null;
 // The sign-in reads a burst of window focuses caused on `/village`: the page's
 // own read, then the burst's leading and trailing reads.
 let focusBurstReads = null;
@@ -316,7 +318,7 @@ test.beforeAll(async ({ browser }) => {
 
 test.afterAll(async () => {
   writeFileSync(join(artifacts, `${theme()}-evidence.json`), JSON.stringify({
-    theme: theme(), shots, probes, consoleErrors, failedResponses, walked, offerSeen, ingestCounts, importNowCounts, importNowStates, laterImports, importedAfterSetup, savedSelection, storedRemotes, footAlignment, focusBurstReads,
+    theme: theme(), shots, probes, consoleErrors, failedResponses, walked, offerSeen, ingestCounts, importNowCounts, importNowStates, laterImports, importedAfterSetup, savedSelection, storedRemotes, footAlignment, setupGeometry, focusBurstReads,
     frames: frames.map(({ tab, kind, revision, reason, scan, ingest }) => ({ tab, kind, revision, reason, scan, ingest })),
     requests: requests.filter((entry) => entry.path.startsWith('/api/')).map((entry) => `${entry.tab} ${entry.method} ${entry.path}${entry.scope === undefined ? '' : ` (scope ${entry.scope})`}`),
   }, null, 2));
@@ -355,7 +357,11 @@ test('fresh-install-redirects-to-setup', async () => {
   await pageA.goto('/');
   await expect(pageA).toHaveURL(/\/kickstart\/?$/);
 
-  await expect(pageA.getByRole('heading', { level: 1, name: Labels.SetUp })).toBeVisible();
+  // The page's one h1 names it for assistive technology; the trail's last crumb
+  // is what a sighted reader sees. No band is drawn above the page.
+  await expect(pageA.getByRole('heading', { level: 1 })).toHaveCount(1);
+  await expect(pageA.getByRole('heading', { level: 1, name: Labels.SetUp, exact: true })).toHaveCount(1);
+  await expect(pageA.getByRole('navigation', { name: 'Breadcrumb' })).toContainText(Labels.SetUp);
   await expect(title(pageA)).toHaveText('peasant online');
   await seen(pageA);
   // The opening scan may still be running when the first stop is drawn; its
@@ -369,6 +375,34 @@ test('fresh-install-redirects-to-setup', async () => {
   expect(first.index).toBe(1);
   expect(first.total, 'the page counts the stops the server shows').toBe(expectedStops);
   await expect.poll(() => frames.some((frame) => frame.tab === Tab.A && frame.kind === LocalKickstartEventKind.Session && frame.sessionId === id), 'the topic sends the session snapshot on subscribe').toBe(true);
+  // The chrome fits the window: the sidebar starts at the top, its foot (the
+  // settings gear and the theme toggle) is wholly on screen, and so is the
+  // wizard foot's bottom border.
+  const sidebar = pageA.getByRole('complementary', { name: 'peasant' });
+  const gear = sidebar.getByRole('link', { name: Labels.Settings, exact: true });
+  const toggle = sidebar.getByRole('button', { name: /^switch to (light|dark) mode$/ });
+  const box = async (locator) => (await locator.evaluate((element) => element.getBoundingClientRect().toJSON()));
+  setupGeometry = await pageA.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  setupGeometry.sidebar = await box(sidebar);
+  setupGeometry.gear = await box(gear);
+  setupGeometry.toggle = await box(toggle);
+  setupGeometry.wizardFoot = await box(pageA.locator('.swz-foot'));
+  setupGeometry.wizardFootBorderBottom = await pageA.locator('.swz-foot').evaluate((foot) => {
+    // The frame's bottom border is drawn by the foot or by the frame around it, whichever has one.
+    for (let element = foot; element; element = element.parentElement) {
+      const style = getComputedStyle(element);
+      if (parseFloat(style.borderBottomWidth) > 0) return { element: element.className, bottom: element.getBoundingClientRect().bottom };
+    }
+    return null;
+  });
+  const { height } = setupGeometry;
+  expect(setupGeometry.sidebar.top, 'the sidebar starts at the top of the window').toBeLessThanOrEqual(0.5);
+  for (const part of ['gear', 'toggle']) {
+    expect(setupGeometry[part].top, `the sidebar foot's ${part} starts inside the window`).toBeGreaterThanOrEqual(0);
+    expect(setupGeometry[part].bottom, `the sidebar foot's ${part} ends inside the window`).toBeLessThanOrEqual(height);
+  }
+  expect(setupGeometry.wizardFootBorderBottom, 'the wizard frame draws a bottom border').not.toBeNull();
+  expect(setupGeometry.wizardFootBorderBottom.bottom, "the wizard foot's bottom border is inside the window").toBeLessThanOrEqual(height);
   await shoot(pageA, '01-village');
 });
 

@@ -473,17 +473,10 @@
   overflow-wrap: anywhere;
 }
 
-.ks-page-title {
-  margin: 0;
-  padding: var(--sp-2) var(--sp-5);
-  font-family: var(--font-display);
-  font-size: var(--fs-lg);
-  color: var(--ink-strong);
-}
 .ks-counts-mobile { display: none; }
 .ks-wizard .swz-body { padding-block: var(--sp-3); }
 @media (max-width: 767px) {
-  .ks-page-title, .ks-stop:has(.ks-tree) > .ks-title,
+  .ks-stop:has(.ks-tree) > .ks-title,
   .ks-field:has(.ks-tree) > .ks-help:first-child {
     position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
     overflow: hidden; clip-path: inset(50%); white-space: nowrap;

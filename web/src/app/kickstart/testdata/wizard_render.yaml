@@ -137,6 +137,9 @@ cases:
       - expectControl: {role: button, name: "no"}
       # The question is answered from the foot, where continue sits on other stops.
       - expectControl: {role: button, name: continue, present: false}
+      # The full setup draws no title band; the trail's last crumb names the
+      # page, and its one h1, `set up peasant`, is for assistive technology.
+      - expectControl: {role: heading, name: set up peasant, level: 1, count: 1}
 
   - name: conflict-choice-is-sent-per-field
     server:

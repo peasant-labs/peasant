@@ -9,7 +9,6 @@ import {
 } from '../../scripts/visual/shell-chrome-manifest.mjs';
 import { usePublishState } from '@/contexts/PublishContext';
 import { LayoutShell } from './LayoutShell';
-import { KICKSTART_PAGE_TITLE } from '@/lib/kickstart/entry';
 import { OPEN_COMMAND_PALETTE_EVENT } from './command/CommandPalette';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -91,30 +90,6 @@ describe('static shell hydration', () => {
       expect(container.querySelector('.asb-layout')?.classList.contains('asb-layout-viewport')).toBe(row.bounded);
       await act(async () => root!.unmount());
       container.remove();
-    });
-  }
-});
-
-/** The route cases for the setup page title the shell draws. */
-const PAGE_TITLE_CASES = 'src/components/testdata/shell_page_title.yaml';
-
-const pageTitle = YAML.parse(readFileSync(resolve(process.cwd(), PAGE_TITLE_CASES), 'utf8')) as {
-  requiredNames: string[];
-  cases: { name: string; pathname: string; title: boolean }[];
-};
-
-describe('the setup page title', () => {
-  it('retains the named route cases', () => {
-    expect(new Set(pageTitle.cases.map((row) => row.name))).toEqual(new Set(pageTitle.requiredNames));
-  });
-  for (const row of pageTitle.cases) {
-    it(row.name, async () => {
-      mockHttp(UI_CAPABILITY_CASES[0]);
-      route.pathname = row.pathname;
-      await act(async () => { render(<LayoutShell>representative page body</LayoutShell>); });
-      const heading = screen.queryByRole('heading', { level: 1, name: KICKSTART_PAGE_TITLE });
-      if (row.title) expect(heading).not.toBeNull();
-      else expect(heading).toBeNull();
     });
   }
 });

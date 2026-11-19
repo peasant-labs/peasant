@@ -85,7 +85,10 @@ export function KickstartFlow({ scope, title, trail, ariaLabel }: KickstartFlowP
   const frame = (body: ReactNode) => (
     <div className="asb-page wizard-page animate-fade-up">
       <Breadcrumbs items={[{ label: 'home', href: '/' }, ...trail]} />
-      {scope !== KickstartScope.Full && <h1 className="iu-page-title page-title">{title}</h1>}
+      {/* The full setup draws no title of its own: the trail's last crumb names
+          the page. Its h1 is for assistive technology only, in the page body
+          rather than inside the trail's nav, and takes no space. */}
+      <h1 className={scope === KickstartScope.Full ? 'sr-only' : 'iu-page-title page-title'}>{title}</h1>
       {body}
     </div>
   );
