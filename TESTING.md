@@ -9,8 +9,7 @@ test layer to its entry point.
 
 A test result must not depend on the machine. Every package whose tests start a
 process (git, a shell script, `go`) has a `TestMain` that calls
-`gitconfig.RunWithIsolatedGitConfig` (`internal/testkit/gitconfig/gitconfig.go`). Packages with other TestMain duties
-may call `gitconfig.IsolateGitConfig` before their runner. Before any test runs it sets `GIT_CONFIG_GLOBAL=/dev/null` and `GIT_CONFIG_NOSYSTEM=1`,
+`gitconfig.RunWithIsolatedGitConfig` (`internal/testkit/gitconfig/gitconfig.go`). Goroutine-leak-checked packages pass `gitconfig.WithGoleak(m)` as the runner. Before any test runs it sets `GIT_CONFIG_GLOBAL=/dev/null` and `GIT_CONFIG_NOSYSTEM=1`,
 and unsets `GIT_CONFIG_COUNT`, `GIT_CONFIG_PARAMETERS` and the repository
 location variables (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`,
 `GIT_COMMON_DIR`, `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`)

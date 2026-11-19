@@ -144,9 +144,9 @@ func callsIsolationFromTestMain(file *ast.File) bool {
 			if call, ok := n.(*ast.CallExpr); ok {
 				switch fun := call.Fun.(type) {
 				case *ast.SelectorExpr:
-					found = found || fun.Sel.Name == isolationCall || fun.Sel.Name == "IsolateGitConfig"
+					found = found || fun.Sel.Name == isolationCall
 				case *ast.Ident:
-					found = found || fun.Name == isolationCall || fun.Name == "IsolateGitConfig"
+					found = found || fun.Name == isolationCall
 				}
 			}
 			return !found

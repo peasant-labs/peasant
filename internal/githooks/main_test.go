@@ -13,9 +13,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/peasant-labs/peasant/internal/testkit/gitconfig"
-
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/testkit/gitconfig"
 )
 
 // Environment variables this suite controls that are not Peasant's own. HOME

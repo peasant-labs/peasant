@@ -7,9 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/peasant-labs/peasant/internal/testkit/gitconfig"
-
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/testkit/gitconfig"
 )
 
 func TestMain(m *testing.M) {

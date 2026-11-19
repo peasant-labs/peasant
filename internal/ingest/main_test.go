@@ -1,11 +1,10 @@
 package ingest_test
 
 import (
+	"os"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/testkit/gitconfig"
-
-	"go.uber.org/goleak"
 )
 
 // TestMain checks for leaked goroutines and gives every child git a hermetic
@@ -17,8 +16,5 @@ import (
 // WithOpenCodeEnvironment options; production keeps the environment default at
 // the composition root.
 func TestMain(m *testing.M) {
-	if err := gitconfig.IsolateGitConfig(); err != nil {
-		panic(err)
-	}
-	goleak.VerifyTestMain(m)
+	os.Exit(gitconfig.RunWithIsolatedGitConfig(gitconfig.WithGoleak(m)))
 }

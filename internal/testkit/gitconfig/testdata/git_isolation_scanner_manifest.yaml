@@ -1,7 +1,9 @@
 # Required case names for git_isolation_scanner.yaml. Adding or removing a case
 # updates this list in the same change.
 requiredNames:
-  - an environment-only isolation call composes with another runner
+  - an environment-only call after the runner is rejected
+  - a discarded environment-only error is rejected
+  - an isolated runner composes with goleak
   - a test that runs git with the isolating TestMain passes
   - an isolating TestMain in the external test package passes
   - a test that runs git without a TestMain is rejected

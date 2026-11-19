@@ -19,7 +19,7 @@ import (
 // sets them with t.Setenv, which overrides this baseline for that test only.
 // GIT_CONFIG_GLOBAL needs git 2.32 or newer.
 func RunWithIsolatedGitConfig(m interface{ Run() int }) int {
-	if err := IsolateGitConfig(); err != nil {
+	if err := isolateGitConfig(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
@@ -43,9 +43,7 @@ var isolatedGitUnset = []string{
 	"GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
 }
 
-// IsolateGitConfig installs the same environment without running tests, for
-// TestMain functions that need to compose with another runner such as goleak.
-func IsolateGitConfig() error {
+func isolateGitConfig() error {
 	for name, value := range isolatedGitSet {
 		if err := os.Setenv(name, value); err != nil {
 			return isolationError(name, err)

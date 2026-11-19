@@ -5,7 +5,24 @@
 # least one violation; must-pass cases report none. Case names are pinned in
 # git_isolation_scanner_manifest.yaml.
 cases:
-  - name: an environment-only isolation call composes with another runner
+  - name: an environment-only call after the runner is rejected
+    input:
+      files:
+        tool/tool_test.go: |
+          package tool
+          import ("os/exec"; "testing")
+          func TestMain(m *testing.M) { goleak.VerifyTestMain(m); gitconfig.IsolateGitConfig() }
+          func TestGit(t *testing.T) { _ = exec.Command("git", "status") }
+    expected:
+      needs: [tool]
+      violations: [tool]
+    classification: must-fail
+    provenance:
+      source: boundary
+      ref: "isolation after the runner cannot protect its tests"
+    mutation:
+      description: "move the environment-only call after the runner"
+  - name: a discarded environment-only error is rejected
     input:
       files:
         tool/tool_test.go: |
@@ -15,12 +32,29 @@ cases:
           func TestGit(t *testing.T) { _ = exec.Command("git", "status") }
     expected:
       needs: [tool]
+      violations: [tool]
+    classification: must-fail
+    provenance:
+      source: boundary
+      ref: "discarded isolation errors must not permit tests to run"
+    mutation:
+      description: "discard the environment-only call error"
+  - name: an isolated runner composes with goleak
+    input:
+      files:
+        tool/tool_test.go: |
+          package tool
+          import ("os/exec"; "testing")
+          func TestMain(m *testing.M) { os.Exit(gitconfig.RunWithIsolatedGitConfig(gitconfig.WithGoleak(m))) }
+          func TestGit(t *testing.T) { _ = exec.Command("git", "status") }
+    expected:
+      needs: [tool]
     classification: must-pass
     provenance:
       source: requirement
       ref: "isolation composes with a separate test runner"
     mutation:
-      description: "use the environment-only entry point"
+      description: "wrap the test runner with goleak"
   - name: a test that runs git with the isolating TestMain passes
     input:
       files:

@@ -95,7 +95,7 @@ func TestIsolatedChildGitReadsNoHostileSource(t *testing.T) {
 		}
 	}
 
-	if err := IsolateGitConfig(); err != nil {
+	if err := isolateGitConfig(); err != nil {
 		t.Fatal(err)
 	}
 	after := gitIn(t, repo, "config", "--list", "--show-origin")
@@ -133,5 +133,31 @@ func TestRunWithIsolatedGitConfigRunsTheTestsIsolated(t *testing.T) {
 	}
 	if fake.global != os.DevNull {
 		t.Errorf("tests ran with GIT_CONFIG_GLOBAL=%q, want %q", fake.global, os.DevNull)
+	}
+}
+
+func TestGoleakRunnerPreservesFailureCode(t *testing.T) {
+	fake := &fakeTestRun{code: 7}
+	if got := WithGoleak(fake).Run(); got != fake.code || !fake.ran {
+		t.Fatalf("goleak runner returned %d (ran: %t), want %d and a run", got, fake.ran, fake.code)
+	}
+}
+
+func TestGoleakRunnerReportsLeaks(t *testing.T) {
+	stop := make(chan struct{})
+	started := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		close(started)
+		<-stop
+	}()
+	<-started
+	fake := &fakeTestRun{}
+	code := WithGoleak(fake).Run()
+	close(stop)
+	<-done
+	if code != 1 || !fake.ran {
+		t.Fatalf("goleak runner returned %d (ran: %t), want 1 for the leaked goroutine", code, fake.ran)
 	}
 }

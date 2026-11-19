@@ -8,11 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/peasant-labs/peasant/internal/testkit/gitconfig"
-
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/testkit/gitconfig"
 )
 
 // TestMain configures the cmd/peasant test binary process-wide. It uses
