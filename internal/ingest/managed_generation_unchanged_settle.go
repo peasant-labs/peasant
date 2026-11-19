@@ -70,26 +70,26 @@ func (p *Pipeline) validateRefresh(ctx context.Context, input *CapturedIndexInpu
 	return result
 }
 
-func (p *Pipeline) settleManagedGenerationUnchanged(ctx context.Context, input *CapturedIndexInput, lane *storeWriteLane) (ManagedGenerationRefreshOutcome, time.Duration, error) {
+func (p *Pipeline) settleManagedGenerationUnchanged(ctx context.Context, input *CapturedIndexInput, lane *storeWriteLane) (ManagedGenerationUnchangedSettleOutcome, time.Duration, error) {
 	prover, ok := p.metricsStore.(ManagedGenerationUnchangedProver)
 	if !ok {
-		return ManagedGenerationRefreshOutcome{}, 0, fmt.Errorf("ingest: store cannot settle an unchanged generation; use the ordinary parse")
+		return ManagedGenerationUnchangedSettleOutcome{}, 0, fmt.Errorf("ingest: store cannot settle an unchanged generation; use the ordinary parse")
 	}
 	request, err := p.unchangedProofRequest(input)
 	if err != nil {
-		return ManagedGenerationRefreshOutcome{}, 0, err
+		return ManagedGenerationUnchangedSettleOutcome{}, 0, err
 	}
 	start := time.Now()
-	var outcome ManagedGenerationRefreshOutcome
+	var outcome ManagedGenerationUnchangedSettleOutcome
 	p.runStoreWrite(lane, StageIndex, func() {
 		outcome, err = prover.SettleCapturedGenerationUnchanged(ctx, request)
 	})
 	return outcome, time.Since(start), err
 }
 
-// ManagedGenerationRefreshOutcome is the pipeline-owned result of an unchanged
+// ManagedGenerationUnchangedSettleOutcome is the pipeline-owned result of an unchanged
 // settlement of a managed generation.
-type ManagedGenerationRefreshOutcome struct {
+type ManagedGenerationUnchangedSettleOutcome struct {
 	// GenerationID is the generation that is the active read authority
 	// afterwards: the settled source generation.
 	GenerationID string

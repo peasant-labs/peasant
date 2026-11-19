@@ -58,19 +58,19 @@ func (s *Store) ProveCapturedGenerationUnchanged(ctx context.Context, request in
 	return s.ProveManagedGenerationUnchanged(ctx, proof)
 }
 
-func (s *Store) SettleCapturedGenerationUnchanged(ctx context.Context, request ingest.ManagedGenerationUnchangedProof) (ingest.ManagedGenerationRefreshOutcome, error) {
+func (s *Store) SettleCapturedGenerationUnchanged(ctx context.Context, request ingest.ManagedGenerationUnchangedProof) (ingest.ManagedGenerationUnchangedSettleOutcome, error) {
 	proof, found, err := s.capturedUnchangedRequest(ctx, request)
 	if err != nil {
-		return ingest.ManagedGenerationRefreshOutcome{}, err
+		return ingest.ManagedGenerationUnchangedSettleOutcome{}, err
 	}
 	if !found {
-		return ingest.ManagedGenerationRefreshOutcome{}, &ingest.StaleIndexWorkError{SessionID: request.SessionID}
+		return ingest.ManagedGenerationUnchangedSettleOutcome{}, &ingest.StaleIndexWorkError{SessionID: request.SessionID}
 	}
 	result, err := s.SettleManagedGenerationUnchanged(ctx, proof)
 	if err != nil {
-		return ingest.ManagedGenerationRefreshOutcome{}, err
+		return ingest.ManagedGenerationUnchangedSettleOutcome{}, err
 	}
-	return ingest.ManagedGenerationRefreshOutcome{GenerationID: result.GenerationID}, nil
+	return ingest.ManagedGenerationUnchangedSettleOutcome{GenerationID: result.GenerationID}, nil
 }
 
 func (s *Store) StageGenerationCandidates(ctx context.Context, candidates []ingest.GenerationActivation) ([]ingest.GenerationStaged, []error) {

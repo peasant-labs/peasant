@@ -2049,12 +2049,12 @@ type indexParseResult struct {
 	entryCount int
 	startedAt  int64
 	logEntry   IndexLogEntry
-	// managedRefreshDuration is the time the unchanged settlement of a managed
+	// managedUnchangedSettleDuration is the time the unchanged settlement of a managed
 	// generation spent on the serialized write lane. It is the write half of a
 	// result that settled a generation and parsed nothing.
-	managedRefreshDuration time.Duration
-	parseDuration          time.Duration
-	bytes                  int64
+	managedUnchangedSettleDuration time.Duration
+	parseDuration                  time.Duration
+	bytes                          int64
 }
 
 // permanentRefusalCode names the refusal when this build can never clear it,
@@ -2371,7 +2371,7 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 				if settleErr == nil {
 					// Preserve the historical index-log reason for report continuity.
 					reason := indexManagedRefreshReason + " (unchanged)"
-					result.managedRefreshDuration = duration
+					result.managedUnchangedSettleDuration = duration
 					result.logEntry = p.makeIndexLogEntry(im, IndexOutcomeSkipped, 0, result.startedAt, &reason, nil)
 					result.bytes = 0
 					input.transcript, input.tree = nil, nil
@@ -2745,7 +2745,7 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 			continue
 		}
 		if result.output == nil || p.metricsStore == nil {
-			record(i, indexedMeta{session: result.im.session, startMs: result.im.startMs}, result.logEntry, p.makeIndexProfileSession(result, result.logEntry, result.managedRefreshDuration))
+			record(i, indexedMeta{session: result.im.session, startMs: result.im.startMs}, result.logEntry, p.makeIndexProfileSession(result, result.logEntry, result.managedUnchangedSettleDuration))
 			continue
 		}
 		if result.generationCandidate != nil {
@@ -2963,7 +2963,7 @@ func (p *Pipeline) writeIndexParseResult(ctx context.Context, result indexParseR
 	im := result.im
 	ok := false
 	logEntry := result.logEntry
-	writeDuration := result.managedRefreshDuration
+	writeDuration := result.managedUnchangedSettleDuration
 	entriesCount := result.entryCount
 	if result.output != nil && p.metricsStore != nil {
 		// A split entries/stamp fallback could overwrite last-good output and
