@@ -7,6 +7,8 @@ import { loadCases, readFixture, type FixtureCase } from '@/test/fixtures/kickst
 import { API, KickstartServer, mountKickstart, runSteps, teardown, type Mounted, type RouteAnswer, type Step } from '@/test/kickstartHarness';
 import { MockWebSocket } from '@/test/mockWebSocket';
 import { buildFrame, type FrameRequest, type StreamSpec } from '@/test/fixtures/sourcePreviewStream';
+import { PreviewNoticeTone, READ_AGAIN } from '@/lib/kickstart/sourcePreview';
+import { ERROR_CARD_CLASS } from '@/components/ErrorCard';
 
 vi.mock('next/navigation', () => ({
   usePathname: () => '/selection',
@@ -37,6 +39,7 @@ interface PreviewStep {
   expectHighlight?: string;
   expectSessionMeta?: { reads?: string[]; lacks?: string[] };
   expectTurnLabels?: Record<string, string>;
+  expectNoticeTone?: { tone: PreviewNoticeTone; text: string; readAgainInside?: boolean };
 }
 const PREVIEW_KEYS = Object.freeze({
   serve: true,
@@ -51,6 +54,7 @@ const PREVIEW_KEYS = Object.freeze({
   expectHighlight: true,
   expectSessionMeta: true,
   expectTurnLabels: true,
+  expectNoticeTone: true,
 } satisfies Record<keyof PreviewStep, true>);
 /** Where the stream must not reach: the closed set an `expectPrivacy` step names. */
 const PreviewPrivacy = Object.freeze({
@@ -214,6 +218,30 @@ async function runPreviewStep(step: PreviewStep, spec: StreamSpec, state: Conver
       return [index, card?.querySelector('.txn-turnnum')?.textContent?.replace(/\s+/g, '') ?? '(not drawn)'];
     }));
     await waitFor(() => expect(read(), `${at}: the turn numbers drawn`).toEqual(want));
+  }
+  if (step.expectNoticeTone !== undefined) {
+    const { tone, text, readAgainInside } = step.expectNoticeTone;
+    const pane = mounted.container.querySelector('[data-preview-session]') ?? mounted.container;
+    const holder = await waitFor(() => {
+      const found = [...mounted.container.querySelectorAll<HTMLElement>('[role="alert"], [role="status"]')]
+        .filter((element) => (element.textContent ?? '').includes(text));
+      if (found.length === 0) throw new Error(`${at}: no alert or status carries "${text}"`);
+      return found.at(-1)!;
+    });
+    const card = holder.closest<HTMLElement>('[role="alert"]');
+    if (tone === PreviewNoticeTone.Error) {
+      expect(card, `${at}: "${text}" sits in an alert`).not.toBeNull();
+      for (const name of ERROR_CARD_CLASS.split(' ')) expect(card!.classList.contains(name), `${at}: the alert is the app's error card (${name})`).toBe(true);
+      if (readAgainInside) {
+        expect(card!.querySelector('button')?.textContent, `${at}: read again sits in the error card`).toBe(READ_AGAIN);
+      }
+    } else if (tone === PreviewNoticeTone.Neutral) {
+      expect(card, `${at}: "${text}" is not announced as an alert`).toBeNull();
+      expect(holder.getAttribute('role'), `${at}: "${text}" is a status`).toBe('status');
+      expect(pane.querySelectorAll('[role="alert"]').length, `${at}: the preview shows no error card`).toBe(0);
+    } else {
+      throw new Error(`${at}: expectNoticeTone names tone ${String(tone)}; it is one of ${Object.values(PreviewNoticeTone).join(', ')}`);
+    }
   }
   for (const check of step.expectPrivacy ?? []) {
     if (!PRIVACY.includes(check)) throw new Error(`${at}: expectPrivacy names ${check}; it is one of ${PRIVACY.join(', ')}`);

@@ -31,6 +31,8 @@
 #                  no item may carry]}
 #   expectTurnLabels the turn number each drawn turn reads, by stream turn index:
 #                  {"<index>": "#<label>"}
+#   expectNoticeTone how the stop's notice reads: {tone: error | neutral, text: words of it,
+#                  readAgainInside: true when `read again` sits in the error card}
 #
 # Every transcript is synthetic. `marker` texts exist only in the stream, so
 # finding one in storage or a URL is a leak.
@@ -117,6 +119,10 @@ requiredNames:
   - turn-labels-continue-across-loaded-segments
   - earlier-labels-stable-when-a-segment-appends
   - earlier-labels-stable-when-a-boundary-turn-repeats
+  - oversized-record-stop-reads-as-error
+  - source-changed-stop-reads-as-error
+  - source-cap-stop-stays-neutral
+  - end-stays-neutral
 defaultServer:
   "GET /api/v1/kickstart/status": {body: {configured: true}}
   "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
@@ -299,6 +305,7 @@ cases:
       - click: load more of this session
       - serve: {closed: late_result, code: kickstart_preview_late_result, message: "part of this session changed after it was shown. read it again from the start."}
       - expectText: ["part of this session changed after it was shown"]
+      - expectNoticeTone: {tone: error, text: "part of this session changed after it was shown", readAgainInside: true}
       - expectControl: {role: button, name: read again}
       - click: read again
       - expectSent: {op: open, count: 2}
@@ -315,6 +322,7 @@ cases:
       - serve: {segment: 0}
       - socket: close
       - expectText: ["the connection to the app on this computer dropped. read this session again from the start."]
+      - expectNoticeTone: {tone: error, text: "the connection to the app on this computer dropped", readAgainInside: true}
       - expectTurnText: {index: 0, drawn: true}
       - expectControl: {role: button, name: read again}
       # The socket comes back: the capture is not resumed, nothing is asked for.
@@ -500,3 +508,41 @@ cases:
       - click: load more of this session
       - serve: {segment: 1, final: end}
       - expectTurnLabels: {"0": "#1", "1": "#1a", "2": "#1a", "3": "#2", "4": "#2a"}
+
+  - name: oversized-record-stop-reads-as-error
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - click: load more of this session
+      - serve: {segment: 1, final: cut, cutReason: oversized_record, lines: ["the next record of this transcript is 40 MiB, larger than a preview shows; import the session to read it."]}
+      - expectNoticeTone: {tone: error, text: "the next record of this transcript is 40 MiB"}
+
+  - name: source-changed-stop-reads-as-error
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - serve: {closed: source_changed, code: kickstart_preview_source_changed, message: "this session's transcript changed after part of it was shown. read it again from the start."}
+      - expectNoticeTone: {tone: error, text: "this session's transcript changed after part of it was shown", readAgainInside: true}
+
+  - name: source-cap-stop-stays-neutral
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - click: load more of this session
+      - serve: {segment: 1, final: cut, cutReason: source_budget, lines: ["the preview stops at 16 MiB of this transcript; import the session to read all of it."]}
+      - expectNoticeTone: {tone: neutral, text: "the preview stops at 16 MiB of this transcript"}
+
+  - name: end-stays-neutral
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0, final: end, lines: ["this session has grown since the preview opened. open the preview again to read the newer part."]}
+      - expectNoticeTone: {tone: neutral, text: "this session has grown since the preview opened"}
+

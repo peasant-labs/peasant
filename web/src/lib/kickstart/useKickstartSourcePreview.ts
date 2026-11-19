@@ -15,7 +15,10 @@ import { useKickstartPreviewTransport } from '@/contexts/WebSocketContext';
 import {
   PREVIEW_CLOSED_READ_AGAIN,
   PREVIEW_CLOSED_SENTENCE,
+  PREVIEW_CLOSED_TONE,
   PREVIEW_CUT_SENTENCE,
+  PREVIEW_CUT_TONE,
+  PreviewNoticeTone,
   PreviewSentence,
 } from './sourcePreview';
 
@@ -46,6 +49,11 @@ export interface KickstartSourcePreview {
   readonly continuation: ContinuationState | null;
   /** The sentence to show: the server's at an end or a cut, or why the preview stopped. */
   readonly notice: string | null;
+  /**
+   * How the notice reads: an error card or a plain notice. Decided from the
+   * contract's typed cut and close reasons, never from the sentence.
+   */
+  readonly noticeTone: PreviewNoticeTone;
   /** Whether the pane offers to read the session again from the start. */
   readonly canReadAgain: boolean;
   /** Ask for exactly one more segment. A no-op unless more can load and none is in flight. */
@@ -59,6 +67,7 @@ interface PreviewView {
   readonly held: LocalKickstartPreviewState | null;
   readonly continuation: ContinuationState | null;
   readonly notice: string | null;
+  readonly noticeTone: PreviewNoticeTone;
   readonly canReadAgain: boolean;
 }
 
@@ -77,10 +86,10 @@ interface LiveCapture {
   done: boolean;
 }
 
-const IDLE: PreviewView = Object.freeze({ key: null, held: null, continuation: null, notice: null, canReadAgain: false });
+const IDLE: PreviewView = Object.freeze({ key: null, held: null, continuation: null, notice: null, noticeTone: PreviewNoticeTone.Neutral, canReadAgain: false });
 
 function openingView(key: string): PreviewView {
-  return { key, held: null, continuation: null, notice: null, canReadAgain: false };
+  return { key, held: null, continuation: null, notice: null, noticeTone: PreviewNoticeTone.Neutral, canReadAgain: false };
 }
 
 /** A request id the contract accepts: 16 base64url characters from 12 random bytes. */
@@ -122,7 +131,7 @@ export function useKickstartSourcePreview(
   }
 
   /** Stop the live capture here and show why. Closes it on the server when it is still open there. */
-  const fail = useCallback((current: LiveCapture, notice: string, canReadAgain: boolean, closeOnServer: boolean) => {
+  const fail = useCallback((current: LiveCapture, notice: string, noticeTone: PreviewNoticeTone, canReadAgain: boolean, closeOnServer: boolean) => {
     if (closeOnServer && current.captureId !== null) {
       send({ op: LocalKickstartPreviewOp.Close, requestId: mintRequestId(), sessionId: current.sessionId, captureId: current.captureId });
     }
@@ -134,6 +143,7 @@ export function useKickstartSourcePreview(
       held: current.held,
       continuation: current.held === null ? null : TranscriptContinuationState.Failed,
       notice,
+      noticeTone,
       canReadAgain,
     });
   }, [send]);
@@ -150,7 +160,7 @@ export function useKickstartSourcePreview(
     live.current = current;
     setView(openingView(key));
     if (!send({ op: LocalKickstartPreviewOp.Open, requestId, sessionId, nodeId })) {
-      fail(current, PreviewSentence.ConnectionDropped, true, false);
+      fail(current, PreviewSentence.ConnectionDropped, PreviewNoticeTone.Error, true, false);
     }
     return () => {
       if (live.current === current) live.current = null;
@@ -169,7 +179,7 @@ export function useKickstartSourcePreview(
     const current = live.current;
     if (!connected && current !== null && !current.done) {
       current.captureId = null;
-      fail(current, PreviewSentence.ConnectionDropped, true, false);
+      fail(current, PreviewSentence.ConnectionDropped, PreviewNoticeTone.Error, true, false);
     }
   }, [connected, fail]);
 
@@ -179,7 +189,7 @@ export function useKickstartSourcePreview(
     if (lastScan.current === scanGeneration) return;
     lastScan.current = scanGeneration;
     const current = live.current;
-    if (current !== null && !current.done) fail(current, PreviewSentence.Rescanned, true, true);
+    if (current !== null && !current.done) fail(current, PreviewSentence.Rescanned, PreviewNoticeTone.Neutral, true, true);
   }, [scanGeneration, fail]);
 
   const onFrame = useCallback((data: unknown) => {
@@ -189,7 +199,7 @@ export function useKickstartSourcePreview(
     try {
       event = parseLocalKickstartPreviewEvent(data);
     } catch {
-      fail(current, PreviewSentence.FrameRefused, true, true);
+      fail(current, PreviewSentence.FrameRefused, PreviewNoticeTone.Error, true, true);
       return;
     }
     if (event.kind === LocalKickstartPreviewEventKind.Closed) {
@@ -197,7 +207,7 @@ export function useKickstartSourcePreview(
         || (event.requestId !== undefined && (event.requestId === current.requestId || event.requestId === current.more));
       if (!ours || event.reason === undefined) return;
       current.captureId = null;
-      fail(current, event.message || PREVIEW_CLOSED_SENTENCE[event.reason], PREVIEW_CLOSED_READ_AGAIN[event.reason], false);
+      fail(current, event.message || PREVIEW_CLOSED_SENTENCE[event.reason], PREVIEW_CLOSED_TONE[event.reason], PREVIEW_CLOSED_READ_AGAIN[event.reason], false);
       return;
     }
     if (event.kind === LocalKickstartPreviewEventKind.Opened) {
@@ -210,7 +220,7 @@ export function useKickstartSourcePreview(
       next = mergeLocalKickstartPreview(current.held ?? undefined, data);
     } catch {
       if (event.kind === LocalKickstartPreviewEventKind.Opened && event.captureId !== undefined) current.captureId = event.captureId;
-      fail(current, PreviewSentence.FrameRefused, true, true);
+      fail(current, PreviewSentence.FrameRefused, PreviewNoticeTone.Error, true, true);
       return;
     }
     current.held = next;
@@ -220,7 +230,7 @@ export function useKickstartSourcePreview(
       current.more = null;
     }
     if (next.continuation === LocalKickstartPreviewContinuation.More) {
-      setView({ key: current.key, held: next, continuation: openContinuation(current), notice: null, canReadAgain: false });
+      setView({ key: current.key, held: next, continuation: openContinuation(current), notice: null, noticeTone: PreviewNoticeTone.Neutral, canReadAgain: false });
       return;
     }
     // The directory is complete: the server has freed the capture.
@@ -232,6 +242,9 @@ export function useKickstartSourcePreview(
       held: next,
       continuation: cut ? TranscriptContinuationState.Cut : TranscriptContinuationState.End,
       notice,
+      // An end, and a cut at a designed limit, are information; a cut because a
+      // record could not be shown is an error.
+      noticeTone: cut && event.cutReason !== undefined ? PREVIEW_CUT_TONE[event.cutReason] : PreviewNoticeTone.Neutral,
       canReadAgain: false,
     });
   }, [fail]);
@@ -249,11 +262,11 @@ export function useKickstartSourcePreview(
     const requestId = mintRequestId();
     if (!send({ op: LocalKickstartPreviewOp.More, requestId, sessionId: current.sessionId, captureId: current.captureId, after: current.held.seq })) {
       current.captureId = null;
-      fail(current, PreviewSentence.ConnectionDropped, true, false);
+      fail(current, PreviewSentence.ConnectionDropped, PreviewNoticeTone.Error, true, false);
       return;
     }
     current.more = requestId;
-    setView({ key: current.key, held: current.held, continuation: TranscriptContinuationState.Loading, notice: null, canReadAgain: false });
+    setView({ key: current.key, held: current.held, continuation: TranscriptContinuationState.Loading, notice: null, noticeTone: PreviewNoticeTone.Neutral, canReadAgain: false });
   }, [send, fail]);
 
   const readAgain = useCallback(() => setAttempt((value) => value + 1), []);
@@ -265,6 +278,7 @@ export function useKickstartSourcePreview(
     held: shown.held,
     continuation: shown.continuation,
     notice: shown.notice,
+    noticeTone: shown.noticeTone,
     canReadAgain: shown.canReadAgain,
     loadMore,
     readAgain,

@@ -235,6 +235,12 @@
   align-items: flex-start;
   gap: var(--sp-2);
 }
+/* A stop that lost part of the session sits in the app's error card; its
+   sentence reads at full ink on the danger tint, as the card's title does. */
+.ks-preview-notice-error,
+.ks-preview-error-text {
+  color: var(--ink);
+}
 .ks-lines {
   display: flex;
   flex-direction: column;
