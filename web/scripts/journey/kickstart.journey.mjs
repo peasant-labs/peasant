@@ -482,9 +482,9 @@ test('scan-progress-and-tree-selection', async () => {
   expect((await stepOf(pageA)).total, 'the count after the choice is the server list').toBe(visibleStops(view).length);
   expect(visibleStops(view).map((stop) => stop.key), 'the auto-ingest stop is in the server list').toContain('auto-ingest');
 
-  // A row's preview is the server's reading of the real transcript.
-  await row(pageA, chosenSessions[0].prompt).focus();
-  await expect(pageA.locator('.ks-preview')).toContainText(chosenSessions[0].prompt);
+  // A row's preview is the server's reading of the real transcript. It opens
+  // from the row's title, not from the checkbox, and choosing nothing.
+  await openPreview(pageA, chosenSessions[0]);
   await shoot(pageA, '03-selection-tree');
 });
 
