@@ -108,10 +108,12 @@ projects:
 baseCommit: 890032faef0aea693c9d76d2b90c60d35b6db78a
 provenance:
   # Strings only this branch introduces, found in the bundle the binary serves:
-  # the session preview pane's class and the data attribute it carries.
+  # the session preview pane's classes. They are in the route's stylesheet; the
+  # pane's script is a chunk loaded on the first preview, which the route's
+  # own assets do not list.
   markers:
     - ks-session-preview
-    - data-preview-session
+    - ks-preview-raw
   routes: [/kickstart/, /selection/]
 # The recordings: the ingest end-to-end fixture's Claude root session is the
 # template. Sessions name a prompt (the first is what the tree shows).
