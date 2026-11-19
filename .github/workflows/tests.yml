@@ -42,7 +42,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: peasant-labs/infra
-          ref: bcdaa02f9defd528b4dd9cb3077238573e709749
+          ref: 7d2a604afe5b50a3dcc20df06f02e85c2a0d4027
           path: infra-tool
           sparse-checkout: tools/release
           persist-credentials: false
@@ -115,7 +115,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: peasant-labs/infra
-          ref: bcdaa02f9defd528b4dd9cb3077238573e709749
+          ref: 7d2a604afe5b50a3dcc20df06f02e85c2a0d4027
           path: infra-tool
           sparse-checkout: tools/release
           persist-credentials: false
