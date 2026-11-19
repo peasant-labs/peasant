@@ -109,6 +109,11 @@ func generationStoreOptionsReadOnly(ownedRoot string) ([]store.OpenOption, error
 // honors the user's batch caps instead of the shipped defaults. A dry-run
 // store is opened read-only but with the same target-resolving reader, so its
 // forecast matches a real run; it still changes no file.
+//
+// progress chooses who renders a schema upgrade. A caller that has a progress
+// renderer mounted passes storeUpgradeProgressMounted and upgrades the store
+// before it mounts the renderer: the open then writes nothing to the terminal
+// and fails when the store is still behind.
 func openRunStore(cmd *cobra.Command, dryRun bool, ownedRoot string, write ingest.WriteConfig, progress storeUpgradeProgressMode) (*store.Store, error) {
 	path := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
 	if dryRun {

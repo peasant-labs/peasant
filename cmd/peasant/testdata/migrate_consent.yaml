@@ -1,0 +1,20 @@
+cases:
+  - name: short yes
+    input: "y\n"
+    consent: true
+  - name: full yes
+    input: "yes\n"
+    consent: true
+  - name: short no
+    input: "n\n"
+  - name: full no
+    input: "no\n"
+  - name: empty
+    input: "\n"
+  - name: invalid then yes
+    input: "maybe\ny\n"
+    consent: true
+    reprompt: true
+  - name: eof
+    input: ""
+    error: true

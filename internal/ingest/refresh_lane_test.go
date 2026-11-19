@@ -139,13 +139,18 @@ type refreshLaneBench struct {
 	versions         map[ingest.Harness]ingest.HarvesterVersions
 	metadataPath     string
 	transcriptPath   string
+	progress         *ingest.ProgressState
 }
 
 func newRefreshLaneBench(t *testing.T, fixture refreshLaneFixture, testCase refreshLaneCase) *refreshLaneBench {
+	return newRefreshLaneBenchWithVersions(t, fixture, testCase, cloneHarvesterVersions())
+}
+
+func newRefreshLaneBenchWithVersions(t *testing.T, fixture refreshLaneFixture, testCase refreshLaneCase, versions map[ingest.Harness]ingest.HarvesterVersions, options ...store.OpenOption) *refreshLaneBench {
 	t.Helper()
 	mem := testutil.NewMemFS()
 	fs := testutil.NewCountingFS(mem)
-	database := storetest.OpenWith(t)
+	database := storetest.OpenWith(t, options...)
 	t.Cleanup(func() { _ = database.Close() })
 
 	root := "/refresh-lane"
@@ -174,7 +179,7 @@ func newRefreshLaneBench(t *testing.T, fixture refreshLaneFixture, testCase refr
 		t: t, fixture: fixture, fs: fs, database: database,
 		harness: testCase.Harness, sessionID: sessionID,
 		sourceRoot: sourceRoot, sourcePath: sourcePath, sourceText: transcript,
-		recordLimitBytes: testCase.RecordLimitBytes, outputDir: outputDir, versions: cloneHarvesterVersions(),
+		recordLimitBytes: testCase.RecordLimitBytes, outputDir: outputDir, versions: versions,
 	}
 	result := bench.run(true, true)
 	if result.Summary.New != 1 || result.Summary.StoreError != nil {
@@ -275,6 +280,7 @@ func assertRefreshLaneOmission(t *testing.T, entries []schema.SessionEntry, fixt
 func (b *refreshLaneBench) pipeline(force bool, discover bool) *ingest.Pipeline {
 	b.t.Helper()
 	cfg := makePipelineConfig(b.outputDir)
+	cfg.Progress = b.progress
 	cfg.StalenessThreshold = 0
 	cfg.Force = force
 	if !discover {
@@ -336,6 +342,58 @@ func (b *refreshLaneBench) run(force bool, discover bool) *ingest.PipelineResult
 func (b *refreshLaneBench) runStoredOnly() *ingest.PipelineResult {
 	b.t.Helper()
 	return b.run(false, false)
+}
+
+func TestStoredCopyExtractProgressBytes(t *testing.T) {
+	fixture := loadRefreshLaneFixture(t)
+	for _, row := range fixture.Cases {
+		if row.Name != "adapter-behind-refreshes-metadata-from-the-stored-copy" {
+			continue
+		}
+		bench := newRefreshLaneBench(t, fixture, row)
+		bench.applyMutation(row)
+		transcript, err := bench.fs.ReadFile(bench.transcriptPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bench.progress = ingest.NewProgressState()
+		result := bench.run(false, true)
+		if got := bench.decision(result).Lane; got != ingest.RefreshLaneStoredMetadata {
+			t.Fatalf("lane = %s, want stored metadata", got)
+		}
+		stage := bench.progress.Snapshot()[ingest.StageExtract]
+		if stage.BytesTotal != int64(len(transcript)) || stage.BytesDone != stage.BytesTotal {
+			t.Fatalf("stored-copy progress = %+v, want %d completed bytes", stage, len(transcript))
+		}
+		return
+	}
+	t.Fatal("stored-copy fixture case is missing")
+}
+
+func TestStoredCopyIndexProgressBytes(t *testing.T) {
+	fixture := loadRefreshLaneFixture(t)
+	for _, row := range fixture.Cases {
+		if row.Name != "indexer-behind-reindexes-the-stored-copy" {
+			continue
+		}
+		bench := newRefreshLaneBench(t, fixture, row)
+		bench.applyMutation(row)
+		transcript, err := bench.fs.ReadFile(bench.transcriptPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bench.progress = ingest.NewProgressState()
+		result := bench.run(false, true)
+		if got := bench.decision(result).Lane; got != ingest.RefreshLaneStoredIndex {
+			t.Fatalf("lane = %s, want stored index", got)
+		}
+		stage := bench.progress.Snapshot()[ingest.StageIndex]
+		if stage.BytesTotal != int64(len(transcript)) || stage.BytesDone != stage.BytesTotal {
+			t.Fatalf("stored index progress = %+v, want %d completed bytes", stage, len(transcript))
+		}
+		return
+	}
+	t.Fatal("stored-index fixture case is missing")
 }
 
 func (b *refreshLaneBench) lastRun() int64 {
@@ -470,6 +528,25 @@ func (b *refreshLaneBench) applyMutation(testCase refreshLaneCase) {
 // production metadata encoder and reconciles the recorded artifact identity,
 // so the pair stays a valid pair for the new bytes.
 func (b *refreshLaneBench) mutateMetadata(mutate func(*ingest.UnifiedMetadata)) {
+	b.mutateMetadataWithoutBinding(mutate)
+	// A metadata-only pair change records a new publication capture. The
+	// stored index still describes the same transcript, so re-state the
+	// binding the way the ordinary index write would.
+	state, err := b.database.ReadIndexState(b.t.Context(), b.sessionID)
+	if err != nil || state == nil {
+		b.t.Fatalf("read index state after metadata mutation: state=%+v err=%v", state, err)
+	}
+	if state.IndexedInputHash != nil && !state.PublicationBound {
+		if err := b.database.BindPublicationIndex(b.t.Context(), ingest.PublicationIndexBind{
+			SessionID: b.sessionID, ExpectedState: state, IndexedInputHash: *state.IndexedInputHash,
+			CaptureRevision: state.PublicationCaptureRevision, IndexedAtMs: time.Now().UnixMilli(),
+		}); err != nil {
+			b.t.Fatalf("rebind metadata-only pair: %v", err)
+		}
+	}
+}
+
+func (b *refreshLaneBench) mutateMetadataWithoutBinding(mutate func(*ingest.UnifiedMetadata)) {
 	b.t.Helper()
 	data, err := b.fs.ReadFile(b.metadataPath)
 	if err != nil {
@@ -499,21 +576,6 @@ func (b *refreshLaneBench) mutateMetadata(mutate func(*ingest.UnifiedMetadata)) 
 	mirrored := b.database.MirrorArtifacts(b.t.Context(), []ingest.ArtifactMirrorRequest{{Artifact: artifact, TranscriptKept: true}})
 	if len(mirrored) != 1 || mirrored[0].Err != nil || !mirrored[0].Mirrored {
 		b.t.Fatalf("reconcile mutated pair: %+v", mirrored)
-	}
-	// A metadata-only pair change records a new publication capture. The
-	// stored index still describes the same transcript, so re-state the
-	// binding the way the ordinary index write would.
-	state, err := b.database.ReadIndexState(b.t.Context(), b.sessionID)
-	if err != nil || state == nil {
-		b.t.Fatalf("read index state after metadata mutation: state=%+v err=%v", state, err)
-	}
-	if state.IndexedInputHash != nil && !state.PublicationBound {
-		if err := b.database.BindPublicationIndex(b.t.Context(), ingest.PublicationIndexBind{
-			SessionID: b.sessionID, ExpectedState: state, IndexedInputHash: *state.IndexedInputHash,
-			CaptureRevision: state.PublicationCaptureRevision, IndexedAtMs: time.Now().UnixMilli(),
-		}); err != nil {
-			b.t.Fatalf("rebind metadata-only pair: %v", err)
-		}
 	}
 }
 

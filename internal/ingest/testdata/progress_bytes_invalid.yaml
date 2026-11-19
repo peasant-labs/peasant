@@ -1,0 +1,4 @@
+requiredNames: [misspelled-estimate-key]
+cases:
+  - name: misspelled-estimate-key
+    wantEstimatte: "estimate: 9s"

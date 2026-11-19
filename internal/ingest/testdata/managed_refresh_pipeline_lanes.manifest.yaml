@@ -1,0 +1,4 @@
+requiredNames:
+  - adapter-behind
+  - adapter-stamp-absent
+  - indexer-behind

@@ -31,8 +31,14 @@ type CapturedIndexInput struct {
 	artifactHash string
 	inputHash    string
 	expected     *SessionIndexState
-	transcript   []byte
-	tree         *openCodeJSONInput
+	// managedGenerationRefresh marks input this run produced on the
+	// adapter-behind / adapter-stamp-absent stored-metadata lane for a harness
+	// whose declared output is a managed generation. It is the marker the
+	// specific no-parse refresh rule reads; it is not a general permission for
+	// a managed generation to bind without a re-parse.
+	managedGenerationRefresh bool
+	transcript               []byte
+	tree                     *openCodeJSONInput
 }
 
 // Only OpenCode's native JSON layout needs a provider-specific capture method.
@@ -96,6 +102,7 @@ func (p *Pipeline) captureIndexInput(ctx context.Context, im indexedMeta, indexe
 	}
 	input.expected, input.metadataPath, input.published = state, metadataPath, im.published
 	input.metadataData = im.metadataData
+	input.managedGenerationRefresh = im.managedGenerationRefresh
 	return input, nil
 }
 

@@ -1652,6 +1652,7 @@ func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *
 		}
 	}
 
+	pipelineCfg.Validator = db
 	pipeline, err := ingest.NewPipeline(fs, git, ingest.DefaultAdapterRegistry, pipelineCfg,
 		ingest.WithRunLock(filepath.Join(string(h.dataDir()), ingest.RunLockFileName)),
 		ingest.WithRunLockNoWait(),

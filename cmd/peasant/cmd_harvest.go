@@ -496,6 +496,20 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 		}
 	}
 
+	// Upgrade a store that is behind BEFORE the renderer mounts. The upgrade
+	// prints its plan, may ask a question, and reports its steps on the
+	// terminal; a mounted renderer redraws over all three, so the prompt could
+	// be erased while a person is answering it. Here the terminal is not owned
+	// yet, so the upgrade uses its normal terminal flow. The store open below
+	// then finds a current store, and it refuses to write anything if it does
+	// not (storeUpgradeProgressMounted).
+	if !skipDB && !flags.dryRun {
+		dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
+		if err := ensureStoreCurrent(cmd, dbPath, storeEntryModeFor(cmd)); err != nil {
+			return fmt.Errorf("open analytics store: %w", err)
+		}
+	}
+
 	// Build and start the progress renderer before the store opens, so the
 	// one-time upgrade pass and the store open are visible as stage activity
 	// rather than a frozen terminal. The renderer reads progState; every stage,
@@ -545,7 +559,7 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 	// place an already-stored session on the branch the setup tree lists it under.
 	var storedSessions ingest.KnownSessionIndex
 	if !skipDB {
-		db, err := openRunStore(cmd, flags.dryRun, string(resolvedOutput), cfg.Write, storeUpgradeProgressPlain)
+		db, err := openRunStore(cmd, flags.dryRun, string(resolvedOutput), cfg.Write, storeUpgradeProgressMounted)
 		if err != nil {
 			return fmt.Errorf("open analytics store: %w", err)
 		}
@@ -565,6 +579,7 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 			}
 		}
 		storedSessions = loadKnownSessionsFrom(ctx, db)
+		pipelineCfg.Validator = db
 		pipelineOpts = append(pipelineOpts,
 			ingest.WithStore(db),
 			ingest.WithMetricsStore(db),
@@ -716,7 +731,7 @@ func outputHarvest(cmd *cobra.Command, execution harvestExecution, options harve
 		}
 		return nil
 	}
-	printSummary(cmd.OutOrStdout(), result, options.flags.verbose, options.flags.includeActive, options.outputDir, options.configPath, options.sources, options.customPatternCount)
+	printSummaryWithForecast(cmd.OutOrStdout(), result, options.flags.verbose, options.flags.includeActive, options.outputDir, options.configPath, options.sources, options.customPatternCount, options.flags.dryRun)
 	if remaining := result.Summary.ContentCaptureRemaining; remaining > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "%d sessions do not have their full text stored yet. The next harvest continues this. Run `peasant harvest index` to finish it now.\n", remaining)
 	}
@@ -1411,6 +1426,7 @@ func parseSinceDuration(s string) (time.Time, error) {
 // SessionResult.Error (type error) does not serialize; we convert it to a string.
 type jsonPipelineResult struct {
 	Summary              ingest.PipelineSummary       `json:"summary"`
+	CensusStored         bool                         `json:"census_stored"`
 	Sessions             []jsonSessionResult          `json:"sessions"`
 	Duration             string                       `json:"duration"`
 	IndexLog             []ingest.IndexLogEntry       `json:"indexLog,omitempty"`
@@ -1435,6 +1451,7 @@ type jsonSessionResult struct {
 func printJSON(w io.Writer, result *ingest.PipelineResult) error {
 	out := jsonPipelineResult{
 		Summary:              result.Summary,
+		CensusStored:         result.CensusStored,
 		Duration:             result.Duration.Round(100 * time.Millisecond).String(),
 		IndexLog:             result.IndexLog,
 		IndexCoverage:        result.IndexCoverage,
@@ -1482,6 +1499,10 @@ func printRecordKindsReport(w io.Writer, refused []ingest.RecordKindRefusalCount
 // Default (no --verbose): path header + summary line + changed/error rows with provider and output path.
 // --verbose: same rows but visible subagents are expanded underneath their parent instead of collapsed.
 func printSummary(w io.Writer, result *ingest.PipelineResult, verbose bool, includeActive bool, outputDir string, configPath string, sources map[defaults.Harness]ingest.SourceConfig, customPatternCount int) {
+	printSummaryWithForecast(w, result, verbose, includeActive, outputDir, configPath, sources, customPatternCount, false)
+}
+
+func printSummaryWithForecast(w io.Writer, result *ingest.PipelineResult, verbose bool, includeActive bool, outputDir string, configPath string, sources map[defaults.Harness]ingest.SourceConfig, customPatternCount int, forecast bool) {
 	// Path header.
 	fmt.Fprintf(w, "Output:  %s\n", outputDir)
 	if configPath != "" {
@@ -1524,11 +1545,18 @@ func printSummary(w io.Writer, result *ingest.PipelineResult, verbose bool, incl
 	fmt.Fprintf(w, "   - %-5d active %s\n", s.Active, activeLabel)
 	fmt.Fprintf(w, "duration: %s\n", result.Duration.Round(100*time.Millisecond))
 	var census *ingest.RefreshCensus
-	if result.CensusStored {
+	if result.CensusStored || forecast {
 		census = result.Census
 	}
-	for _, line := range ingestprogress.CensusLines(census) {
-		fmt.Fprintln(w, line)
+	if forecast && census != nil {
+		fmt.Fprintln(w, "forecast (not stored; indexed bytes are not yet measured):")
+	}
+	if forecast && result.CensusForecastNeedsReindexRouting {
+		fmt.Fprintln(w, "refresh census unavailable: reindex dry-run stops before source routing and index decisions assign refresh reasons; run without --dry-run to record the actual census")
+	} else {
+		for _, line := range ingest.CensusLines(census) {
+			fmt.Fprintln(w, line)
+		}
 	}
 	// The index line is printed whenever there is anything to say, INCLUDING when
 	// nothing was indexed because indexing failed.

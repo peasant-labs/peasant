@@ -1,0 +1,29 @@
+# Each case patches the first ledger row with one value outside its closed set.
+# The loader must reject it and name the field, so a typo cannot silently test
+# a different producer.
+required_names:
+  - unknown-harness
+  - unknown-kind
+  - unknown-reason
+  - unknown-lane
+  - unknown-change-scope
+  - unknown-input
+  - unknown-output-proof
+  - unknown-precheck
+  - unknown-fallback
+  - per-harness-kind-without-a-harness
+  - single-producer-kind-with-a-harness
+  - content-model-without-a-name
+cases:
+  - {name: unknown-harness, patch: {harness: typo}, error_contains: harness}
+  - {name: unknown-kind, patch: {kind: typo}, error_contains: kind}
+  - {name: unknown-reason, patch: {reason: typo}, error_contains: reason}
+  - {name: unknown-lane, patch: {lane: typo}, error_contains: lane}
+  - {name: unknown-change-scope, patch: {change_scope: typo}, error_contains: change scope}
+  - {name: unknown-input, patch: {input: typo}, error_contains: producer input}
+  - {name: unknown-output-proof, patch: {output_proof: [content-hash, typo]}, error_contains: output proof}
+  - {name: unknown-precheck, patch: {precheck: typo}, error_contains: precheck}
+  - {name: unknown-fallback, patch: {fallback: typo}, error_contains: step action}
+  - {name: per-harness-kind-without-a-harness, patch: {harness: ""}, error_contains: names no harness}
+  - {name: single-producer-kind-with-a-harness, patch: {kind: store-schema}, error_contains: names harness}
+  - {name: content-model-without-a-name, patch: {kind: content-model, harness: "", name: ""}, error_contains: names no capability}

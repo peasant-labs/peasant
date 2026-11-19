@@ -1,0 +1,75 @@
+# Each case changes one registry the declaration table reads, or one ledger
+# row, and the agreement check must fail and name the disagreement. A
+# producer missing from the ledger or from a registry never passes quietly.
+#
+# registry: changes applied to copies of the live registries.
+#   set_baseline / set_managed: replace one harness's harvester versions.
+#   drop_harness: remove a harness from the version and adapter registries.
+#   drop_versions / drop_adapter: remove a harness from one registry only.
+#   add_content_capability / drop_content_capability: change the inventory.
+#   metadata_schema / redaction_rules / store_schema: replace the version.
+# ledger: changes applied to a copy of the ledger rows.
+#   drop_rows: remove rows by id.
+#   patch_rows: overwrite fields of one row by id.
+required_names:
+  - store-migration-without-a-ledger-row
+  - indexer-bump-without-a-ledger-row
+  - managed-target-without-a-ledger-row
+  - baseline-checkpoint-off-the-chain
+  - content-capability-without-a-ledger-row
+  - redaction-rule-bump-without-a-ledger-row
+  - metadata-schema-bump-without-a-ledger-row
+  - registered-producer-missing-from-the-ledger
+  - ledger-producer-missing-from-the-registries
+  - content-capability-retired-from-the-registry
+  - chain-not-contiguous
+  - bump-that-does-not-advance
+  - newest-row-disagrees-with-the-declaration
+  - harvester-versions-without-an-adapter
+  - adapter-without-harvester-versions
+cases:
+  - name: store-migration-without-a-ledger-row
+    registry: {store_schema: 82}
+    error_contains: "store-schema chain ends at 81 but the registry declares 82"
+  - name: indexer-bump-without-a-ledger-row
+    registry: {set_baseline: {harness: pi, adapter: 3, indexer: 19, format: 1}}
+    error_contains: "transcript-indexer/pi chain ends at 18 but the registry declares 19"
+  - name: managed-target-without-a-ledger-row
+    registry: {set_managed: {harness: codex, adapter: 4, indexer: 23, format: 2}}
+    error_contains: "transcript-indexer/codex chain ends at 22 but the registry declares 23"
+  - name: baseline-checkpoint-off-the-chain
+    registry: {set_baseline: {harness: claude-code, adapter: 4, indexer: 23, format: 1}}
+    error_contains: "transcript-indexer/claude-code registry version 23 is absent"
+  - name: content-capability-without-a-ledger-row
+    registry: {add_content_capability: future_part_v1}
+    error_contains: "content-model/future_part_v1 is declared but the ledger has no rows"
+  - name: redaction-rule-bump-without-a-ledger-row
+    registry: {redaction_rules: 3.2.0}
+    error_contains: "redaction-rules chain ends at 3.1.1 but the registry declares 3.2.0"
+  - name: metadata-schema-bump-without-a-ledger-row
+    registry: {metadata_schema: 13}
+    error_contains: "metadata-schema chain ends at 12 but the registry declares 13"
+  - name: registered-producer-missing-from-the-ledger
+    ledger: {drop_rows: [cursor-adapter-1]}
+    error_contains: "metadata-adapter/cursor is declared but the ledger has no rows"
+  - name: ledger-producer-missing-from-the-registries
+    registry: {drop_harness: cursor}
+    error_contains: "ledger has rows for index-format/cursor but no registry declares it"
+  - name: content-capability-retired-from-the-registry
+    registry: {drop_content_capability: tool_namespace_v1}
+    error_contains: "ledger has rows for content-model/tool_namespace_v1 but no registry declares it"
+  - name: chain-not-contiguous
+    ledger: {patch_rows: [{id: claude-indexer-26-managed, patch: {from: 24}}]}
+    error_contains: "not a contiguous chain at claude-indexer-26-managed"
+  - name: bump-that-does-not-advance
+    ledger: {patch_rows: [{id: store-schema-81, patch: {from: 81}}]}
+    error_contains: "store-schema-81 is not a bump"
+  - name: newest-row-disagrees-with-the-declaration
+    ledger: {patch_rows: [{id: strike-adapter-3, patch: {input: stored-transcript}}]}
+    error_contains: "strike-adapter-3 disagrees with the declaration"
+  - name: harvester-versions-without-an-adapter
+    registry: {drop_adapter: strike}
+    error_contains: "no registered adapter"
+  - name: adapter-without-harvester-versions
+    registry: {drop_versions: strike}
+    error_contains: "has no harvester versions"

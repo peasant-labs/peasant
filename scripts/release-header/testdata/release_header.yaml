@@ -113,6 +113,48 @@ cases:
       ## Still fenced
       ~~~~
       After the examples.
+  # An unclosed fence or comment swallows every later heading, so without the
+  # check the section would run to the end of the file and publish every older
+  # release as this release's notes.
+  - name: unclosed-fence-in-the-tag-section-fails-closed
+    tag: v2.4.0
+    changelog: |
+      ## [2.4.0]
+      Notes.
+      ```text
+      An example that never ends.
+      ## [2.3.0]
+      Older work that must not be published here.
+    error_contains: unclosed code fence opened on line 3
+  - name: unclosed-comment-in-the-tag-section-fails-closed
+    tag: v2.4.0
+    changelog: |
+      ## [2.4.0]
+      Notes.
+      <!--
+      A comment that never ends.
+      ## [2.3.0]
+      Older work that must not be published here.
+    error_contains: unclosed HTML comment opened on line 3
+  - name: unclosed-fence-before-the-tag-section-fails-closed
+    tag: v2.4.0
+    changelog: |
+      ~~~
+      A fence that hides the heading below.
+      ## [2.4.0]
+      Notes.
+    error_contains: unclosed code fence opened on line 1
+  - name: unclosed-fence-in-an-older-section-does-not-block-the-release
+    tag: v2.4.0
+    changelog: |
+      ## [2.4.0]
+      Notes.
+      ## [2.3.0]
+      ```text
+      An old example that never ends.
+    header: |-
+      ## [2.4.0]
+      Notes.
   - name: commented-heading-does-not-count
     tag: v2.4.0
     changelog: |

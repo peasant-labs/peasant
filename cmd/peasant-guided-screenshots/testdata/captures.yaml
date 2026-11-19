@@ -81,7 +81,7 @@ completion:
     - key: warnings-bottom
       wantContains: [2 warnings, restore read access, next steps, peasant config, peasant village push, PgUp, quit]
     - key: no-warnings
-      wantContains: [kickstart complete, 2 new, 1 updated, 3 unchanged, 4 excluded by selection, next steps, peasant village push]
+      wantContains: [kickstart complete, 1 new, 0 updated, 3 unchanged, 4 excluded by selection, "refresh census: 1 session"]
       wantAbsent: [warnings]
     - key: final-census
       wantContains: [kickstart complete, "refresh census: 3 sessions", "includes failed attempts", "native / new: 2", "indexed bytes measured: 2 KiB", "stored-metadata / adapter_behind: 1", "indexed bytes: unknown", quit]
@@ -205,21 +205,27 @@ selectionStates:
 ingestProgressStates:
   - key: running
     candidates: 4
+    bytesTotal: 8388608
+    bytesDone: 2097152
     lane: {queued: 3, busyMs: 1000, elapsedMs: 1000}
-    wantContains: [importing transcripts, local import progress, extract+write, 1/4, "█", "_|||_", "extract candidates: 4 sessions (not confirmed refreshes)", "writer lane: 3 waiting", "100% busy", "total elapsed: 2s", "estimate: 6s", ctrl+c to quit]
+    wantContains: [importing transcripts, local import progress, extract+write, 1/4, "2 MiB/8 MiB", "█", "_|||_", "extract candidates: 4 sessions (not confirmed refreshes)", "writer lane: 3 waiting", "100% busy", "total elapsed: 2s", "estimate: 6s", ctrl+c to quit]
   - key: harvest-inline
     candidates: 4
+    bytesTotal: 8388608
+    bytesDone: 2097152
     lane: {queued: 3, busyMs: 1000, elapsedMs: 1000}
-    wantContains: [local import progress, extract+write, 1/4, "█", "_|||_", "extract candidates: 4 sessions (not confirmed refreshes)", "writer lane: 3 waiting", "100% busy", "total elapsed: 2s", "estimate: 6s", ctrl+c to cancel]
+    wantContains: [local import progress, extract+write, 1/4, "2 MiB/8 MiB", "█", "_|||_", "extract candidates: 4 sessions (not confirmed refreshes)", "writer lane: 3 waiting", "100% busy", "total elapsed: 2s", "estimate: 6s", ctrl+c to cancel]
   - key: harvest-canceling
     wantContains: [local import progress, "✗ discover", 2/4, "total elapsed: 9s", "estimate: 6s", canceling harvest]
   - key: harvest-canceled
+    lane: {queued: 3, busyMs: 1000, elapsedMs: 1000}
     wantContains: [local import progress, "✗ discover", 2/4, "total elapsed: 12s", "estimate: 6s", harvest canceled]
+    wantAbsent: ["writer lane:"]
   - key: candidates
-    candidates: 7
+    candidates: 1
     lane: {queued: 0, busyMs: 0, elapsedMs: 1000}
-    wantContains: [local import progress, "extract candidates: 7 sessions (not confirmed refreshes)", "writer lane: 0 waiting", "0% busy", ctrl+c to quit]
-    wantAbsent: ["7 refreshed"]
+    wantContains: [local import progress, "extract candidates: 1 session (not confirmed refreshes)", "writer lane: 0 waiting", "0% busy", ctrl+c to quit]
+    wantAbsent: ["1 refreshed"]
   - key: unknown-total
     wantContains: [local import progress, discover, estimate unavailable, ctrl+c to quit]
     wantAbsent: ["extract candidates:", "writer lane:", "0/0", "1/4"]

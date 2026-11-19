@@ -19,6 +19,12 @@ type RefreshReason string
 // The values are variables rather than typed constants because their spelling
 // is owned by outcome_reason.go. A switch on them is an ordinary expression
 // switch and stays exhaustive-checkable through AllRefreshReasons.
+//
+// RefreshReasonAdapterBehindNativeOnly is an adapter bump the stored lane
+// cannot serve, for one of two causes: the adapter cannot re-derive metadata
+// from the stored transcript, or it withholds the metadata-only change scope
+// (see AdapterDeclaresChangeScope). The decision's AdapterUndeclared field and
+// the dry-run full_step census name the second cause.
 var (
 	RefreshReasonNew                                     = RefreshReason(OutcomeReasonRefreshNew.Code())
 	RefreshReasonSourceChanged                           = RefreshReason(OutcomeReasonRefreshSourceChanged.Code())
@@ -64,38 +70,20 @@ func NewRefreshReason(raw string) (RefreshReason, error) {
 	return "", fmt.Errorf("ingest: read refresh reason %q: this build defines no such decision reason; nothing was refreshed; use one of the named refresh reasons", raw)
 }
 
+var refreshOutcomeReasons = func() map[RefreshReason]OutcomeReason {
+	reasons := make(map[RefreshReason]OutcomeReason, len(AllRefreshReasons))
+	for _, reason := range AllRefreshReasons {
+		outcome, err := NewOutcomeReason(string(reason))
+		if err == nil && outcome.Kind() == OutcomeKindRefresh {
+			reasons[reason] = outcome
+		}
+	}
+	return reasons
+}()
+
 // OutcomeReason returns the run-outcome reason this decision records, or 0 for
 // source_compare and none, which write no outcome row.
-func (r RefreshReason) OutcomeReason() OutcomeReason {
-	switch r {
-	case RefreshReasonNew:
-		return OutcomeReasonRefreshNew
-	case RefreshReasonSourceChanged:
-		return OutcomeReasonRefreshSourceChanged
-	case RefreshReasonPairMissing:
-		return OutcomeReasonRefreshPairMissing
-	case RefreshReasonMetadataSchema:
-		return OutcomeReasonRefreshMetadataSchema
-	case RefreshReasonForced:
-		return OutcomeReasonRefreshForced
-	case RefreshReasonAdapterBehind:
-		return OutcomeReasonRefreshAdapterBehind
-	case RefreshReasonAdapterBehindNativeOnly:
-		return OutcomeReasonRefreshAdapterBehindNativeOnly
-	case RefreshReasonAdapterStampAbsent:
-		return OutcomeReasonRefreshAdapterStampAbsent
-	case RefreshReasonIndexerBehind:
-		return OutcomeReasonRefreshIndexerBehind
-	case RefreshReasonRefusalReopened:
-		return OutcomeReasonRefreshRefusalReopened
-	case RefreshReasonPublicationUnbound:
-		return OutcomeReasonRefreshPublicationUnbound
-	case RefreshReasonPublicationCaptureMissing:
-		return OutcomeReasonRefreshPublicationCaptureMissing
-	default:
-		return 0
-	}
-}
+func (r RefreshReason) OutcomeReason() OutcomeReason { return refreshOutcomeReasons[r] }
 
 // Refreshing reports whether the reason writes a refresh outcome row.
 func (r RefreshReason) Refreshing() bool { return r.OutcomeReason().Defined() }
@@ -105,6 +93,11 @@ func (r RefreshReason) Refreshing() bool { return r.OutcomeReason().Defined() }
 type RefreshDecision struct {
 	Reason RefreshReason
 	Lane   RefreshLane
+	// AdapterUndeclared names the adapter as the reason the full native step
+	// was chosen: the adapter is registered and behind, but it declares no
+	// output-preserving change scope, so the stored-metadata lane cannot
+	// skip work for it. The reason is then adapter_behind_native_only.
+	AdapterUndeclared bool
 }
 
 // IsRefresh reports whether the decision records a refresh.
@@ -145,6 +138,16 @@ type refreshEvidence struct {
 	// SourceChanged reports that the captured source bytes, clock or cursor
 	// moved past the stored evidence.
 	SourceChanged bool
+	// PublicationCannotBind and StructuralMismatch require native repair.
+	PublicationCannotBind bool
+	StructuralMismatch    bool
+	// OpenCodeClockMoved requires native comparison before a stored-index or no-op decision.
+	OpenCodeClockMoved bool
+	// Discovery freshness is a preliminary clock, schema and readiness hint.
+	FreshnessFutureSchema      bool
+	FreshnessClockMoved        bool
+	FreshnessSchemaOld         bool
+	FreshnessPublicationNeeded bool
 	// SourceClockMoved reports a source clock newer than the stored ingest
 	// clock. The bytes must be read before any stored lane may claim the source
 	// unchanged, so this outranks a behind producer.
@@ -180,6 +183,10 @@ type refreshEvidence struct {
 	// AdapterCanExtract reports that the adapter implements stored-transcript
 	// metadata extraction.
 	AdapterCanExtract bool
+	// AdapterUndeclared reports a registered adapter that withholds its
+	// output-preserving change scope (see AdapterDeclaresChangeScope). The
+	// zero value is the declaration every shipped adapter makes.
+	AdapterUndeclared bool
 	// IndexerVersion and IndexerTarget describe the stored index producer.
 	IndexerVersion int
 	IndexerTarget  int
@@ -199,6 +206,21 @@ type refreshEvidence struct {
 	LatestAttemptSettled bool
 }
 
+// RefreshEvidence is the evidence consumed by the canonical refresh decision.
+// Unobservable facts must retain their zero values.
+type RefreshEvidence = refreshEvidence
+
+// MetadataNeedsNativeRefresh exposes the same metadata compatibility rule used
+// by the production refresh path.
+func MetadataNeedsNativeRefresh(version int) bool {
+	return metadataNeedsNativeRefresh(version)
+}
+
+// DecideRefresh returns the canonical decision for the supplied evidence.
+func DecideRefresh(in RefreshEvidence) RefreshDecision {
+	return decideRefresh(in)
+}
+
 // decideRefresh is the one home of the refresh decision. It orders the facts
 // the way the accepted design does: a capture-side fact (forced, new, missing
 // pair, changed source, old schema) wins a native capture; otherwise the
@@ -206,7 +228,12 @@ type refreshEvidence struct {
 // stored transcript, so its bump never needs the native source. An adapter
 // produces the pair, so its bump needs the native source only when the adapter
 // cannot re-derive from the stored transcript.
-func decideRefresh(in refreshEvidence) RefreshDecision {
+func decideRefresh(in refreshEvidence) (decision RefreshDecision) {
+	defer func() {
+		if in.OpenCodeClockMoved && (decision.Lane == RefreshLaneStoredIndex || decision.Reason == RefreshReasonNone) {
+			decision = RefreshDecision{Reason: RefreshReasonSourceCompare, Lane: RefreshLaneNative}
+		}
+	}()
 	switch {
 	case in.Forced:
 		return RefreshDecision{Reason: RefreshReasonForced, Lane: RefreshLaneNative}
@@ -214,7 +241,7 @@ func decideRefresh(in refreshEvidence) RefreshDecision {
 		return RefreshDecision{Reason: RefreshReasonNew, Lane: RefreshLaneNative}
 	case in.PairMissing:
 		return RefreshDecision{Reason: RefreshReasonPairMissing, Lane: RefreshLaneNative}
-	case in.SourceChanged:
+	case in.SourceChanged, in.StructuralMismatch:
 		return RefreshDecision{Reason: RefreshReasonSourceChanged, Lane: RefreshLaneNative}
 	case in.SourceClockMoved:
 		return RefreshDecision{Reason: RefreshReasonSourceCompare, Lane: RefreshLaneNative}
@@ -229,6 +256,11 @@ func decideRefresh(in refreshEvidence) RefreshDecision {
 	case in.AdapterVersion < in.AdapterTarget:
 		if !in.AdapterCanExtract {
 			return RefreshDecision{Reason: RefreshReasonAdapterBehindNativeOnly, Lane: RefreshLaneNative}
+		}
+		if in.AdapterUndeclared {
+			// The stored lane's skip rests on the adapter's declaration. Without
+			// it the full step runs, on the path a native-only adapter takes.
+			return RefreshDecision{Reason: RefreshReasonAdapterBehindNativeOnly, Lane: RefreshLaneNative, AdapterUndeclared: true}
 		}
 		if !in.AdapterStampPresent {
 			return RefreshDecision{Reason: RefreshReasonAdapterStampAbsent, Lane: RefreshLaneStoredMetadata}
@@ -247,6 +279,9 @@ func decideRefresh(in refreshEvidence) RefreshDecision {
 	case in.ContentPending:
 		return RefreshDecision{Reason: RefreshReasonIndexerBehind, Lane: RefreshLaneStoredIndex}
 	case in.PublicationUnbound:
+		if in.PublicationCannotBind {
+			return RefreshDecision{Reason: RefreshReasonSourceChanged, Lane: RefreshLaneNative}
+		}
 		return RefreshDecision{Reason: RefreshReasonPublicationUnbound, Lane: RefreshLaneStoredIndex}
 	case in.SourceCompared, in.SourceComparePending:
 		return RefreshDecision{Reason: RefreshReasonSourceCompare, Lane: RefreshLaneNative}
@@ -273,17 +308,81 @@ func storedAdapterEvidence(loc SessionLocation, hasLocation bool, metadata *Unif
 	return storedAdapterRevision(nil), false
 }
 
+// adapterCapability is what a registered adapter declares about itself: a
+// type property of the adapter, not of any session.
+type adapterCapability struct {
+	// canExtract reports that the adapter re-derives metadata from the
+	// stored transcript (TranscriptMetadataExtractor).
+	canExtract bool
+	// declaresScope reports that the adapter declares its output-preserving
+	// change scope (AdapterDeclaresChangeScope).
+	declaresScope bool
+}
+
+// adapterCapabilityFor builds the harness's adapter once per pipeline, with the
+// pipeline's own dependencies (a registered factory may need a real
+// filesystem), and caches what it declares. Every refresh decision reads the
+// cache instead of building an adapter per session. The mutex makes the first
+// build safe from concurrent workers. A factory's only effect is the adapter
+// it returns, so building it once suppresses nothing. ok is false for an
+// unregistered harness.
+func (p *Pipeline) adapterCapabilityFor(harness Harness) (capability adapterCapability, ok bool) {
+	p.adapterCapabilitiesMu.Lock()
+	defer p.adapterCapabilitiesMu.Unlock()
+	if capability, ok = p.adapterCapabilities[harness]; ok {
+		return capability, true
+	}
+	factory, ok := p.adapters[harness]
+	if !ok {
+		return adapterCapability{}, false
+	}
+	adapter := factory(p.fs, p.git, p.salt)
+	_, capability.canExtract = adapter.(TranscriptMetadataExtractor)
+	capability.declaresScope = AdapterDeclaresChangeScope(adapter)
+	if p.adapterCapabilities == nil {
+		p.adapterCapabilities = make(map[Harness]adapterCapability)
+	}
+	p.adapterCapabilities[harness] = capability
+	return capability, true
+}
+
 // adapterSupportsStoredExtraction reports whether the registered adapter can
 // re-derive its metadata from the stored transcript. It asks the real interface
 // rather than naming a harness list, so a new native-only adapter is covered
 // without a second definition of the set.
 func (p *Pipeline) adapterSupportsStoredExtraction(harness Harness) bool {
+	capability, ok := p.adapterCapabilityFor(harness)
+	return ok && capability.canExtract
+}
+
+// adapterDeclaresChangeScope reads the registered adapter's change-scope
+// declaration. An unregistered harness has no adapter to declare anything, and
+// no adapter-behind decision to make.
+func (p *Pipeline) adapterDeclaresChangeScope(harness Harness) bool {
+	capability, ok := p.adapterCapabilityFor(harness)
+	return !ok || capability.declaresScope
+}
+
+// withAdapterEvidence fills every adapter fact of a refresh decision: the
+// stored revision and stamp, this build's target, and what the registered
+// adapter declares. Every site that decides an adapter refresh calls it, so
+// none can leave the declaration at its zero value.
+func (p *Pipeline) withAdapterEvidence(in refreshEvidence, harness Harness, version int, present bool) refreshEvidence {
+	in.AdapterVersion = version
+	in.AdapterTarget = p.versionTargets()[harness].AdapterVersion
+	in.AdapterStampPresent = present
+	in.AdapterCanExtract = p.adapterSupportsStoredExtraction(harness)
+	in.AdapterUndeclared = !p.adapterDeclaresChangeScope(harness)
+	return in
+}
+
+func (p *Pipeline) adapterDeclaresOutputPreserving(harness Harness) bool {
 	factory, ok := p.adapters[harness]
 	if !ok {
 		return false
 	}
-	_, ok = factory(p.fs, p.git, p.salt).(TranscriptMetadataExtractor)
-	return ok
+	declaration, ok := factory(p.fs, p.git, p.salt).(OutputPreservingDeclaration)
+	return ok && declaration.DeclaresOutputPreserving()
 }
 
 // classificationDecision is the decision the discovery classifier derives
@@ -355,22 +454,18 @@ func (p *Pipeline) refreshEvidenceForClassification(session DiscoveredSession, c
 func (p *Pipeline) refreshEvidenceForLocation(session DiscoveredSession, loc SessionLocation, metadata *UnifiedMetadata) refreshEvidence {
 	target := p.versionTargets()[session.Harness]
 	version, present := storedAdapterEvidence(loc, true, metadata)
-	return refreshEvidence{
+	return p.withAdapterEvidence(refreshEvidence{
 		StoredRow:             loc.IngestedMs != nil,
 		Forced:                p.config.Force,
 		MetadataSchemaOld:     metadataNeedsNativeRefresh(loc.SchemaVersion),
 		CaptureRecoveryNeeded: loc.ContentFailureCode == ContentCaptureLegacyPreviewOnly && len(loc.SourceFingerprint) > 0,
 		PublicationCaptureMissing: loc.CaptureRevision == 0 && loc.SourceEvidenceSupported &&
 			len(loc.SourceFingerprint) > 0 && (!permanentCaptureRefusal(loc.ContentFailureCode) || loc.ContentPublishable),
-		AdapterVersion:      version,
-		AdapterTarget:       target.AdapterVersion,
-		AdapterStampPresent: present,
-		AdapterCanExtract:   p.adapterSupportsStoredExtraction(session.Harness),
-		IndexerVersion:      loc.IndexerVersion,
-		IndexerTarget:       target.IndexerVersion,
-		IndexProofPresent:   loc.IndexedInputHash != nil,
-		PermanentRefusal:    permanentCaptureRefusal(loc.ContentFailureCode),
-	}
+		IndexerVersion:    loc.IndexerVersion,
+		IndexerTarget:     target.IndexerVersion,
+		IndexProofPresent: loc.IndexedInputHash != nil,
+		PermanentRefusal:  permanentCaptureRefusal(loc.ContentFailureCode),
+	}, session.Harness, version, present)
 }
 
 // storedMetadataForDecision reads the saved metadata half of the pair without
@@ -434,6 +529,10 @@ func (p *Pipeline) openCodeSessionClockMoved(ctx context.Context, session Discov
 // The pair is the metadata file; a stored file-only harvest proves the source
 // unchanged by reading it once and comparing the owned capture marker.
 func (p *Pipeline) refreshDecisionForFile(session DiscoveredSession, metadata *UnifiedMetadata, sourceCompare bool) RefreshDecision {
+	return decideRefresh(p.refreshEvidenceForFile(session, metadata, sourceCompare))
+}
+
+func (p *Pipeline) refreshEvidenceForFile(session DiscoveredSession, metadata *UnifiedMetadata, sourceCompare bool) refreshEvidence {
 	version, present := storedAdapterEvidence(SessionLocation{}, false, metadata)
 	in := refreshEvidence{
 		StoredRow:         metadata != nil,
@@ -449,10 +548,7 @@ func (p *Pipeline) refreshDecisionForFile(session DiscoveredSession, metadata *U
 		// The owned marker or a current-schema artifact makes the source
 		// worth proving again. An old artifact with neither evidence is left
 		// on the clock hint, exactly as the file fallback leaves it.
-		in.AdapterVersion = version
-		in.AdapterTarget = p.versionTargets()[session.Harness].AdapterVersion
-		in.AdapterStampPresent = present
-		in.AdapterCanExtract = p.adapterSupportsStoredExtraction(session.Harness)
+		in = p.withAdapterEvidence(in, session.Harness, version, present)
 	}
 	if metadata != nil {
 		if metadata.Timestamp.Ingested != nil && !session.ModTime.IsZero() &&
@@ -469,7 +565,7 @@ func (p *Pipeline) refreshDecisionForFile(session DiscoveredSession, metadata *U
 			in.SourceChanged = true
 		}
 	}
-	return decideRefresh(in)
+	return in
 }
 
 func sameParentSession(a, b *SessionID) bool {
@@ -517,7 +613,7 @@ func (p *Pipeline) refreshDecisionForLocation(session DiscoveredSession, loc Ses
 // decide without opening the pair.
 func (p *Pipeline) refreshDecisionForIndexState(state *SessionIndexState, target HarvesterVersions, inputHashMatches bool, bindsPublication bool) RefreshDecision {
 	if state == nil {
-		return RefreshDecision{Reason: RefreshReasonIndexerBehind, Lane: RefreshLaneStoredIndex}
+		return decideRefresh(refreshEvidence{StoredRow: true})
 	}
 	in := refreshEvidence{
 		StoredRow:           true,

@@ -1,0 +1,7 @@
+cases:
+  - name: missing-turn-count
+    column: turn_count
+  - name: missing-conversation-count
+    column: conversation_turn_count
+  - name: missing-input-count
+    column: input_submission_count

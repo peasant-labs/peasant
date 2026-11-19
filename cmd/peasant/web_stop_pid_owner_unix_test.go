@@ -98,6 +98,30 @@ func assertNotSignalled(t *testing.T, what string, cmd *exec.Cmd, exited <-chan 
 	}
 }
 
+// TestStopWebTreatsAnAlreadyGoneServerAsStopped covers the race where the
+// HTTP shutdown request reaches a server that exits before the response is
+// read. The PID is gone, so stop must report success and remove the file
+// instead of calling it a stale PID.
+func TestStopWebTreatsAnAlreadyGoneServerAsStopped(t *testing.T) {
+	t.Parallel()
+	port := freePort(t)
+	cmd := exec.Command("sleep", "1")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	pid := cmd.Process.Pid
+	if err := cmd.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	writePIDFile(t, port, pid)
+	if err := stopWeb(port); err != nil {
+		t.Fatalf("stopWeb after the server exited = %v, want nil", err)
+	}
+	if _, statErr := os.Stat(pidFilePath(port)); !os.IsNotExist(statErr) {
+		t.Fatalf("PID file still exists after the already-stopped stop (stat err %v)", statErr)
+	}
+}
+
 // TestStopWebLeavesAnUnrelatedProcessAlone guards #671: a stale PID file that
 // names some other process (here `sleep`) must not get it signalled. The file
 // is removed and the error says it was stale. Ports are per test, so the

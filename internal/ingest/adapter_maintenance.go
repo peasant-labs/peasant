@@ -53,15 +53,11 @@ func (p *Pipeline) adapterTargetNeedsWork(ctx context.Context, target reindexTar
 	decision := p.refreshDecisionForLocation(target.session, loc, metadata)
 	if !hasLocation {
 		version, present := storedAdapterEvidence(loc, false, metadata)
-		decision = decideRefresh(refreshEvidence{
-			StoredRow:           true,
-			Forced:              p.config.Force,
-			MetadataSchemaOld:   metadataNeedsNativeRefresh(metadata.SchemaVersion),
-			AdapterVersion:      version,
-			AdapterTarget:       p.versionTargets()[target.session.Harness].AdapterVersion,
-			AdapterStampPresent: present,
-			AdapterCanExtract:   p.adapterSupportsStoredExtraction(target.session.Harness),
-		})
+		decision = decideRefresh(p.withAdapterEvidence(refreshEvidence{
+			StoredRow:         true,
+			Forced:            p.config.Force,
+			MetadataSchemaOld: metadataNeedsNativeRefresh(metadata.SchemaVersion),
+		}, target.session.Harness, version, present))
 	}
 	return decision.Reason == RefreshReasonAdapterBehind ||
 		decision.Reason == RefreshReasonAdapterStampAbsent ||
@@ -165,14 +161,10 @@ func (p *Pipeline) storedAdapterEntry(ctx context.Context, sid SessionID, native
 	} else {
 		// A legacy pair with no row is decided from its file stamp only.
 		version, present := storedAdapterEvidence(loc, false, metadata)
-		decision = decideRefresh(refreshEvidence{
-			StoredRow:           metadata != nil,
-			Forced:              p.config.Force,
-			AdapterVersion:      version,
-			AdapterTarget:       p.versionTargets()[reconstructed.Harness].AdapterVersion,
-			AdapterStampPresent: present,
-			AdapterCanExtract:   p.adapterSupportsStoredExtraction(reconstructed.Harness),
-		})
+		decision = decideRefresh(p.withAdapterEvidence(refreshEvidence{
+			StoredRow: metadata != nil,
+			Forced:    p.config.Force,
+		}, reconstructed.Harness, version, present))
 	}
 	if decision.Lane != RefreshLaneStoredMetadata && decision.Reason != RefreshReasonAdapterBehindNativeOnly && decision.Reason != RefreshReasonMetadataSchema {
 		// The stored-index lane is settled by the index inventory from the
@@ -827,6 +819,7 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry, writeLan
 				// the refresh: no native read.
 				p.markRefreshReason(entry.Session.SessionID, decision.OutcomeReason())
 				refreshed.result.Decision = decision
+				refreshed.managedGenerationRefresh = p.managedGenerationRefreshLane(entry.Session, decision)
 				return refreshed
 			}
 		}

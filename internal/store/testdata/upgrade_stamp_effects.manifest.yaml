@@ -1,0 +1,6 @@
+requiredNames:
+  - ordinary-schema-step
+  - legacy-index-has-no-stamp
+  - harness-identifiers-renamed
+  - union-search-needs-consolidation
+  - turn-counts-need-recount

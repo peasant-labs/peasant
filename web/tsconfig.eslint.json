@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": [
+    "node_modules", ".next", "scripts",
+    "src/**/*.test.ts", "src/**/*.test.tsx",
+    "src/**/*.spec.ts", "src/**/*.spec.tsx",
+    "src/**/*.stories.ts", "src/**/*.stories.tsx",
+    "src/**/*.type-test.ts", "src/**/*.type-test.tsx",
+    "src/**/*.fixture.ts", "src/**/*.fixture.tsx",
+    "src/**/*fixtures*.ts", "src/**/*fixtures*.tsx",
+    "src/**/*.generated.ts", "src/**/*.generated.tsx",
+    "src/**/__tests__/**", "src/**/testdata/**", "src/test/**",
+    "src/lib/session-detail/mock-redactions.ts", "src/lib/share/mock-data.ts"
+  ]
+}

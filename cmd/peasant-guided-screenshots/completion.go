@@ -125,20 +125,28 @@ func renderCompletionCapture(directory string, index int, fixture completionFixt
 		return "", err
 	}
 	result := &ftue.IngestResult{New: fixture.New, Updated: fixture.Updated, Unchanged: fixture.Unchanged, ExcludedBySelection: fixture.Excluded, Errors: fixture.Errors}
+	if capture.State == completionNoWarnings {
+		result.New, result.Updated = 1, 0
+	}
 	if capture.State == completionWarningsTop || capture.State == completionWarningsBottom {
 		result.Diagnostics = fixture.Diagnostics
 	}
-	if capture.State != completionNoWarnings {
-		result.CensusReported = true
-	}
+	result.CensusReported = true
 	if result.CensusReported && capture.State != completionCensusUnavailable {
 		result.Census = &ingest.RefreshCensus{}
 		for _, row := range fixture.CensusRows {
+			if capture.State == completionNoWarnings && len(result.Census.Rows) > 0 {
+				break
+			}
 			reason, err := ingest.NewOutcomeReason(row.Reason)
 			if err != nil {
 				return "", err
 			}
-			result.Census.Rows = append(result.Census.Rows, ingest.RefreshCensusRow{Reason: reason, Lane: reason.RefreshLane(), Sessions: row.Sessions, SourceBytes: row.IndexedBytes})
+			sessions := row.Sessions
+			if capture.State == completionNoWarnings {
+				sessions = 1
+			}
+			result.Census.Rows = append(result.Census.Rows, ingest.RefreshCensusRow{Reason: reason, Lane: reason.RefreshLane(), Sessions: sessions, SourceBytes: row.IndexedBytes})
 		}
 	}
 	program := kickstart.NewProgram(kickstart.ProgramDeps{

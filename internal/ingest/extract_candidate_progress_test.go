@@ -101,6 +101,9 @@ func TestPipelinePublishesCandidatesBeforeCaptureCompletes(t *testing.T) {
 			if !stage.CandidatesKnown || stage.CandidateCount != row.WantCandidates || stage.Done != 0 {
 				t.Fatalf("candidate state = %+v", stage)
 			}
+			if stage.BytesTotal != int64(row.WantCandidates)*3 || stage.BytesDone != 0 {
+				t.Fatalf("extract byte state = %+v, want three bytes per source and no completed work", stage)
+			}
 			if _, ok := progress.WriteLaneSnapshot(); !ok {
 				t.Fatal("production run did not expose its writer recorder")
 			}

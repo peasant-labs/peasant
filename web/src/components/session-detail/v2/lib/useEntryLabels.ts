@@ -1,4 +1,5 @@
 'use client';
+import { TargetKind as SchemaTargetKind } from '@peasant-labs/schema';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -24,7 +25,7 @@ export interface UseEntryLabelsResult {
  * annotations that do not target a single entry (no targetEntryIndex).
  */
 export function summaryToTurnLabel(a: AnnotationSummary): SavedTurnLabel | null {
-  if (a.targetKind !== 'entry' || a.targetEntryIndex == null) return null;
+  if (a.targetKind !== SchemaTargetKind.Entry || a.targetEntryIndex == null) return null;
   return {
     entryIndex: a.targetEntryIndex,
     typeId: a.typeId,

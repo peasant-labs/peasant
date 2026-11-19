@@ -56,11 +56,16 @@ func TestMountedHarvestLaneAndCensus(t *testing.T) {
 			Absent   []string `yaml:"absent"`
 		} `yaml:"censusCases"`
 	}
-	if err := yaml.Unmarshal(liveProfileYAML, &fixture); err != nil {
+	decoder := yaml.NewDecoder(strings.NewReader(string(liveProfileYAML)))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&fixture); err != nil {
 		t.Fatal(err)
 	}
 	laneNames := make(map[string]bool)
 	for _, row := range fixture.LaneCases {
+		if len(row.Contains) == 0 {
+			t.Fatalf("lane case %q has no contains assertions", row.Name)
+		}
 		if laneNames[row.Name] {
 			t.Fatalf("duplicate lane case %q", row.Name)
 		}
@@ -94,6 +99,9 @@ func TestMountedHarvestLaneAndCensus(t *testing.T) {
 	}
 	censusNames := make(map[string]bool)
 	for _, row := range fixture.CensusCases {
+		if len(row.Contains) == 0 {
+			t.Fatalf("census case %q has no contains assertions", row.Name)
+		}
 		if censusNames[row.Name] {
 			t.Fatalf("duplicate census case %q", row.Name)
 		}
@@ -110,7 +118,7 @@ func TestMountedHarvestLaneAndCensus(t *testing.T) {
 					census.Rows = append(census.Rows, ingest.RefreshCensusRow{Reason: reason, Lane: reason.RefreshLane(), Sessions: input.Sessions, SourceBytes: input.IndexedBytes})
 				}
 			}
-			assertLiveProfileText(t, strings.Join(ingestprogress.CensusLines(census), "\n"), row.Contains, row.Absent)
+			assertLiveProfileText(t, strings.Join(ingest.CensusLines(census), "\n"), row.Contains, row.Absent)
 		})
 	}
 	for _, name := range fixture.RequiredCensusCases {

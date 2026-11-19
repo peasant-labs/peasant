@@ -1,4 +1,5 @@
 'use client';
+import { LocalPublicationState as SchemaLocalPublicationState, SyncLoginStatus as SchemaSyncLoginStatus, SyncPushSessionStatus as SchemaSyncPushSessionStatus, SyncPushStep as SchemaSyncPushStep, SyncPushStepOutcome as SchemaSyncPushStepOutcome } from '@peasant-labs/schema';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { MoreHorizontal, RotateCw } from 'lucide-react';
@@ -152,7 +153,7 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
   }, [sessionId, settledCount, readNonce]);
 
   const publication = read.status === 'ready' ? read.publication : null;
-  const publishedNow: 'publish' | 'update' = publication?.state === 'published' ? 'update' : 'publish';
+  const publishedNow: 'publish' | 'update' = publication?.state === SchemaLocalPublicationState.Published ? 'update' : 'publish';
   const comparison = useMemo(
     () => compareLoadedTurns({ ...coverage, turns, publishedAt: publication?.publishedAt }),
     [coverage, publication?.publishedAt, turns],
@@ -295,7 +296,7 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
     startVillageSignIn()
       .then((result) => {
         if (generation !== openGeneration.current) return;
-        if (result.status === 'already_authenticated') setSignIn('unknown');
+        if (result.status === SchemaSyncLoginStatus.AlreadyAuthenticated) setSignIn('unknown');
       })
       .catch((error: unknown) => {
         if (generation !== openGeneration.current) return;
@@ -460,7 +461,7 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
       }
       : read.status === 'ready' && publication === null
         ? { stoppedAt: 'reading this session: it is not recorded on this computer yet; run peasant ingest, then retry', retry: reread }
-        : read.status === 'ready' && publication?.state === 'published' && !read.audienceKnown
+        : read.status === 'ready' && publication?.state === SchemaLocalPublicationState.Published && !read.audienceKnown
         ? { stoppedAt: 'reading who can read it online', retry: reread }
         : null;
 
@@ -509,7 +510,7 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
       const selectedCollectives = access.filter((item) => item.pending !== 'removal').map((item) => item.id);
       const response = await publish(sessionId, request, readerCount, enableAutomatic ? async (response) => {
         const result = response.sessions.find((item) => item.sessionId === sessionId);
-        if (!result || result.status === 'error' || result.status === 'held') return;
+        if (!result || result.status === SchemaSyncPushSessionStatus.Error || result.status === SchemaSyncPushSessionStatus.Held) return;
         const accepted = publishOutcome({ response, sessionId, names, audienceBefore, requestedAdds: request.collectives?.add ?? [], fallbackUrl: publication?.transcriptUrl });
         if (accepted.kind === 'stopped') return;
         let ruleId = automaticRuleIds.current.get(sessionId);
@@ -526,7 +527,7 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
         // The popup's rows follow this read at once, so a reader removed on
         // the next screen is a reader the push takes the transcript back from.
         setRead({ status: 'ready', publication: after.publication, audienceKnown: after.audienceKnown });
-        if (after.audienceKnown && after.publication?.state === 'published') audienceAfter = after.publication.audience ?? [];
+        if (after.audienceKnown && after.publication?.state === SchemaLocalPublicationState.Published) audienceAfter = after.publication.audience ?? [];
       } catch {
         // The bar re-reads on its own; the push's steps stand in here.
       }
@@ -542,7 +543,7 @@ export function useTranscriptPublish(options: TranscriptPublishOptions): Transcr
       // The draft now describes what was asked; a retry starts from what
       // village holds, keeping the adds village did not take.
       const removed = new Set(response.sessions.find((item) => item.sessionId === sessionId)?.steps
-        ?.filter((step) => step.step === 'remove_collective' && step.outcome === 'succeeded')
+        ?.filter((step) => step.step === SchemaSyncPushStep.RemoveCollective && step.outcome === SchemaSyncPushStepOutcome.Succeeded)
         .map((step) => step.collectiveId) ?? []);
       setDraft((current) => (current ? { add: current.add, remove: current.remove.filter((id) => !removed.has(id)) } : current));
     } catch (error) {

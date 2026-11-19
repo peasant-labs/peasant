@@ -1,2 +1,7 @@
 # Embedded DDL must match the migration chain and generated baseline byte-for-byte.
 /internal/store/baseline_schema.sql text eol=lf
+
+# Golden files are compared byte-for-byte. Pin LF so a Windows checkout
+# cannot change their bytes and fail an otherwise identical comparison.
+*.golden text eol=lf
+*.golden.json text eol=lf

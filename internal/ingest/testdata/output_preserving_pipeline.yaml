@@ -1,0 +1,11 @@
+cases:
+  - name: declared-mismatch-reports-and-parses
+    declared: true
+    diagnostic: true
+    builds: 1
+    copies: 0
+  - name: undeclared-mismatch-does-not-report
+    declared: false
+    diagnostic: false
+    builds: 0
+    copies: 1

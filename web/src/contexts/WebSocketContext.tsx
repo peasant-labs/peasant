@@ -288,13 +288,13 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       };
 
       switch (msg.type) {
-        case 'connected':
+        case MessageType.Connected:
           // The socket is alive, but a valid message is not a recovery signal
           // for a retained data fault; only a reconnect clears a connection
           // fault, and only the same operation's success clears a data fault.
           break;
 
-        case 'error':
+        case MessageType.Error:
           if (msg.topic) {
             const key = msg.topic === ChannelTopic.SessionDetail && msg.id
               ? `${msg.topic}:${msg.id}`
@@ -364,10 +364,10 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
           break;
         }
 
-        case 'dashboard':
-        case 'sessions':
-        case 'trends':
-        case 'quality': {
+        case MessageType.Dashboard:
+        case MessageType.Sessions:
+        case MessageType.Trends:
+        case MessageType.Quality: {
           // Write to the ref-based store — only listeners for THIS channel
           // are notified. No React state change at the provider level.
           const operation = faultOperationForMessageType(msg.type);
@@ -376,7 +376,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
           break;
         }
 
-        case 'session_detail': {
+        case MessageType.SessionDetail: {
           // Write to both bare key and ID-qualified key so both the
           // legacy ChannelName[] API and typed subscribe.sessionDetail(id) work.
           acknowledge(FaultOperation.SessionDetailRead, msg.type);
@@ -390,7 +390,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
           break;
         }
 
-        case 'annotations': {
+        case MessageType.Annotations: {
           // Key must match subscriptionKey() format: "annotations:{axis}:{id}"
           const ann = msg.data as { axis?: string; id?: string } | undefined;
           const annKey = ann?.axis && ann?.id
@@ -401,7 +401,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
           break;
         }
 
-        case 'project_familiarity': {
+        case MessageType.ProjectFamiliarity: {
           // Key must match subscriptionKey() format: "project_familiarity:{id}".
           // The payload's project identity is `projectHash`, not an `id` member.
           const payload = msg.data as { projectHash?: string } | undefined;

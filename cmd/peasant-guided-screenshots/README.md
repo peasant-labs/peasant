@@ -25,7 +25,8 @@ revision. While developing the harness itself, generate explicitly marked dispos
 go run -tags=guided_screenshots ./cmd/peasant-guided-screenshots --allow-dirty
 ```
 
-Set `PEASANT_GUIDED_KEEP_SCRATCH=1` to retain the synthetic working directories,
+Set `PEASANT_TEST_KEEP_SCRATCH=1` to retain the synthetic working directories
+for this harness and the CLI tests,
 ANSI inputs, and content-fit measurements instead of deleting them. Keep
 `TMPDIR` private; the retained data is local development evidence.
 

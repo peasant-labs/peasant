@@ -1,0 +1,24 @@
+requiredNames:
+  - unchanged
+  - adapter-bump
+  - redaction-provenance
+  - inactive-generation
+  - unsupported-generation
+  - latest-attempt-held
+  - content-hash
+  - source-format
+  - harness
+  - completeness
+  - source-evidence
+  - metadata-context
+  - zero-metadata-hash
+  - forged-metadata-hash
+  - redaction-content
+  - indexer-behind
+  - input-proof-differs
+  - missing-index-input-proof-is-not-proven
+  - seal-missing
+settleRequiredNames:
+  - settle-commits-at-most-two-wal-frames
+  - settle-writes-only-stats-and-binding
+  - unchanged-path-reads-zero-entry-mapping-and-title-ref-rows

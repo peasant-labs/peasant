@@ -1,0 +1,7 @@
+requiredNames:
+  - proven
+  - index-not-current
+  - metadata-context
+  - copy-refused
+  - proof-error
+  - settle-refused

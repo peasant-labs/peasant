@@ -54,3 +54,16 @@ func listensOn(netstat string, pid, port int) bool {
 	}
 	return false
 }
+
+// processGone reports whether the PID no longer names a live process.
+func processGone(pid int) (bool, error) {
+	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	if err != nil {
+		if err == windows.ERROR_INVALID_PARAMETER {
+			return true, nil
+		}
+		return false, err
+	}
+	windows.CloseHandle(handle)
+	return false, nil
+}

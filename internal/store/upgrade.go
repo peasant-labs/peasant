@@ -278,7 +278,7 @@ func planUpgradeOnConn(conn *sqlite.Conn, dbPath string) (UpgradePlan, []string,
 		if !ok {
 			return UpgradePlan{}, nil, fmt.Errorf("store: plan the upgrade of %s: schema version %d has no entry in the upgrade step catalog; nothing was changed; this is a defect in this build: %s", dbPath, produced, missingCatalogEntryFix(produced))
 		}
-		step := UpgradeStep{Version: produced, Kind: UpgradeStepSchema, Title: entry.title, Cost: entry.cost, Counts: entry.counts}
+		step := UpgradeStep{Version: produced, Kind: UpgradeStepSchema, Title: entry.title, Cost: entry.cost, Counts: entry.counts, StampEffect: entry.stampEffect}
 		if produced == searchRepairSchemaVersion && plan.From == searchRepairSchemaVersion-1 {
 			repair, notice, err := searchRepairStep(conn, step)
 			if err != nil {
@@ -385,7 +385,9 @@ func searchRepairStep(conn *sqlite.Conn, step UpgradeStep) (UpgradeStep, string,
 			"meaning: the store cannot be upgraded as it is, and commands that need the new schema will not run. " +
 			"fix: restore the database from a backup, or move it aside and run `peasant harvest` to rebuild it from your transcripts")
 	}
-	long := UpgradeStep{Version: step.Version, Kind: step.Kind, Title: searchRepairLongTitle, Cost: UpgradeCostScalesWithText, Counts: step.Counts}
+	long := step
+	long.Title = searchRepairLongTitle
+	long.Cost = UpgradeCostScalesWithText
 	if !tableExistsOnConn(conn, "session_entries_fts") {
 		return long, searchIndexPrecheckWarning + ": the retired index table session_entries_fts is missing; continuing: the repair rebuilds the search index", nil
 	}

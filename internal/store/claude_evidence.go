@@ -180,9 +180,13 @@ func (s *Store) loadClaudeEvidence(ctx context.Context) (map[ingest.ResolvedPath
 	}
 	defer s.pool.Put(conn)
 
+	return loadClaudeEvidenceOnConn(conn)
+}
+
+func loadClaudeEvidenceOnConn(conn *sqlite.Conn) (map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence, bool, error) {
 	records := make(map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence)
 	skipped := 0
-	err = sqlitex.Execute(conn, sqlSelectClaudeEvidence, &sqlitex.ExecOptions{
+	err := sqlitex.Execute(conn, sqlSelectClaudeEvidence, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			record, ok := scanClaudeEvidence(stmt)
 			if !ok {
@@ -242,6 +246,25 @@ func (s *Store) LoadClaudeEvidenceForCompletely(ctx context.Context, paths []ing
 
 // loadClaudeEvidenceFor is the one batched by-path scan both readers use.
 func (s *Store) loadClaudeEvidenceFor(ctx context.Context, paths []ingest.ResolvedPath) (map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence, bool, error) {
+	if !hasEvidencePath(paths) {
+		return make(map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence), true, nil
+	}
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf(
+			"store.LoadClaudeEvidenceFor: take connection: %w; "+
+				"what: failed to obtain a database connection for the by-path evidence read; "+
+				"why: the pool is exhausted or the context was cancelled; "+
+				"where: store.LoadClaudeEvidenceFor in internal/store/claude_evidence.go; "+
+				"when: before the first by-path batch ran; "+
+				"impact: no cached transcript evidence was returned, so the caller cannot reuse the cache; "+
+				"fix: check the pool size and context deadline, then retry the scoped read", err)
+	}
+	defer s.pool.Put(conn)
+	return loadClaudeEvidenceForOnConn(conn, paths)
+}
+
+func loadClaudeEvidenceForOnConn(conn *sqlite.Conn, paths []ingest.ResolvedPath) (map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence, bool, error) {
 	records := make(map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence)
 	if len(paths) == 0 {
 		return records, true, nil
@@ -263,19 +286,7 @@ func (s *Store) loadClaudeEvidenceFor(ctx context.Context, paths []ingest.Resolv
 		return records, true, nil
 	}
 
-	conn, err := s.pool.Take(ctx)
-	if err != nil {
-		return nil, false, fmt.Errorf(
-			"store.LoadClaudeEvidenceFor: take connection: %w; "+
-				"what: failed to obtain a database connection for the by-path evidence read; "+
-				"why: the pool is exhausted or the context was cancelled; "+
-				"where: store.LoadClaudeEvidenceFor in internal/store/claude_evidence.go; "+
-				"when: before the first by-path batch ran; "+
-				"impact: no cached transcript evidence was returned, so the caller cannot reuse the cache; "+
-				"fix: check the pool size and context deadline, then retry the scoped read", err)
-	}
-	defer s.pool.Put(conn)
-
+	var err error
 	skipped := 0
 	unreadableProjections := make([]ingest.ResolvedPath, 0)
 	for start := 0; start < len(unique); start += indexFormatReadBatchSize {
@@ -316,7 +327,7 @@ func (s *Store) loadClaudeEvidenceFor(ctx context.Context, paths []ingest.Resolv
 		// The unparsed column may be the spawn list, so fill it from the derived
 		// projection: tolerating the row with no spawns would under-subtract a
 		// stored spawner that this path recorded before the column broke.
-		spawns, spawnErr := s.claudeTeammateSpawnsForPathsOnConn(ctx, conn, unreadableProjections)
+		spawns, spawnErr := claudeTeammateSpawnsForPathsOnConn(conn, unreadableProjections)
 		if spawnErr != nil {
 			return nil, false, spawnErr
 		}
@@ -496,6 +507,27 @@ func decodeIdentityChain(raw string) ([]ingest.ClaudeIdentityChainLink, error) {
 // named in the second result and omitted from the map, so the caller can mine
 // that transcript again instead of treating a missing list as an empty one.
 func (s *Store) LoadClaudeIdentityChains(ctx context.Context, paths []ingest.ResolvedPath) (map[ingest.ResolvedPath][]ingest.ClaudeIdentityChainLink, []ingest.ResolvedPath, error) {
+	if !hasEvidencePath(paths) {
+		return make(map[ingest.ResolvedPath][]ingest.ClaudeIdentityChainLink), nil, nil
+	}
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("store.LoadClaudeIdentityChains: take connection: %w; what: failed to obtain a database connection for the identity-chain read; why: the pool is exhausted or the context was cancelled; where: store.LoadClaudeIdentityChains in internal/store/claude_evidence.go; when: before the first chain batch ran; impact: no coordinate list was returned, so lineage linking cannot reuse the cache; fix: check the pool size and context deadline, then retry", err)
+	}
+	defer s.pool.Put(conn)
+	return loadClaudeIdentityChainsOnConn(conn, paths)
+}
+
+func hasEvidencePath(paths []ingest.ResolvedPath) bool {
+	for _, path := range paths {
+		if path.String() != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func loadClaudeIdentityChainsOnConn(conn *sqlite.Conn, paths []ingest.ResolvedPath) (map[ingest.ResolvedPath][]ingest.ClaudeIdentityChainLink, []ingest.ResolvedPath, error) {
 	chains := make(map[ingest.ResolvedPath][]ingest.ClaudeIdentityChainLink)
 	if len(paths) == 0 {
 		return chains, nil, nil
@@ -516,11 +548,7 @@ func (s *Store) LoadClaudeIdentityChains(ctx context.Context, paths []ingest.Res
 	if len(unique) == 0 {
 		return chains, nil, nil
 	}
-	conn, err := s.pool.Take(ctx)
-	if err != nil {
-		return nil, nil, fmt.Errorf("store.LoadClaudeIdentityChains: take connection: %w; what: failed to obtain a database connection for the identity-chain read; why: the pool is exhausted or the context was cancelled; where: store.LoadClaudeIdentityChains in internal/store/claude_evidence.go; when: before the first chain batch ran; impact: no coordinate list was returned, so lineage linking cannot reuse the cache; fix: check the pool size and context deadline, then retry", err)
-	}
-	defer s.pool.Put(conn)
+	var err error
 	var unreadable []ingest.ResolvedPath
 	for start := 0; start < len(unique); start += indexFormatReadBatchSize {
 		end := min(start+indexFormatReadBatchSize, len(unique))

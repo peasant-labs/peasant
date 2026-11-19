@@ -25,6 +25,37 @@ type SourceAdapter interface {
 	ExtractMetadata(ctx context.Context, session DiscoveredSession) (*UnifiedMetadata, error)
 }
 
+// OutputPreservingDeclaration is an optional producer declaration. Absence
+// means no declaration, not a negative declaration. The producer graph in
+// #1033 supplies real declarations through this seam.
+type OutputPreservingDeclaration interface {
+	DeclaresOutputPreserving() bool
+}
+
+// ChangeScopeWithholder is an optional adapter declaration. A registered
+// adapter declares the metadata-only change scope by default: its revision
+// bump changes the metadata derived from an unchanged transcript, so the
+// stored-metadata lane preserves every other stored output. An adapter that
+// implements this interface and returns true withholds that declaration; it
+// is then an undeclared producer, and every refresh decision sends its
+// adapter-behind sessions to the full native step instead of the stored lane.
+//
+// No shipped adapter withholds its scope. The interface exists so a test or a
+// measurement build can register one that does.
+type ChangeScopeWithholder interface {
+	WithholdsChangeScope() bool
+}
+
+// AdapterDeclaresChangeScope reports whether an adapter declares its
+// output-preserving change scope. It is the one reading of the declaration:
+// the refresh decision's evidence and the upgrade planner's declaration table
+// both call it. It takes a constructed adapter rather than a factory, so each
+// caller builds the adapter with the dependencies it already holds.
+func AdapterDeclaresChangeScope(adapter SourceAdapter) bool {
+	withholder, ok := adapter.(ChangeScopeWithholder)
+	return !ok || !withholder.WithholdsChangeScope()
+}
+
 // DiscoveryProgress reports the number of source files enumerated and built
 // by a Discover call. The total precedes every advance; an advance includes a
 // source that disappeared or was rejected while it was being built. An adapter

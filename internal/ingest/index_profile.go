@@ -40,6 +40,13 @@ const (
 	// resolution and lookup-cache loading. It is profile-only and is not shown by
 	// the progress renderer.
 	StagePrepare Stage = "PREPARE"
+	// StageRefreshProof counts attempted equality proofs; Done is the number
+	// proven and Total is the number attempted.
+	StageRefreshProof Stage = "refresh_proof"
+	// StageRefreshValidate counts attempts in Total, not completed work in Done.
+	StageRefreshValidate Stage = "refresh_validate"
+	// StageRefreshValidateUnsupported counts unsupported results in Total.
+	StageRefreshValidateUnsupported Stage = "refresh_validate_unsupported"
 	// StageIndexLog covers index_log persistence after INDEX work completes.
 	StageIndexLog Stage = "INDEX LOG"
 	// StageAudit covers the final ingest_log write.
@@ -56,6 +63,9 @@ var IndexProfileStageOrder = []Stage{
 	StageExtract,
 	StageDBInsert,
 	StageContent,
+	StageRefreshProof,
+	StageRefreshValidate,
+	StageRefreshValidateUnsupported,
 	StageIndex,
 	StageIndexLog,
 	StageCompute,
@@ -81,8 +91,9 @@ type IndexProfileStage struct {
 
 // StageTotals folds the recorded stage segments into one row per stage, in
 // profile display order. Several segments of one stage sum their durations and
-// bytes; Done and Total come from the last segment. Stages overlap by design,
-// so the rows do not sum to wall time.
+// bytes; Done and Total come from the last segment except for refresh proof
+// and validation, whose counts sum across attempts. Stages overlap, so rows do
+// not sum to wall time.
 func (p *IndexProfiler) StageTotals() []IndexProfileStage {
 	if p == nil {
 		return nil
@@ -105,7 +116,8 @@ func (p *IndexProfiler) StageTotals() []IndexProfileStage {
 
 // FoldProfileStages folds stage segments into one row per stage, in profile
 // display order: durations, bytes and lane waits sum; Done and Total come from
-// the last segment.
+// the last segment except for refresh proof and validation, whose counts sum
+// across attempts.
 func FoldProfileStages(segments []IndexProfileStage) []IndexProfileStage {
 	position := make(map[Stage]int, len(segments))
 	var totals []IndexProfileStage
@@ -119,8 +131,13 @@ func FoldProfileStages(segments []IndexProfileStage) []IndexProfileStage {
 		totals[at].Duration += segment.Duration
 		totals[at].Bytes += segment.Bytes
 		totals[at].LaneWait += segment.LaneWait
-		totals[at].Done = segment.Done
-		totals[at].Total = segment.Total
+		if segment.Stage == StageRefreshProof || segment.Stage == StageRefreshValidate || segment.Stage == StageRefreshValidateUnsupported {
+			totals[at].Done += segment.Done
+			totals[at].Total += segment.Total
+		} else {
+			totals[at].Done = segment.Done
+			totals[at].Total = segment.Total
+		}
 	}
 	sort.SliceStable(totals, func(i, j int) bool {
 		return indexProfileStageRank(totals[i].Stage) < indexProfileStageRank(totals[j].Stage)

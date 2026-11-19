@@ -12,6 +12,9 @@ import (
 //go:embed testdata/refresh_reasons.yaml
 var refreshReasonsYAML []byte
 
+//go:embed testdata/refresh_reasons.manifest.yaml
+var refreshReasonsManifestYAML []byte
+
 type refreshReasonsFixture struct {
 	Reasons []struct {
 		Code      ingest.RefreshReason `yaml:"code"`
@@ -28,12 +31,38 @@ func loadRefreshReasonsFixture(t *testing.T) refreshReasonsFixture {
 	if err := decoder.Decode(&fixture); err != nil {
 		t.Fatalf("decode refresh_reasons.yaml: %v", err)
 	}
+	var manifest struct {
+		RequiredNames []string `yaml:"requiredNames"`
+	}
+	decoder = yaml.NewDecoder(strings.NewReader(string(refreshReasonsManifestYAML)))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&manifest); err != nil {
+		t.Fatalf("decode refresh reasons manifest: %v", err)
+	}
+	required := make(map[string]bool)
+	for _, name := range manifest.RequiredNames {
+		if name == "" || required[name] {
+			t.Fatalf("empty or duplicate required refresh reason %q", name)
+		}
+		required[name] = true
+	}
+	actual := make(map[string]bool)
 	for _, row := range fixture.Reasons {
+		name := string(row.Code)
+		if !required[name] || actual[name] {
+			t.Fatalf("refresh reason %q is not in the manifest or is duplicated", name)
+		}
+		actual[name] = true
 		if _, err := ingest.NewRefreshReason(string(row.Code)); err != nil {
 			t.Fatalf("refresh_reasons.yaml code: %v", err)
 		}
 		if _, err := ingest.NewRefreshLane(string(row.Lane)); err != nil {
 			t.Fatalf("refresh_reasons.yaml code %s lane: %v", row.Code, err)
+		}
+	}
+	for name := range required {
+		if !actual[name] {
+			t.Fatalf("required refresh reason %q missing from fixture", name)
 		}
 	}
 	return fixture

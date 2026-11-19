@@ -8,12 +8,11 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 )
-
-const estimateWindow = 5 * time.Second
 
 type FinalOutcome uint8
 
@@ -73,6 +72,7 @@ type estimate struct {
 type observation struct {
 	startedAt, lastAt   time.Time
 	lastDone, lastTotal int
+	byteEstimate        bool
 	progress            ingest.StageProgress
 	estimateEligible    bool
 	estimate            estimate
@@ -121,6 +121,8 @@ func (m Model) Update(message tea.Msg) (Model, tea.Cmd) {
 	case CancelRequestedMsg:
 		m.retainEstimate()
 	case FinalMsg:
+		m.lane = nil
+		m.waiting = ""
 		candidate := msg.Snapshot[ingest.StageExtract]
 		m.candidateCount, m.candidatesKnown = candidate.CandidateCount, candidate.CandidatesKnown
 		if msg.Outcome == FinalCanceled {
@@ -157,7 +159,7 @@ func (m *Model) applyFinal(at time.Time, snapshot map[ingest.Stage]ingest.StageP
 			}
 		}
 		m.observations[stage] = observation{startedAt: startedAt, lastAt: lastAt, lastDone: sp.Done,
-			lastTotal: sp.Total, progress: sp, estimator: kit.NewEstimator(estimateWindow)}
+			lastTotal: sp.Total, progress: sp, estimator: kit.NewEstimator(kit.EstimateWindow)}
 	}
 }
 
@@ -177,11 +179,12 @@ func (m *Model) observe(at time.Time, snapshot map[ingest.Stage]ingest.StageProg
 		if !sp.Started {
 			continue
 		}
+		done, total, bytes := estimateProgress(sp)
 		o, seen := m.observations[stage]
 		if !seen {
-			o = observation{startedAt: at, lastAt: at, lastDone: sp.Done, lastTotal: sp.Total, progress: sp,
-				estimateEligible: sp.Total > 0 && !sp.HasErr && !m.retry, estimator: kit.NewEstimator(estimateWindow)}
-			o.estimator.Estimate(at, sp.Done, sp.Total)
+			o = observation{startedAt: at, lastAt: at, lastDone: done, lastTotal: total, byteEstimate: bytes, progress: sp,
+				estimateEligible: total > 0 && !sp.HasErr && !m.retry, estimator: kit.NewEstimator(kit.EstimateWindow)}
+			o.estimator.Estimate(at, done, total)
 			m.observations[stage] = o
 			continue
 		}
@@ -189,23 +192,39 @@ func (m *Model) observe(at time.Time, snapshot map[ingest.Stage]ingest.StageProg
 			continue
 		}
 		o.estimate.ok = false
-		if sp.Total != o.lastTotal {
-			o.lastAt, o.lastDone, o.lastTotal, o.progress = at, sp.Done, sp.Total, sp
-			o.estimateEligible = sp.Total > 0 && !sp.HasErr && !m.retry
-			o.estimator.Estimate(at, sp.Done, sp.Total)
+		if total != o.lastTotal || bytes != o.byteEstimate {
+			if bytes != o.byteEstimate {
+				o.estimator = kit.NewEstimator(kit.EstimateWindow)
+			}
+			o.lastAt, o.lastDone, o.lastTotal, o.byteEstimate, o.progress = at, done, total, bytes, sp
+			o.estimateEligible = total > 0 && !sp.HasErr && !m.retry
+			o.estimator.Estimate(at, done, total)
 			m.observations[stage] = o
 			continue
 		}
-		if sp.Total <= 0 || sp.HasErr || m.retry || sp.Done < o.lastDone {
+		if total <= 0 || sp.HasErr || m.retry || done < o.lastDone {
 			o.estimateEligible = false
 		}
-		eta, ok := o.estimator.Estimate(at, sp.Done, sp.Total)
-		if o.estimateEligible && hasFocus && stage == focus && !sp.Ended && sp.Done < sp.Total && ok {
+		eta, ok := o.estimator.Estimate(at, done, total)
+		if o.estimateEligible && hasFocus && stage == focus && !sp.Ended && done < total && ok {
 			o.estimate = estimate{value: eta, ok: true}
 		}
-		o.lastAt, o.lastDone, o.lastTotal, o.progress = at, sp.Done, sp.Total, sp
+		o.lastAt, o.lastDone, o.lastTotal, o.progress = at, done, total, sp
 		m.observations[stage] = o
 	}
+}
+
+func estimateProgress(sp ingest.StageProgress) (int, int, bool) {
+	if sp.BytesTotal > 0 {
+		// Scaling to KiB on narrow platforms avoids integer overflow.
+		maxInt := int64(^uint(0) >> 1)
+		scale := int64(1)
+		if sp.BytesTotal > maxInt {
+			scale = sp.BytesTotal/maxInt + 1
+		}
+		return int(sp.BytesDone / scale), int(sp.BytesTotal / scale), true
+	}
+	return sp.Done, sp.Total, false
 }
 
 func (m Model) FocusedStage() (ingest.Stage, bool) {
@@ -267,8 +286,12 @@ func (m Model) View() string {
 		rows = append(rows, row)
 	}
 	lines := make([]string, 0, len(rows)+2)
-	for _, line := range kit.ProgressMatrix(rows) {
+	for i, line := range kit.ProgressMatrix(rows) {
 		rendered := styles.Base.Render(line.Bar)
+		sp := m.observations[ingest.StageOrder[i]].progress
+		if sp.BytesTotal > 0 {
+			rendered += styles.Muted.Render("  " + defaults.HumanByteSize(sp.BytesDone) + "/" + defaults.HumanByteSize(sp.BytesTotal))
+		}
 		if line.Elapsed != "" {
 			rendered += styles.Muted.Render("  " + line.Elapsed)
 		}
@@ -284,7 +307,7 @@ func (m Model) View() string {
 	}
 	detail := []string{}
 	if m.candidatesKnown {
-		detail = append(detail, styles.Muted.Render(fmt.Sprintf("%sextract candidates: %d sessions (not confirmed refreshes)", kit.Indent(2), m.candidateCount)))
+		detail = append(detail, styles.Muted.Render(fmt.Sprintf("%sextract candidates: %d %s (not confirmed refreshes)", kit.Indent(2), m.candidateCount, ingest.SessionWord(m.candidateCount))))
 	}
 	if m.lane != nil {
 		busy := "busy unknown"

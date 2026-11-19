@@ -1,3 +1,4 @@
+import { LocalCollectiveSuggestionReason as SchemaLocalCollectiveSuggestionReason, LocalPublicationState as SchemaLocalPublicationState, SyncPushSessionStatus as SchemaSyncPushSessionStatus, SyncPushStep as SchemaSyncPushStep, SyncPushStepOutcome as SchemaSyncPushStepOutcome, VillageCollectiveAcceptanceMode as SchemaVillageCollectiveAcceptanceMode, VillageShareStatus as SchemaVillageShareStatus } from '@peasant-labs/schema';
 /**
  * What the transcript page's publish bar and popup show, derived from the Local
  * API answers the page already holds.
@@ -91,7 +92,7 @@ export function countNewTurns(turns: readonly { timestamp: string }[], published
 
 /** The collectives that can read the transcript now: the approved shares. */
 export function approvedReaders(publication: LocalPublication | null): LocalPublicationAudienceMember[] {
-  return (publication?.audience ?? []).filter((member) => member.status === 'approved');
+  return (publication?.audience ?? []).filter((member) => member.status === SchemaVillageShareStatus.Approved);
 }
 
 export interface BarModel {
@@ -123,7 +124,7 @@ export function barModel(options: {
   // still be public, which this read does not report, so the count is left
   // out rather than shown as 0.
   const collectives = audienceKnown && readers.length > 0 ? readers.length : undefined;
-  if (publication.state !== 'published') {
+  if (publication.state !== SchemaLocalPublicationState.Published) {
     if (publication.autoPublish) return { state: 'auto-publish' };
     return { state: 'not-published' };
   }
@@ -160,7 +161,7 @@ export function initialDraft(mode: 'publish' | 'update', collectives: readonly L
 export function suggestionNote(collective: LocalVillageCollective): string | undefined {
   const suggestion = collective.suggestion;
   if (!suggestion) return undefined;
-  if (suggestion.reason === 'linked_repository') {
+  if (suggestion.reason === SchemaLocalCollectiveSuggestionReason.LinkedRepository) {
     return `suggested · repo ${suggestion.match.replace(/^github\.com:/, '')} is linked`;
   }
   return `suggested · github org ${suggestion.match}`;
@@ -172,14 +173,14 @@ export function suggestionNote(collective: LocalVillageCollective): string | und
  * push result says what village did.
  */
 function waitsForApproval(collective: LocalVillageCollective | undefined): boolean {
-  return collective?.group.acceptance_mode === 'curated';
+  return collective?.group.acceptance_mode === SchemaVillageCollectiveAcceptanceMode.Curated;
 }
 
 /** The collectives that can read the transcript now or wait for approval. */
 export function currentReaderIds(publication: LocalPublication | null): string[] {
-  if (publication?.state !== 'published') return [];
+  if (publication?.state !== SchemaLocalPublicationState.Published) return [];
   return (publication.audience ?? [])
-    .filter((member) => member.status === 'approved' || member.status === 'pending')
+    .filter((member) => member.status === SchemaVillageShareStatus.Approved || member.status === SchemaVillageShareStatus.Pending)
     .map((member) => member.collectiveId);
 }
 
@@ -195,18 +196,18 @@ export function accessItems(options: {
   draft: AccessDraft;
 }): AccessItem[] {
   const { publication, collectives, draft } = options;
-  const published = publication?.state === 'published';
+  const published = publication?.state === SchemaLocalPublicationState.Published;
   const byId = new Map(collectives.map((collective) => [collective.group.id, collective]));
   const items: AccessItem[] = [];
   if (published) {
     for (const member of publication?.audience ?? []) {
-      if (member.status !== 'approved' && member.status !== 'pending') continue;
+      if (member.status !== SchemaVillageShareStatus.Approved && member.status !== SchemaVillageShareStatus.Pending) continue;
       const collective = byId.get(member.collectiveId);
       items.push({
         id: member.collectiveId,
         name: member.name,
         members: collective?.group.member_count,
-        pending: draft.remove.includes(member.collectiveId) ? 'removal' : member.status === 'pending' ? 'approval' : undefined,
+        pending: draft.remove.includes(member.collectiveId) ? 'removal' : member.status === SchemaVillageShareStatus.Pending ? 'approval' : undefined,
       });
     }
   }
@@ -338,9 +339,9 @@ export type PublishOutcome =
 function stepSubject(step: SyncPushStepResult, names: ReadonlyMap<string, string>): string {
   const name = step.collectiveId ? names.get(step.collectiveId) ?? 'a collective' : 'a collective';
   switch (step.step) {
-    case 'content':
+    case SchemaSyncPushStep.Content:
       return 'sending the content';
-    case 'remove_collective':
+    case SchemaSyncPushStep.RemoveCollective:
       return `taking it back from ${name}`;
     default:
       return `sharing it with ${name}`;
@@ -380,12 +381,12 @@ export function publishOutcome(options: {
   const result = response.sessions.find((session) => session.sessionId === sessionId);
   if (!result) return { kind: 'stopped', stoppedAt: 'reading the answer from peasant online' };
   const steps = result.steps ?? [];
-  if (result.status === 'held') {
-    const reason = steps.find((step) => step.step === 'content')?.reason;
+  if (result.status === SchemaSyncPushSessionStatus.Held) {
+    const reason = steps.find((step) => step.step === SchemaSyncPushStep.Content)?.reason;
     return { kind: 'stopped', stoppedAt: stepWithReason('waiting for this session’s ingest to finish', reason), detail: reason || undefined };
   }
-  if (result.status === 'error') {
-    const failed = steps.find((step) => step.outcome === 'failed');
+  if (result.status === SchemaSyncPushSessionStatus.Error) {
+    const failed = steps.find((step) => step.outcome === SchemaSyncPushStepOutcome.Failed);
     if (failed) return { kind: 'stopped', ...stepLine(failed, names) };
     return { kind: 'stopped', stoppedAt: stepWithReason('publishing', result.error), detail: result.error || undefined };
   }
@@ -395,23 +396,23 @@ export function publishOutcome(options: {
   let readers: LocalPublicationAudienceMember[];
   let pending: LocalPublicationAudienceMember[];
   if (audienceAfter) {
-    readers = audienceAfter.filter((member) => member.status === 'approved');
-    pending = audienceAfter.filter((member) => member.status === 'pending');
+    readers = audienceAfter.filter((member) => member.status === SchemaVillageShareStatus.Approved);
+    pending = audienceAfter.filter((member) => member.status === SchemaVillageShareStatus.Pending);
   } else {
-    const removed = new Set(steps.filter((step) => step.step === 'remove_collective' && step.outcome === 'succeeded').map((step) => step.collectiveId));
-    readers = audienceBefore.filter((member) => member.status === 'approved' && !removed.has(member.collectiveId));
-    pending = audienceBefore.filter((member) => member.status === 'pending' && !removed.has(member.collectiveId));
+    const removed = new Set(steps.filter((step) => step.step === SchemaSyncPushStep.RemoveCollective && step.outcome === SchemaSyncPushStepOutcome.Succeeded).map((step) => step.collectiveId));
+    readers = audienceBefore.filter((member) => member.status === SchemaVillageShareStatus.Approved && !removed.has(member.collectiveId));
+    pending = audienceBefore.filter((member) => member.status === SchemaVillageShareStatus.Pending && !removed.has(member.collectiveId));
     for (const step of steps) {
-      if (step.step !== 'add_collective' || !step.collectiveId) continue;
+      if (step.step !== SchemaSyncPushStep.AddCollective || !step.collectiveId) continue;
       const member = { collectiveId: step.collectiveId, name: names.get(step.collectiveId) ?? 'a collective' };
-      if (step.outcome === 'succeeded' && !readers.some((entry) => entry.collectiveId === member.collectiveId)) readers.push({ ...member, status: 'approved' });
-      if (step.outcome === 'pending_approval' && !pending.some((entry) => entry.collectiveId === member.collectiveId)) pending.push({ ...member, status: 'pending' });
+      if (step.outcome === SchemaSyncPushStepOutcome.Succeeded && !readers.some((entry) => entry.collectiveId === member.collectiveId)) readers.push({ ...member, status: 'approved' });
+      if (step.outcome === SchemaSyncPushStepOutcome.PendingApproval && !pending.some((entry) => entry.collectiveId === member.collectiveId)) pending.push({ ...member, status: 'pending' });
     }
   }
   const holds = new Set([...readers, ...pending].map((member) => member.collectiveId));
   const missed = requestedAdds.find((id) => !holds.has(id));
   if (missed) {
-    const step = steps.find((entry) => entry.step === 'add_collective' && entry.collectiveId === missed);
+    const step = steps.find((entry) => entry.step === SchemaSyncPushStep.AddCollective && entry.collectiveId === missed);
     const name = names.get(missed) ?? 'a collective';
     return step ? { kind: 'stopped', ...stepLine(step, names) } : { kind: 'stopped', stoppedAt: `sharing it with ${name}` };
   }

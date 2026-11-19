@@ -1,4 +1,5 @@
 'use client';
+import { VillageShareStatus as SchemaVillageShareStatus } from '@peasant-labs/schema';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchPublications, fetchSyncSessions } from '@/lib/api/publications';
@@ -106,7 +107,7 @@ export function usePublicationAudience(sessionIds: readonly string[], revision: 
         setCounts((previous) => {
           const next = new Map(previous);
           for (const publication of publications) {
-            if (publication.audience) next.set(publication.sessionId, publication.audience.filter((member) => member.status === 'approved').length);
+            if (publication.audience) next.set(publication.sessionId, publication.audience.filter((member) => member.status === SchemaVillageShareStatus.Approved).length);
           }
           return next;
         });

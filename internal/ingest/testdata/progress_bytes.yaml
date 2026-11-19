@@ -1,0 +1,30 @@
+requiredNames:
+  - extract-reports-bytes-when-sizes-are-known
+  - unknown-size-falls-back-to-counts
+  - estimate-uses-bytes-when-a-total-exists
+  - bytes-done-never-exceeds-bytes-total
+cases:
+  - name: extract-reports-bytes-when-sizes-are-known
+    total: 10240
+    delta: 1024
+    wantDone: 1024
+    wantText: "1 KiB/10 KiB"
+    wantEstimate: "estimate: 9s"
+  - name: unknown-size-falls-back-to-counts
+    total: 0
+    delta: 1024
+    wantDone: 0
+    absentText: "KiB"
+    wantEstimate: "estimate: 1s"
+  - name: estimate-uses-bytes-when-a-total-exists
+    total: 10240
+    delta: 2048
+    wantDone: 2048
+    wantText: "2 KiB/10 KiB"
+    wantEstimate: "estimate: 4s"
+  - name: bytes-done-never-exceeds-bytes-total
+    total: 1024
+    delta: 2048
+    wantDone: 1024
+    wantText: "1 KiB/1 KiB"
+    wantEstimate: "estimate unavailable"

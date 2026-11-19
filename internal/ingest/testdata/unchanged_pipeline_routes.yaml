@@ -1,0 +1,7 @@
+cases:
+  - name: proven
+  - name: index-not-current
+  - name: metadata-context
+  - name: copy-refused
+  - name: proof-error
+  - name: settle-refused

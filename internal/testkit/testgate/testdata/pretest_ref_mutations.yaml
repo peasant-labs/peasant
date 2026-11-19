@@ -16,6 +16,8 @@ required_names:
   - workflow-fragment-truncated
   - workflow-prerequisite-of-check
   - workflow-in-check-recipe
+  - unstring-missing-from-check
+  - unstring-missing-from-target
 
 mutations:
   - name: fragment-absent
@@ -50,3 +52,11 @@ mutations:
     op: replace-makefile
     value: "ast-grep scan --error=unused-suppression --config sgconfig.yml ."
     with: "$(MAKE) check-workflows; ast-grep scan --error=unused-suppression --config sgconfig.yml ."
+  - name: unstring-missing-from-check
+    op: replace-makefile
+    value: "$(UNSTRING) check; \\"
+    with: "true; \\"
+  - name: unstring-missing-from-target
+    op: replace-makefile
+    value: "check-unstring:\n\t$(UNSTRING) check"
+    with: "check-unstring:\n\ttrue"

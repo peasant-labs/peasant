@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -23,7 +24,129 @@ var (
 	_ ingest.GenerationPriorReader             = (*Store)(nil)
 	_ ingest.NativePriorCaptureAuthorityReader = (*Store)(nil)
 	_ ingest.ContentSweeper                    = (*Store)(nil)
+	_ ingest.ManagedGenerationRefresher        = (*Store)(nil)
+	_ ingest.ManagedGenerationUnchangedProver  = (*Store)(nil)
 )
+
+func (s *Store) capturedUnchangedRequest(ctx context.Context, request ingest.ManagedGenerationUnchangedProof) (ManagedGenerationUnchangedProof, bool, error) {
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return ManagedGenerationUnchangedProof{}, false, err
+	}
+	active, err := readActiveGenerationOnConn(conn, request.SessionID)
+	s.pool.Put(conn)
+	if err != nil {
+		return ManagedGenerationUnchangedProof{}, false, err
+	}
+	if active == nil || *active == "" {
+		return ManagedGenerationUnchangedProof{}, false, nil
+	}
+	return ManagedGenerationUnchangedProof{
+		SessionID: request.SessionID, GenerationID: *active, Metadata: request.Metadata,
+		InputDigest: request.InputDigest, IndexerTarget: request.IndexerTarget,
+		FormatTarget: request.FormatTarget, Expected: request.Expected, UpdatedAtMs: time.Now().UnixMilli(),
+	}, true, nil
+}
+
+func (s *Store) ProveCapturedGenerationUnchanged(ctx context.Context, request ingest.ManagedGenerationUnchangedProof) (ingest.UnchangedProof, error) {
+	proof, found, err := s.capturedUnchangedRequest(ctx, request)
+	if err != nil {
+		return ingest.UnchangedProof{}, err
+	}
+	if !found {
+		return ingest.UnchangedProof{Mismatch: ingest.UnchangedNotProvenActive}, nil
+	}
+	return s.ProveManagedGenerationUnchanged(ctx, proof)
+}
+
+func (s *Store) SettleCapturedGenerationUnchanged(ctx context.Context, request ingest.ManagedGenerationUnchangedProof) (ingest.ManagedGenerationRefreshOutcome, error) {
+	proof, found, err := s.capturedUnchangedRequest(ctx, request)
+	if err != nil {
+		return ingest.ManagedGenerationRefreshOutcome{}, err
+	}
+	if !found {
+		return ingest.ManagedGenerationRefreshOutcome{}, &ingest.StaleIndexWorkError{SessionID: request.SessionID}
+	}
+	result, err := s.SettleManagedGenerationUnchanged(ctx, proof)
+	if err != nil {
+		return ingest.ManagedGenerationRefreshOutcome{}, err
+	}
+	disposition, err := ingestManagedGenerationRefreshDisposition(result.Disposition)
+	return ingest.ManagedGenerationRefreshOutcome{GenerationID: result.GenerationID, Disposition: disposition}, err
+}
+
+// RefreshManagedGenerationWithoutParse translates the ingest-owned
+// metadata-only refresh request to the store's immutable request and back.
+// The pipeline cannot import store, so this adapter is the one boundary between
+// the two shapes.
+//
+// The store resolves the session's active generation here and the refresh
+// re-checks it under the exclusive session lock, so a pointer that moved
+// between the read and the commit is refused as source-not-active rather than
+// refreshing a generation that is no longer the read authority.
+//
+// A refusal and a stale capture are returned unchanged: callers classify them
+// with errors.Is(err, ErrManagedGenerationRefreshRefused), errors.As to
+// *ManagedGenerationRefreshError, or errors.As to *ingest.StaleIndexWorkError,
+// and fall back to the ordinary parse path. The old generation stays active
+// for every one of those outcomes.
+func (s *Store) RefreshManagedGenerationWithoutParse(ctx context.Context, request ingest.ManagedGenerationRefreshRequest) (ingest.ManagedGenerationRefreshOutcome, error) {
+	if err := s.requireGenerationSupport(); err != nil {
+		return ingest.ManagedGenerationRefreshOutcome{}, err
+	}
+	sessionID, err := schema.NewSessionID(string(request.SessionID))
+	if err != nil {
+		return ingest.ManagedGenerationRefreshOutcome{}, fmt.Errorf("store: refresh a managed generation from an ingest request with a malformed session identity: %w; nothing changed; supply a canonical session ID", err)
+	}
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return ingest.ManagedGenerationRefreshOutcome{}, fmt.Errorf("store: resolve the active generation for session %s before a metadata-only refresh: take a connection: %w; nothing changed and the active generation is unchanged; restore database access and retry", sessionID, err)
+	}
+	active, activeErr := readActiveGenerationOnConn(conn, sessionID)
+	s.pool.Put(conn)
+	if activeErr != nil {
+		return ingest.ManagedGenerationRefreshOutcome{}, activeErr
+	}
+	if active == nil || *active == "" {
+		return ingest.ManagedGenerationRefreshOutcome{}, &ManagedGenerationRefreshError{
+			SessionID: sessionID,
+			Reason:    ManagedGenerationRefreshSourceNotActive,
+			Detail:    "the session has no active managed generation, so there is no stored parse to reuse; nothing changed and the ordinary parse path must create one",
+		}
+	}
+	result, err := s.RefreshManagedGeneration(ctx, ManagedGenerationRefresh{
+		SessionID:          sessionID,
+		SourceGenerationID: *active,
+		Metadata:           request.Metadata,
+		Expected:           request.ExpectedState,
+	})
+	if err != nil {
+		return ingest.ManagedGenerationRefreshOutcome{}, err
+	}
+	disposition, err := ingestManagedGenerationRefreshDisposition(result.Disposition)
+	if err != nil {
+		return ingest.ManagedGenerationRefreshOutcome{}, err
+	}
+	return ingest.ManagedGenerationRefreshOutcome{
+		GenerationID: result.GenerationID,
+		Disposition:  disposition,
+	}, nil
+}
+
+// ingestManagedGenerationRefreshDisposition translates the store's closed
+// disposition set into the pipeline's closed set. An unknown value is refused
+// at the adapter boundary: a result the pipeline cannot classify must never be
+// read as a successful settle.
+func ingestManagedGenerationRefreshDisposition(disposition ManagedGenerationRefreshDisposition) (ingest.ManagedGenerationRefreshDisposition, error) {
+	switch disposition {
+	case ManagedGenerationRefreshInstalled:
+		return ingest.ManagedGenerationRefreshInstalled, nil
+	case ManagedGenerationRefreshUnchanged:
+		return ingest.ManagedGenerationRefreshUnchanged, nil
+	default:
+		return "", fmt.Errorf("store: managed-generation refresh reported unknown disposition %q; the active generation is unchanged; treat the session as ordinary parse work and report the unknown disposition", disposition)
+	}
+}
 
 func (s *Store) StageGenerationCandidates(ctx context.Context, candidates []ingest.GenerationActivation) ([]ingest.GenerationStaged, []error) {
 	activations := make([]GenerationActivation, len(candidates))

@@ -1,7 +1,8 @@
-requiredLaneCases: [unknown, idle, busy, elapsed-unknown, candidates-before-extract, zero-candidates, candidates-on-cancel]
+requiredLaneCases: [unknown, idle, busy, elapsed-unknown, candidates-before-extract, zero-candidates, one-candidate, candidates-on-cancel]
 laneCases:
   - name: unknown
     available: false
+    contains: ["filter"]
     absent: [writer lane:]
   - name: idle
     available: true
@@ -26,13 +27,19 @@ laneCases:
     candidatesKnown: true
     candidates: 0
     contains: ["extract candidates: 0 sessions (not confirmed refreshes)"]
+  - name: one-candidate
+    candidatesKnown: true
+    candidates: 1
+    contains: ["extract candidates: 1 session (not confirmed refreshes)"]
   - name: candidates-on-cancel
     finalCanceled: true
+    available: true
+    queued: 3
     candidatesKnown: true
     candidates: 7
     contains: ["extract candidates: 7 sessions (not confirmed refreshes)", harvest canceled]
-    absent: ["7 refreshed"]
-requiredCensusCases: [unavailable, empty, indexed-and-unmeasured]
+    absent: ["7 refreshed", "writer lane:"]
+requiredCensusCases: [unavailable, empty, singular, indexed-and-unmeasured]
 censusCases:
   - name: unavailable
     available: false
@@ -41,6 +48,11 @@ censusCases:
   - name: empty
     available: true
     contains: ["refresh census: 0 sessions (includes failed attempts)"]
+  - name: singular
+    available: true
+    rows:
+      - {reason: new, sessions: 1, indexedBytes: 0}
+    contains: ["refresh census: 1 session (includes failed attempts)"]
   - name: indexed-and-unmeasured
     available: true
     rows:
