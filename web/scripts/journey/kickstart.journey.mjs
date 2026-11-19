@@ -61,7 +61,7 @@ const Tab = Object.freeze({ A: 'A', B: 'B', C: 'C', D: 'D', E: 'E', F: 'F', G: '
 const Css = Object.freeze({ None: 'none', Hidden: 'hidden' });
 const Labels = Object.freeze({
   Continue: 'continue', SaveAndImport: 'save and import', ImportFinished: 'import finished',
-  SetUp: 'set up peasant', Yes: 'yes', No: 'no', Prev: 'prev', ScanAgain: 'scan again',
+  SetUp: 'set up peasant', Breadcrumb: 'Breadcrumb', Sidebar: 'peasant', ThemeToggle: /^switch to (light|dark) mode$/, Yes: 'yes', No: 'no', Prev: 'prev', ScanAgain: 'scan again',
   ScanProgress: 'scan progress', AutoIngest: /auto-ingest new branches/,
   PublishLater: 'plan to publish later', RedactionExample: 'example for redaction level',
   SetupSaved: 'your setup is saved', TakeTheirs: /^take theirs for/,
@@ -361,7 +361,7 @@ test('fresh-install-redirects-to-setup', async () => {
   // is what a sighted reader sees. No band is drawn above the page.
   await expect(pageA.getByRole('heading', { level: 1 })).toHaveCount(1);
   await expect(pageA.getByRole('heading', { level: 1, name: Labels.SetUp, exact: true })).toHaveCount(1);
-  await expect(pageA.getByRole('navigation', { name: 'Breadcrumb' })).toContainText(Labels.SetUp);
+  await expect(pageA.getByRole('navigation', { name: Labels.Breadcrumb })).toContainText(Labels.SetUp);
   await expect(title(pageA)).toHaveText('peasant online');
   await seen(pageA);
   // The opening scan may still be running when the first stop is drawn; its
@@ -378,9 +378,9 @@ test('fresh-install-redirects-to-setup', async () => {
   // The chrome fits the window: the sidebar starts at the top, its foot (the
   // settings gear and the theme toggle) is wholly on screen, and so is the
   // wizard foot's bottom border.
-  const sidebar = pageA.getByRole('complementary', { name: 'peasant' });
+  const sidebar = pageA.getByRole('complementary', { name: Labels.Sidebar });
   const gear = sidebar.getByRole('link', { name: Labels.Settings, exact: true });
-  const toggle = sidebar.getByRole('button', { name: /^switch to (light|dark) mode$/ });
+  const toggle = sidebar.getByRole('button', { name: Labels.ThemeToggle });
   const box = async (locator) => (await locator.evaluate((element) => element.getBoundingClientRect().toJSON()));
   setupGeometry = await pageA.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
   setupGeometry.sidebar = await box(sidebar);
