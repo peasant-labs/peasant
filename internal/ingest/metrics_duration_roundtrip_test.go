@@ -24,16 +24,26 @@ import (
 //go:embed testdata/metrics_duration_roundtrip.yaml
 var metricsDurationRoundtripYAML []byte
 
+//go:embed testdata/metrics_duration_roundtrip.manifest.yaml
+var metricsDurationRoundtripManifestYAML []byte
+
 func TestManagedMetricsDurationRoundtrip(t *testing.T) {
 	var fixture struct {
-		RequiredNames []string `yaml:"requiredNames"`
-		Cases         []struct {
-			Name    string `yaml:"name"`
-			Entries int    `yaml:"entries"`
-			Refresh bool   `yaml:"refresh"`
+		Cases []struct {
+			Name       string `yaml:"name"`
+			Entries    int    `yaml:"entries"`
+			DurationMS int64  `yaml:"durationMs"`
+			Refresh    bool   `yaml:"refresh"`
+			Recovery   bool   `yaml:"recovery"`
 		} `yaml:"cases"`
 	}
 	if err := testutil.DecodeFixtureYAML(metricsDurationRoundtripYAML, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		RequiredNames []string `yaml:"requiredNames"`
+	}
+	if err := testutil.DecodeFixtureYAML(metricsDurationRoundtripManifestYAML, &manifest); err != nil {
 		t.Fatal(err)
 	}
 	seen := map[string]bool{}
@@ -75,12 +85,40 @@ func TestManagedMetricsDurationRoundtrip(t *testing.T) {
 					t.Fatalf("generation not installed: %+v %v", result, err)
 				}
 			}
+			if row.Recovery {
+				conn, err := db.Pool().Take(t.Context())
+				if err != nil {
+					t.Fatal(err)
+				}
+				err = sqlitex.ExecuteTransient(conn, `UPDATE session_captured_stats SET duration_ms = 998999 WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{string(sid)}})
+				db.Pool().Put(conn)
+				if err != nil {
+					t.Fatal(err)
+				}
+				input, err = db.ReadMetricInput(t.Context(), sid, true)
+				if err != nil || metrics.MetricsCurrentForInput(input) {
+					t.Fatalf("legacy truncated row unexpectedly current: %v", err)
+				}
+				result, err = pipeline.Run(t.Context())
+				if err != nil || result.Summary.Computed != 1 {
+					t.Fatalf("harvest did not recompute legacy metrics: %+v %v", result, err)
+				}
+				input, err = db.ReadMetricInput(t.Context(), sid, true)
+				if err != nil || input == nil {
+					t.Fatalf("read recomputed metrics: %v", err)
+				}
+			}
 			if !metrics.MetricsCurrentForInput(input) {
 				t.Errorf("reread metrics do not prove captured input current: %+v", input.Existing)
+			}
+			if input.Existing == nil || input.Existing.DurationMinutes == nil || *input.Existing.DurationMinutes != float64(row.DurationMS)/60000 {
+				t.Errorf("reread duration does not equal %d milliseconds", row.DurationMS)
 			}
 			state, err := db.GetAnnotationRunState(t.Context(), sid)
 			if err != nil || state == nil {
 				t.Errorf("classifier run state missing: %v", err)
+			} else if input.Existing == nil || input.Existing.OutputHash == nil || state.MetricsOutputHash != *input.Existing.OutputHash {
+				t.Errorf("classifier run state does not cover the persisted metrics")
 			}
 			annotations, err := db.GetAnnotationsForSession(t.Context(), string(sid))
 			if err != nil || len(annotations) == 0 {
@@ -88,7 +126,7 @@ func TestManagedMetricsDurationRoundtrip(t *testing.T) {
 			}
 		})
 	}
-	if err := testutil.RequireFixtureNames("metrics_duration_roundtrip.yaml", "cases", fixture.RequiredNames, seen); err != nil {
+	if err := testutil.RequireFixtureNames("metrics_duration_roundtrip.yaml", "cases", manifest.RequiredNames, seen); err != nil {
 		t.Fatal(err)
 	}
 }

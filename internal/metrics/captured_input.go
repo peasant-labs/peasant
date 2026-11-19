@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"time"
 
@@ -92,6 +93,12 @@ func (e *Engine) computeCapturedSession(ctx context.Context, backing ingest.Metr
 	}
 	if git.Result != nil {
 		mergeSessionMetrics(merged, git.Result)
+	}
+	// Captured native stats persist integer milliseconds. Hash their read-back
+	// value, including when a metric function supplied sub-millisecond minutes.
+	if merged.DurationMinutes != nil {
+		duration := math.Round(*merged.DurationMinutes*60000) / 60000
+		merged.DurationMinutes = &duration
 	}
 	now, version := time.Now().UnixMilli(), CurrentComputeVersion
 	merged.ComputedAt, merged.ComputeVersion, merged.InputHash = &now, &version, &inputHash

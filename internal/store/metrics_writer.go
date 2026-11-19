@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -135,7 +136,7 @@ func upsertDerivedStatsOnConn(conn *sqlite.Conn, m *ingest.SessionMetrics) (bool
 	}
 	var durationMs *int64
 	if m.DurationMinutes != nil {
-		ms := int64(*m.DurationMinutes * 60000)
+		ms := int64(math.Round(*m.DurationMinutes * 60000))
 		durationMs = &ms
 	}
 	return upsertCapturedStatsOnConn(conn, CapturedStats{
