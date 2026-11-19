@@ -15,3 +15,11 @@ cases:
     entries: 1000
     durationMs: 999000
     recovery: true
+  - name: submillisecond-source
+    entries: 2
+    durationMs: 0
+    spanNs: 500000
+  - name: future-capture-clock
+    entries: 1000
+    durationMs: 999000
+    futureClock: true

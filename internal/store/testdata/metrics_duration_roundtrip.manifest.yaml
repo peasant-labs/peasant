@@ -1,0 +1,10 @@
+requiredNames:
+  - decimal-1665
+  - one-third
+  - floating-sum
+  - milliseconds-derived
+  - tiny
+  - zero
+  - large
+  - below-half-ms
+  - above-half-ms

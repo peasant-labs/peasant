@@ -12,6 +12,7 @@ import (
 )
 
 // SQL constants for the metrics read path.
+// Duration divisions below mirror ingest.DurationMsToMinutes.
 const (
 	// V23+: host_slug is no longer a column on sessions; must JOIN host_slugs.
 	sqlLookupSessionLocation = `SELECT h.host_slug, s.parent_id

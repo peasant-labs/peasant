@@ -146,5 +146,19 @@ func (s *Store) SaveMetricsForInput(ctx context.Context, expected *ingest.Metric
 	if current.DatabaseHash != expected.DatabaseHash || !reflect.DeepEqual(current.Existing, expected.Existing) {
 		return fmt.Errorf("save metrics for session %s: captured inputs or prior result changed during computation; current values were preserved; retry metrics with a fresh snapshot", metrics.SessionID)
 	}
-	return saveMetricsOnConn(conn, metrics, metrics.InputHash, metrics.OutputHash)
+	if err := saveMetricsOnConn(conn, metrics, metrics.InputHash, metrics.OutputHash); err != nil {
+		return err
+	}
+	saved, err := getMetricsOnConn(conn, metrics.SessionID)
+	if err != nil {
+		return err
+	}
+	if saved == nil {
+		return fmt.Errorf("save metrics for session %s: saved values are unavailable; prior values were preserved; retry the harvest", metrics.SessionID)
+	}
+	savedHash, err := ingest.MetricOutputHash(saved)
+	if err != nil || savedHash != *metrics.OutputHash {
+		return fmt.Errorf("save metrics for session %s: stored values differ from computed output; prior values were preserved; retry the harvest", metrics.SessionID)
+	}
+	return nil
 }

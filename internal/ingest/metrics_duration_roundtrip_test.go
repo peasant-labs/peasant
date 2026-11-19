@@ -4,21 +4,22 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"github.com/peasant-labs/peasant/internal/defaults"
-	"github.com/peasant-labs/peasant/internal/store"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
-	"github.com/peasant-labs/schema"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/metrics"
+	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"github.com/peasant-labs/schema"
 )
 
 //go:embed testdata/metrics_duration_roundtrip.yaml
@@ -30,11 +31,13 @@ var metricsDurationRoundtripManifestYAML []byte
 func TestManagedMetricsDurationRoundtrip(t *testing.T) {
 	var fixture struct {
 		Cases []struct {
-			Name       string `yaml:"name"`
-			Entries    int    `yaml:"entries"`
-			DurationMS int64  `yaml:"durationMs"`
-			Refresh    bool   `yaml:"refresh"`
-			Recovery   bool   `yaml:"recovery"`
+			Name        string `yaml:"name"`
+			Entries     int    `yaml:"entries"`
+			DurationMS  int64  `yaml:"durationMs"`
+			Refresh     bool   `yaml:"refresh"`
+			Recovery    bool   `yaml:"recovery"`
+			SpanNS      int64  `yaml:"spanNs"`
+			FutureClock bool   `yaml:"futureClock"`
 		} `yaml:"cases"`
 	}
 	if err := testutil.DecodeFixtureYAML(metricsDurationRoundtripYAML, &fixture); err != nil {
@@ -58,8 +61,8 @@ func TestManagedMetricsDurationRoundtrip(t *testing.T) {
 			output := filepath.Join(root, "output")
 			db := durationStore(t, filepath.Join(root, "store.db"), output)
 			defer db.Close()
-			durationCorpus(t, source, 1, row.Entries)
-			pipeline := durationPipeline(t, db, source, output, nil, true)
+			durationCorpus(t, source, row.Entries, row.SpanNS)
+			pipeline := durationPipeline(t, db, source, output)
 			result, err := pipeline.Run(t.Context())
 			if err != nil || result.Summary.Indexed != 1 {
 				t.Fatalf("import: %+v %v", result, err)
@@ -111,6 +114,21 @@ func TestManagedMetricsDurationRoundtrip(t *testing.T) {
 					t.Fatalf("read recomputed metrics: %v", err)
 				}
 			}
+			if row.FutureClock {
+				duration := int64(1)
+				_, err := db.UpsertCapturedStats(t.Context(), store.CapturedStats{SessionID: sid, DurationMs: &duration, Source: store.StatsSourceHarness, UpdatedAtMs: time.Now().Add(time.Hour).UnixMilli()})
+				if err != nil {
+					t.Fatal(err)
+				}
+				result, err = pipeline.Run(t.Context())
+				if err != nil || result.Summary.Computed != 1 {
+					t.Fatalf("future capture clock did not recompute: %+v %v", result, err)
+				}
+				input, err = db.ReadMetricInput(t.Context(), sid, true)
+				if err != nil || input == nil {
+					t.Fatalf("read future-clock metrics: %v", err)
+				}
+			}
 			if !metrics.MetricsCurrentForInput(input) {
 				t.Errorf("reread metrics do not prove captured input current: %+v", input.Existing)
 			}
@@ -127,6 +145,18 @@ func TestManagedMetricsDurationRoundtrip(t *testing.T) {
 			if err != nil || len(annotations) == 0 {
 				t.Errorf("annotations missing: %v", err)
 			}
+			second, err := pipeline.Run(t.Context())
+			if err != nil || second.Summary.Computed != 0 {
+				t.Fatalf("second harvest recomputed metrics: %+v %v", second, err)
+			}
+			afterState, err := db.GetAnnotationRunState(t.Context(), sid)
+			if err != nil || !reflect.DeepEqual(state, afterState) {
+				t.Errorf("second harvest changed classification state: %v", err)
+			}
+			afterAnnotations, err := db.GetAnnotationsForSession(t.Context(), string(sid))
+			if err != nil || !reflect.DeepEqual(annotations, afterAnnotations) {
+				t.Errorf("second harvest changed annotations: %v", err)
+			}
 		})
 	}
 	if err := testutil.RequireFixtureNames("metrics_duration_roundtrip.yaml", "cases", manifest.RequiredNames, seen); err != nil {
@@ -134,29 +164,26 @@ func TestManagedMetricsDurationRoundtrip(t *testing.T) {
 	}
 }
 
-func durationPipeline(tb testing.TB, db *store.Store, source, output string, profiler *ingest.IndexProfiler, classify bool) *ingest.Pipeline {
+func durationPipeline(tb testing.TB, db *store.Store, source, output string) *ingest.Pipeline {
 	tb.Helper()
 	fs := &ingest.OSFileSystem{}
 	cfg := ingest.PipelineConfig{
 		Sources: map[ingest.Harness]ingest.SourceConfig{
 			ingest.HarnessClaudeCode: {Enabled: true, Paths: []ingest.ResolvedPath{ingest.ResolvedPath(source)}},
 		},
-		OutputDir:     ingest.ResolvedPath(output),
-		IndexProfiler: profiler,
+		OutputDir: ingest.ResolvedPath(output),
 	}
 	options := []ingest.PipelineOption{
 		ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithSalt(db.InstallationSalt()),
 		ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
 		ingest.WithLogger(db), ingest.WithIndexLogger(db),
 	}
-	if classify {
-		options = append(options,
-			ingest.WithAnalyzer(metrics.NewEngineWithModels(db, db)),
-			ingest.WithClassifier(metrics.NewClassifierAnnotator(db, db)))
-	}
+	options = append(options,
+		ingest.WithAnalyzer(metrics.NewEngineWithModels(db, db)),
+		ingest.WithClassifier(metrics.NewClassifierAnnotator(db, db)))
 	pipeline, err := ingest.NewPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg, options...)
 	if err != nil {
-		tb.Fatalf("build refresh pipeline: %v", err)
+		tb.Fatalf("build duration pipeline: %v", err)
 	}
 	return pipeline
 }
@@ -176,18 +203,17 @@ func durationStore(tb testing.TB, dbPath, output string) *store.Store {
 
 // durationCorpus writes one deterministic JSONL file per session.
 // The text is synthetic and carries no user data.
-func durationCorpus(tb testing.TB, root string, sessions, entries int) int64 {
+func durationCorpus(tb testing.TB, root string, entries int, spanNS int64) {
 	tb.Helper()
 	filler := strings.Repeat("synthetic transcript text for the managed refresh measurement. ", 12)
-	var total int64
 	workspace := filepath.Join(root, "-workspace")
 	if err := os.MkdirAll(workspace, 0o700); err != nil {
 		tb.Fatal(err)
 	}
-	for n := range sessions {
+	for n := range 1 {
 		id := fmt.Sprintf("bec00000-0000-4000-8000-%012d", n+1)
 		path := filepath.Join(workspace, id+".jsonl")
-		content := durationTranscript(id, entries, filler)
+		content := durationTranscript(id, entries, filler, spanNS)
 		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 			tb.Fatal(err)
 		}
@@ -195,15 +221,17 @@ func durationCorpus(tb testing.TB, root string, sessions, entries int) int64 {
 		if err := os.Chtimes(path, stamp, stamp); err != nil {
 			tb.Fatal(err)
 		}
-		total += int64(len(content))
 	}
-	return total
 }
 
-func durationTranscript(sessionID string, entries int, filler string) string {
+func durationTranscript(sessionID string, entries int, filler string, spanNS int64) string {
 	var content strings.Builder
 	for n := range entries {
-		at := time.Unix(1_700_000_000+int64(n), 0).UTC().Format(time.RFC3339)
+		atTime := time.Unix(1_700_000_000+int64(n), 0)
+		if spanNS != 0 {
+			atTime = time.Unix(1_700_000_000, int64(n)*spanNS)
+		}
+		at := atTime.UTC().Format(time.RFC3339Nano)
 		if n%2 == 0 {
 			fmt.Fprintf(&content, `{"type":"user","sessionId":"%s","uuid":"u%d","cwd":"/work/project","timestamp":"%s","message":{"role":"user","content":"prompt %d: %s"}}`+"\n", sessionID, n, at, n, filler)
 			continue

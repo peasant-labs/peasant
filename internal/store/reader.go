@@ -235,6 +235,7 @@ var (
 	// from the captured stats row; sessions without one keep the legacy
 	// metrics columns. Input tokens stay on the analysis record everywhere:
 	// they are peak context usage, not the harness-reported total.
+	// The SQL duration division mirrors ingest.DurationMsToMinutes.
 	//
 	// Column 29 is the logical-parent rule, not the raw cache: a child whose
 	// generation carries started_by evidence answers its target even while the
@@ -310,6 +311,7 @@ func sqlSessionDetailByIDQuery(latestAttemptCounts bool) string {
 	turnAuthority := sqlSessionTurnCount
 	toolAuthority := "CASE WHEN s.active_generation_id IS NOT NULL THEN c.tool_call_count ELSE m.tool_calls END"
 	outAuthority := "CASE WHEN s.active_generation_id IS NOT NULL THEN c.tokens_out ELSE m.output_tokens END"
+	// SQL duration divisions mirror ingest.DurationMsToMinutes.
 	durationAuthority := "CASE WHEN s.active_generation_id IS NOT NULL THEN CAST(c.duration_ms AS REAL) / 60000.0 ELSE m.duration_minutes END"
 	latestAttemptExpr := func(key, fallback string) string {
 		if !latestAttemptCounts {

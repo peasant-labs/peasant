@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"reflect"
 	"time"
 
@@ -68,10 +67,10 @@ func (e *Engine) computeCapturedSession(ctx context.Context, backing ingest.Metr
 		merged.SubagentCount = &seed.SubagentCount
 		merged.InputTokens, merged.OutputTokens = &seed.TokensIn, &seed.TokensOut
 		merged.ToolCalls = &seed.ToolCallCount
-		duration := float64(seed.DurationMs) / 60000
+		duration := ingest.DurationMsToMinutes(seed.DurationMs)
 		merged.DurationMinutes = &duration
 	} else if input.EndMS >= input.StartMS {
-		duration := float64(input.EndMS-input.StartMS) / 60000
+		duration := ingest.DurationMsToMinutes(input.EndMS - input.StartMS)
 		merged.DurationMinutes = &duration
 	}
 	titleFunc := func(_ context.Context, _ ingest.SessionID, entries []schema.SessionEntry, _ *ingest.SessionMetrics) *ingest.SessionMetrics {
@@ -94,10 +93,9 @@ func (e *Engine) computeCapturedSession(ctx context.Context, backing ingest.Metr
 	if git.Result != nil {
 		mergeSessionMetrics(merged, git.Result)
 	}
-	// Captured native stats persist integer milliseconds. Hash their read-back
-	// value, including when a metric function supplied sub-millisecond minutes.
+	// Hash the value the reader returns.
 	if merged.DurationMinutes != nil {
-		duration := math.Round(*merged.DurationMinutes*60000) / 60000
+		duration := ingest.CanonicalDurationMinutes(*merged.DurationMinutes)
 		merged.DurationMinutes = &duration
 	}
 	now, version := time.Now().UnixMilli(), CurrentComputeVersion

@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"fmt"
-	"math"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -42,6 +41,11 @@ func (s *Store) SaveMetrics(ctx context.Context, m *ingest.SessionMetrics) (err 
 		return fmt.Errorf("store: take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
+	end, err := sqlitex.ImmediateTransaction(conn)
+	if err != nil {
+		return err
+	}
+	defer end(&err)
 	// Legacy writes invalidate completion proof; only the conditional writer
 	// can attach captured-input evidence to new computed values.
 	return saveMetricsOnConn(conn, m, nil, nil)
@@ -116,8 +120,12 @@ func saveMetricsOnConn(conn *sqlite.Conn, m *ingest.SessionMetrics, inputHash, o
 		return fmt.Errorf("store: save metrics for %s: %w", m.SessionID, err)
 	}
 	if native {
-		if _, err := upsertDerivedStatsOnConn(conn, m); err != nil {
+		applied, err := upsertDerivedStatsOnConn(conn, m)
+		if err != nil {
 			return err
+		}
+		if !applied {
+			return fmt.Errorf("store: save metrics for %s: captured stats advanced during computation; retry with a fresh snapshot", m.SessionID)
 		}
 	}
 
@@ -134,9 +142,22 @@ func upsertDerivedStatsOnConn(conn *sqlite.Conn, m *ingest.SessionMetrics) (bool
 	if m.ComputedAt != nil {
 		updatedAt = *m.ComputedAt
 	}
+	// Computation is based on the captured row, even if its clock is ahead of
+	// ours. Preserve its timestamp while allowing this derived update to win.
+	if err := sqlitex.ExecuteTransient(conn, `SELECT updated_at_ms FROM session_captured_stats WHERE session_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{string(m.SessionID)},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			if prior := stmt.ColumnInt64(0); prior > updatedAt {
+				updatedAt = prior
+			}
+			return nil
+		},
+	}); err != nil {
+		return false, fmt.Errorf("store: read captured stats clock for %s: %w", m.SessionID, err)
+	}
 	var durationMs *int64
 	if m.DurationMinutes != nil {
-		ms := int64(math.Round(*m.DurationMinutes * 60000))
+		ms := ingest.DurationMinutesToMs(*m.DurationMinutes)
 		durationMs = &ms
 	}
 	return upsertCapturedStatsOnConn(conn, CapturedStats{

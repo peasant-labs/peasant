@@ -3,3 +3,5 @@ requiredNames:
   - installed-refresh
   - exact-control
   - truncated-row-recovery
+  - submillisecond-source
+  - future-capture-clock
