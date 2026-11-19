@@ -40,6 +40,7 @@ interface PreviewStep {
   expectSessionMeta?: { reads?: string[]; lacks?: string[] };
   expectTurnLabels?: Record<string, string>;
   expectNoticeTone?: { tone: PreviewNoticeTone; text: string; readAgainInside?: boolean };
+  expectStateInPane?: string;
 }
 const PREVIEW_KEYS = Object.freeze({
   serve: true,
@@ -55,6 +56,7 @@ const PREVIEW_KEYS = Object.freeze({
   expectSessionMeta: true,
   expectTurnLabels: true,
   expectNoticeTone: true,
+  expectStateInPane: true,
 } satisfies Record<keyof PreviewStep, true>);
 /** Where the stream must not reach: the closed set an `expectPrivacy` step names. */
 const PreviewPrivacy = Object.freeze({
@@ -242,6 +244,18 @@ async function runPreviewStep(step: PreviewStep, spec: StreamSpec, state: Conver
     } else {
       throw new Error(`${at}: expectNoticeTone names tone ${String(tone)}; it is one of ${Object.values(PreviewNoticeTone).join(', ')}`);
     }
+  }
+  if (step.expectStateInPane !== undefined) {
+    const text = step.expectStateInPane;
+    // jsdom has no layout, so the size is proven by structure: the state sits
+    // in the same block the viewer fills, whose size the stylesheet fixes.
+    await waitFor(() => {
+      const box = mounted.container.querySelector('.ks-session-preview > .ks-session-preview-viewer');
+      if (box === null) throw new Error(`${at}: there is no reading pane`);
+      // The reading skeleton names itself by its accessible label.
+      const labels = [...box.querySelectorAll('[aria-label]')].map((element) => element.getAttribute('aria-label') ?? '');
+      expect([box.textContent ?? '', ...labels].join('\n'), `${at}: the pane holds "${text}"`).toContain(text);
+    });
   }
   for (const check of step.expectPrivacy ?? []) {
     if (!PRIVACY.includes(check)) throw new Error(`${at}: expectPrivacy names ${check}; it is one of ${PRIVACY.join(', ')}`);

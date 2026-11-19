@@ -154,23 +154,33 @@ export default function SessionPreview({ sessionId, nodeId, label, scanGeneratio
   ) : null;
 
   if (viewModel === null || directory === null) {
-    if (notice !== null) {
-      if (noticeTone === PreviewNoticeTone.Error) {
-        return (
-          <ErrorCard className="ks-preview-closed">
-            <p className="ks-help ks-preview-error-text">{notice}</p>
-            {readAgainControl}
-          </ErrorCard>
-        );
-      }
-      return (
+    // Reading, or stopped before a segment arrived: the state sits in the same
+    // reading pane the viewer fills, so the pane keeps its size and the tree
+    // beside it does not move when a preview fails or loads.
+    let state = <Skeleton label="reading the preview" avatar={false} lines={2} />;
+    if (notice !== null && noticeTone === PreviewNoticeTone.Error) {
+      state = (
+        <ErrorCard className="ks-preview-closed">
+          <p className="ks-help ks-preview-error-text">{notice}</p>
+          {readAgainControl}
+        </ErrorCard>
+      );
+    } else if (notice !== null) {
+      state = (
         <div className="ks-preview-closed" role="status">
           <p className="ks-help">{notice}</p>
           {readAgainControl}
         </div>
       );
     }
-    return <Skeleton label="reading the preview" avatar={false} lines={2} />;
+    return (
+      <div className="ks-session-preview" data-preview-pane-state>
+        <p className="ks-preview-raw" aria-hidden={notice !== null ? true : undefined} data-reserved={notice !== null ? true : undefined}>
+          raw, on this computer only
+        </p>
+        <div className="ks-session-preview-viewer ks-session-preview-state">{state}</div>
+      </div>
+    );
   }
 
   const continuationBody = (
