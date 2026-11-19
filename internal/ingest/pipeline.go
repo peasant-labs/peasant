@@ -2356,13 +2356,18 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 					forceParse = true
 				}
 			}
-			if proofErr == nil && !proof.Proven && p.adapterDeclaresOutputPreserving(input.session.Harness) {
-				p.reportDiagnostic(DiagnosticEntry{
-					ErrorType:   "output_preserving_proof_failed",
-					Location:    string(input.session.SessionID),
-					Message:     fmt.Sprintf("the %s producer declared output-preserving but its unchanged proof was not proven (%s); the transcript will be parsed", input.session.Harness, proof.Mismatch),
-					Remediation: "Review the producer declaration and proof mismatch before relying on an unchanged-output optimization.",
-				})
+			if proofErr == nil && !proof.Proven {
+				if p.adapterDeclaresOutputPreserving(input.session.Harness) {
+					p.reportDiagnostic(DiagnosticEntry{
+						ErrorType:   "output_preserving_proof_failed",
+						Location:    string(input.session.SessionID),
+						Message:     fmt.Sprintf("the %s producer declared output-preserving but its unchanged proof was not proven (%s); the transcript will be parsed", input.session.Harness, proof.Mismatch),
+						Remediation: "Review the producer declaration and proof mismatch before relying on an unchanged-output optimization.",
+					})
+				}
+				// A failed proof parses. A metadata-only copy of the stored
+				// generation measured no cheaper than the parse, so there is no
+				// intermediate path between the settle and the parse.
 				forceParse = true
 			}
 			if proofErr == nil && proof.Proven {

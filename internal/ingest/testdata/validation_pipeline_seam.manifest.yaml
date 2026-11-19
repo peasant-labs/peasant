@@ -1,7 +1,7 @@
 requiredNames:
-  - unsupported-copies
+  - unsupported-parses
   - proven-settles
   - not-proven-parses
-  - validator-error-copies
-  - inconsistent-proven-copies
-  - missing-validator-copies
+  - validator-error-parses
+  - inconsistent-proven-parses
+  - missing-validator-parses
