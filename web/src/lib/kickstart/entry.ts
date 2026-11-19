@@ -8,6 +8,9 @@ import { closed } from '@peasant-labs/fairtrade/closed-value';
 export const KICKSTART_ROUTE = '/kickstart';
 export const SELECTION_ROUTE = '/selection';
 
+/** The setup page's title, which the shell draws above the page on that page alone. */
+export const KICKSTART_PAGE_TITLE = 'set up peasant';
+
 /**
  * Whether a pathname is the setup page itself. The app is exported with
  * `trailingSlash: true`, so the served path is `/kickstart/`; both spellings

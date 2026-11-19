@@ -9,6 +9,7 @@ import {
 } from '../../scripts/visual/shell-chrome-manifest.mjs';
 import { usePublishState } from '@/contexts/PublishContext';
 import { LayoutShell } from './LayoutShell';
+import { KICKSTART_PAGE_TITLE } from '@/lib/kickstart/entry';
 import { OPEN_COMMAND_PALETTE_EVENT } from './command/CommandPalette';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -94,7 +95,10 @@ describe('static shell hydration', () => {
   }
 });
 
-const pageTitle = YAML.parse(readFileSync(resolve(process.cwd(), 'src/components/testdata/shell_page_title.yaml'), 'utf8')) as {
+/** The route cases for the setup page title the shell draws. */
+const PAGE_TITLE_CASES = 'src/components/testdata/shell_page_title.yaml';
+
+const pageTitle = YAML.parse(readFileSync(resolve(process.cwd(), PAGE_TITLE_CASES), 'utf8')) as {
   requiredNames: string[];
   cases: { name: string; pathname: string; title: boolean }[];
 };
@@ -108,7 +112,7 @@ describe('the setup page title', () => {
       mockHttp(UI_CAPABILITY_CASES[0]);
       route.pathname = row.pathname;
       await act(async () => { render(<LayoutShell>representative page body</LayoutShell>); });
-      const heading = screen.queryByRole('heading', { level: 1, name: 'set up peasant' });
+      const heading = screen.queryByRole('heading', { level: 1, name: KICKSTART_PAGE_TITLE });
       if (row.title) expect(heading).not.toBeNull();
       else expect(heading).toBeNull();
     });
