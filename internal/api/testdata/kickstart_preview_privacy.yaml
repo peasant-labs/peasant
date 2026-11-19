@@ -10,10 +10,25 @@ secrets:
   transcript: synthetic-transcript-marker
   readerError: synthetic-reader-error-marker
   cursor: synthetic-cursor-marker
+# The preview's server log lines (plan section 8). They carry counts and
+# closed-set reasons only. Every preview line the socket cases write must be
+# one of these messages and carry only these attribute keys, and no value may
+# hold the source path, transcript text, or a session, node or capture id.
+previewLog:
+  named:
+    opened: "kickstart preview: capture opened"
+    sent: "kickstart preview: segment sent"
+    ended: "kickstart preview: capture reached its end"
+    closed: "kickstart preview: capture closed"
+    freed: "kickstart preview: capture freed"
+  keys: [turns, source_bytes, source_total_bytes, continuation, seq, segment_bytes, loaded_segments, loaded_turns, cut_reason, reason, code, retained_bytes]
 socketCases:
   - unreadable-source-errors-and-logs-carry-no-source-or-path
   - preview-close-carries-no-source-or-path
   - preview-cut-carries-no-source-or-path
+  - preview-logs-open-segments-close-and-free
+  - socket-disconnect-logs-capture-freed
+  - idle-expiry-logs-capture-freed
 requiredNames:
   - project-preview
   - branch-preview

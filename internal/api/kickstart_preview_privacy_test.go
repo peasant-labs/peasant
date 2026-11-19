@@ -57,8 +57,17 @@ type previewPrivacyCase struct {
 	RawLog       string `yaml:"rawLog"`
 }
 
+// previewLogPolicy is the closed set of preview log lines and the only
+// attributes they may carry: counts and closed-set reasons.
+type previewLogPolicy struct {
+	Named    map[string]string `yaml:"named"`
+	Keys     []string          `yaml:"keys"`
+	Messages []string          `yaml:"-"`
+}
+
 type previewPrivacyFixture struct {
 	Secrets       previewPrivacySecrets `yaml:"secrets"`
+	PreviewLog    previewLogPolicy      `yaml:"previewLog"`
 	SocketCases   []string              `yaml:"socketCases"`
 	RequiredNames []string              `yaml:"requiredNames"`
 	Cases         []previewPrivacyCase  `yaml:"cases"`
