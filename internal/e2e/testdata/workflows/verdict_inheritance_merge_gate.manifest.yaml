@@ -5,6 +5,9 @@ requiredNames:
   - group-code-change-passes
   - push-code-change-passes
   - push-post-merge-evidence-skip-passes
+  - push-skipped-check-without-evidence-is-refused
+  - push-skipped-check-with-skipped-probe-is-refused
+  - dispatch-skipped-check-is-refused
   - group-docs-only-passes
   - release-group-full-passes
   - release-group-inherited-passes

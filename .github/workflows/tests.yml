@@ -43,6 +43,9 @@ jobs:
       inherit: ${{ steps.inherit.outputs.inherit || 'false' }}
       inherited_from: ${{ steps.inherit.outputs.inherited_from }}
     steps:
+      # A full clone, not redact's blob:none: the steps below read blobs at
+      # the base and head with persist-credentials off, so a lazy blob fetch
+      # could not authenticate.
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -92,6 +95,8 @@ jobs:
           path: infra-tool
           sparse-checkout: tools/release
           persist-credentials: false
+      # No cache: the tool builds only for a release entry, so a module cache
+      # would rarely be reused; redact's cache-dependency-path buys little.
       - name: Set up Go
         if: steps.precheck.outputs.build == 'true'
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
@@ -106,6 +111,9 @@ jobs:
       # candidate: this run is the bot release PR, or a merge group whose entry
       # is. release: a candidate merge group, which runs the release gates. A
       # run the pre-check filtered out never built the tool and is neither.
+      # scripts/release-group-entry prints release-intent classify's own
+      # `kind=` line, the contract redact reads from group-pr plus classify
+      # inline; TestReleaseEntryClassification runs it and pins that output.
       - name: Classify the release entry
         id: entry
         env:
@@ -163,7 +171,10 @@ jobs:
             echo "inherit=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          wait=0s
+          # A merge group may sit behind its base's group; a release PR
+          # refreshed seconds after a landing may see that landing's verdict
+          # still pending.
+          wait=2m
           if [ "$EVENT" = merge_group ]; then wait=20m; fi
           git fetch --no-tags origin "$BASE" "$HEAD"
           "$RUNNER_TEMP/release-intent" inherit-verdict --base "$BASE" --head "$HEAD" --repo "$GITHUB_REPOSITORY" --wait "$wait"
@@ -1096,6 +1107,7 @@ jobs:
           RELEASE_CANDIDATE: ${{ needs.changes.outputs.release_candidate }}
           RELEASE_ONLY: ${{ needs.changes.outputs.release_only }}
           INHERIT: ${{ needs.changes.outputs.inherit }}
+          POST_MERGE_SKIP: ${{ needs.post-merge-evidence.outputs.skip }}
           INHERITED_JOBS: check harvester-version-guard third-party-notices web-lockfiles-in-sync web-pnpm-build home-phone-gate windows schema-parity
           RELEASE_JOBS: release-content vendor-hash check-arm64 cgo0 e2e release-validate
         run: |
@@ -1123,6 +1135,12 @@ jobs:
             for job in $INHERITED_JOBS; do
               [ "$(result "$job")" = success ] || fail "$job is required for a code change"
             done
+          elif [ "$CODE" = true ] && [ "$(result check)" != success ]; then
+            # Outside the queue only a push whose post-merge probe proved the
+            # pushed tree was already tested may skip make check.
+            if [ "$EVENT" != push ] || [ "$(result post-merge-evidence)" != success ] || [ "$POST_MERGE_SKIP" != true ]; then
+              fail "check is required unless post-merge evidence proved the pushed tree"
+            fi
           fi
           if [ "$RELEASE" = true ]; then
             for job in $RELEASE_JOBS; do

@@ -33,6 +33,9 @@ var verdictInheritanceClassifyManifest []byte
 //go:embed testdata/workflows/verdict_inheritance_jobs.manifest.yaml
 var verdictInheritanceJobsManifest []byte
 
+//go:embed testdata/workflows/verdict_inheritance_kept_jobs.manifest.yaml
+var verdictInheritanceKeptJobsManifest []byte
+
 type verdictInheritanceFixture struct {
 	VerdictMarkers struct {
 		Version int      `yaml:"version"`
@@ -54,6 +57,7 @@ type verdictInheritanceFixture struct {
 	} `yaml:"inherited_jobs"`
 	KeptJobs []struct {
 		Job    string `yaml:"job"`
+		If     string `yaml:"if"`
 		Reason string `yaml:"reason"`
 	} `yaml:"kept_jobs"`
 	ReleaseJobs           []string                     `yaml:"release_jobs"`
@@ -100,6 +104,7 @@ type verdictMergeGateCase struct {
 	ReleaseCandidate *string           `yaml:"release_candidate"`
 	ReleaseOnly      *string           `yaml:"release_only"`
 	Inherit          *string           `yaml:"inherit"`
+	PostMergeSkip    *string           `yaml:"post_merge_skip"`
 	Profile          string            `yaml:"profile"`
 	Overrides        map[string]string `yaml:"overrides"`
 	ExpectedError    string            `yaml:"expected_error"`
@@ -362,6 +367,7 @@ func TestMergeGateVerdict(t *testing.T) {
 				"RELEASE_CANDIDATE="+verdictValue(c.ReleaseCandidate, "false"),
 				"RELEASE_ONLY="+verdictValue(c.ReleaseOnly, "false"),
 				"INHERIT="+inherit,
+				"POST_MERGE_SKIP="+verdictValue(c.PostMergeSkip, "false"),
 				"INHERITED_JOBS="+inheritedJobs,
 				"RELEASE_JOBS="+releaseJobs,
 			))
@@ -654,8 +660,11 @@ func TestVerdictInheritanceWiring(t *testing.T) {
 
 	keptNames := make([]string, 0, len(fixture.KeptJobs))
 	for _, k := range fixture.KeptJobs {
-		if k.Reason == "" {
-			t.Errorf("kept job %s gives no reason it runs despite an inherited verdict", k.Job)
+		if k.Reason == "" || k.If == "" {
+			t.Errorf("kept job %s needs both its if and the reason it runs despite an inherited verdict", k.Job)
+		}
+		if strings.Contains(k.If, "outputs.inherit") {
+			t.Errorf("kept job %s is pinned to an if that reads the inheritance output", k.Job)
 		}
 		keptNames = append(keptNames, k.Job)
 		job := yamlMappingValue(jobs, k.Job)
@@ -663,10 +672,11 @@ func TestVerdictInheritanceWiring(t *testing.T) {
 			t.Errorf("jobs.%s is missing", k.Job)
 			continue
 		}
-		if strings.Contains(verdictScalar(job, "if"), "outputs.inherit") {
-			t.Errorf("jobs.%s is a kept job but its if reads the inheritance output", k.Job)
+		if got := normalizeCondition(verdictScalar(job, "if")); got != k.If {
+			t.Errorf("jobs.%s if = %q, want %q", k.Job, got, k.If)
 		}
 	}
+	requireVerdictCaseNames(t, verdictInheritanceKeptJobsManifest, keptNames, "kept jobs")
 	for _, job := range fixture.ReleaseJobs {
 		if !slices.Contains(keptNames, job) {
 			t.Errorf("release job %s is not a kept job; a release group must run it", job)

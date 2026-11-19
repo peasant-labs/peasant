@@ -1,0 +1,12 @@
+# Required kept_jobs in verdict_inheritance.yaml: every job merge-gate needs
+# that an inherited verdict does not replace. Removing a row needs a
+# deliberate manifest change.
+requiredNames:
+  - determine-runner
+  - post-merge-evidence
+  - release-content
+  - vendor-hash
+  - check-arm64
+  - cgo0
+  - e2e
+  - release-validate

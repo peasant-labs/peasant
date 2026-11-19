@@ -53,24 +53,33 @@ inherited_jobs:
   - job: schema-parity
     if: "needs.changes.outputs.code == 'true' && needs.changes.outputs.inherit != 'true'"
 
-# Jobs the aggregator needs that an inherited verdict does NOT replace. Their
-# conditions never read the inheritance output.
+# Jobs the aggregator needs that an inherited verdict does NOT replace. Each
+# condition is pinned exactly and never reads the inheritance output, so an
+# inherited release group still runs every one of them.
 kept_jobs:
   - job: determine-runner
+    if: "needs.changes.outputs.code == 'true'"
     reason: cgo0 still runs in an inherited release group and is routed by it.
   - job: post-merge-evidence
+    if: "github.event_name == 'push'"
     reason: push-only probe; inheritance is never granted on push.
   - job: release-content
+    if: "needs.changes.outputs.release == 'true'"
     reason: rechecks the release content against the live default branch; the base verdict cannot prove that.
   - job: vendor-hash
+    if: "github.event_name == 'pull_request' || needs.changes.outputs.release == 'true'"
     reason: release-group gate; an ordinary base group never ran it.
   - job: check-arm64
+    if: "needs.changes.outputs.release == 'true'"
     reason: release-group gate; an ordinary base group never ran it, so the base verdict carries no arm64 signal to inherit.
   - job: cgo0
+    if: "needs.changes.outputs.release == 'true'"
     reason: release-group gate; an ordinary base group never ran it, so the base verdict carries no CGO=0 signal to inherit.
   - job: e2e
+    if: "needs.changes.outputs.release == 'true'"
     reason: release-group gate; an ordinary base group never ran it.
   - job: release-validate
+    if: "needs.changes.outputs.release == 'true'"
     reason: release-group gate that validates packaging of the exact tree being tagged; an ordinary base group never ran it.
 
 # merge-gate's RELEASE_JOBS: required to succeed in every release group,
@@ -218,7 +227,8 @@ result_profiles:
 
 # Each case runs the real merge-gate shell step over a profile with its
 # overrides. An omitted event is merge_group; omitted code is "true";
-# omitted release, release_candidate, release_only and inherit are "false".
+# omitted release, release_candidate, release_only, inherit and
+# post_merge_skip (the probe's skip output) are "false".
 # A reject names the ::error:: text it must fail with, so a jq or shell fault
 # cannot pass as a rejection. An accepting case names the one marker step
 # whose condition holds for it.
@@ -236,8 +246,25 @@ merge_gate_cases:
     expected_marker: "verdict-source: full"
   - name: push-post-merge-evidence-skip-passes
     event: push
+    post_merge_skip: "true"
     profile: push-evidence-skip
     expected_marker: "verdict-source: unaffected"
+  - name: push-skipped-check-without-evidence-is-refused
+    event: push
+    post_merge_skip: "false"
+    profile: push-evidence-skip
+    expected_error: "check is required unless post-merge evidence proved the pushed tree"
+  - name: push-skipped-check-with-skipped-probe-is-refused
+    event: push
+    post_merge_skip: ""
+    profile: push-evidence-skip
+    overrides: {post-merge-evidence: skipped}
+    expected_error: "check is required unless post-merge evidence proved the pushed tree"
+  - name: dispatch-skipped-check-is-refused
+    event: workflow_dispatch
+    profile: push-evidence-skip
+    overrides: {post-merge-evidence: skipped}
+    expected_error: "check is required unless post-merge evidence proved the pushed tree"
   - name: group-docs-only-passes
     code: "false"
     profile: group-docs-only
