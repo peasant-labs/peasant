@@ -1,0 +1,94 @@
+requiredNames:
+  - executable-literal
+  - executable-group-bit
+  - hexadecimal-executable
+  - binary-executable
+  - hexadecimal-readable
+  - readable-literal
+  - variable-mode
+  - ignored-reason
+  - helper-exempt
+  - support-source
+  - other-source
+cases:
+  - name: executable-literal
+    path: internal/demo/executable_test.go
+    matches: 1
+    source: |
+      package demo
+      import "os"
+      func f() { _ = os.WriteFile("x", nil, 0o755) }
+  - name: executable-group-bit
+    path: internal/demo/group_test.go
+    matches: 1
+    source: |
+      package demo
+      import "os"
+      func f() { _ = os.WriteFile("x", nil, 0o010) }
+  - name: readable-literal
+    path: internal/demo/readable_test.go
+    matches: 0
+    source: |
+      package demo
+      import "os"
+      func f() { _ = os.WriteFile("x", nil, 0o644) }
+  - name: hexadecimal-executable
+    path: internal/demo/hex_test.go
+    matches: 1
+    source: |
+      package demo
+      import "os"
+      func f() { _ = os.WriteFile("x", nil, 0x1ed) }
+  - name: binary-executable
+    path: internal/demo/binary_test.go
+    matches: 1
+    source: |
+      package demo
+      import "os"
+      func f() { _ = os.WriteFile("x", nil, 0b1000000) }
+  - name: hexadecimal-readable
+    path: internal/demo/hexread_test.go
+    matches: 0
+    source: |
+      package demo
+      import "os"
+      func f() { _ = os.WriteFile("x", nil, 0x1a4) }
+  - name: variable-mode
+    path: internal/demo/variable_test.go
+    matches: 0
+    source: |
+      package demo
+      import "os"
+      func f(mode os.FileMode) { _ = os.WriteFile("x", nil, mode) }
+  - name: ignored-reason
+    path: internal/demo/ignored_test.go
+    matches: 0
+    source: |
+      package demo
+      import "os"
+      func f() {
+        // not executed: this fixture is inspected only.
+        // ast-grep-ignore: no-unsafe-executable-write -- inspected fixture only.
+        _ = os.WriteFile("x", nil, 0o755)
+      }
+  - name: helper-exempt
+    path: internal/testkit/executable/fixture_test.go
+    matches: 0
+    source: |
+      package executable
+      import "os"
+      func f() { _ = os.WriteFile("x", nil, 0o755) }
+  - name: support-source
+    path: internal/e2e/support.go
+    matches: 1
+    source: |
+      package e2e
+      import "os"
+      func f() { _ = os.WriteFile("x", nil, 0o755) }
+  - name: other-source
+    path: internal/demo/production.go
+    matches: 0
+    source: |
+      package demo
+      import "os"
+      func f() { _ = os.WriteFile("x", nil, 0o755) }
