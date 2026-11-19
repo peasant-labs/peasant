@@ -36,6 +36,7 @@ func TestRefreshEvidenceCoverage(t *testing.T) {
 		t.Fatal(err)
 	}
 	read := map[string]bool{}
+	typ := reflect.TypeOf(ingest.RefreshEvidence{})
 	ast.Inspect(file, func(node ast.Node) bool {
 		lit, ok := node.(*ast.CompositeLit)
 		if !ok {
@@ -46,7 +47,7 @@ func TestRefreshEvidenceCoverage(t *testing.T) {
 			return true
 		}
 		pkg, ok := selector.X.(*ast.Ident)
-		if !ok || pkg.Name != "ingest" {
+		if !ok || pkg.Name != filepath.Base(typ.PkgPath()) {
 			return true
 		}
 		for _, element := range lit.Elts {
@@ -62,7 +63,6 @@ func TestRefreshEvidenceCoverage(t *testing.T) {
 		}
 		return true
 	})
-	typ := reflect.TypeOf(ingest.RefreshEvidence{})
 	seen := map[string]bool{}
 	kinds := map[string]bool{}
 	for i := 0; i < typ.NumField(); i++ {
