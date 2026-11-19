@@ -173,7 +173,9 @@ jobs:
           fi
           # A merge group may sit behind its base's group; a release PR
           # refreshed seconds after a landing may see that landing's verdict
-          # still pending.
+          # still pending. A base verdict still pending after the wait fails
+          # this job on purpose (fail closed); rerunning the job after the
+          # base's queue run finishes clears it.
           wait=2m
           if [ "$EVENT" = merge_group ]; then wait=20m; fi
           git fetch --no-tags origin "$BASE" "$HEAD"

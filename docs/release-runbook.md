@@ -64,8 +64,9 @@ ordinary base group never ran them and its verdict has nothing for them to
 inherit. Some of them also check the exact tree being tagged: the release
 content against the live `develop`, the vendor hash, and the packages built
 from that tree. `check-arm64` (about 18m41s) stays on the critical path, so a
-release group's wall time is roughly unchanged; the saving, about 27
-runner-minutes per release group, is runner time.
+release group's wall time is roughly unchanged; the saving is runner time,
+estimated at about 27 runner-minutes per release group from the job timings
+of the v0.21.0 release merge-group run (run 44405289479, release PR #1092).
 
 Each `merge-gate` run records where its verdict came from in its last step:
 `verdict-source: full` when `make check` ran, `verdict-source: inherited` when
@@ -76,7 +77,9 @@ chain ends at a run where `make check` passed.
 
 A missing, pending, failed or ambiguous base verdict fails the `changes` job;
 it never falls back to the suite. A merge group waits up to 20 minutes for a
-pending base verdict, and a release PR run up to 2 minutes.
+pending base verdict, and a release PR run up to 2 minutes. A base verdict
+still pending after the wait fails the job on purpose (fail closed);
+rerunning the job after the base's queue run finishes clears it.
 
 Bases from before the marker steps carry no source. Such a base is accepted
 only when its own `make check` ran (`legacy-full`), so a pre-marker docs-only
@@ -87,6 +90,11 @@ the release PR onto the new base. Until then the release PR's own required
 `merge-gate` is red, so it cannot be queued. Open release PR #1105
 ("release[patch]: v0.21.1") is the current instance: its base is #1107, a
 `CHANGELOG.md`-only change whose group skipped `make check`.
+
+The `legacy-full` acceptance is a bootstrap rule with an exit condition: it
+can be removed once no pre-marker commit can be a release PR's base, that is,
+once every release PR's base is a commit landed after verdict inheritance was
+adopted.
 
 ### One-time cutover
 

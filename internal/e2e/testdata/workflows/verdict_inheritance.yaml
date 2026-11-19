@@ -249,6 +249,13 @@ merge_gate_cases:
     post_merge_skip: "true"
     profile: push-evidence-skip
     expected_marker: "verdict-source: unaffected"
+  - name: push-docs-only-passes
+    event: push
+    code: "false"
+    post_merge_skip: "false"
+    profile: group-docs-only
+    overrides: {post-merge-evidence: success}
+    expected_marker: "verdict-source: unaffected"
   - name: push-skipped-check-without-evidence-is-refused
     event: push
     post_merge_skip: "false"
