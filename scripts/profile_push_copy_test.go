@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/testkit/gitconfig"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"gopkg.in/yaml.v3"
 )
@@ -98,11 +99,21 @@ const profileChildCaseEnv = "PEASANT_PROFILE_CHILD_CASE"
 // of its expect steps fails, so the case's status assertion reports it.
 const profileChildStepFailed = 86
 
-func TestMain(m *testing.M) {
+// TestMain is this package's one TestMain, so it also carries the git
+// isolation every package that starts a process needs (TESTING.md). The
+// isolation wraps the profiled command too: the child inherits the isolated
+// environment from its parent test either way.
+func TestMain(m *testing.M) { os.Exit(gitconfig.RunWithIsolatedGitConfig(profileChildOr{m})) }
+
+// profileChildOr runs the profiled command when the test binary is started as
+// one, and the tests otherwise.
+type profileChildOr struct{ m *testing.M }
+
+func (r profileChildOr) Run() int {
 	if name, ok := os.LookupEnv(profileChildCaseEnv); ok {
-		os.Exit(runProfileChild(name, os.Args[1:]))
+		return runProfileChild(name, os.Args[1:])
 	}
-	os.Exit(m.Run())
+	return r.m.Run()
 }
 
 // runProfileChild is the profiled command: it performs the named case's child

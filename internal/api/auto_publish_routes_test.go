@@ -125,10 +125,6 @@ func newAutoPublishWorld(t *testing.T, options autoPublishWorldOptions) *autoPub
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	// Keep the host's git configuration out of the fixture repositories: a
-	// global commit.gpgsign can block on a pinentry prompt, and host hooks or
-	// URL rewrites would change what the test observes.
-	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %s in %s: %v\n%s", strings.Join(args, " "), dir, err, out)
 	}
