@@ -1045,6 +1045,9 @@ test('preview-end-says-final', async () => {
       if (element.scrollHeight > element.clientHeight) element.scrollTop = element.scrollHeight;
     }
   });
+  // The wake source is the viewer drawing the last reply where the trace ends.
+  const lastReply = `Step ${fixture.preview.longExchanges} of the long read`;
+  await expect(pane(pageG).getByText(lastReply, { exact: false }).filter({ visible: true }).first(), 'the end of the trace is drawn').toBeInViewport();
   await shoot(pageG, '15-preview-end');
 });
 

@@ -169,6 +169,8 @@ selectionPage:
 # the sentence the server sends when a session grew after its preview opened.
 preview:
   long: long-read
+  # The long session's exchanges; its last reply opens with this step number.
+  longExchanges: 130
   growing: growing
   oversized: oversized
   grownNotice: this session has grown since the preview opened
