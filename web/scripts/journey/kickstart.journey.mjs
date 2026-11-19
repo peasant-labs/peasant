@@ -1,10 +1,11 @@
 import { test, expect } from '@playwright/test';
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { parse } from 'yaml';
-import { License, LocalKickstartEventKind, LocalKickstartIngestState, LocalKickstartNodeKind, LocalKickstartScanState, LocalKickstartStopKind, MessageType } from '@peasant-labs/schema';
+import { License, LocalKickstartEventKind, LocalKickstartIngestState, LocalKickstartNodeKind, LocalKickstartPreviewContinuation, LocalKickstartPreviewEventKind, LocalKickstartPreviewOp, LocalKickstartScanState, LocalKickstartStopKind, MessageType } from '@peasant-labs/schema';
 import { railProblems } from './lib/kickstart-rail.mjs';
+import { longSessionLines } from './lib/kickstart-seed.mjs';
 
 /**
  * The setup journey on the built binary: a fresh computer with seeded agent
@@ -56,7 +57,7 @@ const Routes = Object.freeze({
 });
 const Method = Object.freeze({ Get: 'GET', Post: 'POST' });
 const ConsoleLevel = Object.freeze({ Error: 'error' });
-const Tab = Object.freeze({ A: 'A', B: 'B', C: 'C', D: 'D', E: 'E', F: 'F' });
+const Tab = Object.freeze({ A: 'A', B: 'B', C: 'C', D: 'D', E: 'E', F: 'F', G: 'G' });
 const Css = Object.freeze({ None: 'none', Hidden: 'hidden' });
 const Labels = Object.freeze({
   Continue: 'continue', SaveAndImport: 'save and import', ImportFinished: 'import finished',
@@ -69,7 +70,15 @@ const Labels = Object.freeze({
   ChooseRules: 'choose automatic publishing rules', AutomaticPublishing: 'automatic publishing',
   Settings: 'settings', KeepLocal: 'keep local, do not publish',
   ChooseSessions: 'choose sessions', SelectionSaved: 'your selection is saved',
+  LoadMore: 'load more of this session', Raw: 'raw, on this computer only',
+  LoadedSoFar: 'loaded so far', Highlights: 'highlights', FinalResponse: 'final response',
+  LatestLoaded: 'latest loaded response', Loading: 'loading', Trace: /^trace/,
 });
+const previewTitle = (prompt) => `preview ${prompt}`;
+// The trace is read past its end, then the page is given this long to start a
+// load it must not start. The wake source is the socket: any request it sends
+// is recorded the moment it leaves.
+const SCROLL_SETTLE_MS = 1500;
 
 // The pointer's click-through: the connection stop's answer and the next stop's
 // `continue` sit in the same foot slot, so a right edge or vertical centre that
@@ -125,7 +134,8 @@ function watch(page, label) {
   });
   page.on('pageerror', (error) => consoleErrors.push(`${label} pageerror: ${error.message}`));
   page.on('request', (request) => {
-    const entry = { tab: label, method: request.method(), path: new URL(request.url()).pathname };
+    const url = new URL(request.url());
+    const entry = { tab: label, method: request.method(), path: url.pathname, origin: url.origin, protocol: url.protocol };
     // Which scope a page asked a session for says which page opened it.
     if (entry.method === Method.Post && entry.path === `${API}/sessions`) {
       try { entry.scope = JSON.parse(request.postData() ?? '{}').scope; } catch { entry.scope = null; }
@@ -874,6 +884,196 @@ test('stored-remote-matches-the-tree', async () => {
     expect(entry.gitRemote, `${entry.name}: the remote it was stored with is its repository's`).toBe(recorded.remote);
     expect(entry.gitBranch, `${entry.name}: the branch it was stored with is the branch it recorded`).toBe(recorded.branch);
   }
+});
+
+// ── the raw session preview ─────────────────────────────────────────────────
+// One page of the selection route, its socket routed through the journey so a
+// segment can be held back to show the pane loading. Every preview request the
+// page sends and every preview frame it receives is recorded by kind, op, seq
+// and continuation only: never its text.
+const previewSessions = {
+  long: seeded.find((entry) => entry.name === fixture.preview.long),
+  growing: seeded.find((entry) => entry.name === fixture.preview.growing),
+  oversized: seeded.find((entry) => entry.name === fixture.preview.oversized),
+};
+let pageG;
+let pageGHref;
+const previewSent = [];
+const previewReceived = [];
+const previewHold = { active: false, queue: [], forward: null };
+
+function previewMessage(text) {
+  if (typeof text !== 'string') return null;
+  try {
+    const message = JSON.parse(text);
+    return message.type === MessageType.KickstartPreview ? message : null;
+  } catch {
+    return null;
+  }
+}
+
+async function openPreviewPage() {
+  const page = await context.newPage();
+  watch(page, Tab.G);
+  await page.routeWebSocket(/\/api\/v1\/ws$/, (ws) => {
+    const server = ws.connectToServer();
+    ws.onMessage((message) => {
+      const preview = previewMessage(message);
+      if (preview) previewSent.push({ op: preview.preview?.op, after: preview.preview?.after });
+      server.send(message);
+    });
+    server.onMessage((message) => {
+      const preview = previewMessage(message);
+      if (preview) {
+        const { kind, seq, continuation, segment, reason } = preview.data ?? {};
+        previewReceived.push({ kind, seq, continuation, reason, segment: segment?.index ?? null });
+        if (previewHold.active && kind === LocalKickstartPreviewEventKind.Segment) {
+          previewHold.queue.push(message);
+          return;
+        }
+      }
+      ws.send(message);
+    });
+    previewHold.forward = (message) => ws.send(message);
+  });
+  await page.goto('/selection/');
+  await expect(title(page)).toHaveText('choose sessions to import');
+  pageGHref = page.url();
+  return page;
+}
+
+const pane = (page) => page.locator('.ks-session-preview');
+const loadMore = (page) => pane(page).getByRole('button', { name: Labels.LoadMore, exact: true });
+const sent = (op) => previewSent.filter((entry) => entry.op === op).length;
+const segmentsReceived = () => previewReceived.filter((entry) => entry.kind === LocalKickstartPreviewEventKind.Segment && entry.segment !== null).length;
+
+async function openPreview(page, entry) {
+  const button = page.getByRole('button', { name: previewTitle(entry.prompt), exact: true });
+  await button.scrollIntoViewIfNeeded();
+  await button.click();
+  await expect(pane(page).getByText(Labels.Raw)).toBeVisible();
+  await expect(pane(page)).toContainText(entry.prompt);
+}
+
+/** Activate load more until the directory completes. Each activation sends one request and waits for its frame. */
+async function loadToEnd(page) {
+  for (let guard = 0; guard < 32 && await loadMore(page).count() > 0; guard += 1) {
+    const before = previewReceived.length;
+    await loadMore(page).click();
+    await expect.poll(() => previewReceived.length, { message: 'the server answered the load' }).toBeGreaterThan(before);
+    await expect(loadMore(page).or(pane(page).locator('.ks-preview-notice')).or(pane(page).locator('[data-transcript-continuation]'))).toBeVisible();
+    if (await loadMore(page).count() > 0) await expect(loadMore(page)).toBeEnabled();
+  }
+  await expect(loadMore(page)).toHaveCount(0);
+}
+
+async function highlightsSay(page, words) {
+  await pane(page).getByRole('tab', { name: new RegExp(`^${Labels.Highlights}`) }).click();
+  await expect(pane(page).getByText(words, { exact: false }).first()).toBeVisible();
+}
+
+test('preview-session-in-the-viewer', async () => {
+  pageG = await openPreviewPage();
+  await openPreview(pageG, previewSessions.long);
+  expect(sent(LocalKickstartPreviewOp.Open), 'one title click opened one capture').toBe(1);
+  expect(sent(LocalKickstartPreviewOp.More), 'the first segment painted without a click').toBe(0);
+  // The code block of a reply is highlighted: its tokens are drawn in more than one colour.
+  const colours = await pane(pageG).locator('pre').first().evaluate((block) => [...new Set([...block.querySelectorAll('span')].map((span) => getComputedStyle(span).color))]);
+  expect(colours.length, `the first code block draws its tokens in more than one colour (saw ${colours.join(', ')})`).toBeGreaterThan(1);
+  // Previewing does not choose the session.
+  await expect(row(pageG, previewSessions.long.prompt)).not.toBeChecked();
+  await shoot(pageG, '13-preview-open');
+});
+
+test('preview-scroll-to-end-loads-nothing', async () => {
+  const before = previewSent.length;
+  await pane(pageG).evaluate((root) => {
+    for (const element of [root, ...root.querySelectorAll('*')]) {
+      if (element.scrollHeight > element.clientHeight) element.scrollTop = element.scrollHeight;
+    }
+  });
+  await pane(pageG).hover();
+  await pageG.mouse.wheel(0, 20000);
+  await pageG.setViewportSize({ width: 1180, height: 820 });
+  await pageG.setViewportSize(test.info().project.use.viewport);
+  await pageG.waitForTimeout(SCROLL_SETTLE_MS);
+  expect(previewSent.slice(before), 'reading to the end of the trace, wheeling and resizing sent nothing').toEqual([]);
+});
+
+test('preview-position-reads-loaded-so-far', async () => {
+  await expect(pane(pageG).getByText(Labels.LoadedSoFar, { exact: false }).first()).toBeVisible();
+  await highlightsSay(pageG, Labels.LatestLoaded);
+  await expect(pane(pageG).getByText(Labels.FinalResponse, { exact: true })).toHaveCount(0);
+  await pane(pageG).getByRole('tab', { name: Labels.Trace }).click();
+});
+
+test('preview-load-more-appends-one-segment', async () => {
+  const segmentsBefore = segmentsReceived();
+  const moreBefore = sent(LocalKickstartPreviewOp.More);
+  previewHold.active = true;
+  await loadMore(pageG).click();
+  await expect(loadMore(pageG)).toBeDisabled();
+  await expect(loadMore(pageG)).toHaveText(Labels.Loading);
+  await expect.poll(() => previewHold.queue.length, { message: 'the segment the click asked for arrived and is held' }).toBe(1);
+  await shoot(pageG, '14-preview-loading');
+  previewHold.active = false;
+  for (const message of previewHold.queue.splice(0)) previewHold.forward(message);
+  await expect(loadMore(pageG)).toBeEnabled();
+  expect(sent(LocalKickstartPreviewOp.More) - moreBefore, 'one activation sent one request').toBe(1);
+  expect(segmentsReceived() - segmentsBefore, 'and the server sent one segment').toBe(1);
+});
+
+test('preview-end-says-final', async () => {
+  await loadToEnd(pageG);
+  const last = previewReceived.at(-1);
+  expect(last.continuation, 'the last frame ended the capture').toBe(LocalKickstartPreviewContinuation.End);
+  await expect(pane(pageG).getByText(Labels.LoadedSoFar, { exact: false })).toHaveCount(0);
+  await highlightsSay(pageG, Labels.FinalResponse);
+  await expect(pane(pageG).getByText(Labels.LatestLoaded, { exact: false })).toHaveCount(0);
+  await pane(pageG).getByRole('tab', { name: Labels.Trace }).click();
+  await shoot(pageG, '15-preview-end');
+});
+
+test('preview-cut-shows-the-server-sentence', async () => {
+  await openPreview(pageG, previewSessions.oversized);
+  await loadToEnd(pageG);
+  expect(previewReceived.at(-1).continuation, 'the capture was cut').toBe(LocalKickstartPreviewContinuation.Cut);
+  await expect(pane(pageG).locator('.ks-preview-notice')).toContainText(fixture.preview.cutNotice);
+  await shoot(pageG, '16-preview-cut');
+});
+
+test('preview-grown-session-notice', async () => {
+  await openPreview(pageG, previewSessions.growing);
+  // The session grows after its preview opened: more prompt and reply lines are appended.
+  const lines = readFileSync(previewSessions.growing.path, 'utf8').trimEnd().split('\n');
+  const extra = longSessionLines(lines.at(-1), { sessionId: previewSessions.growing.sessionId, exchanges: fixture.preview.appendExchanges, replyBytes: 2000, batch: 'grown' });
+  appendFileSync(previewSessions.growing.path, `${extra.join('\n')}\n`);
+  await loadToEnd(pageG);
+  expect(previewReceived.at(-1).continuation, 'the capture ended at the extent it fixed').toBe(LocalKickstartPreviewContinuation.End);
+  await expect(pane(pageG).locator('.ks-preview-notice')).toContainText(fixture.preview.grownNotice);
+});
+
+test('preview-leaves-no-trace', async () => {
+  const words = ['the long read', 'ledger totals add up', previewSessions.long.prompt];
+  const traces = await pageG.evaluate(async (needles) => {
+    const held = (storage) => Array.from({ length: storage.length }, (_, index) => `${storage.key(index)}=${storage.getItem(storage.key(index))}`).join('\n');
+    const text = `${held(localStorage)}\n${held(sessionStorage)}`;
+    return {
+      storage: needles.filter((needle) => text.includes(needle)),
+      databases: typeof indexedDB.databases === 'function' ? (await indexedDB.databases()).map((db) => db.name) : [],
+      caches: 'caches' in window ? await caches.keys() : [],
+    };
+  }, words);
+  expect(traces.storage, 'browser storage holds no preview text').toEqual([]);
+  expect(traces.databases, 'no IndexedDB database was opened').toEqual([]);
+  expect(traces.caches, 'no Cache Storage was written').toEqual([]);
+  expect(pageG.url(), 'the URL never changed').toBe(pageGHref);
+  const origin = new URL(pageGHref).origin;
+  const offsite = requests.filter((entry) => entry.tab === Tab.G && /^(https?|wss?):$/.test(entry.protocol) && entry.origin !== origin);
+  expect(offsite, 'no request left this computer').toEqual([]);
+  // Every capture ended by completing its directory: none was closed under the page.
+  expect(previewReceived.filter((entry) => entry.kind === LocalKickstartPreviewEventKind.Closed), 'no capture was closed by the server').toEqual([]);
+  await pageG.close();
 });
 
 test('computed-styles-and-themes', async () => {
