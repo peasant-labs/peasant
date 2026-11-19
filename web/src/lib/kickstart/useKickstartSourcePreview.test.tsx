@@ -273,4 +273,3 @@ describe('the raw session preview on the selection page', () => {
     });
   }
 });
-
