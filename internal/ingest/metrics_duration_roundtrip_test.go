@@ -76,9 +76,12 @@ func TestManagedMetricsDurationRoundtrip(t *testing.T) {
 				if count := durationStampMetadata(t, output, version, "changed project"); count != 1 {
 					t.Fatalf("metadata count %d", count)
 				}
+				if err := os.Rename(source, source+"-unavailable"); err != nil {
+					t.Fatal(err)
+				}
 				result, err = pipeline.Run(t.Context())
-				if err != nil {
-					t.Fatalf("refresh: %v", err)
+				if err != nil || result.Summary.Indexed != 0 {
+					t.Fatalf("adapter refresh reparsed entries: %+v %v", result, err)
 				}
 				input, err = db.ReadMetricInput(t.Context(), sid, true)
 				if err != nil || input == nil || input.GenerationID == old {
