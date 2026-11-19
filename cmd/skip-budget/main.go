@@ -71,15 +71,7 @@ func main() {
 	entries := flag.Int("entries", matrixEntries, "entries per session (C4 always uses 10)")
 	rounds := flag.Int("rounds", 5, "rounds per case; each round runs both arms once")
 	flag.Parse()
-	cases := []matrixCase{
-		{Name: upgrade.MeasurementCaseStampOnly, Shape: "stamp-only adapter bump: proof and settle vs parse"},
-		{Name: upgrade.MeasurementCaseIndexerBump, Shape: "indexer bump: stored-index lane vs native"},
-		{Name: upgrade.MeasurementCaseNewSession, Shape: "new session: 2 x 10"},
-		{Name: upgrade.MeasurementCaseUndeclaredProducer, Shape: "undeclared producer: the full step the plan names"},
-	}
-	for i := range cases {
-		cases[i].DataDir = filepath.Join(*root, string(cases[i].Name))
-	}
+	cases := matrixCases(*root)
 	if *list {
 		if err := json.NewEncoder(os.Stdout).Encode(report{Cases: cases}); err != nil {
 			fmt.Fprintf(os.Stderr, "skip-budget: writing matrix to stdout failed: %v\n", err)
@@ -131,6 +123,21 @@ func main() {
 		}
 		fmt.Println(path)
 	}
+}
+
+// matrixCases lists every case the harness can run, in matrix order, with its
+// data directory under root.
+func matrixCases(root string) []matrixCase {
+	cases := []matrixCase{
+		{Name: upgrade.MeasurementCaseStampOnly, Shape: "stamp-only adapter bump: proof and settle vs parse"},
+		{Name: upgrade.MeasurementCaseIndexerBump, Shape: "indexer bump: stored-index lane vs native"},
+		{Name: upgrade.MeasurementCaseNewSession, Shape: "new session: 2 x 10"},
+		{Name: upgrade.MeasurementCaseUndeclaredProducer, Shape: "undeclared producer: the full step the plan names"},
+	}
+	for i := range cases {
+		cases[i].DataDir = filepath.Join(root, string(cases[i].Name))
+	}
+	return cases
 }
 
 func fail(code int, message string) {
