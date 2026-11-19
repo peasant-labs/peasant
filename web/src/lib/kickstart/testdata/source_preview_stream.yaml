@@ -32,8 +32,11 @@
 #   expectTurnLabels the turn number each drawn turn reads, by stream turn index:
 #                  {"<index>": "#<label>"}
 #   expectStateInPane a state shown before any segment (reading, or a stop) sits in the
-#                  reading pane the viewer fills, so the pane keeps its size: the words
-#                  the pane holds
+#                  slot the viewer fills, so the slot keeps its size: the words the slot
+#                  holds
+#   expectPreviewColumn the preview column is the labelled region alone, holding the
+#                  viewer's own root or a state: {region: accessible name, holds: viewer |
+#                  state, absentText: [whole texts no element of the column may read]}
 #   expectNoticeTone how the stop's notice reads: {tone: error | neutral, text: words of it,
 #                  readAgainInside: true when `read again` sits in the error card}
 #
@@ -127,6 +130,7 @@ requiredNames:
   - source-cap-stop-stays-neutral
   - end-stays-neutral
   - failed-preview-keeps-the-pane
+  - preview-column-is-the-viewer-alone
 defaultServer:
   "GET /api/v1/kickstart/status": {body: {configured: true}}
   "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
@@ -150,7 +154,6 @@ cases:
       - serve: {opened: true}
       - serve: {segment: 0}
       - expectTurnText: {index: 0, drawn: true}
-      - expectText: ["raw, on this computer only"]
       - expectSent: {op: more, count: 0}
       # Previewing does not select: the row's checkbox is as the server drew it.
       - expectControl: {role: checkbox, name: fix the ledger rounding, checked: true}
@@ -357,7 +360,6 @@ cases:
       - expectText: [two sessions on the main branch]
       - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-selection/tree/p-ledger/preview", count: 1}
       - expectSent: {op: open, count: 0}
-      - expectNoText: ["raw, on this computer only"]
 
   - name: refused-open-shows-the-server-note
     stream: ledger
@@ -559,3 +561,18 @@ cases:
       - serve: {closed: unreadable, code: kickstart_preview_unreadable, message: "the preview could not be read; check that the transcript is readable and try again"}
       - expectStateInPane: the preview could not be read
       - expectNoticeTone: {tone: error, text: "the preview could not be read", readAgainInside: true}
+
+  # The right column is the transcript viewer itself: no "preview" heading, no
+  # "raw, on this computer only" line, no frame around it. Before a title is
+  # clicked, while reading and once a segment arrives, the column is one
+  # labelled region, so a screen reader still announces it.
+  - name: preview-column-is-the-viewer-alone
+    stream: ledger
+    steps:
+      - expectPreviewColumn: {region: session preview, holds: state, absentText: [preview, "raw, on this computer only"]}
+      - click: preview fix the ledger rounding
+      - expectPreviewColumn: {region: session preview, holds: state, absentText: [preview, "raw, on this computer only"]}
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - expectPreviewColumn: {region: session preview, holds: viewer, absentText: [preview, "raw, on this computer only"]}
+      - expectNoText: ["raw, on this computer only"]

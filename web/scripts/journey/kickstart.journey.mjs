@@ -70,7 +70,7 @@ const Labels = Object.freeze({
   ChooseRules: 'choose automatic publishing rules', AutomaticPublishing: 'automatic publishing',
   Settings: 'settings', KeepLocal: 'keep local, do not publish',
   ChooseSessions: 'choose sessions', SelectionSaved: 'your selection is saved',
-  LoadMore: 'load more of this session', Raw: 'raw, on this computer only',
+  LoadMore: 'load more of this session', PreviewRegion: 'session preview', RemovedRawLine: 'raw, on this computer only',
   LoadedSoFar: 'loaded so far', Highlights: 'highlights', FinalResponse: 'final response',
   LatestLoaded: 'latest loaded response', Loading: 'loading', Trace: /^full trace/,
 });
@@ -985,7 +985,7 @@ async function openPreviewPage() {
   return page;
 }
 
-const pane = (page) => page.locator('.ks-session-preview');
+const pane = (page) => page.getByRole('region', { name: Labels.PreviewRegion, exact: true });
 const loadMore = (page) => pane(page).getByRole('button', { name: Labels.LoadMore, exact: true });
 const sent = (op) => previewSent.filter((entry) => entry.op === op).length;
 const segmentsReceived = () => previewReceived.filter((entry) => entry.kind === LocalKickstartPreviewEventKind.Segment && entry.segment !== null).length;
@@ -994,8 +994,38 @@ async function openPreview(page, entry) {
   const button = page.getByRole('button', { name: previewTitle(entry.prompt), exact: true });
   await button.scrollIntoViewIfNeeded();
   await button.click();
-  await expect(pane(page).getByText(Labels.Raw)).toBeVisible();
   await expect(pane(page)).toContainText(entry.prompt);
+  // The column is the viewer alone: no caption above it.
+  await expect(page.getByText(Labels.RemovedRawLine, { exact: true })).toHaveCount(0);
+}
+
+/**
+ * Where the viewer sits in its column, as drawn: the column's, the slot's and
+ * the viewer root's border boxes, and the padding and border of the two
+ * boxes around the viewer. The viewer is the column itself when its border
+ * box starts at the column's edge and nothing around it draws a frame.
+ */
+async function viewerFrame(page) {
+  return pane(page).evaluate((slot) => {
+    const column = slot.parentElement;
+    const viewer = slot.firstElementChild;
+    const box = (element) => {
+      const rect = element.getBoundingClientRect();
+      return { left: rect.left, top: rect.top, right: rect.right };
+    };
+    const frame = (element) => {
+      const style = getComputedStyle(element);
+      return ['Top', 'Right', 'Bottom', 'Left'].flatMap((side) => [style[`padding${side}`], style[`border${side}Width`]]).filter((value) => value !== '0px');
+    };
+    return {
+      slotChildren: slot.children.length,
+      columnChildren: column.children.length,
+      column: box(column),
+      viewer: box(viewer),
+      columnFrame: frame(column),
+      slotFrame: frame(slot),
+    };
+  });
 }
 
 /** Activate load more until the directory completes. Each activation sends one request and waits for its frame. */
@@ -1056,6 +1086,16 @@ test('preview-session-in-the-viewer', async () => {
   expect(colours.length, `the first code block draws its tokens in more than one colour (saw ${colours.join(', ')})`).toBeGreaterThan(1);
   // Previewing does not choose the session.
   await expect(row(pageG, previewSessions.long.prompt)).not.toBeChecked();
+  // The right column is the transcript viewer itself: its border box starts at
+  // the column's edge, with no padded or bordered frame around it.
+  const frame = await viewerFrame(pageG);
+  expect(frame.columnChildren, 'the column holds the preview region alone').toBe(1);
+  expect(frame.slotChildren, 'the region holds the viewer alone').toBe(1);
+  expect(frame.columnFrame, 'the column draws no padding or border').toEqual([]);
+  expect(frame.slotFrame, 'the region draws no padding or border').toEqual([]);
+  for (const edge of ['left', 'top', 'right']) {
+    expect(Math.abs(frame.viewer[edge] - frame.column[edge]), `the viewer's ${edge} edge is the column's (viewer ${frame.viewer[edge]}, column ${frame.column[edge]})`).toBeLessThan(0.5);
+  }
   await shoot(pageG, '13-preview-open');
 });
 

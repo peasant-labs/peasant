@@ -8,6 +8,7 @@ import { useKickstartPreview } from '@/lib/kickstart/usePreview';
 import { scanPercent, selectedIds } from '@/lib/kickstart/view';
 import { KickstartScanState } from '@/lib/kickstart/values';
 import { ExampleLines } from './PrivacyStep';
+import PreviewSlot, { PreviewSlotContent } from './PreviewSlot';
 
 // The transcript viewer is large; it loads the first time a session row is previewed.
 const SessionPreview = lazy(() => import('./SessionPreview'));
@@ -157,11 +158,14 @@ export function SelectionStep({ field, api }: { field: KickstartField; api: Kick
               <SelectionTree nodes={rows} value={selection.ids} onSelectionChange={onSelectionChange} onPreview={setHighlighted} previewId={highlighted} ariaLabel="sessions to import" />
             </div>
           )}
-          <aside className="ks-preview" aria-label="preview">
-            <p className="ks-preview-title">preview</p>
-            {highlighted === null && <p className="ks-help">click a title to read the start of it. previewing does not select it. use its checkbox to import it.</p>}
+          <div className="ks-preview">
+            {highlighted === null && (
+              <PreviewSlot content={PreviewSlotContent.State}>
+                <p className="ks-help">click a title to read the start of it. previewing does not select it. use its checkbox to import it.</p>
+              </PreviewSlot>
+            )}
             {sessionRow !== null && session !== null && (
-              <Suspense fallback={<Skeleton label="reading the preview" avatar={false} lines={2} />}>
+              <Suspense fallback={<PreviewSlot content={PreviewSlotContent.State}><Skeleton label="reading the preview" avatar={false} lines={2} /></PreviewSlot>}>
                 <SessionPreview sessionId={session.id} nodeId={sessionRow.id} label={sessionRow.label} scanGeneration={finishedScans} />
               </Suspense>
             )}
@@ -170,7 +174,7 @@ export function SelectionStep({ field, api }: { field: KickstartField; api: Kick
             {preview.lines !== null && (preview.lines.length === 0
               ? <p className="ks-help">this row has nothing to preview.</p>
               : <ExampleLines lines={preview.lines} label="preview lines" />)}
-          </aside>
+          </div>
         </div>
       )}
       {tree !== null && rows.length > 0 && (

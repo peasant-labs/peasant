@@ -16,6 +16,7 @@ import { PreviewNoticeTone, READ_AGAIN } from '@/lib/kickstart/sourcePreview';
 import { continueTurnLabels } from '@/lib/kickstart/previewTurnLabels';
 import { cookSegment } from '@/components/session-detail/v2/lib/transcriptSegments';
 import ErrorCard from '@/components/ErrorCard';
+import PreviewSlot, { PreviewSlotContent } from './PreviewSlot';
 
 /**
  * The raw preview of one session row, read on this computer and shown in the
@@ -31,6 +32,9 @@ import ErrorCard from '@/components/ErrorCard';
  * app-initiated clipboard copy, no turn permalinks (so no URL change), and no
  * Markdown images (so no request). The text is raw: the preview is not
  * redacted, which is why it never leaves this computer.
+ *
+ * The viewer is the column itself: it sits in the preview slot with no
+ * heading, caption or frame of its own around it.
  */
 
 const NO_TRAIL: never[] = [];
@@ -154,9 +158,9 @@ export default function SessionPreview({ sessionId, nodeId, label, scanGeneratio
   ) : null;
 
   if (viewModel === null || directory === null) {
-    // Reading, or stopped before a segment arrived: the state sits in the same
-    // reading pane the viewer fills, so the pane keeps its size and the tree
-    // beside it does not move when a preview fails or loads.
+    // Reading, or stopped before a segment arrived: the state sits in the slot
+    // the viewer fills, at the same size, so the tree beside it does not move
+    // when a preview fails or loads.
     let state = <Skeleton label="reading the preview" avatar={false} lines={2} />;
     if (notice !== null && noticeTone === PreviewNoticeTone.Error) {
       state = (
@@ -173,14 +177,7 @@ export default function SessionPreview({ sessionId, nodeId, label, scanGeneratio
         </div>
       );
     }
-    return (
-      <div className="ks-session-preview" data-preview-pane-state>
-        <p className="ks-preview-raw" aria-hidden={notice !== null ? true : undefined} data-reserved={notice !== null ? true : undefined}>
-          raw, on this computer only
-        </p>
-        <div className="ks-session-preview-viewer ks-session-preview-state">{state}</div>
-      </div>
-    );
+    return <PreviewSlot content={PreviewSlotContent.State}>{state}</PreviewSlot>;
   }
 
   const continuationBody = (
@@ -198,29 +195,26 @@ export default function SessionPreview({ sessionId, nodeId, label, scanGeneratio
   );
 
   return (
-    <div className="ks-session-preview" data-preview-session>
-      <p className="ks-preview-raw">raw, on this computer only</p>
-      <div className="ks-session-preview-viewer">
-        <TranscriptViewer
-          viewModel={viewModel}
-          theme={theme}
-          headingLevel={3}
-          // No trail: the viewer's default one links to `#`, which would write
-          // to the URL. The tree beside the pane already says where it is.
-          breadcrumb={NO_TRAIL}
-          capabilities={NO_CAPABILITIES}
-          allowMarkdownImages={false}
-          allowClipboard={false}
-          leftRailOpen={leftRailOpen}
-          onLeftRailOpenChange={setLeftRailOpen}
-          rightRailOpen={rightRailOpen}
-          onRightRailOpenChange={setRightRailOpen}
-          directory={directory}
-          segments={segments}
-          onLoadSegment={answerFromMemory}
-          continuation={continuation === null ? undefined : { state: continuation, notice: continuationNotice, onLoadMore: loadMore }}
-        />
-      </div>
-    </div>
+    <PreviewSlot content={PreviewSlotContent.Viewer}>
+      <TranscriptViewer
+        viewModel={viewModel}
+        theme={theme}
+        headingLevel={3}
+        // No trail: the viewer's default one links to `#`, which would write
+        // to the URL. The tree beside the pane already says where it is.
+        breadcrumb={NO_TRAIL}
+        capabilities={NO_CAPABILITIES}
+        allowMarkdownImages={false}
+        allowClipboard={false}
+        leftRailOpen={leftRailOpen}
+        onLeftRailOpenChange={setLeftRailOpen}
+        rightRailOpen={rightRailOpen}
+        onRightRailOpenChange={setRightRailOpen}
+        directory={directory}
+        segments={segments}
+        onLoadSegment={answerFromMemory}
+        continuation={continuation === null ? undefined : { state: continuation, notice: continuationNotice, onLoadMore: loadMore }}
+      />
+    </PreviewSlot>
   );
 }
