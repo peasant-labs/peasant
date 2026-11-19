@@ -65,7 +65,7 @@ func TestVetGoTaggedDiscovery(t *testing.T) {
 			dir := t.TempDir()
 			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()
-			env := append(os.Environ(), "GOWORK=off", "GOFLAGS=", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull)
+			env := append(os.Environ(), "GOWORK=off", "GOFLAGS=")
 			run := func(name string, args ...string) ([]byte, error) {
 				cmd := exec.CommandContext(ctx, name, args...)
 				cmd.Dir = dir

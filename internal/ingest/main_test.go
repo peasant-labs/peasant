@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"go.uber.org/goleak"
+	"github.com/peasant-labs/peasant/internal/testkit/gitconfig"
 )
 
 // TestMain checks for leaked goroutines and gives every child git a hermetic
@@ -16,18 +16,5 @@ import (
 // WithOpenCodeEnvironment options; production keeps the environment default at
 // the composition root.
 func TestMain(m *testing.M) {
-	if err := os.Setenv("GIT_CONFIG_GLOBAL", os.DevNull); err != nil {
-		panic(err)
-	}
-	if err := os.Setenv("GIT_CONFIG_NOSYSTEM", "1"); err != nil {
-		panic(err)
-	}
-	// Config injected through the environment (git -c, GIT_CONFIG_COUNT/KEY/VALUE)
-	// bypasses both files above.
-	for _, name := range []string{"GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS"} {
-		if err := os.Unsetenv(name); err != nil {
-			panic(err)
-		}
-	}
-	goleak.VerifyTestMain(m)
+	os.Exit(gitconfig.RunWithIsolatedGitConfig(gitconfig.WithGoleak(m)))
 }
