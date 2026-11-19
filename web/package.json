@@ -49,7 +49,7 @@
   },
   "dependencies": {
     "@peasant-labs/fairtrade": "0.0.71",
-    "@peasant-labs/schema": "0.57.0",
+    "@peasant-labs/schema": "0.58.1",
     "@xyflow/react": "^12.10.1",
     "clsx": "^2.1.1",
     "diff": "^9.0.0",
@@ -83,6 +83,6 @@
     "yaml": "2.9.0",
     "eslint": "9.39.1",
     "typescript-eslint": "8.46.4",
-    "eslint-plugin-unstring": "0.2.1"
+    "eslint-plugin-unstring": "0.3.0"
   }
 }
