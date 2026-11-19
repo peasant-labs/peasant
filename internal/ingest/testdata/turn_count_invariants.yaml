@@ -41,14 +41,17 @@ cases:
     path: unmanaged
     wantTurnCount: 6
     wantConversationTurnCount: 3
+  # The managed build stores the thinking-only reply as one entry, as the
+  # stored indexer does, so both paths fold to the same turns.
   - name: counts-managed-session
     path: managed
-    wantTurnCount: 7
+    wantTurnCount: 6
     wantConversationTurnCount: 3
   # OpenCode messages built with the indexer's BuildGeneration: a prompt, a
   # tool-only message, a shell-form message, a text-then-tool message and a
   # reasoning-then-tool message. Only the prompt and the text reply are
-  # conversation turns.
+  # conversation turns. The reasoning is a thinking child of its reply and
+  # folds to a turn of its own under it.
   - name: counts-managed-opencode-session
     path: managed-opencode
     sessionId: ses_opencodeTurnCounts
@@ -83,7 +86,7 @@ cases:
         timeCreated: 8000
         timeUpdated: 9000
         data: '{"id":"msg_rt","type":"assistant","agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"reasoning","id":"prt_reason","text":"Weighing it."},{"type":"tool","id":"prt_tool_after_reason","name":"read","state":{"status":"completed","input":{"path":"b.go"},"content":[{"type":"text","text":"body"}]},"time":{"created":8000,"completed":9000}}],"time":{"created":8000,"completed":9000}}'
-    wantTurnCount: 5
+    wantTurnCount: 6
     wantConversationTurnCount: 2
     wantToolCallCount: 4
   # A Codex rollout built with the indexer's BuildGeneration: a prompt and a

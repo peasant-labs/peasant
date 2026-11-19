@@ -70,6 +70,18 @@
   fallback: parse
   reason: adapter_behind
   lane: stored-metadata
+- id: claude-adapter-5
+  harness: claude-code
+  kind: metadata-adapter
+  from: 4
+  to: 5
+  change_scope: metadata-only
+  input: stored-transcript
+  output_proof: [content-hash, metadata-context-digest]
+  precheck: adapter-context-equivalence
+  fallback: parse
+  reason: adapter_behind
+  lane: stored-metadata
 - id: claude-indexer-25
   harness: claude-code
   kind: transcript-indexer
@@ -87,6 +99,18 @@
   kind: transcript-indexer
   from: 25
   to: 26
+  change_scope: index-only
+  input: stored-transcript
+  output_proof: []
+  precheck: none
+  fallback: reindex-stored
+  reason: indexer_behind
+  lane: stored-index
+- id: claude-indexer-27-managed
+  harness: claude-code
+  kind: transcript-indexer
+  from: 26
+  to: 27
   change_scope: index-only
   input: stored-transcript
   output_proof: []
@@ -159,6 +183,18 @@
   kind: transcript-indexer
   from: 19
   to: 20
+  change_scope: index-only
+  input: stored-transcript
+  output_proof: []
+  precheck: none
+  fallback: reindex-stored
+  reason: indexer_behind
+  lane: stored-index
+- id: opencode-indexer-21-managed
+  harness: opencode
+  kind: transcript-indexer
+  from: 20
+  to: 21
   change_scope: index-only
   input: stored-transcript
   output_proof: []

@@ -18,7 +18,9 @@ freshness_cases:
     # comes from its own text part. That part would render the same prose a
     # second time, so indexing keeps the message row and drops the part row.
     expected_target_entries: 6
-    expected_target_turns: 3
+    # The original assistant message's reasoning part is a thinking child of
+    # its reply and folds to a turn of its own.
+    expected_target_turns: 4
     expected_content: committed WAL update
 
 required_candidate_cases:
@@ -64,7 +66,8 @@ recovery_cases:
   # and the mounted source is never touched. The database-to-file metadata
   # rebuild stays dropped; this repair reads the native source, not the
   # database. URD ruling 2026-09-12 supersedes the report-and-run---force
-  # behavior these cases used to pin.
+  # behavior these cases used to pin. The assistant message's reasoning part
+  # is a thinking child of its reply and folds to a turn of its own.
   - name: missing-metadata-valid-managed-envelope
     source_fixture: legacy-mounted-projection
     target_session: ses_3cd91f52effeXd3QAJ54jOyzv5
@@ -72,7 +75,7 @@ recovery_cases:
     envelope_mutation: none
     expected_recovery: true
     expected_entries: 5
-    expected_turns: 2
+    expected_turns: 3
     expected_tool_call: {id: call_synthetic, input_contains: MUST_NOT_OPEN, output_contains: INLINE_OUTPUT, duration_ms: 10}
   - name: corrupt-metadata-valid-managed-envelope
     source_fixture: legacy-mounted-projection
@@ -81,7 +84,7 @@ recovery_cases:
     envelope_mutation: none
     expected_recovery: true
     expected_entries: 5
-    expected_turns: 2
+    expected_turns: 3
     expected_tool_call: {id: call_synthetic, input_contains: MUST_NOT_OPEN, output_contains: INLINE_OUTPUT, duration_ms: 10}
   - name: arbitrary-json-fails-closed
     source_fixture: legacy-mounted-projection
@@ -90,7 +93,7 @@ recovery_cases:
     envelope_mutation: arbitrary_json
     expected_recovery: true
     expected_entries: 5
-    expected_turns: 2
+    expected_turns: 3
     expected_tool_call: {id: call_synthetic, input_contains: MUST_NOT_OPEN, output_contains: INLINE_OUTPUT, duration_ms: 10}
   - name: wrong-version-fails-closed
     source_fixture: legacy-mounted-projection
@@ -99,7 +102,7 @@ recovery_cases:
     envelope_mutation: wrong_version
     expected_recovery: true
     expected_entries: 5
-    expected_turns: 2
+    expected_turns: 3
     expected_tool_call: {id: call_synthetic, input_contains: MUST_NOT_OPEN, output_contains: INLINE_OUTPUT, duration_ms: 10}
   - name: wrong-kind-fails-closed
     source_fixture: legacy-mounted-projection
@@ -108,5 +111,5 @@ recovery_cases:
     envelope_mutation: wrong_kind
     expected_recovery: true
     expected_entries: 5
-    expected_turns: 2
+    expected_turns: 3
     expected_tool_call: {id: call_synthetic, input_contains: MUST_NOT_OPEN, output_contains: INLINE_OUTPUT, duration_ms: 10}

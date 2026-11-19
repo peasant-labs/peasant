@@ -86,7 +86,9 @@ func TestWithFullContent_ClaudeThinkingBlock(t *testing.T) {
 	)
 
 	longThinking := strings.Repeat("C", defaults.ContentPreviewLimit+200)
-	line := fmt.Sprintf(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","text":%q}]}}`, longThinking)
+	// A tool call keeps the thinking a child of the reply: a thinking-only
+	// reply would hold it as its own content instead.
+	line := fmt.Sprintf(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","text":%q},{"type":"tool_use","id":"toolu_1","name":"Read","input":{}}]}}`, longThinking)
 	session := makeClaudeSession(t, fs, testutil.TestSessionUUID, line)
 
 	entries, err := idxFull.IndexTranscript(ctx, session)

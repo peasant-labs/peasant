@@ -612,7 +612,7 @@ rules:
     internal/ingest/claude_identity_chain_test.go: 2
     internal/ingest/claude_identity_test.go: 2
     internal/ingest/claude_indexer.go: 33
-    internal/ingest/claude_indexer_v2_test.go: 3
+    internal/ingest/claude_indexer_v2_test.go: 2
     internal/ingest/claude_session_locator_test.go: 1
     internal/ingest/codex_catalog_test.go: 1
     internal/ingest/codex_delivery.go: 2
@@ -659,7 +659,7 @@ rules:
     internal/ingest/opencode_preview_bound_internal_test.go: 3
     internal/ingest/opencode_projection_internal_test.go: 11
     internal/ingest/opencode_projection_test.go: 2
-    internal/ingest/opencode_provenance.go: 6
+    internal/ingest/opencode_provenance.go: 4
     internal/ingest/opencode_provenance_decode.go: 17
     internal/ingest/opencode_provenance_test.go: 6
     internal/ingest/opencode_session_authority_internal_test.go: 3

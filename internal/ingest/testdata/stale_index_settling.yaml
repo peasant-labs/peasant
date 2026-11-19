@@ -100,7 +100,7 @@ cases:
     transcript: claude-certifiable
     wantCaptureStatus: complete
     wantCaptureFormat: full
-    wantEntries: 3
+    wantEntries: 2
   - name: claude-null-identity-strict-refused
     harness: claude-code
     transcript: claude-unrepresented
@@ -108,7 +108,7 @@ cases:
     wantCaptureFormat: full
     wantFailureCode: unknown_data_retained
     wantRetainedKind: future-record
-    wantEntries: 4
+    wantEntries: 3
   - name: claude-stored-identity-strict-refused
     harness: claude-code
     transcript: claude-unrepresented
@@ -117,7 +117,7 @@ cases:
     wantCaptureFormat: full
     wantFailureCode: unknown_data_retained
     wantRetainedKind: future-record
-    wantEntries: 4
+    wantEntries: 3
   - name: codex-null-identity-retains-unknown
     harness: codex
     transcript: codex-unrepresented
@@ -150,7 +150,7 @@ cases:
     wantCaptureFormat: full
     wantFailureCode: unknown_data_retained
     wantRetainedKind: progress
-    wantEntries: 4
+    wantEntries: 3
   - name: codex-unknown-record-settles
     harness: codex
     transcript: codex-unknown-record
