@@ -5,94 +5,6 @@
 # least one violation; must-pass cases report none. Case names are pinned in
 # git_isolation_scanner_manifest.yaml.
 cases:
-  - name: isolation after goleak is rejected
-    input:
-      files:
-        go.mod: "module example.com/m\n\ngo 1.25\n"
-        tool/tool_test.go: |
-          package tool
-          import ("os/exec"; "testing")
-          func TestMain(m *testing.M) { goleak.VerifyTestMain(m); os.Exit(gitconfig.RunWithIsolatedGitConfig(m)) }
-          func TestGit(t *testing.T) { _ = exec.Command("git", "status") }
-    expected:
-      needs: [tool]
-      violations: [tool]
-    classification: must-fail
-    provenance:
-      source: boundary
-      ref: "isolation after the runner cannot protect its tests"
-    mutation:
-      description: "move the isolation exit after the goleak runner"
-  - name: a discarded isolation result is rejected
-    input:
-      files:
-        go.mod: "module example.com/m\n\ngo 1.25\n"
-        tool/tool_test.go: |
-          package tool
-          import ("os/exec"; "testing")
-          func TestMain(m *testing.M) { gitconfig.RunWithIsolatedGitConfig(m) }
-          func TestGit(t *testing.T) { _ = exec.Command("git", "status") }
-    expected:
-      needs: [tool]
-      violations: [tool]
-    classification: must-fail
-    provenance:
-      source: boundary
-      ref: "a discarded failure code must not permit success without tests"
-    mutation:
-      description: "discard the isolation runner exit code"
-  - name: a test runner called before isolation is rejected
-    input:
-      files:
-        go.mod: "module example.com/m\n\ngo 1.25\n"
-        tool/tool_test.go: |
-          package tool
-          import ("os/exec"; "testing")
-          func TestMain(m *testing.M) { m.Run(); os.Exit(gitconfig.RunWithIsolatedGitConfig(m)) }
-          func TestGit(t *testing.T) { _ = exec.Command("git", "status") }
-    expected:
-      needs: [tool]
-      violations: [tool]
-    classification: must-fail
-    provenance:
-      source: boundary
-      ref: "the test runner must not run before isolation"
-    mutation:
-      description: "run the tests before the isolated runner"
-  - name: a prelude before the isolated exit passes
-    input:
-      files:
-        go.mod: "module example.com/m\n\ngo 1.25\n"
-        tool/tool_test.go: |
-          package tool
-          import ("os/exec"; "testing")
-          func TestMain(m *testing.M) { os.Setenv("HOME", "/tmp"); os.Exit(gitconfig.RunWithIsolatedGitConfig(m)) }
-          func TestGit(t *testing.T) { _ = exec.Command("git", "status") }
-    expected:
-      needs: [tool]
-    classification: must-pass
-    provenance:
-      source: boundary
-      ref: "environment setup may precede the isolated exit"
-    mutation:
-      description: "add a setup prelude"
-  - name: an isolated runner composes with goleak
-    input:
-      files:
-        go.mod: "module example.com/m\n\ngo 1.25\n"
-        tool/tool_test.go: |
-          package tool
-          import ("os/exec"; "testing")
-          func TestMain(m *testing.M) { os.Exit(gitconfig.RunWithIsolatedGitConfig(gitconfig.WithGoleak(m))) }
-          func TestGit(t *testing.T) { _ = exec.Command("git", "status") }
-    expected:
-      needs: [tool]
-    classification: must-pass
-    provenance:
-      source: requirement
-      ref: "isolation composes with a separate test runner"
-    mutation:
-      description: "wrap the test runner with goleak"
   - name: a test that runs git with the isolating TestMain passes
     input:
       files:
@@ -286,53 +198,251 @@ cases:
       ref: "a nested module runs its own tests; testdata is not compiled"
     mutation:
       description: "placed unisolated git tests in a nested module and under testdata"
-  - name: helper package alone is exempt
+  - name: isolation after running tests is rejected
     input:
       files:
-        go.mod: "module github.com/peasant-labs/peasant\n\ngo 1.25\n"
-        internal/testkit/gitconfig/tool_test.go: |
+        go.mod: "module example.com/m\n\ngo 1.25\n"
+        tool/tool_test.go: |
           package tool
-          import "os/exec"
-          var _ = exec.Command
+          import ("os"; "os/exec"; "testing")
+          func TestGit(t *testing.T) { _ = exec.Command("git", "status") }
+          func TestMain(m *testing.M) { m.Run(); os.Exit(testutil.RunWithIsolatedGitConfig(m)) }
     expected:
-      needs: [internal/testkit/gitconfig]
+      needs: [tool]
+      violations: [tool]
+    classification: must-fail
+    provenance:
+      source: boundary
+      ref: "the isolation result must be the sole final exit status"
+    mutation:
+      description: "isolation after running tests is rejected"
+  - name: discarded isolation result is rejected
+    input:
+      files:
+        go.mod: "module example.com/m\n\ngo 1.25\n"
+        tool/tool_test.go: |
+          package tool
+          import ("os"; "os/exec"; "testing")
+          func TestGit(t *testing.T) { _ = exec.Command("git", "status") }
+          func TestMain(m *testing.M) { testutil.RunWithIsolatedGitConfig(m) }
+    expected:
+      needs: [tool]
+      violations: [tool]
+    classification: must-fail
+    provenance:
+      source: boundary
+      ref: "the isolation result must be the sole final exit status"
+    mutation:
+      description: "discarded isolation result is rejected"
+  - name: discarded exit code is rejected
+    input:
+      files:
+        go.mod: "module example.com/m\n\ngo 1.25\n"
+        tool/tool_test.go: |
+          package tool
+          import ("os"; "os/exec"; "testing")
+          func TestGit(t *testing.T) { _ = exec.Command("git", "status") }
+          func TestMain(m *testing.M) { code := testutil.RunWithIsolatedGitConfig(m); _ = code; os.Exit(0) }
+    expected:
+      needs: [tool]
+      violations: [tool]
+    classification: must-fail
+    provenance:
+      source: boundary
+      ref: "the isolation result must be the sole final exit status"
+    mutation:
+      description: "discarded exit code is rejected"
+  - name: deferred isolation exit is rejected
+    input:
+      files:
+        go.mod: "module example.com/m\n\ngo 1.25\n"
+        tool/tool_test.go: |
+          package tool
+          import ("os"; "os/exec"; "testing")
+          func TestGit(t *testing.T) { _ = exec.Command("git", "status") }
+          func TestMain(m *testing.M) { defer os.Exit(testutil.RunWithIsolatedGitConfig(m)) }
+    expected:
+      needs: [tool]
+      violations: [tool]
+    classification: must-fail
+    provenance:
+      source: boundary
+      ref: "the isolation result must be the sole final exit status"
+    mutation:
+      description: "deferred isolation exit is rejected"
+  - name: a prelude before the isolated exit passes
+    input:
+      files:
+        go.mod: "module example.com/m\n\ngo 1.25\n"
+        tool/tool_test.go: |
+          package tool
+          import ("os"; "os/exec"; "testing")
+          func TestGit(t *testing.T) { _ = exec.Command("git", "status") }
+          func TestMain(m *testing.M) { _ = 1; os.Exit(testutil.RunWithIsolatedGitConfig(m)) }
+    expected:
+      needs: [tool]
     classification: must-pass
     provenance:
       source: boundary
-      ref: "only the helper package may isolate without calling itself"
+      ref: "the isolation result must be the sole final exit status"
     mutation:
-      description: "helper package alone is exempt"
-  - name: other package in helper module is not exempt
+      description: "a prelude before the isolated exit passes"
+  - name: competing exit before isolation is rejected
     input:
       files:
-        go.mod: "module github.com/peasant-labs/peasant\n\ngo 1.25\n"
-        other/testutil/tool_test.go: |
+        go.mod: "module example.com/m\n\ngo 1.25\n"
+        tool/tool_test.go: |
           package tool
-          import "os/exec"
-          var _ = exec.Command
+          import ("os"; "os/exec"; "testing")
+          func TestGit(t *testing.T) { _ = exec.Command("git", "status") }
+          func TestMain(m *testing.M) { os.Exit(1); os.Exit(testutil.RunWithIsolatedGitConfig(m)) }
     expected:
-      needs: [other/testutil]
-      violations: [other/testutil]
+      needs: [tool]
+      violations: [tool]
     classification: must-fail
     provenance:
       source: boundary
-      ref: "only the helper package may isolate without calling itself"
+      ref: "the isolation result must be the sole final exit status"
     mutation:
-      description: "other package in helper module is not exempt"
-  - name: same helper directory in another module is not exempt
+      description: "competing exit before isolation is rejected"
+  - name: competing goleak runner is rejected
     input:
       files:
-        go.mod: "module example.com/unrelated\n\ngo 1.25\n"
-        internal/testkit/gitconfig/tool_test.go: |
+        go.mod: "module example.com/m\n\ngo 1.25\n"
+        tool/tool_test.go: |
           package tool
-          import "os/exec"
-          var _ = exec.Command
+          import ("os"; "os/exec"; "testing")
+          func TestGit(t *testing.T) { _ = exec.Command("git", "status") }
+          func TestMain(m *testing.M) { goleak.VerifyTestMain(m); os.Exit(testutil.RunWithIsolatedGitConfig(m)) }
     expected:
-      needs: [internal/testkit/gitconfig]
-      violations: [internal/testkit/gitconfig]
+      needs: [tool]
+      violations: [tool]
     classification: must-fail
     provenance:
       source: boundary
-      ref: "only the helper package may isolate without calling itself"
+      ref: "the isolation result must be the sole final exit status"
     mutation:
-      description: "same helper directory in another module is not exempt"
+      description: "competing goleak runner is rejected"
+  - name: direct isolation with checked error passes
+    input:
+      files:
+        go.mod: "module example.com/m\n\ngo 1.25\n"
+        tool/tool_test.go: |
+          package tool
+          import ("os"; "os/exec"; "testing")
+          func TestGit(t *testing.T) { _ = exec.Command("git", "status") }
+          func TestMain(m *testing.M) { if err := isolateGitConfig(); err != nil { os.Exit(2) }; os.Exit(m.Run()) }
+    expected:
+      needs: [tool]
+    classification: must-pass
+    provenance:
+      source: boundary
+      ref: "the test runner must follow checked isolation and supply the exit code"
+    mutation:
+      description: "direct isolation with checked error passes"
+  - name: direct isolation without TestMain is rejected
+    input:
+      files:
+        go.mod: "module example.com/m\n\ngo 1.25\n"
+        tool/tool_test.go: |
+          package tool
+          import ("os"; "os/exec"; "testing")
+          func TestGit(t *testing.T) { _ = exec.Command("git", "status") }
+
+    expected:
+      needs: [tool]
+      violations: [tool]
+    classification: must-fail
+    provenance:
+      source: boundary
+      ref: "the test runner must follow checked isolation and supply the exit code"
+    mutation:
+      description: "direct isolation without TestMain is rejected"
+  - name: direct runner without isolation is rejected
+    input:
+      files:
+        go.mod: "module example.com/m\n\ngo 1.25\n"
+        tool/tool_test.go: |
+          package tool
+          import ("os"; "os/exec"; "testing")
+          func TestGit(t *testing.T) { _ = exec.Command("git", "status") }
+          func TestMain(m *testing.M) { os.Exit(m.Run()) }
+    expected:
+      needs: [tool]
+      violations: [tool]
+    classification: must-fail
+    provenance:
+      source: boundary
+      ref: "the test runner must follow checked isolation and supply the exit code"
+    mutation:
+      description: "direct runner without isolation is rejected"
+  - name: direct isolation after running tests is rejected
+    input:
+      files:
+        go.mod: "module example.com/m\n\ngo 1.25\n"
+        tool/tool_test.go: |
+          package tool
+          import ("os"; "os/exec"; "testing")
+          func TestGit(t *testing.T) { _ = exec.Command("git", "status") }
+          func TestMain(m *testing.M) { m.Run(); if err := isolateGitConfig(); err != nil { os.Exit(2) }; os.Exit(m.Run()) }
+    expected:
+      needs: [tool]
+      violations: [tool]
+    classification: must-fail
+    provenance:
+      source: boundary
+      ref: "the test runner must follow checked isolation and supply the exit code"
+    mutation:
+      description: "direct isolation after running tests is rejected"
+  - name: direct isolation without error check is rejected
+    input:
+      files:
+        go.mod: "module example.com/m\n\ngo 1.25\n"
+        tool/tool_test.go: |
+          package tool
+          import ("os"; "os/exec"; "testing")
+          func TestGit(t *testing.T) { _ = exec.Command("git", "status") }
+          func TestMain(m *testing.M) { isolateGitConfig(); os.Exit(m.Run()) }
+    expected:
+      needs: [tool]
+      violations: [tool]
+    classification: must-fail
+    provenance:
+      source: boundary
+      ref: "the test runner must follow checked isolation and supply the exit code"
+    mutation:
+      description: "direct isolation without error check is rejected"
+  - name: final call is not os.Exit
+    input:
+      files:
+        go.mod: "module example.com/m\n\ngo 1.25\n"
+        tool/tool_test.go: |
+          package tool
+          import ("os"; "os/exec"; "testing")
+          func TestGit(t *testing.T) { _ = exec.Command("git", "status") }
+          func TestMain(m *testing.M) { if flag { os.Exit(1) }; log.Fatal(testutil.RunWithIsolatedGitConfig(m)) }
+    expected:
+      needs: [tool]
+      violations: [tool]
+    classification: must-fail
+    provenance:
+      source: boundary
+      ref: "the test runner must follow checked isolation and supply the exit code"
+    mutation:
+      description: "final call is not os.Exit"
+  - name: an isolated runner composes with goleak
+    input:
+      files:
+        tool/tool_test.go: |
+          package tool
+          import ("os/exec"; "testing")
+          func TestMain(m *testing.M) { os.Exit(gitconfig.RunWithIsolatedGitConfig(gitconfig.WithGoleak(m))) }
+          func TestGit(t *testing.T) { _ = exec.Command("git", "status") }
+    expected:
+      needs: [tool]
+    classification: must-pass
+    provenance:
+      source: requirement
+      ref: "isolation composes with a separate test runner"
+    mutation:
+      description: "wrap the test runner with goleak"

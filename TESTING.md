@@ -21,11 +21,15 @@ per-call `-c commit.gpgsign=false` or `GIT_CONFIG_GLOBAL` workarounds. Set the
 commit identity per call (`GIT_AUTHOR_*`, `GIT_COMMITTER_*`), as the existing
 helpers do.
 
-`TestEveryPackageThatStartsProcessesIsolatesGitConfig`
-(`internal/testkit/gitconfig/gitconfig_guard_test.go`) fails when a `_test.go` file
-imports `os/exec` and its package lacks an unconstrained `TestMain` ending in
-`os.Exit(gitconfig.RunWithIsolatedGitConfig(...))`, with no competing `m.Run`,
-`goleak.VerifyTestMain`, or `os.Exit` call. Setup before the exit is allowed. Its scanner cases live in
+`TestEveryPackageThatStartsProcessesIsolatesGitConfig` scans test files that
+import `os/exec`. Their package must have an unconstrained `TestMain` ending in
+`os.Exit(gitconfig.RunWithIsolatedGitConfig(...))`, with no other `m.Run`,
+`goleak.VerifyTestMain`, `os.Exit`, or isolation-helper call. Setup before the
+exit is allowed. The helper's own package instead calls unexported
+`isolateGitConfig` in a top-level `if err := isolateGitConfig(); err != nil`
+that exits nonzero, then ends with `os.Exit(m.Run())`, without a competing
+runner, exit, or isolation call. It runs independently so a broken helper
+cannot skip its own tests. The fixture corpus is
 `internal/testkit/gitconfig/testdata/git_isolation_scanner.yaml`.
 `TestIsolatedChildGitReadsNoHostileSource` runs a real child git under every
 hostile source and checks that it reads none of them once isolated.
