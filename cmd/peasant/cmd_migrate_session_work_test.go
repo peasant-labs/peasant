@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/json"
+	"flag"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -16,6 +19,8 @@ import (
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
+
+var updateMigrateSessionWorkGolden = flag.Bool("update-migrate-session-work-golden", false, "update migrate session work golden")
 
 const (
 	migrateSessionWorkSQL    = "testdata/migrate-session-work.sql"
@@ -58,7 +63,7 @@ func TestMigrateDryRunSessionWork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"session work: 1 session(s)", "unknown evidence adapter_version: 1", "lower bound:", "run the dry run again"} {
+	for _, want := range []string{"session work: 2 session(s)", "unknown evidence adapter_version: 2", "lower bound:", "run the dry run again"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing %q in %s", want, text)
 		}
@@ -79,21 +84,47 @@ func TestMigrateDryRunSessionWork(t *testing.T) {
 	if err := dec.Decode(&extra); err != io.EOF {
 		t.Fatalf("extra JSON output: %v", err)
 	}
-	if _, ok := doc["schema_upgrade"]; !ok {
-		t.Fatal("missing schema plan")
-	}
-	var formatted bytes.Buffer
-	if err := json.Indent(&formatted, doc["session_work"], "", "  "); err != nil {
+	var schema map[string]json.RawMessage
+	if err := json.Unmarshal(doc["schema_upgrade"], &schema); err != nil {
 		t.Fatal(err)
 	}
-	formatted.WriteByte('\n')
+	var disk map[string]json.RawMessage
+	if err := json.Unmarshal(schema["disk"], &disk); err != nil {
+		t.Fatal(err)
+	}
+	var steps []map[string]json.RawMessage
+	if err := json.Unmarshal(schema["steps"], &steps); err != nil || len(steps) == 0 {
+		t.Fatalf("schema steps missing: %v", err)
+	}
+	stepKeys := slices.Sorted(maps.Keys(steps[0]))
+	for _, step := range steps {
+		if !slices.Equal(slices.Sorted(maps.Keys(step)), stepKeys) {
+			t.Fatalf("inconsistent schema step keys: %v", step)
+		}
+	}
+	envelope := struct {
+		SchemaKeys     []string        `json:"schema_upgrade_keys"`
+		SchemaDiskKeys []string        `json:"schema_upgrade_disk_keys"`
+		SchemaStepKeys []string        `json:"schema_upgrade_step_keys"`
+		SessionWork    json.RawMessage `json:"session_work"`
+	}{slices.Sorted(maps.Keys(schema)), slices.Sorted(maps.Keys(disk)), stepKeys, doc["session_work"]}
+	formatted, err := json.MarshalIndent(envelope, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	formatted = append(formatted, '\n')
+	if *updateMigrateSessionWorkGolden {
+		if err := os.WriteFile(migrateSessionWorkGolden, formatted, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	golden, err := os.ReadFile(migrateSessionWorkGolden)
 	if err != nil {
 		t.Fatal(err)
 	}
 	golden = bytes.ReplaceAll(golden, []byte("\r\n"), []byte("\n"))
-	if !bytes.Equal(formatted.Bytes(), golden) {
-		t.Fatalf("session work golden mismatch:\n%s", formatted.String())
+	if !bytes.Equal(formatted, golden) {
+		t.Fatalf("session work golden mismatch:\n%s", formatted)
 	}
 	after, err := os.ReadFile(path)
 	if err != nil {

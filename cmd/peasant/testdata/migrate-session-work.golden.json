@@ -1,33 +1,57 @@
 {
-  "available": true,
-  "lower_bound": true,
-  "approximate": true,
-  "evidence_not_read": [
-    "capture_recovery",
-    "publication_capture",
-    "content_pending",
-    "publication_bound",
-    "source_compared",
-    "latest_attempt",
-    "source_state",
-    "stored_pair",
-    "permanent_refusal"
+  "schema_upgrade_keys": [
+    "db_path",
+    "disk",
+    "from",
+    "steps",
+    "to"
   ],
-  "unapplied_effects": [
-    "search-invalidated",
-    "recount-owed"
+  "schema_upgrade_disk_keys": [
+    "free_bytes",
+    "free_bytes_known",
+    "required_bytes",
+    "store_bytes"
   ],
-  "sessions": 1,
-  "undecided": 0,
-  "by_lane": {
-    "native": 1
-  },
-  "by_reason": {
-    "metadata_schema": 1
-  },
-  "full_step": {},
-  "unknown": {
-    "adapter_version": 1,
-    "indexed_input_hash": 1
+  "schema_upgrade_step_keys": [
+    "cost",
+    "counts",
+    "kind",
+    "title",
+    "version"
+  ],
+  "session_work": {
+    "available": true,
+    "lower_bound": true,
+    "approximate": true,
+    "evidence_not_read": [
+      "capture_recovery",
+      "publication_capture",
+      "content_pending",
+      "publication_bound",
+      "source_compared",
+      "latest_attempt",
+      "source_state",
+      "stored_pair",
+      "permanent_refusal"
+    ],
+    "unapplied_effects": [
+      "search-invalidated",
+      "recount-owed"
+    ],
+    "sessions": 2,
+    "undecided": 0,
+    "by_lane": {
+      "native": 1,
+      "stored-metadata": 1
+    },
+    "by_reason": {
+      "adapter_stamp_absent": 1,
+      "metadata_schema": 1
+    },
+    "full_step": {},
+    "unknown": {
+      "adapter_version": 2,
+      "indexed_input_hash": 2
+    }
   }
 }
