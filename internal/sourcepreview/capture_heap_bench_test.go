@@ -3,10 +3,13 @@ package sourcepreview_test
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"runtime/metrics"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -83,14 +86,33 @@ func (s *heapSampler) finish() uint64 {
 // user's process does.
 //
 //	go test ./internal/sourcepreview -run '^$' -bench BenchmarkCaptureWebHeap -benchtime 3x
+//
+// The held-call runs read the same transcript with one tool call at its head
+// that no record answers. That is the worst case for the hold: the capture
+// hands out no turn until the cap, then all of them at once, so the segmenter
+// buffers every turn it read. They run at the web cap and at the terminal's.
 func BenchmarkCaptureWebHeap(b *testing.B) {
 	listing := writeGenerated(b, 7_700, 4_000, 0)
+	held := writeGeneratedWithHeldCall(b, 7_700, 4_000)
 	// The web source cap, then the larger caps the rule refused, so the curve
 	// stays visible.
 	caps := []int64{defaults.KickstartWebPreviewSourceCapBytes >> 20, 24, 32}
+	type sweep struct {
+		name    string
+		listing onboarding.SessionListing
+		capMiB  int64
+	}
+	var sweeps []sweep
 	for _, capMiB := range caps {
+		sweeps = append(sweeps, sweep{"cap", listing, capMiB})
+	}
+	for _, capMiB := range []int64{defaults.KickstartWebPreviewSourceCapBytes >> 20, defaults.KickstartTerminalPreviewSourceCapBytes >> 20} {
+		sweeps = append(sweeps, sweep{"held-call/cap", held, capMiB})
+	}
+	for _, run := range sweeps {
+		listing, capMiB := run.listing, run.capMiB
 		for _, gogc := range []int{100, 10} {
-			b.Run(fmt.Sprintf("cap-%dMiB/gogc-%d", capMiB, gogc), func(b *testing.B) {
+			b.Run(fmt.Sprintf("%s-%dMiB/gogc-%d", run.name, capMiB, gogc), func(b *testing.B) {
 				previous := debug.SetGCPercent(gogc)
 				defer debug.SetGCPercent(previous)
 				var retained, peaks []uint64
@@ -161,6 +183,26 @@ func measureCaptureHeap(b *testing.B, listing onboarding.SessionListing, sourceC
 		retained = max(retained, stats.HeapAlloc)
 	}
 	return retained, sampler.finish()
+}
+
+// writeGeneratedWithHeldCall is writeGenerated with a tool call at the head of
+// the session that no record answers.
+func writeGeneratedWithHeldCall(b *testing.B, pairs, answerBytes int) onboarding.SessionListing {
+	b.Helper()
+	lines := []string{
+		`{"type":"user","uuid":"held-u","timestamp":"2026-01-01T00:00:00.000Z","message":{"role":"user","content":"start a long task."}}`,
+		`{"type":"assistant","uuid":"held-a","parentUuid":"held-u","timestamp":"2026-01-01T00:00:00.500Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"call_held","name":"Bash","input":{"command":"sleep 3600"}}]}}`,
+	}
+	generated := generatedClaudeLines(pairs, answerBytes)
+	generated[0] = strings.Replace(generated[0], `"uuid":"u0",`, `"uuid":"u0","parentUuid":"held-a",`, 1)
+	lines = append(lines, generated...)
+	dir := b.TempDir()
+	path := filepath.Join(dir, fixtureSessionID+".jsonl")
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		b.Fatalf("write the generated transcript: %v", err)
+	}
+	return onboarding.SessionListing{SessionID: fixtureSessionID, Harness: "claude-code",
+		Source: onboarding.SessionSource{Path: path, Root: dir, Origin: onboarding.SessionSourceOriginFile}}
 }
 
 func median(values []uint64) uint64 {

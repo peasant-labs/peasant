@@ -31,7 +31,11 @@ budgets:
   # expansion factor BenchmarkCaptureWebHeap measures with GOGC 10). The rule:
   # the transient peak stays at or under 128 MiB. 16 MiB peaked at about
   # 92 MiB; 24 MiB at about 132 MiB, over it; 32 MiB at about 172 MiB. The
-  # serialized cap matches the source cap.
+  # serialized cap matches the source cap. A tool call held unanswered for
+  # the whole cap (the hold's worst case: every turn goes out at the cut and
+  # the segmenter buffers them all) peaked at about 84 MiB live and retained
+  # about 26 MiB, measured 2026-11-19 by the held-call runs of the same
+  # benchmark.
   - {name: web-source-cap-bytes, value: 16777216}
   - {name: web-serialized-cap-bytes, value: 16777216}
   - {name: web-turn-cap, value: 20000}
