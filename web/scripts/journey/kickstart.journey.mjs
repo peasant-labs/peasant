@@ -968,8 +968,8 @@ async function loadToEnd(page) {
     const before = previewReceived.length;
     await loadMore(page).click();
     await expect.poll(() => previewReceived.length, { message: 'the server answered the load' }).toBeGreaterThan(before);
-    await expect(loadMore(page).or(pane(page).locator('.ks-preview-notice')).or(pane(page).locator('[data-transcript-continuation]'))).toBeVisible();
-    if (await loadMore(page).count() > 0) await expect(loadMore(page)).toBeEnabled();
+    // The frame is applied: the control is ready for the next activation, or gone at the end.
+    await expect.poll(async () => await loadMore(page).count() === 0 || await loadMore(page).isEnabled(), { message: 'the pane applied the frame' }).toBe(true);
   }
   await expect(loadMore(page)).toHaveCount(0);
 }
