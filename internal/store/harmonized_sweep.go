@@ -258,6 +258,10 @@ func (s *Store) deleteVerifiedBodies(ctx context.Context, sessionID schema.Sessi
 				return deleted, txnErr
 			}
 		}
+		if err := reportContentSweepSeam(contentSweepSeamBodyDelete); err != nil {
+			txnErr = fmt.Errorf("store: sweep session %s interrupted before a body delete: %w; the batch rolled back and every body row is unchanged; %s", sessionID, err, sweepRetryAdvice(err))
+			return deleted, txnErr
+		}
 		if err := sqlitex.Execute(conn, `DELETE FROM session_entry_bodies WHERE session_id = ? AND body_digest = ?`, &sqlitex.ExecOptions{
 			Args: []any{string(sessionID), digest},
 		}); err != nil {

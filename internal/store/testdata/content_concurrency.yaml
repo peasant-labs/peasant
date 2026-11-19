@@ -34,14 +34,42 @@ cases:
     mode: sweep
     seam: after-staging
     expect: fk-refused-then-committed
+  # sweep-writer: a second SQLite connection writes at a sweep seam. path is
+  # the sweep's delete path: bounded (one transaction) or batch (the
+  # resumable fallback a one-row budget forces). expect decides what the
+  # competitor does: writer-waits (commit inside a sweep transaction, must
+  # find the writer held), writer-commits (commit between sweep
+  # transactions), sweep-waits (hold the writer, the sweep must wait).
   - name: sweep-vs-commit-after-its-read
     mode: sweep-writer
+    path: bounded
     seam: first-sweep-write
     expect: writer-waits-then-swept
   - name: sweep-vs-held-writer
     mode: sweep-writer
+    path: bounded
     seam: after-commit-before-sweep
     expect: sweep-waits-then-swept
+  - name: sweep-batch-vs-commit-at-first-write
+    mode: sweep-writer
+    path: batch
+    seam: first-sweep-write
+    expect: writer-commits-then-swept
+  - name: sweep-batch-vs-held-writer
+    mode: sweep-writer
+    path: batch
+    seam: after-commit-before-sweep
+    expect: sweep-waits-then-swept
+  - name: sweep-batch-vs-held-writer-mid-batch
+    mode: sweep-writer
+    path: batch
+    seam: mid-sweep-batch
+    expect: sweep-waits-then-swept
+  - name: sweep-batch-vs-commit-after-body-verify
+    mode: sweep-writer
+    path: batch
+    seam: before-verified-body-delete
+    expect: writer-waits-then-swept
   - name: harvest-during-search-consolidation
     mode: consolidation
     seam: sqlite-authorizer

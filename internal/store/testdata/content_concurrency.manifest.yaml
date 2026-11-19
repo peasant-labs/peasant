@@ -9,4 +9,8 @@ requiredNames:
   - sweep-vs-stage
   - sweep-vs-commit-after-its-read
   - sweep-vs-held-writer
+  - sweep-batch-vs-commit-at-first-write
+  - sweep-batch-vs-held-writer
+  - sweep-batch-vs-held-writer-mid-batch
+  - sweep-batch-vs-commit-after-body-verify
   - harvest-during-search-consolidation

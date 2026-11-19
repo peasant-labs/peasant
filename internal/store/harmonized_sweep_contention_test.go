@@ -1,7 +1,6 @@
 package store
 
 import (
-	"errors"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -69,22 +68,44 @@ func competingProbeRows(t *testing.T, s *Store) int64 {
 	return queryMigrateInt(t, s, "SELECT COUNT(*) FROM "+competingWriterProbeTable)
 }
 
+// sweepContentionExpect is what a sweep contention case expects of the
+// competing writer and the sweep, and so what the competitor does at the seam.
+type sweepContentionExpect string
+
+const (
+	// sweepContentionWriterWaits: the competitor tries to commit at the seam
+	// and must find the writer held by the sweep (BUSY); it writes once the
+	// sweep has committed. The seam lies inside a sweep transaction that has
+	// already read, so a deferred transaction would let the commit land and
+	// then fail its delete with BUSY (a stale snapshot cannot upgrade).
+	sweepContentionWriterWaits sweepContentionExpect = "writer-waits-then-swept"
+	// sweepContentionWriterCommits: the seam lies between sweep transactions,
+	// so the competitor's commit lands there and the sweep still completes.
+	sweepContentionWriterCommits sweepContentionExpect = "writer-commits-then-swept"
+	// sweepContentionSweepWaits: the competitor takes the writer at the seam
+	// and holds it; the sweep must wait for the commit instead of failing.
+	sweepContentionSweepWaits sweepContentionExpect = "sweep-waits-then-swept"
+)
+
+// sweepContentionHold is how long a holding competitor keeps the writer. It
+// stays well under busy_timeout so that a waiting sweep is never timed out.
+const sweepContentionHold = 250 * time.Millisecond
+
 // runConcurrencySweepVsWriter proves the sweep and a competing writer on
-// another connection serialize on the SQLite writer, at two stages:
+// another connection serialize on the SQLite writer. The case names the sweep
+// path (bounded, or the batch fallback a one-row budget forces), the seam
+// where the competitor acts, and the expectation that decides what it does.
+// In every case the sweep deletes everything it should and clears its flag,
+// and the competitor's one write is durable beside it.
 //
-//   - first-sweep-write: the competitor tries to commit after the sweep has
-//     read its work and before its first delete. A deferred transaction would
-//     let that commit land and then fail its delete with BUSY (a stale
-//     snapshot cannot upgrade), so the competitor must instead find the
-//     writer held, and it writes once the sweep has committed.
-//   - after-commit-before-sweep: the competitor holds the writer when the
-//     sweep starts. A deferred transaction would read and then fail its
-//     delete with BUSY at once, without waiting on busy_timeout, so the sweep
-//     must instead wait until the competitor commits, then sweep.
-//
-// In both, the sweep deletes everything it should and clears its flag.
+// The holding cases release the writer on a timer, not on a signal that the
+// sweep is blocked: a sweep waiting on SQLite's busy handler has no Go-side
+// observation point. So a holding case proves the sweep never fails beside a
+// held writer and returns only after the release, but if the sweep were slow
+// enough to reach the writer only after the timer fired, the case would pass
+// without exercising the wait. The commit cases carry no timer and are exact.
 func runConcurrencySweepVsWriter(t *testing.T, c contentConcurrencyCase) {
-	s, root := openGenerationStore(t)
+	s, root := openSweepPathStore(t, c.Path)
 	writer := openCompetingWriter(t, root)
 	ctx := testwait.Context(t)
 	sid := gcSession(t, s, "e3e3e3e3-e3e3-43e3-83e3-e3e3e3e3e3e3")
@@ -95,73 +116,69 @@ func runConcurrencySweepVsWriter(t *testing.T, c contentConcurrencyCase) {
 	}
 	t.Cleanup(func() { contentSweepSeam = nil })
 
+	expect := sweepContentionExpect(c.Expect)
 	var fired atomic.Int64
+	// probeErr is written by the seam hook, which runs on the sweep's own
+	// goroutine, and read only after SweepSession returns: one goroutine, no
+	// race.
 	var probeErr error
 	released := make(chan error, 1)
+	var releasedBeforeReturn atomic.Bool
 	// The releaser owns the competing connection until it commits; this
 	// cleanup runs before the connection's own, so a failed sweep never
 	// closes the connection under it.
 	var releaser sync.WaitGroup
 	t.Cleanup(releaser.Wait)
-	wantExpect := map[string]string{
-		contentSweepSeamFirstWrite:  "writer-waits-then-swept",
-		contentSweepSeamAfterCommit: "sweep-waits-then-swept",
-	}
-	if want, ok := wantExpect[c.Seam]; !ok || c.Expect != want {
-		t.Fatalf("sweep contention case %q pairs seam %q with expectation %q, want %q", c.Name, c.Seam, c.Expect, want)
-	}
-	switch c.Seam {
-	case contentSweepSeamFirstWrite:
-		contentSweepSeam = func(stage string) error {
-			if stage != contentSweepSeamFirstWrite || fired.Add(1) != 1 {
-				return nil
-			}
+	var act func() error
+	switch expect {
+	case sweepContentionWriterWaits, sweepContentionWriterCommits:
+		act = func() error {
 			probeErr = competingWriteBegin(writer, 1)
 			if probeErr == nil {
 				// The writer was free: commit, as the next activation would.
 				probeErr = sqlitex.ExecuteTransient(writer, "COMMIT", nil)
-				if probeErr == nil {
-					probeErr = errors.New("the competing writer committed between the sweep's read and its first delete")
-				}
 			}
 			return nil
 		}
-	case contentSweepSeamAfterCommit:
-		contentSweepSeam = func(stage string) error {
-			if stage != contentSweepSeamAfterCommit || fired.Add(1) != 1 {
-				return nil
-			}
+	case sweepContentionSweepWaits:
+		act = func() error {
 			if err := competingWriteBegin(writer, 1); err != nil {
 				return err
 			}
 			releaser.Add(1)
 			go func() {
 				defer releaser.Done()
-				// The timer is the wake source for the bounded hold. It gives
-				// the sweep the chance to meet the held writer; it stays well
-				// under busy_timeout so a waiting sweep is never timed out.
-				hold := time.NewTimer(250 * time.Millisecond)
+				// The timer is the wake source for the bounded hold.
+				hold := time.NewTimer(sweepContentionHold)
 				defer hold.Stop()
 				<-hold.C
+				releasedBeforeReturn.Store(true)
 				released <- sqlitex.ExecuteTransient(writer, "COMMIT", nil)
 			}()
 			return nil
 		}
 	default:
-		t.Fatalf("unknown sweep contention seam %q", c.Seam)
+		t.Fatalf("unknown sweep contention expectation %q", c.Expect)
+	}
+	contentSweepSeam = func(stage string) error {
+		if stage != c.Seam || fired.Add(1) != 1 {
+			return nil
+		}
+		return act()
 	}
 
 	got, err := s.SweepSession(ctx, sid)
-	if fired.Load() != 1 {
-		t.Fatalf("the %s seam fired %d times, want once", c.Seam, fired.Load())
+	returnedAfterRelease := releasedBeforeReturn.Load()
+	if fired.Load() < 1 {
+		t.Fatalf("the %s seam never fired on the %s path", c.Seam, c.Path)
 	}
 	if err != nil {
-		t.Fatalf("sweep beside a competing writer at %s: %v", c.Seam, err)
+		t.Fatalf("sweep beside a competing writer at %s on the %s path: %v", c.Seam, c.Path, err)
 	}
-	switch c.Seam {
-	case contentSweepSeamFirstWrite:
+	switch expect {
+	case sweepContentionWriterWaits:
 		if sqlite.ErrCode(probeErr).ToPrimary() != sqlite.ResultBusy {
-			t.Fatalf("competing writer at the sweep's first delete = %v, want BUSY: the sweep must hold the writer before it reads its work", probeErr)
+			t.Fatalf("competing writer at %s = %v, want BUSY: the sweep must hold the writer before it reads what it deletes", c.Seam, probeErr)
 		}
 		if err := competingWriteBegin(writer, 1); err != nil {
 			t.Fatalf("competing writer after the sweep committed: %v", err)
@@ -169,7 +186,14 @@ func runConcurrencySweepVsWriter(t *testing.T, c contentConcurrencyCase) {
 		if err := sqlitex.ExecuteTransient(writer, "COMMIT", nil); err != nil {
 			t.Fatalf("commit the competing write after the sweep: %v", err)
 		}
-	case contentSweepSeamAfterCommit:
+	case sweepContentionWriterCommits:
+		if probeErr != nil {
+			t.Fatalf("competing writer at %s = %v, want its commit to land between sweep transactions", c.Seam, probeErr)
+		}
+	case sweepContentionSweepWaits:
+		if !returnedAfterRelease {
+			t.Fatal("the sweep returned while the competitor still held the writer; it must wait for the release")
+		}
 		if err := testwait.Receive(t, released, "the competing writer's commit"); err != nil {
 			t.Fatalf("commit the held competing write: %v", err)
 		}
