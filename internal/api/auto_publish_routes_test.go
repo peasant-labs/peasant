@@ -193,6 +193,8 @@ func TestAutoPublishInstallRoutes(t *testing.T) {
 			t.Parallel()
 			world := newAutoPublishWorld(t, autoPublishWorldOptions{remote: c.RemoteRecorded})
 			if c.ForeignHook != "" {
+				// not executed: the route inspects and preserves the foreign hook.
+				// ast-grep-ignore: no-unsafe-executable-write -- foreign hook refusal fixture.
 				if err := os.WriteFile(filepath.Join(world.recorded, ".git", "hooks", "pre-push"), []byte(c.ForeignHook), 0o755); err != nil {
 					t.Fatal(err)
 				}
@@ -483,6 +485,8 @@ func TestPublicationHookBindingFixtures(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				// not executed: publication status reads the hook to identify its binding.
+				// ast-grep-ignore: no-unsafe-executable-write -- publication status fixture.
 				if err := os.WriteFile(hookPath, []byte("#!/bin/sh\n"+snippet), 0o755); err != nil {
 					t.Fatal(err)
 				}
@@ -503,6 +507,8 @@ func TestPublicationHookBindingFixtures(t *testing.T) {
 				if moved == string(written) || !githooks.IsManaged([]byte(moved)) {
 					t.Fatal("the hook could not be pointed at a moved repository")
 				}
+				// not executed: publication status reads the altered hook binding.
+				// ast-grep-ignore: no-unsafe-executable-write -- publication status fixture.
 				if err := os.WriteFile(hookPath, []byte(moved), 0o755); err != nil {
 					t.Fatal(err)
 				}

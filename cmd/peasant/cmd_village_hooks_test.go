@@ -282,6 +282,8 @@ func TestVillageHooks_RefusesUnownedHookAndPrintsManualSection(t *testing.T) {
 	repo := hooksTestRepo(t)
 	path := hooksSlotPath(t, repo, githooks.EventPostCommit)
 	existing := "#!/bin/sh\n# composed by the user\nmake lint || exit 1\nexit 0\n"
+	// not executed: install and uninstall inspect and preserve the foreign hook.
+	// ast-grep-ignore: no-unsafe-executable-write -- foreign hook refusal fixture.
 	if err := os.WriteFile(path, []byte(existing), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -331,6 +333,8 @@ func TestVillageHooks_EventsAreHandledIndependently(t *testing.T) {
 	t.Parallel()
 	repo := hooksTestRepo(t)
 	blocked := hooksSlotPath(t, repo, githooks.EventPrePush)
+	// not executed: install inspects this occupied hook slot.
+	// ast-grep-ignore: no-unsafe-executable-write -- foreign hook refusal fixture.
 	if err := os.WriteFile(blocked, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -364,6 +368,8 @@ func TestVillageHooks_PublicVisibilityNoticeNamesTheInstalledEvents(t *testing.T
 	t.Parallel()
 	repo := hooksTestRepo(t)
 	// post-commit is occupied by a foreign hook, so only pre-push is installed.
+	// not executed: install inspects this occupied hook slot.
+	// ast-grep-ignore: no-unsafe-executable-write -- foreign hook refusal fixture.
 	if err := os.WriteFile(hooksSlotPath(t, repo, githooks.EventPostCommit),
 		[]byte("#!/bin/sh\necho another tool\n"), 0o755); err != nil {
 		t.Fatal(err)

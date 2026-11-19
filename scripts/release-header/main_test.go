@@ -234,12 +234,7 @@ func TestMountedReleaseHeader(t *testing.T) {
 			capture := filepath.Join(dir, "published-header")
 			argsFile := filepath.Join(dir, "publisher-args")
 			stub := "#!/bin/sh\nmkdir -p dist\nprintf '%s' \"$PEASANT_RELEASE_HEADER\" > \"$CAPTURE\"\nprintf '%s\\n' \"$@\" > \"$ARGS_FILE\"\n"
-			if err := os.MkdirAll(filepath.Join(runner, "goreleaser-bin"), 0o700); err != nil {
-				t.Fatal(err)
-			}
-			if err := executable.Write(filepath.Join(runner, "goreleaser-bin", "goreleaser"), []byte(stub), 0o700); err != nil {
-				t.Fatal(err)
-			}
+			writeTestExecutable(t, filepath.Join(runner, "goreleaser-bin", "goreleaser"), stub)
 			for _, step := range []workflowStep{publish} {
 				cmd := exec.Command("bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", step.Run)
 				cmd.Dir = dir
@@ -309,5 +304,15 @@ func writeTestFile(t *testing.T, path, content string, mode os.FileMode) {
 	}
 	if err := os.WriteFile(path, []byte(content), mode); err != nil {
 		t.Fatal(fmt.Errorf("write synthetic fixture %s: %w", path, err))
+	}
+}
+
+func writeTestExecutable(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := executable.Write(path, []byte(content), 0o700); err != nil {
+		t.Fatal(err)
 	}
 }

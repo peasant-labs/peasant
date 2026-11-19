@@ -8,6 +8,7 @@ import (
 )
 
 // Write publishes an executable fixture without exposing a partially written file.
+// It sets mode exactly, without filtering through the process umask.
 //
 // On Unix it prevents Go's fork/exec from inheriting its write descriptor.
 // O_CLOEXEC alone closes that descriptor only at exec, not at fork, and renaming
@@ -22,7 +23,11 @@ func Write(path string, data []byte, mode os.FileMode) (err error) {
 		return fmt.Errorf("create executable fixture for %s: %w", path, err)
 	}
 	name := f.Name()
-	defer os.Remove(name)
+	defer func() {
+		if name != "" {
+			_ = os.Remove(name)
+		}
+	}()
 	defer func() {
 		if f != nil {
 			_ = f.Close()
@@ -34,9 +39,6 @@ func Write(path string, data []byte, mode os.FileMode) (err error) {
 	if _, err = f.Write(data); err != nil {
 		return fmt.Errorf("write executable fixture %s: %w", path, err)
 	}
-	if err = f.Sync(); err != nil {
-		return fmt.Errorf("sync executable fixture %s: %w", path, err)
-	}
 	err = f.Close()
 	f = nil
 	if err != nil {
@@ -45,5 +47,6 @@ func Write(path string, data []byte, mode os.FileMode) (err error) {
 	if err = os.Rename(name, path); err != nil {
 		return fmt.Errorf("publish executable fixture %s: %w", path, err)
 	}
+	name = ""
 	return nil
 }
