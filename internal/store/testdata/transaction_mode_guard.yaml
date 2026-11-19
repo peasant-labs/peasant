@@ -1,0 +1,198 @@
+# The reviewed deferred transaction begins in the store's production code.
+#
+# Every store transaction that may write begins IMMEDIATE (beginWrite): a
+# DEFERRED transaction that reads and then writes fails with BUSY at once,
+# without waiting on busy_timeout, when another connection writes meanwhile.
+# TestStoreWritesBeginImmediate finds every begin that does not take the
+# SQLite writer up front and requires it to be listed here, exactly; a begin
+# the code no longer has must be removed.
+#
+# mode is one of:
+#   read-only           the transaction only reads, so it never upgrades
+#   nested              the savepoint only runs inside a caller's IMMEDIATE
+#                       transaction, whose writer it inherits
+#   private-connection  the connection is private to the function
+#
+# Adding an entry is a review decision: a read-only entry that later gains a
+# write must move to beginWrite instead.
+deferredBegins:
+  # Read-only snapshots and reads.
+  - file: annotation_run_state.go
+    function: Store.GetAnnotationRunInputs
+    begin: sqlitex.Save
+    mode: read-only
+    reason: validates the index format and reads the run inputs in one snapshot
+  - file: annotation_run_state.go
+    function: Store.GetCurrentSessionEntriesHash
+    begin: sqlitex.Save
+    mode: read-only
+    reason: validates the index format and reads the stored entries hash in one snapshot
+  - file: annotation_snapshot.go
+    function: Store.ReadAnnotationPushSnapshot
+    begin: sqlitex.Save
+    mode: read-only
+    reason: reads the annotations selected for publication in one snapshot
+  - file: annotation_store.go
+    function: Store.GetAnnotationsForEntry
+    begin: sqlitex.Save
+    mode: read-only
+    reason: validates the index format and reads one entry's annotations in one snapshot
+  - file: annotation_store.go
+    function: Store.GetEntryAnnotationsForSession
+    begin: sqlitex.Save
+    mode: read-only
+    reason: validates the index format and reads a session's entry annotations in one snapshot
+  - file: collective_attempts.go
+    function: Store.withObservationTransaction
+    begin: sqlitex.Transaction
+    mode: read-only
+    reason: the deferred branch serves only callers that pass write=false and only read; write=true takes ImmediateTransaction
+  - file: committed_publication.go
+    function: Store.readCommittedPublicationInput
+    begin: sqlitex.Save
+    mode: read-only
+    reason: reads the committed publication input in one snapshot
+  - file: content_reader.go
+    function: Store.LoadAvailableSessionEntries
+    begin: sqlitex.Transaction
+    mode: read-only
+    reason: reads the available transcript entries in one snapshot
+  - file: content_reader.go
+    function: Store.LoadFullSessionEntries
+    begin: sqlitex.Transaction
+    mode: read-only
+    reason: reads the complete transcript entries in one snapshot
+  - file: content_reader.go
+    function: Store.ReadSessionEntries
+    begin: sqlitex.Transaction
+    mode: read-only
+    reason: reads one page of transcript entries in one snapshot
+  - file: content_snapshot.go
+    function: Store.readSessionSnapshot
+    begin: sqlitex.Save
+    mode: read-only
+    reason: reads a session's content snapshot
+  - file: entries_writer.go
+    function: Store.SessionEntriesExist
+    begin: sqlitex.Save
+    mode: read-only
+    reason: validates the index format and checks for stored entries in one snapshot
+  - file: generation_snapshot.go
+    function: Store.withSessionSnapshot
+    begin: sqlitex.Save
+    mode: read-only
+    reason: builds the session read snapshot; the callback receives the snapshot, never the connection
+  - file: generation_unchanged.go
+    function: Store.ProveManagedGenerationUnchanged
+    begin: sqlitex.Transaction
+    mode: read-only
+    reason: compares the catalog and index state in one snapshot; the settle step writes in its own IMMEDIATE transaction
+  - file: harmonized_snapshot.go
+    function: Store.WithHarmonizedSessionSnapshot
+    begin: sqlitex.Save
+    mode: read-only
+    reason: reads the harmonized snapshot and ends the savepoint before the callback runs
+  - file: index_input_state.go
+    function: Store.ReadIndexState
+    begin: sqlitex.Save
+    mode: read-only
+    reason: captures the stored index state
+  - file: metric_input.go
+    function: Store.ReadMetricInput
+    begin: sqlitex.Save
+    mode: read-only
+    reason: captures the metric input in one snapshot; the save rechecks it inside its own IMMEDIATE transaction
+  - file: metrics_reader.go
+    function: Store.FirstEntry
+    begin: sqlitex.Save
+    mode: read-only
+    reason: reads the opening entry in one snapshot
+  - file: metrics_reader.go
+    function: Store.ListEntries
+    begin: sqlitex.Save
+    mode: read-only
+    reason: reads a session's entries in one snapshot
+  - file: metrics_reader.go
+    function: Store.ListEntriesRange
+    begin: sqlitex.Save
+    mode: read-only
+    reason: reads a range of a session's entries in one snapshot
+  - file: metrics_reader.go
+    function: Store.MaxEntryIndex
+    begin: sqlitex.Save
+    mode: read-only
+    reason: reads a session's highest entry index in one snapshot
+  - file: publication_metadata.go
+    function: Store.LoadPublicationInput
+    begin: sqlitex.Transaction
+    mode: read-only
+    reason: reads the capture evidence and content for publication in one snapshot
+  - file: publication_metadata.go
+    function: Store.LoadPublicationMetadata
+    begin: sqlitex.Transaction
+    mode: read-only
+    reason: reads publication metadata for a batch of sessions in one snapshot
+  - file: reader.go
+    function: Store.FirstUserMessage
+    begin: sqlitex.Save
+    mode: read-only
+    reason: reads a session's first user message in one snapshot
+  - file: reader.go
+    function: Store.FirstUserMessageBulk
+    begin: sqlitex.Save
+    mode: read-only
+    reason: reads the first user message of a batch of sessions in one snapshot
+  - file: reader.go
+    function: Store.LeadingUserMessagesBulk
+    begin: sqlitex.Save
+    mode: read-only
+    reason: reads the leading user messages of a batch of sessions in one snapshot
+  - file: scan_reuse.go
+    function: OpenForScanReuse
+    begin: BEGIN
+    mode: read-only
+    reason: pins a snapshot on a connection opened read-only; a writer opens its own connection
+  - file: user_prompts.go
+    function: Store.ListUserPrompts
+    begin: sqlitex.Save
+    mode: read-only
+    reason: reads a session's typed prompts in one snapshot
+
+  # Savepoints that only run inside a caller's IMMEDIATE transaction.
+  - file: annotation_store.go
+    function: Store.applyClassifierAnnotationSavepoint
+    begin: SAVEPOINT
+    mode: nested
+    reason: per-result savepoint inside the classifier batch's IMMEDIATE transaction
+  - file: artifact_mirror.go
+    function: Store.mirrorArtifactSavepoint
+    begin: SAVEPOINT
+    mode: nested
+    reason: per-session savepoint inside the artifact mirror's BEGIN IMMEDIATE
+  - file: baseline_fresh.go
+    function: applyBaselineIfStillFresh
+    begin: sqlitex.ExecuteScript
+    mode: nested
+    reason: the script's savepoint runs inside the baseline's IMMEDIATE transaction
+  - file: classifier_input.go
+    function: Store.applyCapturedClassifierBatch
+    begin: sqlitex.Save
+    mode: nested
+    reason: per-session savepoint inside the classifier batch's IMMEDIATE transaction
+  - file: entries_writer.go
+    function: Store.indexSessionEntryWriteSavepoint
+    begin: SAVEPOINT
+    mode: nested
+    reason: per-session savepoint inside the entry batch's IMMEDIATE transaction
+  - file: harmonized_retire.go
+    function: Store.DropRetiredProjectionTables
+    begin: sqlitex.ExecuteScript
+    mode: nested
+    reason: the drop script's savepoint runs inside the drop's IMMEDIATE transaction
+
+  # Connections no other connection can write beside.
+  - file: expected_tables.go
+    function: ExpectedTableNames
+    begin: sqlitex.ExecuteScript
+    mode: private-connection
+    reason: replays the baseline schema into a private in-memory database
