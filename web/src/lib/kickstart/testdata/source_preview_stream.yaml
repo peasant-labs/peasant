@@ -27,6 +27,8 @@
 #   clickTwice     activate a button twice in one turn of the event loop
 #   jump           move through the viewer to a held segment (its scrubber or jump control)
 #   expectHighlight the highlights tab names the last response with these words
+#   expectSessionMeta the viewer's session metadata: {reads: [whole items], lacks: [words
+#                  no item may carry]}
 #
 # Every transcript is synthetic. `marker` texts exist only in the stream, so
 # finding one in storage or a URL is a leak.
@@ -73,6 +75,8 @@ requiredNames:
   - no-clipboard-write
   - no-external-request
   - viewer-capabilities-are-all-off
+  - header-shows-no-unmeasured-figure-while-open
+  - header-shows-no-unmeasured-figure-when-complete
 defaultServer:
   "GET /api/v1/kickstart/status": {body: {configured: true}}
   "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
@@ -396,3 +400,24 @@ cases:
       - serve: {segment: 0}
       - expectTurnText: {index: 0, drawn: true}
       - expectNoControlMatching: {role: button, pattern: "^(label|add label|edit|contribute|share|publish|export|download|visibility|make public)"}
+
+  # The capture's header measures no duration, tokens or tool calls; the wire
+  # carries them as zero. The header names the turns loaded and leaves the rest
+  # out, never `0 tools` or `0 tokens`.
+  - name: header-shows-no-unmeasured-figure-while-open
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - expectSessionMeta: {reads: [2 turns], lacks: [tools, tokens, 0s]}
+
+  - name: header-shows-no-unmeasured-figure-when-complete
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - click: load more of this session
+      - serve: {segment: 1, final: end}
+      - expectSessionMeta: {reads: [4 turns], lacks: [tools, tokens, 0s]}
