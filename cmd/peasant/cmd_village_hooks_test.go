@@ -17,6 +17,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/githooks"
+	"github.com/peasant-labs/peasant/internal/testkit/executable"
 	"gopkg.in/yaml.v3"
 )
 
@@ -645,7 +646,7 @@ func hooksStubPeasant(t *testing.T, exitCode int) (binDir, logPath string) {
 	logPath = filepath.Join(binDir, "invocations.log")
 	quoted := "'" + strings.ReplaceAll(logPath, "'", `'\''`) + "'"
 	stub := "#!/bin/sh\nprintf '%s\\n' \"$@\" >> " + quoted + "\nexit " + strconv.Itoa(exitCode) + "\n"
-	if err := os.WriteFile(filepath.Join(binDir, "peasant"), []byte(stub), 0o755); err != nil {
+	if err := executable.Write(filepath.Join(binDir, "peasant"), []byte(stub), 0o755); err != nil {
 		t.Fatalf("write peasant stub: %v", err)
 	}
 	if err := os.WriteFile(logPath, nil, 0o644); err != nil {

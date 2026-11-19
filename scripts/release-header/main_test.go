@@ -12,6 +12,7 @@ import (
 	"testing"
 	"text/template"
 
+	"github.com/peasant-labs/peasant/internal/testkit/executable"
 	"gopkg.in/yaml.v3"
 )
 
@@ -233,7 +234,12 @@ func TestMountedReleaseHeader(t *testing.T) {
 			capture := filepath.Join(dir, "published-header")
 			argsFile := filepath.Join(dir, "publisher-args")
 			stub := "#!/bin/sh\nmkdir -p dist\nprintf '%s' \"$PEASANT_RELEASE_HEADER\" > \"$CAPTURE\"\nprintf '%s\\n' \"$@\" > \"$ARGS_FILE\"\n"
-			writeTestFile(t, filepath.Join(runner, "goreleaser-bin", "goreleaser"), stub, 0o700)
+			if err := os.MkdirAll(filepath.Join(runner, "goreleaser-bin"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := executable.Write(filepath.Join(runner, "goreleaser-bin", "goreleaser"), []byte(stub), 0o700); err != nil {
+				t.Fatal(err)
+			}
 			for _, step := range []workflowStep{publish} {
 				cmd := exec.Command("bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", step.Run)
 				cmd.Dir = dir
