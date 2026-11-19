@@ -704,7 +704,7 @@ func newManagedRefreshPipeline(tb testing.TB, db *store.Store, source, output st
 			ingest.WithAnalyzer(metrics.NewEngineWithModels(db, db)),
 			ingest.WithClassifier(metrics.NewClassifierAnnotator(db, db)))
 	}
-	pipeline, err := newTestPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg, options...)
+	pipeline, err := ingest.NewPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg, options...)
 	if err != nil {
 		tb.Fatalf("build refresh pipeline: %v", err)
 	}
