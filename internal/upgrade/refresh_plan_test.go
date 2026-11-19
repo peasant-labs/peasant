@@ -238,6 +238,9 @@ func TestPlanRefreshDelegates(t *testing.T) {
 			t.Errorf("%s reason = %s, want %s", c.Name, decisions[c.Name].Reason, c.Reason)
 		}
 	}
+	// This deliberately changes only the version on a current-schema store,
+	// not its schema. It tests that the two pending effects do not change the
+	// decisions, not that a historical store can be read.
 	// Migration 77's recount does not feed decideRefresh; migration 62's
 	// content-pending work is not evidence this planner reads.
 	conn, err := sqlite.OpenConn(path, sqlite.OpenReadWrite)
@@ -268,6 +271,8 @@ func TestPlanRefreshDelegates(t *testing.T) {
 }
 
 func TestPlanRefreshVersionBoundaries(t *testing.T) {
+	// Share the store reader's version-boundary cases so both tests exercise
+	// the same historical layouts; move this path with the store fixture.
 	const boundaryFixturePath = "../store/testdata/refresh_boundaries.yaml"
 	data, err := os.ReadFile(boundaryFixturePath)
 	if err != nil {
