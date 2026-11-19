@@ -88,6 +88,9 @@ func TestReleaseCandidateProvenance(t *testing.T) {
 	if script == "" {
 		t.Fatal("release candidate provenance step has no script")
 	}
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Fatalf("the provenance step's decision runs a real jq, which is not on PATH (%v); add jq to the environment (the Nix package lists it in nativeCheckInputs) and rerun", err)
+	}
 	seen := make(map[string]bool)
 	for _, c := range fixture.Cases {
 		if c.Name == "" || seen[c.Name] {
