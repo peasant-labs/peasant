@@ -6,7 +6,8 @@
 # Each case runs the stored indexer (full depth unless fullDepthOff) over
 # `jsonl` and lists every stored entry in order, with literal values: `parent`
 # is -1 for a depth-0 entry, `uuid` and `timestamp` are the entry's source
-# identity and time, `rawBytes` is the stored source size (the summed trimmed
+# identity and time (a thinking child carries its record's time so a reader can
+# time it), `rawBytes` is the stored source size (the summed trimmed
 # length of the reply's records). An omitted field is asserted empty. An image
 # child's note is not asserted (`contentAny`).
 #
@@ -31,7 +32,7 @@ cases:
     entries:
       - {index: 0, depth: 0, parent: -1, uuid: "u1", timestamp: "2026-01-02T10:00:00Z", role: "user", entryType: "text", content: "tidy the module", rawBytes: 116}
       - {index: 1, depth: 0, parent: -1, uuid: "a1", timestamp: "2026-01-02T10:00:01Z", role: "assistant", entryType: "text", content: "Tidying now.", toolNames: "Bash", tokensIn: 43, tokensOut: 9, stopReason: "max_tokens", rawBytes: 790}
-      - {index: 2, depth: 1, parent: 1, role: "assistant", entryType: "thinking", content: "start with go.mod"}
+      - {index: 2, depth: 1, parent: 1, timestamp: "2026-01-02T10:00:01Z", role: "assistant", entryType: "thinking", content: "start with go.mod"}
       - {index: 3, depth: 1, parent: 1, role: "assistant", entryType: "tool_use", toolNames: "Bash"}
 
   - name: a-message-resumed-after-another-message-joins-its-reply

@@ -902,6 +902,10 @@ func decomposeClaudeContentBlocks(ctx context.Context, idx *ClaudeIndexer, sessi
 			entry.PartType = &pt
 			entry.EntryType = EntryTypeThinking
 			entry.HasThinking = true
+			// A thinking block is served as a turn of its own under its reply,
+			// so it carries the time of the record that wrote it: a reader
+			// times the thinking from it.
+			entry.TimestampMs = parseIndexTimestamp(line.Timestamp)
 			// Claude transcripts store thinking trace text in `thinking`, not `text`.
 			// Fall back to `text` for older fixtures that used the legacy shape.
 			text := block.Thinking

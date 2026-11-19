@@ -419,6 +419,7 @@ func claudeChildBlock(childKey, recordKey string, entry schema.SessionEntry, see
 		RawByteLength:    entry.RawByteLength,
 		ToolName:         derefString(entry.ToolNamesCSV),
 		ToolKind:         derefToolKind(entry.ToolKind),
+		TimestampMs:      entry.TimestampMs,
 	}
 	retained, observedModel, extra, err := claudeEntryExtra(entry)
 	if err != nil {
