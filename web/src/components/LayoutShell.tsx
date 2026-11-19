@@ -15,6 +15,7 @@ import { DevAnnotateOverlay } from '@/components/dev/DevAnnotateOverlay';
 import { playEnter } from '@/lib/motion/enter';
 import { parseTranscriptRoute } from '@/lib/navigation/projectRoutes';
 import { FirstRunProvider } from '@/hooks/useFirstRun';
+import { isKickstartPage } from '@/lib/kickstart/entry';
 
 /** The transcript holds dialogs that position against the screen, so it only fades in. */
 const FADE_ONLY = ['/projects'];
@@ -75,7 +76,7 @@ export function LayoutShell({ children }: { children: ReactNode }) {
           {/* Sends the person to setup from any top-level page until setup has been saved,
               and holds a page that starts something on mount until that is decided. */}
           <FirstRunProvider>
-            <AppSidebarLayout sidebar={<LocalSidebar />} viewport={viewport} notice={<PageNotices />} topBar={pathname === '/kickstart' ? <h1 className="ks-page-title">set up peasant</h1> : undefined} mainAs="main">
+            <AppSidebarLayout sidebar={<LocalSidebar />} viewport={viewport} notice={<PageNotices />} topBar={isKickstartPage(pathname) ? <h1 className="ks-page-title">set up peasant</h1> : undefined} mainAs="main">
               {children}
             </AppSidebarLayout>
           </FirstRunProvider>

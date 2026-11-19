@@ -94,6 +94,27 @@ describe('static shell hydration', () => {
   }
 });
 
+const pageTitle = YAML.parse(readFileSync(resolve(process.cwd(), 'src/components/testdata/shell_page_title.yaml'), 'utf8')) as {
+  requiredNames: string[];
+  cases: { name: string; pathname: string; title: boolean }[];
+};
+
+describe('the setup page title', () => {
+  it('retains the named route cases', () => {
+    expect(new Set(pageTitle.cases.map((row) => row.name))).toEqual(new Set(pageTitle.requiredNames));
+  });
+  for (const row of pageTitle.cases) {
+    it(row.name, async () => {
+      mockHttp(UI_CAPABILITY_CASES[0]);
+      route.pathname = row.pathname;
+      await act(async () => { render(<LayoutShell>representative page body</LayoutShell>); });
+      const heading = screen.queryByRole('heading', { level: 1, name: 'set up peasant' });
+      if (row.title) expect(heading).not.toBeNull();
+      else expect(heading).toBeNull();
+    });
+  }
+});
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();

@@ -1,0 +1,29 @@
+# The full-setup page title the shell draws above the page body. The app is
+# exported with `trailingSlash: true`, so the served setup path is `/kickstart/`;
+# both spellings must draw the title, and no other page draws it.
+requiredNames:
+  - setup-served-with-trailing-slash
+  - setup-without-trailing-slash
+  - selection-page-has-no-setup-title
+  - settings-page-has-no-setup-title
+  - home-has-no-setup-title
+  - path-beneath-setup-is-not-setup
+cases:
+  - name: setup-served-with-trailing-slash
+    pathname: /kickstart/
+    title: true
+  - name: setup-without-trailing-slash
+    pathname: /kickstart
+    title: true
+  - name: selection-page-has-no-setup-title
+    pathname: /selection/
+    title: false
+  - name: settings-page-has-no-setup-title
+    pathname: /settings/
+    title: false
+  - name: home-has-no-setup-title
+    pathname: /
+    title: false
+  - name: path-beneath-setup-is-not-setup
+    pathname: /kickstart/other/
+    title: false
