@@ -118,7 +118,8 @@ func TestMissingChangelogFailsWithoutOutput(t *testing.T) {
 
 type workflow struct {
 	Jobs map[string]struct {
-		Steps []workflowStep `yaml:"steps"`
+		Env   map[string]string `yaml:"env"`
+		Steps []workflowStep    `yaml:"steps"`
 	} `yaml:"jobs"`
 }
 
@@ -182,6 +183,15 @@ func TestMountedReleaseHeader(t *testing.T) {
 	if publish.Env["TAG"] != "${{ github.ref_name }}" {
 		t.Fatal("release build must use the triggering tag")
 	}
+	// The runner gives every step its job's env, so the step runs with the
+	// build job's literal values; an expression there cannot be resolved here.
+	var jobEnv []string
+	for key, value := range release.Jobs["build"].Env {
+		if strings.Contains(value, "${{") {
+			t.Fatalf("build job env %s = %q is an expression this mounted test cannot resolve", key, value)
+		}
+		jobEnv = append(jobEnv, key+"="+value)
+	}
 
 	configBytes, err := os.ReadFile(filepath.Join(root, ".goreleaser.yml"))
 	if err != nil {
@@ -227,7 +237,7 @@ func TestMountedReleaseHeader(t *testing.T) {
 			for _, step := range []workflowStep{publish} {
 				cmd := exec.Command("bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", step.Run)
 				cmd.Dir = dir
-				cmd.Env = append(os.Environ(), "TAG="+c.Tag, "VERSION="+c.Tag, "RUNNER_TEMP="+runner, "CAPTURE="+capture, "ARGS_FILE="+argsFile, "GOWORK=off")
+				cmd.Env = append(append(os.Environ(), jobEnv...), "TAG="+c.Tag, "VERSION="+c.Tag, "RUNNER_TEMP="+runner, "CAPTURE="+capture, "ARGS_FILE="+argsFile, "GOWORK=off")
 				output, runErr := cmd.CombinedOutput()
 				if c.ErrorContains != "" {
 					if runErr == nil || !strings.Contains(string(output), c.ErrorContains) {
