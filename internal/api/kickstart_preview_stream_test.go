@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -70,29 +71,34 @@ func (l *lockedLog) String() string {
 	return l.buf.String()
 }
 
-// previewLogRecords returns the preview lines of a JSON log, each as its
-// attribute map.
-func previewLogRecords(t *testing.T, log string, messages []string) []map[string]any {
+// previewLogLine is one preview line of the JSON log: its message and reason,
+// and every attribute raw so the test can check keys and values alike.
+type previewLogLine struct {
+	Msg    string `json:"msg"`
+	Reason string `json:"reason"`
+	attrs  map[string]json.RawMessage
+}
+
+// previewLogRecords returns the preview lines of a JSON log.
+func previewLogRecords(t *testing.T, log string, messages []string) []previewLogLine {
 	t.Helper()
-	var records []map[string]any
+	var records []previewLogLine
 	for _, line := range strings.Split(strings.TrimSpace(log), "\n") {
 		if line == "" {
 			continue
 		}
-		var record map[string]any
+		var record previewLogLine
 		if err := json.Unmarshal([]byte(line), &record); err != nil {
 			t.Fatalf("log line is not JSON: %v", err)
 		}
-		msg, _ := record["msg"].(string)
-		if !strings.HasPrefix(msg, "kickstart preview:") {
+		if !strings.HasPrefix(record.Msg, "kickstart preview:") {
 			continue
 		}
-		known := false
-		for _, want := range messages {
-			known = known || want == msg
+		if !slices.Contains(messages, record.Msg) {
+			t.Fatalf("preview log line %q is not in the privacy fixture's closed set", record.Msg)
 		}
-		if !known {
-			t.Fatalf("preview log line %q is not in the privacy fixture's closed set", msg)
+		if err := json.Unmarshal([]byte(line), &record.attrs); err != nil {
+			t.Fatalf("log line attributes are not a JSON object: %v", err)
 		}
 		records = append(records, record)
 	}
@@ -176,21 +182,22 @@ func TestKickstartPreviewStream(t *testing.T) {
 				}
 				next := 0
 				for _, record := range records {
-					for key, value := range record {
+					for key, value := range record.attrs {
 						if !allowed[key] {
-							t.Fatalf("preview log line %q carries attribute %q outside the privacy fixture's keys", record["msg"], key)
+							t.Fatalf("preview log line %q carries attribute %q outside the privacy fixture's keys", record.Msg, key)
 						}
-						if text, ok := value.(string); ok && key != "time" {
-							for _, secret := range forbidden {
-								if secret != "" && strings.Contains(text, secret) {
-									t.Fatalf("preview log line %q attribute %q discloses an identifier, path or text", record["msg"], key)
-								}
+						if key == "time" {
+							continue
+						}
+						for _, secret := range forbidden {
+							if secret != "" && strings.Contains(string(value), secret) {
+								t.Fatalf("preview log line %q attribute %q discloses an identifier, path or text", record.Msg, key)
 							}
 						}
 					}
-					if next < len(tc.Logs) && record["msg"] == privacy.PreviewLog.Named[tc.Logs[next]] {
-						if tc.Logs[next] == "freed" && tc.FreedReason != "" && record["reason"] != tc.FreedReason {
-							t.Fatalf("the freed line says %v, want %s", record["reason"], tc.FreedReason)
+					if next < len(tc.Logs) && record.Msg == privacy.PreviewLog.Named[tc.Logs[next]] {
+						if tc.Logs[next] == "freed" && tc.FreedReason != "" && record.Reason != tc.FreedReason {
+							t.Fatalf("the freed line says %q, want %s", record.Reason, tc.FreedReason)
 						}
 						next++
 					}
