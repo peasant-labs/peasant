@@ -21,6 +21,7 @@ type RefreshPlan struct {
 	// Approximate remains true even on a current schema: not all evidence is read.
 	Approximate      bool
 	EvidenceNotRead  []string
+	// UnappliedEffects names pending schema effects that the census cannot model.
 	UnappliedEffects []store.StampEffect
 }
 
@@ -104,6 +105,9 @@ func planRefresh(ctx context.Context, path string, declarations []ProducerDeclar
 	if err != nil {
 		return RefreshPlan{}, fmt.Errorf("plan refresh evidence: %w", err)
 	}
+	// A version-zero database with no rows has no schema work to apply: the
+	// schema planner treats it as a new store while the evidence reader reports
+	// its actual pragma value. Other mismatches can indicate concurrent upgrades.
 	if version != schema.From && !(version == 0 && len(rows) == 0 && len(schema.Steps) == 0) {
 		return RefreshPlan{}, fmt.Errorf("plan refresh %s: schema changed from %d to %d while reading; no changes were made; retry after other migrations finish", path, schema.From, version)
 	}
@@ -142,6 +146,7 @@ func planRefresh(ctx context.Context, path string, declarations []ProducerDeclar
 			plan.UnappliedEffects = append(plan.UnappliedEffects, step.StampEffect)
 		}
 	}
+	// Planning may process many stored rows after the evidence read completes.
 	for _, row := range rows {
 		if err := ctx.Err(); err != nil {
 			return RefreshPlan{}, err
