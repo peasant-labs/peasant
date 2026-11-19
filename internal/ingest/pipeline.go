@@ -2367,9 +2367,10 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 				})
 			}
 			if proofErr == nil && proof.Proven {
-				outcome, duration, settleErr := p.settleManagedGenerationUnchanged(ctx, input, writeLane)
-				if settleErr == nil && outcome.Disposition == ManagedGenerationRefreshUnchanged {
-					reason := indexManagedRefreshReason + " (" + string(outcome.Disposition) + ")"
+				_, duration, settleErr := p.settleManagedGenerationUnchanged(ctx, input, writeLane)
+				if settleErr == nil {
+					// Preserve the historical index-log reason for report continuity.
+					reason := indexManagedRefreshReason + " (unchanged)"
 					result.managedRefreshDuration = duration
 					result.logEntry = p.makeIndexLogEntry(im, IndexOutcomeSkipped, 0, result.startedAt, &reason, nil)
 					result.bytes = 0

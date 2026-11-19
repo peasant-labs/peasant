@@ -87,32 +87,12 @@ func (p *Pipeline) settleManagedGenerationUnchanged(ctx context.Context, input *
 	return outcome, time.Since(start), err
 }
 
-// ManagedGenerationRefreshDisposition is the closed set of outcomes an
-// unchanged settlement of a managed generation reports.
-type ManagedGenerationRefreshDisposition string
-
-const (
-	// ManagedGenerationRefreshUnchanged reports that the captured input
-	// reproduces the active generation: no new generation was installed and
-	// the mutable bookkeeping was settled against the refreshed capture.
-	ManagedGenerationRefreshUnchanged ManagedGenerationRefreshDisposition = "unchanged"
-)
-
-// AllManagedGenerationRefreshDispositions lists every outcome the pipeline
-// understands. A store that reports anything else is refused at the adapter
-// boundary rather than read as a successful settle.
-var AllManagedGenerationRefreshDispositions = []ManagedGenerationRefreshDisposition{
-	ManagedGenerationRefreshUnchanged,
-}
-
 // ManagedGenerationRefreshOutcome is the pipeline-owned result of an unchanged
 // settlement of a managed generation.
 type ManagedGenerationRefreshOutcome struct {
 	// GenerationID is the generation that is the active read authority
 	// afterwards: the settled source generation.
 	GenerationID string
-	// Disposition says what the settlement did.
-	Disposition ManagedGenerationRefreshDisposition
 }
 
 // managedGenerationRefreshLane reports whether a stored-metadata result is a
