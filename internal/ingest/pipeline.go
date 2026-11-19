@@ -5015,7 +5015,7 @@ func (p *Pipeline) indexComputeAndFinalize(
 		// bytes actually parsed. Unknown prior sizes make the total unknown.
 		sizes := make(map[SessionID]int64, len(indexSessions))
 		var totalBytes, priorBytes int64
-		known := prog != nil && len(priorIndexLogEntries) == priorDone
+		known := prog != nil && indexProgressLogsPaired(slog.Default(), len(priorIndexLogEntries), priorDone)
 		if known {
 			for _, log := range priorIndexLogEntries {
 				if log.Bytes == nil || *log.Bytes <= 0 || *log.Bytes > int64(^uint64(0)>>1)-priorBytes {

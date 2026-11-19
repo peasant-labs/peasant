@@ -1,0 +1,4 @@
+requiredNames: [known-without-bytes]
+cases:
+  - name: known-without-bytes
+    known: true

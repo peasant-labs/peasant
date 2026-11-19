@@ -216,7 +216,7 @@ func (m *Model) observe(at time.Time, snapshot map[ingest.Stage]ingest.StageProg
 
 func estimateProgress(sp ingest.StageProgress) (int, int, bool) {
 	if sp.BytesTotal > 0 {
-		// Scaling to KiB on narrow platforms avoids integer overflow.
+		// Scale only when necessary to avoid overflowing int on 32-bit platforms.
 		maxInt := int64(^uint(0) >> 1)
 		scale := int64(1)
 		if sp.BytesTotal > maxInt {
@@ -307,7 +307,7 @@ func (m Model) View() string {
 	}
 	detail := []string{}
 	if m.candidatesKnown {
-		detail = append(detail, styles.Muted.Render(fmt.Sprintf("%sextract candidates: %d %s (not confirmed refreshes)", kit.Indent(2), m.candidateCount, ingest.SessionWord(m.candidateCount))))
+		detail = append(detail, styles.Muted.Render(fmt.Sprintf("%sextract candidates: %d %s (not confirmed refreshes)", kit.Indent(2), m.candidateCount, defaults.SessionWord(m.candidateCount))))
 	}
 	if m.lane != nil {
 		busy := "busy unknown"
