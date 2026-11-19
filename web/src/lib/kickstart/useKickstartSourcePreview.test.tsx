@@ -36,6 +36,7 @@ interface PreviewStep {
   jump?: true;
   expectHighlight?: string;
   expectSessionMeta?: { reads?: string[]; lacks?: string[] };
+  expectTurnLabels?: Record<string, string>;
 }
 const PREVIEW_KEYS = Object.freeze({
   serve: true,
@@ -49,6 +50,7 @@ const PREVIEW_KEYS = Object.freeze({
   jump: true,
   expectHighlight: true,
   expectSessionMeta: true,
+  expectTurnLabels: true,
 } satisfies Record<keyof PreviewStep, true>);
 /** Where the stream must not reach: the closed set an `expectPrivacy` step names. */
 const PreviewPrivacy = Object.freeze({
@@ -202,6 +204,16 @@ async function runPreviewStep(step: PreviewStep, spec: StreamSpec, state: Conver
     for (const word of lacks) {
       expect(items.filter((item) => item.split(' ').includes(word)), `${at}: the header shows no ${word} figure`).toEqual([]);
     }
+  }
+  if (step.expectTurnLabels !== undefined) {
+    const want = step.expectTurnLabels;
+    // Each turn's number, read from its own card: the article Fairtrade keys by
+    // the turn's index, and the number in that card's heading.
+    const read = () => Object.fromEntries(Object.keys(want).map((index) => {
+      const card = mounted.container.querySelector(`[data-preview-session] article[data-turn="${index}"]`);
+      return [index, card?.querySelector('.txn-turnnum')?.textContent?.replace(/\s+/g, '') ?? '(not drawn)'];
+    }));
+    await waitFor(() => expect(read(), `${at}: the turn numbers drawn`).toEqual(want));
   }
   for (const check of step.expectPrivacy ?? []) {
     if (!PRIVACY.includes(check)) throw new Error(`${at}: expectPrivacy names ${check}; it is one of ${PRIVACY.join(', ')}`);

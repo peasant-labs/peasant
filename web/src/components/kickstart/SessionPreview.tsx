@@ -13,6 +13,7 @@ import { Button, Skeleton } from '@/lib/ft-ui';
 import { useTheme } from '@/hooks/useTheme';
 import { useKickstartSourcePreview } from '@/lib/kickstart/useKickstartSourcePreview';
 import { READ_AGAIN } from '@/lib/kickstart/sourcePreview';
+import { continueTurnLabels } from '@/lib/kickstart/previewTurnLabels';
 import { cookSegment } from '@/components/session-detail/v2/lib/transcriptSegments';
 
 /**
@@ -131,10 +132,14 @@ export default function SessionPreview({ sessionId, nodeId, label, scanGeneratio
     };
   }, [held, label, tail]);
 
-  const segments = useMemo(
-    () => (held === null ? [] : held.segments.map((segment) => cookSegment(held.header, segment, { tail }))),
-    [held, tail],
-  );
+  // Each segment is cooked alone, then given the labels the whole held
+  // session has, so turn numbers continue across loaded segments.
+  const segments = useMemo(() => {
+    if (held === null) return [];
+    const cooked = held.segments.map((segment) => cookSegment(held.header, segment, { tail }));
+    if (viewModel === null) return cooked;
+    return continueTurnLabels(cooked, viewModel.turns, held.segments.flatMap((segment) => segment.turns));
+  }, [held, tail, viewModel]);
   const directory = useMemo(() => (held === null ? null : directoryVM(held)), [held]);
 
   // Every segment the directory names is already held, so a jump or a
