@@ -34,6 +34,14 @@ cases:
     mode: sweep
     seam: after-staging
     expect: fk-refused-then-committed
+  - name: sweep-vs-commit-after-its-read
+    mode: sweep-writer
+    seam: first-sweep-write
+    expect: writer-waits-then-swept
+  - name: sweep-vs-held-writer
+    mode: sweep-writer
+    seam: after-commit-before-sweep
+    expect: sweep-waits-then-swept
   - name: harvest-during-search-consolidation
     mode: consolidation
     seam: sqlite-authorizer

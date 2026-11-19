@@ -39,7 +39,18 @@ func (s *Store) sweepBoundedSession(ctx context.Context, sid schema.SessionID, a
 }
 
 func sweepBoundedOnConn(ctx context.Context, conn *sqlite.Conn, sid schema.SessionID, active, latestAttempt string, limit int, result *SweepResult) (err error) {
-	end := sqlitex.Transaction(conn)
+	// Acquire the writer before the first read. A deferred transaction reads
+	// first and its first delete then needs a lock upgrade, which SQLite
+	// refuses with BUSY at once, without waiting on busy_timeout, when another
+	// connection holds the writer or committed after this snapshot began. The
+	// pipeline runs this sweep outside its write lane while staging and the
+	// next activation write on other connections, so the upgrade lost that race
+	// during fresh imports. IMMEDIATE waits on the bounded busy timeout instead,
+	// and every writer's hold stays below that timeout by the write budgets.
+	end, err := sqlitex.ImmediateTransaction(conn)
+	if err != nil {
+		return err
+	}
 	defer end(&err)
 	var work int64
 	for _, table := range reclaimTableNames {

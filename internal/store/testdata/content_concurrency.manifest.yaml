@@ -7,4 +7,6 @@ requiredNames:
   - harvest-vs-reclaim
   - harvest-vs-migrate
   - sweep-vs-stage
+  - sweep-vs-commit-after-its-read
+  - sweep-vs-held-writer
   - harvest-during-search-consolidation

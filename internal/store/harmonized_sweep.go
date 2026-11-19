@@ -233,7 +233,14 @@ func (s *Store) deleteVerifiedBodies(ctx context.Context, sessionID schema.Sessi
 	defer s.pool.Put(conn)
 	var deleted int64
 	txnErr := error(nil)
-	endFn := sqlitex.Transaction(conn)
+	// The batch verifies each body before deleting it, so it reads first.
+	// IMMEDIATE takes the writer before that read: a deferred transaction's
+	// later upgrade fails with BUSY at once, without waiting on busy_timeout,
+	// when another connection writes meanwhile.
+	endFn, err := sqlitex.ImmediateTransaction(conn)
+	if err != nil {
+		return 0, fmt.Errorf("store: begin the delete of %d bodies for session %s: %w; no row was deleted and the sweep flag remains set; %s", len(digests), sessionID, err, sweepRetryAdvice(err))
+	}
 	defer endFn(&txnErr)
 	for _, digest := range digests {
 		if err := ctx.Err(); err != nil {

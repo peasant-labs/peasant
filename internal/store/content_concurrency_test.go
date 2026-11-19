@@ -97,6 +97,11 @@ func TestContentConcurrency(t *testing.T) {
 					t.Fatal("unknown sweep expectation")
 				}
 				runConcurrencySweepVsStage(t)
+			case "sweep-writer":
+				if c.Expect != "writer-waits-then-swept" && c.Expect != "sweep-waits-then-swept" {
+					t.Fatalf("unknown sweep writer expectation %q", c.Expect)
+				}
+				runConcurrencySweepVsWriter(t, c)
 			case "reclaim":
 				if c.Expect != "settled-no-orphans" {
 					t.Fatal("unknown reclaim expectation")
