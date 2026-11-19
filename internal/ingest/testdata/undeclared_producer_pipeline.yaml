@@ -5,7 +5,7 @@
 cases:
   - name: declared-adapter-settles-on-the-stored-lane
     undeclared: false
-    want: {reason: adapter_behind, lane: stored-metadata, proofs: 1, settles: 1, copies: 0, builds: 0}
+    want: {reason: adapter_behind, lane: stored-metadata, proofs: 1, settles: 1, builds: 0}
   - name: undeclared-adapter-parses-on-the-full-step
     undeclared: true
-    want: {reason: adapter_behind_native_only, lane: native, proofs: 0, settles: 0, copies: 0, builds: 1}
+    want: {reason: adapter_behind_native_only, lane: native, proofs: 0, settles: 0, builds: 1}

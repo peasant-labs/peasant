@@ -34,8 +34,8 @@ type CapturedIndexInput struct {
 	// managedGenerationRefresh marks input this run produced on the
 	// adapter-behind / adapter-stamp-absent stored-metadata lane for a harness
 	// whose declared output is a managed generation. It is the marker the
-	// specific no-parse refresh rule reads; it is not a general permission for
-	// a managed generation to bind without a re-parse.
+	// unchanged proof and settle read; it is not a general permission for a
+	// managed generation to bind without a re-parse.
 	managedGenerationRefresh bool
 	transcript               []byte
 	tree                     *openCodeJSONInput

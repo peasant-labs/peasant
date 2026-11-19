@@ -1,8 +1,12 @@
+# The optional validator runs after a not-proven unchanged proof. Only a
+# consistent proven answer settles; every other answer (unsupported, an error,
+# an inconsistent pair, no validator) leaves the proof not proven and the
+# session parses. No answer copies the stored generation.
 cases:
-  - name: unsupported-copies
+  - name: unsupported-parses
     outcome: unsupported
     validatorCalls: 1
-    copies: 1
+    builds: 1
     unsupported: true
   - name: proven-settles
     outcome: proven
@@ -14,15 +18,15 @@ cases:
     validatorCalls: 1
     builds: 1
     diagnostic: true
-  - name: validator-error-copies
+  - name: validator-error-parses
     error: true
     validatorCalls: 1
-    copies: 1
-  - name: inconsistent-proven-copies
+    builds: 1
+  - name: inconsistent-proven-parses
     outcome: proven
     mismatch: content-hash
     validatorCalls: 1
-    copies: 1
-  - name: missing-validator-copies
+    builds: 1
+  - name: missing-validator-parses
     missing: true
-    copies: 1
+    builds: 1

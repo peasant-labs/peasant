@@ -2,6 +2,6 @@ requiredNames:
   - proven
   - index-not-current
   - metadata-context
-  - copy-refused
+  - unproven-unchanged-parses
   - proof-error
   - settle-refused

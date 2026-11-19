@@ -3,13 +3,14 @@
 # skips and once with PipelineConfig.DisableRefreshSkips. Counts are per run
 # over one session. builds counts the managed-format generation builder, which
 # is this format's parse; parses counts the strict parser dispatch, which a
-# managed generation never takes.
+# managed generation never takes. A context change fails the proof, so both
+# runs parse and only the proof attempt differs.
 cases:
   - name: stamp-only-bump-settles-or-parses
     changeContext: false
-    optimized: {proofs: 1, settles: 1, copies: 0, builds: 0, parses: 0}
-    baseline: {proofs: 0, settles: 0, copies: 0, builds: 1, parses: 0}
-  - name: context-change-copies-or-parses
+    optimized: {proofs: 1, settles: 1, builds: 0, parses: 0}
+    baseline: {proofs: 0, settles: 0, builds: 1, parses: 0}
+  - name: context-change-parses-after-the-failed-proof
     changeContext: true
-    optimized: {proofs: 1, settles: 0, copies: 1, builds: 0, parses: 0}
-    baseline: {proofs: 0, settles: 0, copies: 0, builds: 1, parses: 0}
+    optimized: {proofs: 1, settles: 0, builds: 1, parses: 0}
+    baseline: {proofs: 0, settles: 0, builds: 1, parses: 0}

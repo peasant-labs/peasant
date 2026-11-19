@@ -85,9 +85,12 @@ func TestManagedMetricsDurationRoundtrip(t *testing.T) {
 				if err := os.Rename(source, source+"-unavailable"); err != nil {
 					t.Fatal(err)
 				}
+				// The changed project fails the unchanged proof, so the
+				// refresh parses the stored transcript (the source is gone)
+				// and installs the new generation.
 				result, err = pipeline.Run(t.Context())
-				if err != nil || result.Summary.Indexed != 0 {
-					t.Fatalf("adapter refresh reparsed entries: %+v %v", result, err)
+				if err != nil || result.Summary.Indexed != 1 {
+					t.Fatalf("adapter refresh did not parse the stored transcript once: %+v %v", result, err)
 				}
 				input, err = db.ReadMetricInput(t.Context(), sid, true)
 				if err != nil || input == nil || input.GenerationID == old {
@@ -310,9 +313,9 @@ func durationDowngradeAdapter(tb testing.TB, db *store.Store, stored int) {
 
 // durationStampMetadata rewrites every managed metadata file's adapter
 // revision, forces a context change, and recomputes the metadata hash. A
-// stamp-only change reproduces the active generation, so the integrated
-// metadata-only refresh would report unchanged and install nothing; the forced
-// project name is what makes the generation install observable. It returns the
+// stamp-only change reproduces the active generation, so the unchanged proof
+// would settle it and install nothing; the forced project name fails the proof,
+// so the run parses and installs an observable new generation. It returns the
 // file count.
 func durationStampMetadata(tb testing.TB, output string, stored int, projectName string) int {
 	tb.Helper()

@@ -1,0 +1,13 @@
+# The closed set of skip-budget measurement case ids and what each one is.
+#   measured: a two-arm case with a caseSpec in the harness.
+#   smoke:    the new-session full step, timed by its own smoke runner.
+#   retired:  an id the harness no longer accepts and never reuses. C2 and C5
+#             measured the metadata-only copy refresh after a failed proof;
+#             a failed proof now parses, so they have no skip to measure.
+cases:
+  - {name: C1, kind: measured}
+  - {name: C2, kind: retired}
+  - {name: C3, kind: measured}
+  - {name: C4, kind: smoke}
+  - {name: C5, kind: retired}
+  - {name: C6, kind: measured}

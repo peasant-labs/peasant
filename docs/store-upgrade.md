@@ -418,3 +418,10 @@ existing schema or conversion plan, its `session_work` object has these fields:
 
 When `available` is false, the counts do not represent a census. The schema
 plan is still printed so the operator can inspect it and fix the evidence read.
+
+On the stored-metadata lane of a managed generation, a harvest first tries to
+prove that the refreshed metadata reproduces the stored generation. A proven
+session settles its bookkeeping without a parse. Any other answer (the proof
+fails, cannot be read, or its settle is refused) parses the stored transcript
+once and installs the result; there is no intermediate copy of the stored
+generation.

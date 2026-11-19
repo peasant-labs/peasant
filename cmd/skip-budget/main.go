@@ -9,6 +9,10 @@
 // budget matrix, 240 sessions x 1000 entries over 5 rounds; run it only on a
 // quiet machine. A smaller shape is a smoke run and its report says so.
 //
+// C2 and C5 are retired: they measured the metadata-only copy refresh after a
+// failed proof, and a failed proof now parses, so neither has a skip left to
+// measure. Their ids are not reused.
+//
 // Exit condition: the harness exists to decide whether the conditional
 // legacy-row validation (#1036) and shared-mapping reuse (#1038) are worth
 // building. Once that decision is recorded on both issues, delete the harness
@@ -16,7 +20,7 @@
 // the stored run profile then carry the evidence.
 //
 //	go run -tags skipbudget ./cmd/skip-budget -list
-//	go run -tags skipbudget ./cmd/skip-budget -case C1,C2,C3,C5,C6 -base "$(git merge-base HEAD origin/develop)"
+//	go run -tags skipbudget ./cmd/skip-budget -case C1,C3,C6 -base "$(git merge-base HEAD origin/develop)"
 //	go run -tags skipbudget ./cmd/skip-budget -case C1 -base <rev> -sessions 2 -entries 10
 package main
 
@@ -60,24 +64,14 @@ const defaultRoot = "/tmp/opencode/peasant-1034"
 
 func main() {
 	list := flag.Bool("list", false, "print the planned cases without running them")
-	caseList := flag.String("case", "", "comma-separated cases to run: C1, C2, C3, C4, C5, C6")
+	caseList := flag.String("case", "", "comma-separated cases to run: C1, C3, C4, C6")
 	base := flag.String("base", "", "comparison base revision")
 	root := flag.String("root", defaultRoot, "absolute directory that holds one directory per case")
 	sessions := flag.Int("sessions", matrixSessions, "synthetic sessions per case (C4 always uses 2)")
 	entries := flag.Int("entries", matrixEntries, "entries per session (C4 always uses 10)")
 	rounds := flag.Int("rounds", 5, "rounds per case; each round runs both arms once")
 	flag.Parse()
-	cases := []matrixCase{
-		{Name: upgrade.MeasurementCaseStampOnly, Shape: "stamp-only adapter bump: proof and settle vs parse"},
-		{Name: upgrade.MeasurementCaseContextChange, Shape: "forced context change: copy refresh vs parse and install"},
-		{Name: upgrade.MeasurementCaseIndexerBump, Shape: "indexer bump: stored-index lane vs native"},
-		{Name: upgrade.MeasurementCaseNewSession, Shape: "new session: 2 x 10"},
-		{Name: upgrade.MeasurementCaseLegacyRow, Shape: "legacy row: stamp-only bump without the seal"},
-		{Name: upgrade.MeasurementCaseUndeclaredProducer, Shape: "undeclared producer: the full step the plan names"},
-	}
-	for i := range cases {
-		cases[i].DataDir = filepath.Join(*root, string(cases[i].Name))
-	}
+	cases := matrixCases(*root)
 	if *list {
 		if err := json.NewEncoder(os.Stdout).Encode(report{Cases: cases}); err != nil {
 			fmt.Fprintf(os.Stderr, "skip-budget: writing matrix to stdout failed: %v\n", err)
@@ -129,6 +123,21 @@ func main() {
 		}
 		fmt.Println(path)
 	}
+}
+
+// matrixCases lists every case the harness can run, in matrix order, with its
+// data directory under root.
+func matrixCases(root string) []matrixCase {
+	cases := []matrixCase{
+		{Name: upgrade.MeasurementCaseStampOnly, Shape: "stamp-only adapter bump: proof and settle vs parse"},
+		{Name: upgrade.MeasurementCaseIndexerBump, Shape: "indexer bump: stored-index lane vs native"},
+		{Name: upgrade.MeasurementCaseNewSession, Shape: "new session: 2 x 10"},
+		{Name: upgrade.MeasurementCaseUndeclaredProducer, Shape: "undeclared producer: the full step the plan names"},
+	}
+	for i := range cases {
+		cases[i].DataDir = filepath.Join(root, string(cases[i].Name))
+	}
+	return cases
 }
 
 func fail(code int, message string) {
