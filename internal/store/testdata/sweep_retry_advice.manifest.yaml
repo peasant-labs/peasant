@@ -3,4 +3,9 @@ requiredNames:
   - busy-names-lock-contention
   - locked-names-lock-contention
   - full-names-disk-space
-  - ioerr-names-file-access
+  - ioerr-names-full-disk-and-permissions
+  - ioerr-write-names-full-disk-and-permissions
+  - interrupt-names-cancellation
+  - context-canceled-names-cancellation
+  - context-deadline-names-cancellation
+  - corrupt-names-file-access

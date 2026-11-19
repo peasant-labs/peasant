@@ -1,20 +1,56 @@
-# The repair a refused sweep names, by the SQLite result code its first delete
-# failed with. Lock contention and a full disk need opposite actions, so each
-# case also names the advice that must NOT appear.
+# The repair a refused sweep names, by the cause its first delete failed with.
+# Lock contention and a full disk need opposite actions, so each case also
+# names the advice that must NOT appear. Every case runs on each listed sweep
+# path: "bounded" is the one-transaction sweep, "batch" the resumable fallback.
+#
+# namesBusyTimeout: the advice must name the store's real busy timeout; the
+# test derives that text from defaults.SQLiteBusyTimeout, so no duration is
+# written here.
 cases:
   - name: busy-names-lock-contention
-    code: SQLITE_BUSY
-    advice: held the store's SQLite writer for longer than the 5s busy timeout
-    forbidden: free disk space
+    cause: SQLITE_BUSY
+    paths: [bounded, batch]
+    advice: [held the store's SQLite writer, let it finish]
+    forbidden: [free disk space]
+    namesBusyTimeout: true
   - name: locked-names-lock-contention
-    code: SQLITE_LOCKED
-    advice: held the store's SQLite writer for longer than the 5s busy timeout
-    forbidden: free disk space
+    cause: SQLITE_LOCKED
+    paths: [bounded, batch]
+    advice: [held the store's SQLite writer, let it finish]
+    forbidden: [free disk space]
+    namesBusyTimeout: true
   - name: full-names-disk-space
-    code: SQLITE_FULL
-    advice: the disk that holds the store is full; free disk space
-    forbidden: busy timeout
-  - name: ioerr-names-file-access
-    code: SQLITE_IOERR
-    advice: check that the store's database file is readable and writable
-    forbidden: free disk space
+    cause: SQLITE_FULL
+    paths: [bounded, batch]
+    advice: [the disk that holds the store is full; free disk space]
+    forbidden: [busy timeout]
+  - name: ioerr-names-full-disk-and-permissions
+    cause: SQLITE_IOERR
+    paths: [bounded, batch]
+    advice: [the disk may be full, check the file's permissions]
+    forbidden: [busy timeout]
+  - name: ioerr-write-names-full-disk-and-permissions
+    cause: SQLITE_IOERR_WRITE
+    paths: [bounded, batch]
+    advice: [the disk may be full, check the file's permissions]
+    forbidden: [busy timeout]
+  - name: interrupt-names-cancellation
+    cause: SQLITE_INTERRUPT
+    paths: [bounded, batch]
+    advice: [the operation was cancelled]
+    forbidden: [free disk space, busy timeout, readable and writable]
+  - name: context-canceled-names-cancellation
+    cause: context.Canceled
+    paths: [bounded, batch]
+    advice: [the operation was cancelled]
+    forbidden: [free disk space, busy timeout, readable and writable]
+  - name: context-deadline-names-cancellation
+    cause: context.DeadlineExceeded
+    paths: [bounded, batch]
+    advice: [the operation was cancelled]
+    forbidden: [free disk space, busy timeout, readable and writable]
+  - name: corrupt-names-file-access
+    cause: SQLITE_CORRUPT
+    paths: [bounded, batch]
+    advice: [check that the store's database file is readable and writable]
+    forbidden: [free disk space, busy timeout]
