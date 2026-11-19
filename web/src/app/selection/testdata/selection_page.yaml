@@ -16,9 +16,11 @@
 #             answer scripted by the case (`held: true` keeps it back until a
 #             `release` step); `redirects` says whether the person is sent to
 #             setup. The request log is the evidence of what the page started.
-# Every case below is played with the previews of the forest's two session rows
-# answered, because focusing or choosing a row asks for its preview whatever the
-# case is about. A case that is about a preview scripts the route itself.
+# Every case below is played with the HTTP previews of the forest's two session
+# rows answered, because a page could ask for them whatever the case is about. A
+# session row is read raw over the socket now (its cases are in
+# src/lib/kickstart/testdata/source_preview_stream.yaml); the HTTP preview is
+# the project and branch rows', and a case that is about it scripts the route.
 defaultServer:
   "GET /api/v1/kickstart/sessions/ses-selection/tree/s-one/preview": {body: {lines: [{kind: text, text: the first lines of this session}]}}
   "GET /api/v1/kickstart/sessions/ses-selection/tree/s-two/preview": {body: {lines: [{kind: text, text: the first lines of this session}]}}
@@ -58,9 +60,14 @@ cases:
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
       "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+      "GET /api/v1/kickstart/sessions/ses-selection/tree/p-ledger/preview": {body: {lines: [{kind: text, text: the sessions of this project}]}}
     steps:
+      # A project row's title asks for its typed lines; a session row's opens a
+      # raw capture on the socket and asks the HTTP route for nothing.
+      - click: preview ledger
+      - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-selection/tree/p-ledger/preview", count: 1}
       - click: preview fix the ledger rounding
-      - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-selection/tree/s-one/preview", count: 1}
+      - expectNoCalls: "/s-one/preview"
       - expectCalls: {route: "PATCH /api/v1/kickstart/sessions/ses-selection", count: 0}
       - expectControl: {role: checkbox, name: fix the ledger rounding, checked: true}
   - name: checkbox-click-sends-answer-without-preview
@@ -175,7 +182,7 @@ cases:
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
       "GET /api/v1/kickstart/sessions/ses-selection/tree": [{body: {$tree: forest}}, {body: {$tree: forest-two-selected}}]
-      "GET /api/v1/kickstart/sessions/ses-selection/tree/s-one/preview":
+      "GET /api/v1/kickstart/sessions/ses-selection/tree/p-ledger/preview":
         body:
           lines:
             - {kind: label, text: the first lines of this session}
@@ -196,9 +203,9 @@ cases:
       # The tree: the server's rows, with the server's states.
       - expectRows: [p-ledger, g-main, s-one, s-two, p-locked]
       - expectControl: {role: checkbox, name: "ambiguous-rule, locked", disabled: true}
-      # The preview of the row the reader is on.
-      - click: preview fix the ledger rounding
-      - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-selection/tree/s-one/preview", count: 1}
+      # The preview of the project row the reader is on.
+      - click: preview ledger
+      - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-selection/tree/p-ledger/preview", count: 1}
       - expectText: [the first lines of this session, fix the rounding in the ledger totals]
       # A toggle sends the ids and reads the forest again.
       - check: add a CSV export
@@ -693,13 +700,13 @@ cases:
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
       "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
-      "GET /api/v1/kickstart/sessions/ses-selection/tree/s-one/preview":
+      "GET /api/v1/kickstart/sessions/ses-selection/tree/p-ledger/preview":
         status: 404
         body:
           code: kickstart_preview_row_not_found
-          error: "No row has the id \"s-one\" in the forest of the selection session. Nothing was changed. Scan again, then choose a row."
+          error: "No row has the id \"p-ledger\" in the forest of the selection session. Nothing was changed. Scan again, then choose a row."
     steps:
-      - click: preview fix the ledger rounding
+      - click: preview ledger
       - expectText: [No row has the id, "Scan again, then choose a row."]
       - expectNoText: [this selection session timed out]
       - expectControl: {role: button, name: continue, disabled: false}

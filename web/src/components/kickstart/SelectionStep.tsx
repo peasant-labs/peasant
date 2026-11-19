@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useMemo, useRef, useState } from 'react';
 import { Button, FeedbackPanel, Progress, SelectionNodeKind, SelectionTree, Skeleton } from '@/lib/ft-ui';
 import type { KickstartField, KickstartScan } from '@/lib/kickstart/model';
 import type { KickstartSessionApi } from '@/lib/kickstart/useKickstartSession';
@@ -8,6 +8,9 @@ import { useKickstartPreview } from '@/lib/kickstart/usePreview';
 import { scanPercent, selectedIds } from '@/lib/kickstart/view';
 import { KickstartScanState } from '@/lib/kickstart/values';
 import { ExampleLines } from './PrivacyStep';
+
+// The transcript viewer is large; it loads the first time a session row is previewed.
+const SessionPreview = lazy(() => import('./SessionPreview'));
 
 /**
  * The selection stop: the server's forest in fairtrade's SelectionTree, the
@@ -71,14 +74,35 @@ function ScanNotice({ scan }: { scan: KickstartScan | null }) {
   );
 }
 
+/**
+ * A number that changes each time a scan finishes after the page drew it. A
+ * finished scan closes an open session preview: its rows may have moved.
+ */
+function useFinishedScans(scan: KickstartScan | null): number {
+  const last = useRef(scan?.state ?? null);
+  const [finished, setFinished] = useState(0);
+  const state = scan?.state ?? null;
+  if (last.current !== state) {
+    const done = state === KickstartScanState.Done && last.current !== null;
+    last.current = state;
+    if (done) setFinished((count) => count + 1);
+  }
+  return finished;
+}
+
 export function SelectionStep({ field, api }: { field: KickstartField; api: KickstartSessionApi }) {
   const { tree, scan, session } = api;
   const [highlighted, setHighlighted] = useState<string | null>(null);
-  const preview = useKickstartPreview(session?.id ?? null, highlighted);
+  const finishedScans = useFinishedScans(scan);
 
   // The rows are the contract's own, validated where they were read; the tree
   // draws their kind and state, so the page names neither.
   const rows = tree === null ? NO_ROWS : tree.nodes;
+  // A session row is read raw over the socket, in the transcript viewer; a
+  // project or branch row keeps the server's typed lines over HTTP.
+  const highlightedRow = highlighted === null ? null : rows.find((node) => node.id === highlighted) ?? null;
+  const sessionRow = highlightedRow !== null && highlightedRow.kind === SelectionNodeKind.Session.wire ? highlightedRow : null;
+  const preview = useKickstartPreview(session?.id ?? null, sessionRow === null ? highlighted : null);
   const selection = useMemo(() => {
     try {
       return { ids: selectedIds(field), error: null };
@@ -136,6 +160,11 @@ export function SelectionStep({ field, api }: { field: KickstartField; api: Kick
           <aside className="ks-preview" aria-label="preview">
             <p className="ks-preview-title">preview</p>
             {highlighted === null && <p className="ks-help">click a title to read the start of it. previewing does not select it. use its checkbox to import it.</p>}
+            {sessionRow !== null && session !== null && (
+              <Suspense fallback={<Skeleton label="reading the preview" avatar={false} lines={2} />}>
+                <SessionPreview sessionId={session.id} nodeId={sessionRow.id} label={sessionRow.label} scanGeneration={finishedScans} />
+              </Suspense>
+            )}
             {preview.loading && <Skeleton label="reading the preview" avatar={false} lines={2} />}
             {preview.error !== null && <p className="ks-refusal" role="alert">{preview.error.message}</p>}
             {preview.lines !== null && (preview.lines.length === 0
