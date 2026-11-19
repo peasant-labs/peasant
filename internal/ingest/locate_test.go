@@ -240,7 +240,7 @@ func runLocateStepCase(t *testing.T, testCase locateStepCase) {
 	before := snapshotStoreTables(t, dbPath)
 
 	counting := testutil.NewCountingFS(mfs)
-	pipeline, err := ingest.NewPipeline(counting, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithStore(db))
+	pipeline, err := newTestPipeline(counting, testutil.DefaultGitResolver(), adapters, cfg, ingest.WithStore(db))
 	if err != nil {
 		t.Fatalf("build pipeline: %v", err)
 	}
@@ -780,7 +780,7 @@ func TestScopedReindexRequiresAStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build scope: %v", err)
 	}
-	pipeline, err := ingest.NewPipeline(nil, nil, ingest.DefaultAdapterRegistry, ingest.PipelineConfig{
+	pipeline, err := newTestPipeline(nil, nil, ingest.DefaultAdapterRegistry, ingest.PipelineConfig{
 		Reindex: true,
 		Scope:   &scope,
 	})
@@ -857,7 +857,7 @@ func TestLocateRefusesStoreWithoutDerivedLookup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build scope: %v", err)
 	}
-	pipeline, err := ingest.NewPipeline(testutil.NewMemFS(), testutil.DefaultGitResolver(), adapters, ingest.PipelineConfig{
+	pipeline, err := newTestPipeline(testutil.NewMemFS(), testutil.DefaultGitResolver(), adapters, ingest.PipelineConfig{
 		Sources:     sources,
 		OutputDir:   ingest.ResolvedPath("/out"),
 		Scope:       &scope,
@@ -925,7 +925,7 @@ func TestLocateRefusesStoreWithoutDerivedLookupForClaudeCohort(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build scope: %v", err)
 	}
-	pipeline, err := ingest.NewPipeline(testutil.NewMemFS(), testutil.DefaultGitResolver(), adapters, ingest.PipelineConfig{
+	pipeline, err := newTestPipeline(testutil.NewMemFS(), testutil.DefaultGitResolver(), adapters, ingest.PipelineConfig{
 		Sources:     sources,
 		OutputDir:   ingest.ResolvedPath("/out"),
 		Scope:       &scope,

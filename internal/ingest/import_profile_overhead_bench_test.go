@@ -82,7 +82,7 @@ func BenchmarkImportProfilerOverhead(b *testing.B) {
 					OutputDir:     ingest.ResolvedPath(output),
 					IndexProfiler: profiler,
 				}
-				pipeline, err := ingest.NewPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg,
+				pipeline, err := newTestPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg,
 					ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithSalt(db.InstallationSalt()),
 					ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
 					ingest.WithAnalyzer(metrics.NewEngineWithModels(db, db)),

@@ -1,0 +1,45 @@
+id: ingest-test-arena
+language: Go
+severity: error
+message: Use newTestPipeline or pass WithArenaSizeBytes to bound the test staging arena.
+files:
+  - "**/*_test.go"
+rule:
+  all:
+    - any:
+        - pattern:
+            context: 'func _() { _ = ingest.NewPipeline($$$ARGS) }'
+            selector: call_expression
+    - not:
+        has:
+          any:
+            - pattern:
+                context: 'func _() { _ = ingest.WithArenaSizeBytes($SIZE) }'
+                selector: call_expression
+            - pattern:
+                context: 'func _() { _ = WithArenaSizeBytes($SIZE) }'
+                selector: call_expression
+          stopBy: end
+ignores:
+  - "internal/ingest/test_options_helpers_test.go"
+  # These test binaries bound the arena for production-path CLI/API wiring in TestMain.
+  - "cmd/peasant/*_test.go"
+  - "internal/api/*_test.go"
+---
+id: ingest-package-test-arena
+language: Go
+severity: error
+message: Pass WithArenaSizeBytes to bound the test staging arena.
+files:
+  - "internal/ingest/*_test.go"
+rule:
+  all:
+    - pattern:
+        context: 'func _() { _ = NewPipeline($$$ARGS) }'
+        selector: call_expression
+    - not:
+        has:
+          pattern:
+            context: 'func _() { _ = WithArenaSizeBytes($SIZE) }'
+            selector: call_expression
+          stopBy: end
