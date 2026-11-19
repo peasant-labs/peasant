@@ -29,11 +29,11 @@ the confined GitHub Release publisher. The publisher refuses a tag that
 already has a release or a leftover draft, creates the draft and uploads every
 asset in one `gh release create --draft`, verifies the draft, then publishes
 it. A rerun after a published, complete release succeeds without changing it.
-A leftover draft is deleted by its id
-(`gh api -X DELETE repos/peasant-labs/peasant/releases/<id>`, never
-`gh release delete <tag>`) before a rerun; no new tag is needed. The publisher
-does not publish to the Homebrew tap or AUR. The live Homebrew cask publisher must
-be adopted separately; until then the existing final-tag cask smoke can fail
+Before a rerun, delete a leftover draft by its id with
+`gh api -X DELETE repos/peasant-labs/peasant/releases/<id>`, never with
+`gh release delete <tag>`; no new tag is needed. The publisher does not
+publish to the Homebrew tap or AUR. The live Homebrew cask publisher must be
+adopted separately; until then the existing final-tag cask smoke can fail
 because the tap still points to an older release.
 
 The vendor-hash workflow computes a change without an App credential and, if

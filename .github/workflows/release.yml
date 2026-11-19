@@ -167,6 +167,10 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+    env:
+      # The release body. The staging steps keep it beside dist/assets, never
+      # inside it, and the publisher reads it as dist/release-notes.md.
+      RELEASE_NOTES: release-notes.md
     steps:
       - name: Checkout repository (full history for changelog)
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -220,7 +224,7 @@ jobs:
           PEASANT_RELEASE_HEADER="$(go run ./scripts/release-header -tag "$TAG")"
           export PEASANT_RELEASE_HEADER
           "$RUNNER_TEMP/goreleaser-bin/goreleaser" release --clean --skip=publish
-          printf '%s\n' "$PEASANT_RELEASE_HEADER" > dist/release-notes.md
+          printf '%s\n' "$PEASANT_RELEASE_HEADER" > "dist/${RELEASE_NOTES}"
 
       - name: Stage the bare Windows binary at its checksum name
         run: |
@@ -255,7 +259,7 @@ jobs:
           goreleaser_out="$(mktemp -d "$RUNNER_TEMP/goreleaser-dist.XXXXXX")"
           mv dist "${goreleaser_out}/dist"
           mkdir -p dist/assets
-          mv "${goreleaser_out}/dist/release-notes.md" dist/release-notes.md
+          mv "${goreleaser_out}/dist/${RELEASE_NOTES}" "dist/${RELEASE_NOTES}"
           find "${goreleaser_out}/dist" -mindepth 1 -maxdepth 1 -type f -exec cp -- {} dist/assets/ \;
 
       # The published asset set is exact: every file checksums.txt names,
@@ -266,7 +270,7 @@ jobs:
       - name: Verify the staged release assets
         run: |
           set -euo pipefail
-          test -s dist/release-notes.md || { echo "::error::dist/release-notes.md is missing or empty"; exit 1; }
+          test -s "dist/${RELEASE_NOTES}" || { echo "::error::dist/${RELEASE_NOTES} is missing or empty"; exit 1; }
           stray="$(find dist/assets -mindepth 1 ! -type f -print -quit)"
           if [ -n "${stray}" ]; then
             echo "::error::dist/assets must hold only regular files; found ${stray}"
@@ -276,7 +280,7 @@ jobs:
           expected="$( { awk '{print $2}' dist/assets/checksums.txt; echo checksums.txt; printf '%s\n' CHANGELOG.md artifacts.json config.yaml metadata.json; } | LC_ALL=C sort)"
           staged="$(find dist/assets -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort)"
           if [ "${staged}" != "${expected}" ]; then
-            echo "::error::dist/assets does not hold exactly the checksummed files, checksums.txt and the GoReleaser metadata"
+            echo "::error::dist/assets does not hold exactly the checksummed files, checksums.txt and the GoReleaser metadata. If GoReleaser's output changed on purpose, update the expected metadata list in BOTH this step of .github/workflows/release.yml and internal/e2e/testdata/workflows/release_publish_contract.yaml."
             diff <(printf '%s\n' "${expected}") <(printf '%s\n' "${staged}") || true
             exit 1
           fi
