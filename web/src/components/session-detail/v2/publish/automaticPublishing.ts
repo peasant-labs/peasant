@@ -1,3 +1,4 @@
+import { AutoPublishEvent as SchemaAutoPublishEvent, AutoPublishHookStatus as SchemaAutoPublishHookStatus, AutoPublishRuleKind as SchemaAutoPublishRuleKind } from '@peasant-labs/schema';
 import type { AutoPublishRuleRequest } from '@peasant-labs/schema';
 import { installAutoPublishRule, saveAutoPublishRule } from '@/lib/api/settings';
 
@@ -31,12 +32,12 @@ export async function enableAutomaticPublishing(ruleId: string, sessionId: strin
   }
   const audience = new Set(collectives);
   const savedAudience = new Set(rule.collectives);
-  if (rule.id !== ruleId || rule.events.length !== 1 || rule.events[0] !== 'pre-push'
+  if (rule.id !== ruleId || rule.events.length !== 1 || rule.events[0] !== SchemaAutoPublishEvent.PrePush
     || rule.collectives.length !== savedAudience.size || savedAudience.size !== audience.size
     || rule.collectives.some((id) => !audience.has(id))) {
     throw new AutomaticPublishingError('confirming automatic publishing consent', 'peasant returned a different rule, event, or collective audience', 'the transcript was published; review the saved rule in settings');
   }
-  if (rule.kind !== 'folder' || rule.repositories.length !== 1) {
+  if (rule.kind !== SchemaAutoPublishRuleKind.Folder || rule.repositories.length !== 1) {
     throw new AutomaticPublishingError('confirming the repository', 'the rule was saved, but peasant did not confirm exactly one repository for this stored session', 'the transcript was published; review the rule in settings');
   }
   let repository;
@@ -45,8 +46,8 @@ export async function enableAutomaticPublishing(ruleId: string, sessionId: strin
   } catch (error) {
     throw new AutomaticPublishingError('installing the automatic publishing hook', messageOf(error), 'the transcript was published and the rule was saved; check its hook in settings before retrying');
   }
-  const hook = repository.hooks.find((item) => item.event === 'pre-push');
-  if (repository.path !== rule.repositories[0].path || hook?.status !== 'installed') {
+  const hook = repository.hooks.find((item) => item.event === SchemaAutoPublishEvent.PrePush);
+  if (repository.path !== rule.repositories[0].path || hook?.status !== SchemaAutoPublishHookStatus.Installed) {
     const remedy = hook?.remedy?.message;
     throw new AutomaticPublishingError('installing the automatic publishing hook', remedy ?? 'peasant did not confirm an installed pre-push hook', 'the transcript was published and the rule was saved; review its hook in settings');
   }

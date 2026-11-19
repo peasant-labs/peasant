@@ -1,4 +1,5 @@
 'use client';
+import { SyncPushSessionStatus as SchemaSyncPushSessionStatus } from '@peasant-labs/schema';
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { WhereDoesThisGo, Button } from '@/lib/ft-ui';
@@ -110,9 +111,9 @@ function usePush(sessionIds: string[], redactionLevel: SelectableRedactionLevel,
         sessionIds.map((id) => {
           const r = byId.get(id);
           if (!r) return { sessionId: id, state: 'skipped' };
-          if (r.status === 'error') return { sessionId: id, state: 'error', error: r.error };
+          if (r.status === SchemaSyncPushSessionStatus.Error) return { sessionId: id, state: 'error', error: r.error };
           // A held session waits for ingest: nothing was sent, so it is not done.
-          if (r.status === 'skipped' || r.status === 'held') return { sessionId: id, state: 'skipped' };
+          if (r.status === SchemaSyncPushSessionStatus.Skipped || r.status === SchemaSyncPushSessionStatus.Held) return { sessionId: id, state: 'skipped' };
           return { sessionId: id, state: 'done' };
         }),
       );

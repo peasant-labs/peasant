@@ -1,0 +1,15 @@
+# The refresh-skip baseline changes what the pipeline executes, not what it
+# decides. Each case runs the same prepared adapter bump twice: once with the
+# skips and once with PipelineConfig.DisableRefreshSkips. Counts are per run
+# over one session. builds counts the managed-format generation builder, which
+# is this format's parse; parses counts the strict parser dispatch, which a
+# managed generation never takes.
+cases:
+  - name: stamp-only-bump-settles-or-parses
+    changeContext: false
+    optimized: {proofs: 1, settles: 1, copies: 0, builds: 0, parses: 0}
+    baseline: {proofs: 0, settles: 0, copies: 0, builds: 1, parses: 0}
+  - name: context-change-copies-or-parses
+    changeContext: true
+    optimized: {proofs: 1, settles: 0, copies: 1, builds: 0, parses: 0}
+    baseline: {proofs: 0, settles: 0, copies: 0, builds: 1, parses: 0}

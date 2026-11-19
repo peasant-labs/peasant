@@ -1,0 +1,46 @@
+# An undeclared producer and an unknown harness are two different plans.
+#
+# undeclare registers the claude-code adapter as one that withholds its
+# change scope; it stays registered. unregister drops every claude-code
+# producer from the table, so nothing can produce the session's targets: an
+# unknown harness, which stays undecided. The decision these cases name is the
+# one ingest.DecideRefresh makes, so a run takes the same lane.
+#
+# storedLaneScopes pins the declaration each stored lane rests on; every
+# registered producer of that kind must declare that scope.
+storedLaneScopes:
+  - {lane: stored-metadata, kind: metadata-adapter, scope: metadata-only}
+  - {lane: stored-index, kind: transcript-indexer, scope: index-only}
+cases:
+  - name: declared-adapter-keeps-its-stored-lane
+    adapterOffset: -1
+    want: {decided: true, lane: stored-metadata, reason: adapter_behind}
+  - name: undeclared-adapter-plans-the-full-step
+    undeclare: true
+    adapterOffset: -1
+    want: {decided: true, lane: native, reason: adapter_behind_native_only, fullStep: metadata-adapter/claude-code}
+  - name: undeclared-adapter-without-a-stamp-plans-the-full-step
+    undeclare: true
+    stampAbsent: true
+    want: {decided: true, lane: native, reason: adapter_behind_native_only, fullStep: metadata-adapter/claude-code}
+  - name: undeclared-adapter-leaves-an-indexer-bump-on-its-lane
+    undeclare: true
+    indexerOffset: -1
+    want: {decided: true, lane: stored-index, reason: indexer_behind}
+  - name: undeclared-adapter-with-nothing-to-skip-names-nothing
+    undeclare: true
+    want: {decided: true, lane: none, reason: none}
+  - name: undeclared-adapter-already-native-names-nothing
+    undeclare: true
+    adapterOffset: -1
+    metadataOld: true
+    want: {decided: true, lane: native, reason: metadata_schema}
+  - name: unknown-harness-stays-undecided
+    unregister: true
+    adapterOffset: -1
+    want: {decided: false, unknownHarness: true}
+  - name: unknown-harness-is-not-an-undeclared-producer
+    undeclare: true
+    unregister: true
+    adapterOffset: -1
+    want: {decided: false, unknownHarness: true}

@@ -579,6 +579,7 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 			}
 		}
 		storedSessions = loadKnownSessionsFrom(ctx, db)
+		pipelineCfg.Validator = db
 		pipelineOpts = append(pipelineOpts,
 			ingest.WithStore(db),
 			ingest.WithMetricsStore(db),

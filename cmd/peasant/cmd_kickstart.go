@@ -566,6 +566,7 @@ func buildFTUEIngestRunnerWithProgress(cmd *cobra.Command, configPath string) (f
 			return nil, fmt.Errorf("open analytics store: %w", err)
 		}
 		defer db.Close()
+		pipelineCfg.Validator = db
 
 		pipelineOpts := []ingest.PipelineOption{
 			ingest.WithStore(db),

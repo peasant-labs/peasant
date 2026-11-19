@@ -3,6 +3,7 @@ package ingest
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 )
 
@@ -24,6 +25,47 @@ func (p *Pipeline) proveManagedGenerationUnchanged(ctx context.Context, input *C
 		return UnchangedProof{}, err
 	}
 	return prover.ProveCapturedGenerationUnchanged(ctx, request)
+}
+
+// validateRefresh returns unsupported for any unavailable or invalid result;
+// the existing copy-refresh admission then remains the authority.
+func (p *Pipeline) validateRefresh(ctx context.Context, input *CapturedIndexInput) ManagedGenerationValidationResult {
+	fallback := ManagedGenerationValidationResult{Outcome: ValidationUnsupported}
+	if p.config.Validator == nil || input == nil || input.expected == nil || input.metadata == nil {
+		return fallback
+	}
+	target := p.sessionVersionTarget(input.session)
+	if target.IndexVersion == strictIndexFormat || input.expected.IndexVersion == nil ||
+		*input.expected.IndexVersion != target.IndexVersion || input.expected.ActiveGenerationID == "" || input.metadata.ContentHash == "" {
+		return fallback
+	}
+	proof, err := p.unchangedProofRequest(input)
+	if err != nil {
+		return fallback
+	}
+	// The validator's frozen request extends the proof request with a generation
+	// identity and budget; copy the common fields at this single boundary.
+	request := ManagedGenerationValidationRequest{
+		SessionID: proof.SessionID, GenerationID: proof.Expected.ActiveGenerationID,
+		Metadata: proof.Metadata, InputDigest: proof.InputDigest,
+		IndexerTarget: proof.IndexerTarget, FormatTarget: proof.FormatTarget, Expected: proof.Expected,
+	}
+	start := time.Now()
+	result, err := p.config.Validator.ValidateManagedGenerationUnchanged(ctx, request)
+	p.config.IndexProfiler.RecordStage(StageRefreshValidate, time.Since(start), 0, 1)
+	if err != nil {
+		slog.Debug("ingest: refresh validation failed; using refresh fallback", "error", err)
+		return fallback
+	}
+	result, err = NewManagedGenerationValidationResult(result.Outcome, result.Mismatch, result.Detail)
+	if err != nil {
+		slog.Debug("ingest: invalid refresh validation; using refresh fallback", "error", err)
+		return fallback
+	}
+	if result.Outcome == ValidationUnsupported {
+		p.config.IndexProfiler.RecordStage(StageRefreshValidateUnsupported, 0, 0, 1)
+	}
+	return result
 }
 
 func (p *Pipeline) settleManagedGenerationUnchanged(ctx context.Context, input *CapturedIndexInput, lane *storeWriteLane) (ManagedGenerationRefreshOutcome, time.Duration, error) {
@@ -125,7 +167,9 @@ type ManagedGenerationRefresher interface {
 // stored transcript and belongs to the stored-index lane, and --force or
 // --reindex are deliberate full rebuilds. A native-only adapter never reaches
 // the stored-metadata lane because decideRefresh routes it native, and a
-// strict format-1 target has no managed generation to refresh.
+// strict format-1 target has no managed generation to refresh. A measurement
+// baseline (PipelineConfig.DisableRefreshSkips) declines the candidate, so the
+// unchanged proof, its settle and the copy refresh all stay unused.
 //
 // The marker only says the refresh is worth attempting. The index stage checks
 // the captured proof and the store is the final authority; either can send the
@@ -134,7 +178,7 @@ func (p *Pipeline) managedGenerationRefreshLane(session DiscoveredSession, decis
 	if decision.Reason != RefreshReasonAdapterBehind && decision.Reason != RefreshReasonAdapterStampAbsent {
 		return false
 	}
-	if p.config.Force || p.config.Reindex {
+	if p.config.Force || p.config.Reindex || p.config.DisableRefreshSkips {
 		return false
 	}
 	if _, ok := p.metricsStore.(ManagedGenerationRefresher); !ok {

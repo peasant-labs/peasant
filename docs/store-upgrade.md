@@ -381,7 +381,16 @@ are not a duration estimate. The census is approximate even on a current
 schema: it does not read capture recovery, publication capture or binding,
 content pending, source comparison or state, latest attempt, stored pair, or
 permanent refusal evidence. An unknown harness remains undecided and contributes
-to neither lane nor reason counts. A behind schema makes the census a lower bound:
+to neither lane nor reason counts. An undeclared producer is different: its
+harness is registered, but its metadata adapter withholds the metadata-only
+change scope that lets the stored-metadata lane preserve the rest of the stored
+output. The refresh decision then takes the full native step with the reason
+`adapter_behind_native_only`, in this census and in a real harvest alike, and
+the census names the adapter in the full-step count. That reason therefore has
+two causes: an adapter that cannot re-derive metadata from the stored
+transcript, and an adapter that does not declare `metadata-only`. The
+`full_step` count names the sessions of the second cause. Every shipped adapter
+declares its scope, so a shipped build reports none. A behind schema makes the census a lower bound:
 upgrade the schema and repeat the dry run to see what further work it reveals.
 Pending search invalidation and recount effects are reported as unapplied:
 the search migration marks content sweep pending, which production maps to
@@ -401,6 +410,9 @@ existing schema or conversion plan, its `session_work` object has these fields:
 - `sessions`: the number of stored sessions in the census.
 - `undecided`: sessions for which no refresh decision could be made.
 - `by_lane`, `by_reason`: maps from the planner's lane and reason names to counts.
+  An undeclared producer's full step counts as `native`.
+- `full_step`: a map from an undeclared producer, named `kind/harness`, to the
+  sessions it forced onto the full refresh step.
 - `unknown`: a map from unavailable evidence names to counts; a session can
   contribute to more than one evidence count.
 

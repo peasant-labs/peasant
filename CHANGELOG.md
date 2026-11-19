@@ -6,6 +6,11 @@ All notable changes to Peasant are recorded here. The format follows
 GitHub Releases, which hold the signed artifacts and checksums. A version that
 was tagged but not published links to its tag instead.
 
+## [0.21.0] - 2026-11-18
+
+- ask a validator before re-parsing an unproven managed refresh (#1088)
+- name undeclared adapters and build the skip-budget measurement (#1093)
+
 ## [0.20.0] - 2026-11-18
 
 - prove and settle unchanged managed generations without parsing (#1081)

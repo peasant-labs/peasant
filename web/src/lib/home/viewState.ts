@@ -1,3 +1,4 @@
+import { LocalSyncPublicationFilter as SchemaLocalSyncPublicationFilter } from '@peasant-labs/schema';
 import { closed } from '@peasant-labs/fairtrade/closed-value';
 import {
   isPageSize,
@@ -106,7 +107,7 @@ export function decodeHomeViewState(search: string | URLSearchParams): HomeViewS
 export function encodeHomeViewState(state: HomeViewState): string {
   const params = new URLSearchParams();
   if (state.browse !== BrowseView.Sessions) params.set('browse', state.browse.wire);
-  if (state.publication !== 'all') params.set('publication', state.publication);
+  if (state.publication !== SchemaLocalSyncPublicationFilter.All) params.set('publication', state.publication);
   if (state.project !== null) params.set('project', state.project);
   if (state.query !== '') params.set('q', state.query);
   if (state.pageSize !== DEFAULT_PAGE_SIZE) params.set('perPage', String(state.pageSize));
