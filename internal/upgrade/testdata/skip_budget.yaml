@@ -18,6 +18,17 @@
 # stored-index (C3, indexer bump): (0 + 17211.152) / 39884.35 = 0.432. The
 #   lane has no proof. Wall: 22555 ms against 50865 ms.
 #
+# Provenance is recorded as each report recorded it, so the command is the one
+# that actually produced the numbers. The proven-settle command selects C2 and
+# C5, which were retired after that run and which the harness now rejects; the
+# row's own cases list ([C1]) names the report it reads, and the equivalent
+# current command is `-case C1`. Restating the old command as `-case C1` would
+# make the provenance describe a run that never happened.
+#
+# Both rows were measured at heads before the failed-proof change (0c4084f45
+# and c14b7259a). That change did not touch either measured path: the proven
+# settle and the stored-index lane run the same code, so the numbers stand.
+#
 # A not-proven proof parses, so the stored-metadata lane has no other skip to
 # budget; the copy refresh that once filled that gap was measured slower than
 # the parse when metadata changed and removed.
