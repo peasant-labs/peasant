@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -52,6 +53,58 @@ func (fs *gatedPreviewFS) ReadFileRange(path string, offset, length int64) ([]by
 
 func (fs *gatedPreviewFS) unblock() { fs.once.Do(func() { close(fs.release) }) }
 
+// lockedLog is a log sink server goroutines write while the test reads it.
+type lockedLog struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (l *lockedLog) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.Write(p)
+}
+
+func (l *lockedLog) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.String()
+}
+
+// previewLogLine is one preview line of the JSON log: its message and reason,
+// and every attribute raw so the test can check keys and values alike.
+type previewLogLine struct {
+	Msg    string `json:"msg"`
+	Reason string `json:"reason"`
+	attrs  map[string]json.RawMessage
+}
+
+// previewLogRecords returns the preview lines of a JSON log.
+func previewLogRecords(t *testing.T, log string, messages []string) []previewLogLine {
+	t.Helper()
+	var records []previewLogLine
+	for _, line := range strings.Split(strings.TrimSpace(log), "\n") {
+		if line == "" {
+			continue
+		}
+		var record previewLogLine
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatalf("log line is not JSON: %v", err)
+		}
+		if !strings.HasPrefix(record.Msg, "kickstart preview:") {
+			continue
+		}
+		if !slices.Contains(messages, record.Msg) {
+			t.Fatalf("preview log line %q is not in the privacy fixture's closed set", record.Msg)
+		}
+		if err := json.Unmarshal([]byte(line), &record.attrs); err != nil {
+			t.Fatalf("log line attributes are not a JSON object: %v", err)
+		}
+		records = append(records, record)
+	}
+	return records
+}
+
 func TestKickstartPreviewStream(t *testing.T) {
 	var fixture struct {
 		Generated struct {
@@ -65,6 +118,12 @@ func TestKickstartPreviewStream(t *testing.T) {
 			Transcript string `yaml:"transcript"`
 			Long       bool   `yaml:"long"`
 			Operation  string `yaml:"operation"`
+			// Fraction is the share of the file a truncation keeps.
+			Fraction float64 `yaml:"fraction"`
+			// Logs names the preview log lines the case must write, in order.
+			Logs []string `yaml:"logs"`
+			// FreedReason is the reason the freed line must carry.
+			FreedReason string `yaml:"freedReason"`
 		} `yaml:"cases"`
 	}
 	if err := testutil.DecodeNamedFixtureYAML(streamFixture, &fixture); err != nil {
@@ -73,6 +132,16 @@ func TestKickstartPreviewStream(t *testing.T) {
 	var privacy previewPrivacyFixture
 	if err := testutil.DecodeNamedFixtureYAML(kickstartPreviewPrivacyYAML, &privacy); err != nil {
 		t.Fatal(err)
+	}
+	production := map[string]string{"opened": previewLogOpened, "sent": previewLogSent, "ended": previewLogEnded, "closed": previewLogClosed, "freed": previewLogFreed}
+	if len(privacy.PreviewLog.Named) != len(production) {
+		t.Fatalf("the privacy fixture names %d preview log lines, production writes %d", len(privacy.PreviewLog.Named), len(production))
+	}
+	for name, msg := range production {
+		if privacy.PreviewLog.Named[name] != msg {
+			t.Fatalf("the privacy fixture's preview log line %q is %q, production writes %q", name, privacy.PreviewLog.Named[name], msg)
+		}
+		privacy.PreviewLog.Messages = append(privacy.PreviewLog.Messages, msg)
 	}
 	for _, name := range privacy.SocketCases {
 		found := false
@@ -85,9 +154,9 @@ func TestKickstartPreviewStream(t *testing.T) {
 	}
 	for _, tc := range fixture.Cases {
 		t.Run(tc.Name, func(t *testing.T) {
-			var logs bytes.Buffer
+			logs := &lockedLog{}
 			oldLogger := slog.Default()
-			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			slog.SetDefault(slog.New(slog.NewJSONHandler(logs, nil)))
 			t.Cleanup(func() { slog.SetDefault(oldLogger) })
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
@@ -97,10 +166,48 @@ func TestKickstartPreviewStream(t *testing.T) {
 					t.Error("socket preview log disclosed source content or path")
 				}
 			})
-			content := tc.Transcript
-			if tc.Operation == "late-result" {
-				content = strings.ReplaceAll(content, "{{PAD}}", strings.Repeat("x", 600))
+			// checkLogs runs after the case's last frame: the preview lines carry
+			// only the fixture's keys, no identifier, path or text, and the
+			// lines the case names, in order.
+			checkLogs := func(captureID string) {
+				t.Helper()
+				records := previewLogRecords(t, logs.String(), privacy.PreviewLog.Messages)
+				allowed := map[string]bool{"time": true, "level": true, "msg": true}
+				for _, key := range privacy.PreviewLog.Keys {
+					allowed[key] = true
+				}
+				forbidden := []string{path, filepath.Dir(path), privacy.Secrets.Transcript, "setup", "row", "11111111-2222-4333-8444-555555555555"}
+				if captureID != "" {
+					forbidden = append(forbidden, captureID)
+				}
+				next := 0
+				for _, record := range records {
+					for key, value := range record.attrs {
+						if !allowed[key] {
+							t.Fatalf("preview log line %q carries attribute %q outside the privacy fixture's keys", record.Msg, key)
+						}
+						if key == "time" {
+							continue
+						}
+						for _, secret := range forbidden {
+							if secret != "" && strings.Contains(string(value), secret) {
+								t.Fatalf("preview log line %q attribute %q discloses an identifier, path or text", record.Msg, key)
+							}
+						}
+					}
+					if next < len(tc.Logs) && record.Msg == privacy.PreviewLog.Named[tc.Logs[next]] {
+						if tc.Logs[next] == "freed" && tc.FreedReason != "" && record.Reason != tc.FreedReason {
+							t.Fatalf("the freed line says %q, want %s", record.Reason, tc.FreedReason)
+						}
+						next++
+					}
+				}
+				if next < len(tc.Logs) {
+					t.Fatalf("the preview log lacks %q (and what follows it) among %d preview lines", tc.Logs[next], len(records))
+				}
 			}
+			content := tc.Transcript
+			content = strings.ReplaceAll(content, "{{PAD}}", strings.Repeat("x", 600))
 			if tc.Operation == "bounded-turn" {
 				content = fmt.Sprintf("{\"type\":\"user\",\"uuid\":\"u1\",\"timestamp\":\"2026-01-01T00:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"%s\"}}\n", strings.Repeat("x", fixture.Generated.OversizedBytes))
 			}
@@ -180,8 +287,12 @@ func TestKickstartPreviewStream(t *testing.T) {
 			st.mu.Unlock()
 			hub := NewHub(&mockDataProvider{})
 			hub.attachKickstart(st)
-			if tc.Operation == "late-result" {
-				hub.previews.captureOptions = sourcepreview.CaptureOptions{FirstReadBytes: 2400, SliceReadBytes: 2400, HoldbackBytes: 200}
+			switch tc.Operation {
+			case "late-result":
+				hub.previews.captureOptions = sourcepreview.CaptureOptions{FirstReadBytes: 1300, SliceReadBytes: 400}
+			case "truncate-between-loads", "every-more-answered":
+				// Small reads, so each load past the first reads the source again.
+				hub.previews.captureOptions = sourcepreview.CaptureOptions{FirstReadBytes: 64 << 10, SliceReadBytes: 1 << 20, SourceCapBytes: defaults.KickstartWebPreviewSourceCapBytes}
 			}
 			idReached, idRelease := make(chan struct{}), make(chan struct{})
 			if tc.Operation == "refuse-reopen" {
@@ -416,8 +527,70 @@ func TestKickstartPreviewStream(t *testing.T) {
 			if len(state.Segments) != 1 || state.Directory.Complete == (tc.Long || tc.Operation == "late-result") {
 				t.Fatalf("unexpected first segment: %+v", state.Directory)
 			}
+			more := func() {
+				t.Helper()
+				write(ClientMessage{Type: schema.MsgKickstartPreview, Preview: &schema.LocalKickstartPreviewRequest{Op: schema.LocalKickstartPreviewMore, RequestID: "next", SessionID: "setup", CaptureID: state.CaptureID, After: state.Seq}})
+			}
+			// barrier proves no preview frame is still owed or queued: the
+			// socket answers a non-preview message with an error, in order.
+			barrier := func() {
+				t.Helper()
+				write(ClientMessage{Type: MsgDashboard})
+				_, data, err := conn.Read(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var message ServerMessage
+				if err := json.Unmarshal(data, &message); err != nil || message.Type != MsgError {
+					t.Fatalf("a preview frame arrived where the barrier's reply was due: %.200s", data)
+				}
+			}
+			defer func() {
+				if !t.Failed() && len(tc.Logs) > 0 {
+					checkLogs(state.CaptureID)
+				}
+			}()
 			switch tc.Operation {
 			case "":
+			case "every-more-answered":
+				// Every load until the capture ends gets exactly one frame.
+				for loads := 0; !state.Directory.Complete; loads++ {
+					if loads > 200 {
+						t.Fatal("the capture did not end within 200 loads")
+					}
+					more()
+					event := read()
+					if event.Kind == schema.LocalKickstartPreviewClosed {
+						t.Fatalf("load %d closed the capture with %s", loads+1, event.Reason)
+					}
+					next, err := schema.MergeLocalKickstartPreview(state, event)
+					if err != nil {
+						t.Fatalf("merge load %d: %v", loads+1, err)
+					}
+					state = next
+					barrier()
+				}
+			case "truncate-between-loads":
+				more()
+				loaded, err := schema.MergeLocalKickstartPreview(state, read())
+				if err != nil {
+					t.Fatalf("merge the load before truncation: %v", err)
+				}
+				state = loaded
+				barrier()
+				info, err := os.Stat(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Truncate(path, int64(float64(info.Size())*tc.Fraction)); err != nil {
+					t.Fatal(err)
+				}
+				more()
+				event := read()
+				if event.Kind != schema.LocalKickstartPreviewClosed || event.Reason != schema.LocalKickstartPreviewSourceChanged || event.Code != schema.LocalKickstartErrorPreviewSourceChanged || event.Seq != state.Seq+1 {
+					t.Fatalf("the load after truncation was answered with %s/%s, want one source_changed close in sequence", event.Kind, event.Reason)
+				}
+				barrier()
 			case "short":
 				if state.Segments[0].ByteLength >= schema.TranscriptSegmentBudgetBytes {
 					t.Fatal("first source read did not send a short segment")
@@ -543,10 +716,28 @@ func TestKickstartPreviewStream(t *testing.T) {
 					t.Fatal("changed source did not close with its reason")
 				}
 			case "late-result":
-				write(ClientMessage{Type: schema.MsgKickstartPreview, Preview: &schema.LocalKickstartPreviewRequest{Op: schema.LocalKickstartPreviewMore, RequestID: "next", SessionID: "setup", CaptureID: state.CaptureID, After: state.Seq}})
-				event := read()
-				if event.Kind != schema.LocalKickstartPreviewClosed || event.Reason != schema.LocalKickstartPreviewLateResult || event.Code != schema.LocalKickstartErrorPreviewLateResult || !strings.Contains(event.Message, "read it again") {
-					t.Fatal("late result did not offer a fresh read")
+				// Load until the second answer is read; the capture must close
+				// as a late result, never complete as if nothing happened.
+				for loads := 0; ; loads++ {
+					if loads > 20 {
+						t.Fatal("the late result never closed the capture")
+					}
+					more()
+					event := read()
+					if event.Kind == schema.LocalKickstartPreviewClosed {
+						if event.Reason != schema.LocalKickstartPreviewLateResult || event.Code != schema.LocalKickstartErrorPreviewLateResult || !strings.Contains(event.Message, "read it again") || strings.Contains(event.Message, "changed") {
+							t.Fatalf("late result closed with %s %q, want a late result offering a fresh read without claiming a change", event.Reason, event.Message)
+						}
+						break
+					}
+					next, err := schema.MergeLocalKickstartPreview(state, event)
+					if err != nil {
+						t.Fatalf("merge load %d: %v", loads+1, err)
+					}
+					if next.Directory.Complete {
+						t.Fatal("the capture completed although a shown call was answered again later")
+					}
+					state = next
 				}
 			case "refuse-reopen":
 				write(ClientMessage{Type: schema.MsgKickstartPreview, Preview: &schema.LocalKickstartPreviewRequest{Op: schema.LocalKickstartPreviewOpen, RequestID: "rejected-request", SessionID: "setup", NodeID: "row"}})

@@ -46,7 +46,7 @@ func TerminalCaptureOptions() sourcepreview.CaptureOptions {
 // the terminal's "read again".
 const (
 	SourceChangedNotice = "this session's transcript changed after part of it was shown. move to another row and back to read it again from the start."
-	LateResultNotice    = "part of this session changed after it was shown. move to another row and back to read it again from the start."
+	LateResultNotice    = "a later part of this session answers a tool call in a turn already shown. move to another row and back to read it again from the start."
 	GrownNotice         = "this session has grown since the preview opened. move to another row and back to read the newer part."
 )
 

@@ -31,6 +31,9 @@
 #                  no item may carry]}
 #   expectTurnLabels the turn number each drawn turn reads, by stream turn index:
 #                  {"<index>": "#<label>"}
+#   expectStateInPane a state shown before any segment (reading, or a stop) sits in the
+#                  reading pane the viewer fills, so the pane keeps its size: the words
+#                  the pane holds
 #   expectNoticeTone how the stop's notice reads: {tone: error | neutral, text: words of it,
 #                  readAgainInside: true when `read again` sits in the error card}
 #
@@ -123,6 +126,7 @@ requiredNames:
   - source-changed-stop-reads-as-error
   - source-cap-stop-stays-neutral
   - end-stays-neutral
+  - failed-preview-keeps-the-pane
 defaultServer:
   "GET /api/v1/kickstart/status": {body: {configured: true}}
   "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
@@ -303,9 +307,9 @@ cases:
       - serve: {opened: true}
       - serve: {segment: 0}
       - click: load more of this session
-      - serve: {closed: late_result, code: kickstart_preview_late_result, message: "part of this session changed after it was shown. read it again from the start."}
-      - expectText: ["part of this session changed after it was shown"]
-      - expectNoticeTone: {tone: error, text: "part of this session changed after it was shown", readAgainInside: true}
+      - serve: {closed: late_result, code: kickstart_preview_late_result, message: "a later part of this session answers a tool call in a turn already shown. read it again from the start to see the answer in place."}
+      - expectText: ["answers a tool call in a turn already shown"]
+      - expectNoticeTone: {tone: error, text: "answers a tool call in a turn already shown", readAgainInside: true}
       - expectControl: {role: button, name: read again}
       - click: read again
       - expectSent: {op: open, count: 2}
@@ -546,3 +550,12 @@ cases:
       - serve: {segment: 0, final: end, lines: ["this session has grown since the preview opened. open the preview again to read the newer part."]}
       - expectNoticeTone: {tone: neutral, text: "this session has grown since the preview opened"}
 
+  - name: failed-preview-keeps-the-pane
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - expectStateInPane: reading the preview
+      - serve: {opened: true}
+      - serve: {closed: unreadable, code: kickstart_preview_unreadable, message: "the preview could not be read; check that the transcript is readable and try again"}
+      - expectStateInPane: the preview could not be read
+      - expectNoticeTone: {tone: error, text: "the preview could not be read", readAgainInside: true}

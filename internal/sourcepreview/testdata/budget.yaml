@@ -21,7 +21,6 @@ requiredNames:
   - web-live-captures
   - web-parse-workers
   - web-idle-seconds
-  - holdback-bytes
 budgets:
   - {name: first-read-bytes, value: 262144}
   - {name: continuation-read-bytes, value: 8388608}
@@ -32,12 +31,15 @@ budgets:
   # expansion factor BenchmarkCaptureWebHeap measures with GOGC 10). The rule:
   # the transient peak stays at or under 128 MiB. 16 MiB peaked at about
   # 92 MiB; 24 MiB at about 132 MiB, over it; 32 MiB at about 172 MiB. The
-  # serialized cap matches the source cap.
+  # serialized cap matches the source cap. A tool call held unanswered for
+  # the whole cap (the hold's worst case: every turn goes out at the cut and
+  # the segmenter buffers them all) peaked at about 84 MiB live and retained
+  # about 26 MiB, measured 2026-11-19 by the held-call runs of the same
+  # benchmark.
   - {name: web-source-cap-bytes, value: 16777216}
   - {name: web-serialized-cap-bytes, value: 16777216}
   - {name: web-turn-cap, value: 20000}
   - {name: web-live-captures, value: 2}
   - {name: web-parse-workers, value: 1}
   - {name: web-idle-seconds, value: 300}
-  - {name: holdback-bytes, value: 1048576}
 unboundedOptions: {sourceCapBytes: 0, turnCap: 0}

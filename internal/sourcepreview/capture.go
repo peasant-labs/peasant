@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"math"
 	"os"
@@ -39,8 +40,11 @@ const (
 type emittedTurn struct {
 	index  int
 	digest [sha256.Size]byte
-	// pending names the tool calls the turn was handed out without results.
-	pending map[string]struct{}
+	// answers is the digest of which record answered each of the turn's tool
+	// calls when it was handed out (none, for a call handed out pending). A
+	// later read that answers a call from another record is a late result,
+	// told apart from bytes that changed in place.
+	answers [sha256.Size]byte
 }
 
 // Capture is one preview of one session. It holds what the preview has loaded
@@ -84,7 +88,11 @@ type Capture struct {
 	maxEntry   int
 
 	// Emitted state.
-	emitted          []emittedTurn
+	emitted []emittedTurn
+	// sentPending reports that a turn went out with a tool call still
+	// unanswered. That happens only when nothing more will be read: the
+	// capture reached its extent or one of its limits.
+	sentPending      bool
 	retainedBoundary int
 	partial          bool
 	firstTurn        *ingest.Turn
@@ -249,7 +257,7 @@ func (c *Capture) clearLocked() {
 }
 
 func (c *Capture) retainedLocked() int64 {
-	perTurn := int64(sha256.Size + 16)
+	perTurn := int64(2*sha256.Size + 8)
 	return int64(cap(c.loaded)) + perTurn*int64(len(c.emitted))
 }
 
@@ -261,6 +269,7 @@ func (c *Capture) step(ctx context.Context) (Page, error) {
 		}
 		var page Page
 		var err error
+		before := c.consumed()
 		switch c.kind {
 		case originFileRanged:
 			page, err = c.stepFileRanged(ctx)
@@ -276,6 +285,12 @@ func (c *Capture) step(ctx context.Context) (Page, error) {
 		}
 		if len(page.Turns) > 0 || page.Continuation != ContinuationMore {
 			return page, nil
+		}
+		if c.consumed() <= before {
+			// A read that consumed nothing and still promises more would be
+			// asked again forever. The source is shorter than the extent the
+			// capture fixed, so it changed under the preview.
+			return Page{}, captureError(CloseSourceChanged, nil, "a read after byte %d returned nothing although the transcript held %d bytes when the preview opened", before, c.cursor.TotalBytes())
 		}
 	}
 }
@@ -326,6 +341,8 @@ func (c *Capture) stepFileRanged(ctx context.Context) (Page, error) {
 		switch {
 		case errors.As(err, &oversized):
 			cut, cutNotice = c.classifyOversizedLine(path, oversized)
+		case errors.Is(err, ingest.ErrTranscriptShrank):
+			return Page{}, captureError(CloseSourceChanged, err, "the transcript ended before the %d bytes it held when the preview opened, after byte %d", c.cursor.TotalBytes(), len(c.loaded))
 		case err != nil:
 			return Page{}, captureError(CloseUnreadable, err, "reading %d bytes after byte %d", budget, len(c.loaded))
 		default:
@@ -352,6 +369,9 @@ func (c *Capture) stepFileRanged(ctx context.Context) (Page, error) {
 	switch {
 	case page.Continuation == ContinuationCut:
 	case cut != CutNone:
+		if c.sentPending {
+			cutNotice += " " + PendingResultNotice
+		}
 		page.Continuation, page.CutReason, page.Notice = ContinuationCut, cut, cutNotice
 	case !c.sourceMore:
 		page.Continuation = ContinuationEnd
@@ -640,7 +660,7 @@ func (c *Capture) fold(entries []schema.SessionEntry, final, prefix bool) (Page,
 	if projection.Diagnostics != nil && projection.Diagnostics.Partial {
 		c.partial = true
 	}
-	results := resultIDs(entries)
+	results := resultEntries(entries)
 	turns := projection.Turns
 	start := 0
 	if prefix {
@@ -664,7 +684,10 @@ func (c *Capture) fold(entries []schema.SessionEntry, final, prefix bool) (Page,
 	}
 	page := Page{Turns: append([]ingest.Turn(nil), turns[start:end]...), Continuation: ContinuationMore}
 	for i := range page.Turns {
-		c.emitted = append(c.emitted, emittedTurn{index: page.Turns[i].Index, digest: turnDigest(page.Turns[i]), pending: pendingCalls(page.Turns[i], results)})
+		if len(pendingCalls(page.Turns[i], results)) > 0 {
+			c.sentPending = true
+		}
+		c.emitted = append(c.emitted, emittedTurn{index: page.Turns[i].Index, digest: turnDigest(page.Turns[i]), answers: answerDigest(page.Turns[i], results)})
 		if c.firstTurn == nil {
 			first := page.Turns[i]
 			c.firstTurn = &first
@@ -690,19 +713,17 @@ func (c *Capture) fold(entries []schema.SessionEntry, final, prefix bool) (Page,
 }
 
 // verifyEmitted proves every turn already handed out is still at the head of
-// the re-parse, unchanged.
-func (c *Capture) verifyEmitted(turns []ingest.Turn, results map[string]struct{}) error {
+// the re-parse, unchanged. A turn whose tool call is now answered by a record
+// other than the one that answered it when it was shown met a late result; any
+// other difference means the bytes already read changed.
+func (c *Capture) verifyEmitted(turns []ingest.Turn, results map[string]int) error {
 	if len(turns) < len(c.emitted) {
 		return captureError(CloseSourceChanged, nil, "the re-read holds %d turns, fewer than the %d already shown", len(turns), len(c.emitted))
 	}
 	for i, shown := range c.emitted {
 		turn := turns[i]
-		for _, call := range turn.ToolCalls {
-			if _, waiting := shown.pending[call.ID]; waiting {
-				if _, answered := results[call.ID]; answered {
-					return captureError(CloseLateResult, nil, "a result arrived for a call shown without one, in turn %d of %d shown", i+1, len(c.emitted))
-				}
-			}
+		if turn.Index == shown.index && answerDigest(turn, results) != shown.answers {
+			return captureError(CloseLateResult, nil, "a later record answered a tool call in turn %d of %d shown", i+1, len(c.emitted))
 		}
 		if turn.Index != shown.index || turnDigest(turn) != shown.digest {
 			return captureError(CloseSourceChanged, nil, "turn %d of %d shown read differently on the next read", i+1, len(c.emitted))
@@ -714,26 +735,20 @@ func (c *Capture) verifyEmitted(turns []ingest.Turn, results map[string]struct{}
 // sealedEnd returns the end of the run of turns from start that can be handed
 // out now. A turn is held back while one of its tool calls waits for a result,
 // and the last parsed turn is held back while the read can still continue it.
-// Past the holdback bound the oldest held turns go out with their calls
-// pending, so an unanswered call cannot stall the preview.
-func (c *Capture) sealedEnd(turns []ingest.Turn, start int, results map[string]struct{}, final bool) int {
+//
+// The hold has no bound of its own: the capture's source cap bounds it. Held
+// turns cost nothing extra, because every read re-parses the loaded prefix and
+// only the prefix is kept. While the cap allows another read the result can
+// still arrive, so a turn with an unanswered call never goes out early. When
+// the read reaches the extent or a limit (final), everything goes out, and a
+// call still unanswered then is named in the cut notice.
+func (c *Capture) sealedEnd(turns []ingest.Turn, start int, results map[string]int, final bool) int {
 	if final {
 		return len(turns)
 	}
 	limit := len(turns) - 1
 	end := start
-	for end < limit {
-		if len(pendingCalls(turns[end], results)) == 0 {
-			end++
-			continue
-		}
-		held := 0
-		for i := end; i < len(turns); i++ {
-			held += transcript.FoldedTurnByteLength(turns[i])
-		}
-		if held <= c.opts.holdback() {
-			break
-		}
+	for end < limit && len(pendingCalls(turns[end], results)) == 0 {
 		end++
 	}
 	return max(end, start)
@@ -821,19 +836,41 @@ func attachedMetadata(records []schema.NativeMetadataRecord, turns []ingest.Turn
 	return attached
 }
 
-// resultIDs is the set of tool call identifiers that have a result entry.
-func resultIDs(entries []schema.SessionEntry) map[string]struct{} {
-	ids := make(map[string]struct{})
+// resultEntries maps each tool call identifier that has a result to the entry
+// index of the last result record for it, the one the projection shows.
+func resultEntries(entries []schema.SessionEntry) map[string]int {
+	ids := make(map[string]int)
 	for _, entry := range entries {
 		if entry.EntryType == schema.EntryTypeToolResult && entry.ToolCallID != nil {
-			ids[*entry.ToolCallID] = struct{}{}
+			ids[*entry.ToolCallID] = entry.EntryIndex
 		}
 	}
 	return ids
 }
 
+// answerDigest digests which record answers each of the turn's tool calls, in
+// call order: the entry index of its result, or none.
+func answerDigest(turn ingest.Turn, results map[string]int) [sha256.Size]byte {
+	hash := sha256.New()
+	var buf [8]byte
+	for _, call := range turn.ToolCalls {
+		answer := int64(-1)
+		if index, ok := results[call.ID]; ok {
+			answer = int64(index)
+		}
+		binary.BigEndian.PutUint64(buf[:], uint64(len(call.ID)))
+		hash.Write(buf[:])
+		hash.Write([]byte(call.ID))
+		binary.BigEndian.PutUint64(buf[:], uint64(answer))
+		hash.Write(buf[:])
+	}
+	var sum [sha256.Size]byte
+	hash.Sum(sum[:0])
+	return sum
+}
+
 // pendingCalls names the turn's tool calls that have no result yet.
-func pendingCalls(turn ingest.Turn, results map[string]struct{}) map[string]struct{} {
+func pendingCalls(turn ingest.Turn, results map[string]int) map[string]struct{} {
 	var pending map[string]struct{}
 	for _, call := range turn.ToolCalls {
 		if _, ok := results[call.ID]; ok {

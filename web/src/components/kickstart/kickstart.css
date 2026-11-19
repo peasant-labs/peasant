@@ -219,6 +219,16 @@
   border: var(--bd);
   background: var(--canvas);
 }
+/* Reading, or stopped before a segment arrived: the state fills the same pane
+   the viewer would, so a failed or loading preview keeps the pane's size. The
+   raw label keeps its line too, hidden once the preview stopped. */
+.ks-session-preview-state {
+  overflow-y: auto;
+  padding: var(--sp-3);
+}
+.ks-preview-raw[data-reserved] {
+  visibility: hidden;
+}
 .ks-preview-notice {
   display: inline-flex;
   flex-wrap: wrap;

@@ -26,8 +26,11 @@ requiredNames:
   - file-first-page-is-a-prefix-of-the-whole-read
   - file-result-across-a-slice-stays-joined
   - file-unresolved-call-is-held-back
-  - file-holdback-cap-emits-pending-call
-  - file-late-result-after-holdback-ends-with-late-result
+  - result-beyond-old-holdback-arrives-in-order
+  - unanswered-call-at-budget-cuts-neutral
+  - real-late-result-still-fails-closed
+  - truncate-between-loads-closes-source-changed-half
+  - truncate-between-loads-closes-source-changed-quarter
   - file-parent-and-suppressed-result-across-a-slice
   - file-duplicate-record-in-a-later-slice-is-deduplicated
   - file-usage-on-a-later-carrier-stays-joined
@@ -84,6 +87,38 @@ transcripts:
       - '{"type":"assistant","uuid":"a4","parentUuid":"a3","timestamp":"2026-01-01T00:00:04Z","message":{"role":"assistant","content":[{"type":"text","text":"still waiting more {{PAD:600}}"}]}}'
       - '{"type":"user","uuid":"r1","parentUuid":"a4","timestamp":"2026-01-01T00:00:05Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_slow","content":"LATE_TOOL_OUTPUT done"}]}}'
       - '{"type":"assistant","uuid":"a5","parentUuid":"r1","timestamp":"2026-01-01T00:00:06Z","message":{"role":"assistant","content":[{"type":"text","text":"the task finished."}]}}'
+
+  # A call whose result lies more than one contract segment (1 MiB) later,
+  # behind long turns. A capture used to hold back only one segment's worth
+  # and then hand the call out pending, so the result's arrival ended the
+  # preview as if the session had changed.
+  - name: far-result-conversation
+    harness: claude-code
+    lines:
+      - '{"type":"user","uuid":"u1","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"start a long task."}}'
+      - '{"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"call_far","name":"Bash","input":{"command":"sleep 60"}}]}}'
+      - '{"type":"user","uuid":"q1","parentUuid":"a1","timestamp":"2026-01-01T00:00:02Z","message":{"role":"user","content":"meanwhile, explain the layout."}}'
+      - '{"type":"assistant","uuid":"a2","parentUuid":"q1","timestamp":"2026-01-01T00:00:03Z","message":{"role":"assistant","content":[{"type":"text","text":"part one {{PAD:600000}}"}]}}'
+      - '{"type":"user","uuid":"q2","parentUuid":"a2","timestamp":"2026-01-01T00:00:04Z","message":{"role":"user","content":"go on."}}'
+      - '{"type":"assistant","uuid":"a3","parentUuid":"q2","timestamp":"2026-01-01T00:00:05Z","message":{"role":"assistant","content":[{"type":"text","text":"part two {{PAD:600000}}"}]}}'
+      - '{"type":"user","uuid":"q3","parentUuid":"a3","timestamp":"2026-01-01T00:00:06Z","message":{"role":"user","content":"and the rest."}}'
+      - '{"type":"assistant","uuid":"a4","parentUuid":"q3","timestamp":"2026-01-01T00:00:07Z","message":{"role":"assistant","content":[{"type":"text","text":"part three {{PAD:600000}}"}]}}'
+      - '{"type":"user","uuid":"r1","parentUuid":"a4","timestamp":"2026-01-01T00:00:08Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_far","content":"FAR_TOOL_OUTPUT done"}]}}'
+      - '{"type":"assistant","uuid":"a5","parentUuid":"r1","timestamp":"2026-01-01T00:00:09Z","message":{"role":"assistant","content":[{"type":"text","text":"the task finished."}]}}'
+
+  # A call answered at once, and answered AGAIN by a second result record
+  # written later. The projection shows the last answer, so a turn shown with
+  # the first one no longer reads as the session does: a real late result.
+  - name: second-result-conversation
+    harness: claude-code
+    lines:
+      - '{"type":"user","uuid":"u1","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"run it."}}'
+      - '{"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"call_twice","name":"Bash","input":{"command":"true"}}]}}'
+      - '{"type":"user","uuid":"r1","parentUuid":"a1","timestamp":"2026-01-01T00:00:02Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_twice","content":"FIRST_ANSWER"}]}}'
+      - '{"type":"assistant","uuid":"a2","parentUuid":"r1","timestamp":"2026-01-01T00:00:03Z","message":{"role":"assistant","content":[{"type":"text","text":"done {{PAD:600}}"}]}}'
+      - '{"type":"user","uuid":"u2","parentUuid":"a2","timestamp":"2026-01-01T00:00:04Z","message":{"role":"user","content":"next {{PAD:600}}"}}'
+      - '{"type":"user","uuid":"r2","parentUuid":"u2","timestamp":"2026-01-01T00:00:05Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_twice","content":"SECOND_ANSWER"}]}}'
+      - '{"type":"assistant","uuid":"a3","parentUuid":"r2","timestamp":"2026-01-01T00:00:06Z","message":{"role":"assistant","content":[{"type":"text","text":"that is all."}]}}'
 
   # The same record written twice, the second time after other records.
   - name: duplicate-record-conversation
@@ -180,15 +215,29 @@ cases:
     options: {firstReadBytes: 1100, sliceReadBytes: 64}
     expect: {continuation: end, equalsWholeRead: true, firstPageHoldsNoPendingCall: true, firstPageTurns: 1}
 
-  - name: file-holdback-cap-emits-pending-call
-    transcript: late-result-conversation
-    options: {firstReadBytes: 1600, sliceReadBytes: 64, holdbackBytes: 900}
-    expect: {closeReason: late_result, someTurnSentPending: true}
+  # The result lies 1.8 MiB after its call. The capture holds the call's turn
+  # until the result is read, however far, so the session reads to its end in
+  # order and no turn goes out pending.
+  - name: result-beyond-old-holdback-arrives-in-order
+    transcript: far-result-conversation
+    options: {firstReadBytes: 262144, sliceReadBytes: 1048576}
+    sliceSweep: [262144, 1048576]
+    expect: {continuation: end, equalsWholeRead: true, noTurnSentPendingBeforeEnd: true, toolOutputContains: [FAR_TOOL_OUTPUT], minPages: 2}
 
-  - name: file-late-result-after-holdback-ends-with-late-result
-    transcript: late-result-conversation
-    options: {firstReadBytes: 2400, sliceReadBytes: 2400, holdbackBytes: 200}
-    expect: {closeReason: late_result, minPages: 1}
+  # The source cap runs out before the call is answered: the capture stops at
+  # its designed limit, hands out what it read with the call pending, and says
+  # so in neutral words. Nothing changed, so it is not a close.
+  - name: unanswered-call-at-budget-cuts-neutral
+    transcript: far-result-conversation
+    options: {firstReadBytes: 262144, sliceReadBytes: 1048576, sourceCapBytes: 1300000}
+    expect: {continuation: cut, cutReason: source_budget, someTurnSentPending: true, noTurnSentPendingBeforeEnd: true, noticeContains: ["the most one preview reads", "has its result further on"]}
+
+  # A turn shown with its answer, answered again by a later record: the turn
+  # as shown is stale, so the capture still fails closed, as a late result.
+  - name: real-late-result-still-fails-closed
+    transcript: second-result-conversation
+    options: {firstReadBytes: 1300, sliceReadBytes: 400}
+    expect: {closeReason: late_result, minPages: 1, errorContains: ["answers a tool call in a turn already shown"]}
 
   - name: file-parent-and-suppressed-result-across-a-slice
     transcript: tool-call-conversation
@@ -222,6 +271,22 @@ cases:
     transcript: long-conversation
     options: {firstReadBytes: 2000, sliceReadBytes: 2000}
     actions: [{afterPage: 1, do: truncate, bytes: 100}]
+    expect: {closeReason: source_changed}
+
+  # Truncation between loads, at the two points the acceptance run used: half
+  # and a quarter of the file. Both lie past what the first page read, so only
+  # the extent fixed at open shows the change. Each continuation is answered,
+  # by a source-changed close, never by an endless empty read.
+  - name: truncate-between-loads-closes-source-changed-half
+    transcript: long-conversation
+    options: {firstReadBytes: 2000, sliceReadBytes: 2000}
+    actions: [{afterPage: 1, do: truncate, fraction: 0.5}]
+    expect: {closeReason: source_changed}
+
+  - name: truncate-between-loads-closes-source-changed-quarter
+    transcript: long-conversation
+    options: {firstReadBytes: 2000, sliceReadBytes: 2000}
+    actions: [{afterPage: 1, do: truncate, fraction: 0.25}]
     expect: {closeReason: source_changed}
 
   - name: file-replaced-under-capture-fails-closed

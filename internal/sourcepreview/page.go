@@ -112,7 +112,8 @@ type CloseReason uint8
 const (
 	// CloseSourceChanged: the source changed under what was already shown.
 	CloseSourceChanged CloseReason = iota + 1
-	// CloseLateResult: a tool result arrived for a call already shown pending.
+	// CloseLateResult: a later record answered a tool call of a turn already
+	// shown, so the turn as shown is no longer how the session reads.
 	CloseLateResult
 	// CloseUnavailable: discovery recorded no transcript location.
 	CloseUnavailable
@@ -157,7 +158,7 @@ func (r CloseReason) String() string {
 // surface may show it and a log may record it.
 var (
 	ErrSourceChanged = errors.New("this session's transcript changed after part of it was shown. read it again from the start.")
-	ErrLateResult    = errors.New("part of this session changed after it was shown. read it again from the start.")
+	ErrLateResult    = errors.New("a later part of this session answers a tool call in a turn already shown. read it again from the start to see the answer in place.")
 	ErrUnavailable   = errors.New("no transcript preview is available for this session; it still ingests normally.")
 	ErrNoTurns       = errors.New("no readable turns are in this session's transcript yet.")
 	ErrUnreadable    = errors.New("this session's transcript could not be read for a preview. the full session still ingests normally; check that the file or database is readable and read it again.")

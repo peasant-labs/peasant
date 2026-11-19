@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"log/slog"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -29,6 +30,35 @@ type previewRegistry struct {
 }
 
 var errPreviewReasonUnmapped = errors.New("preview reason has no wire mapping")
+
+// The preview log lines. Each carries counts and closed-set reasons only: never
+// a session, node or capture identifier, a path, a title or transcript text
+// (plan section 8, enforced by the privacy fixture's previewLog keys).
+const (
+	previewLogOpened = "kickstart preview: capture opened"
+	previewLogSent   = "kickstart preview: segment sent"
+	previewLogEnded  = "kickstart preview: capture reached its end"
+	previewLogClosed = "kickstart preview: capture closed"
+	previewLogFreed  = "kickstart preview: capture freed"
+)
+
+// previewFreeDisconnect is the freed line's reason when the socket closed
+// under a capture: no close frame is sent then.
+const previewFreeDisconnect = "disconnect"
+
+// previewFreeComplete is the freed line's reason when the capture sent its
+// final frame.
+const previewFreeComplete = "complete"
+
+// logFreed records that a capture's slot and everything it loaded were
+// released, with how much it had sent.
+func logFreed(p *webPreview, reason string) {
+	var retained int64
+	if p.capture != nil {
+		retained = p.capture.RetainedBytes()
+	}
+	slog.Info(previewLogFreed, "reason", reason, "seq", p.seq, "retained_bytes", retained)
+}
 
 func previewCutReason(reason sourcepreview.CutReason) (schema.LocalKickstartPreviewCutReason, bool) {
 	switch reason {
@@ -253,6 +283,8 @@ func (r *previewRegistry) start(p *webPreview, listings []onboarding.SessionList
 	}
 	p.page = page
 	p.segmenter.Push(page)
+	consumed, total := capture.Progress()
+	slog.Info(previewLogOpened, "turns", len(page.Turns), "source_bytes", consumed, "source_total_bytes", total, "continuation", page.Continuation.String())
 	header, err := transcript.SessionToDetailValidated(&page.Session)
 	if err != nil {
 		r.fail(p, err)
@@ -374,11 +406,22 @@ func (r *previewRegistry) send(p *webPreview, event schema.LocalKickstartPreview
 		r.mu.Unlock()
 	}
 	if err == nil {
+		if event.Kind == schema.LocalKickstartPreviewSegmentEvent {
+			turns, bytes := 0, 0
+			if event.Segment != nil {
+				turns, bytes = len(event.Segment.Turns), event.Segment.ByteLength
+			}
+			slog.Info(previewLogSent, "seq", event.Seq, "turns", turns, "segment_bytes", bytes, "loaded_segments", event.Directory.LoadedSegments, "loaded_turns", event.Directory.LoadedTurns)
+			if event.Directory.Complete {
+				slog.Info(previewLogEnded, "seq", event.Seq, "continuation", string(event.Continuation), "cut_reason", string(event.CutReason))
+			}
+		}
 		r.mu.Lock()
 		p.opened = true
 		if event.Directory.Complete && r.captures[p.conn] == p {
 			delete(r.captures, p.conn)
 			p.cancel()
+			logFreed(p, previewFreeComplete)
 			go p.capture.Close()
 		} else if event.Kind == schema.LocalKickstartPreviewSegmentEvent && r.captures[p.conn] == p && !p.busy && p.seq == event.Seq {
 			p.last = r.sessions.env.now()
@@ -432,6 +475,8 @@ func (r *previewRegistry) fail(p *webPreview, err error) {
 		p.stopIdle()
 	}
 	p.cancel()
+	slog.Info(previewLogClosed, "reason", string(reason), "code", string(code), "seq", p.seq)
+	logFreed(p, string(reason))
 	if p.capture != nil {
 		go p.capture.Close()
 	}
@@ -475,6 +520,12 @@ func (r *previewRegistry) removeLocked(p *webPreview, reason schema.LocalKicksta
 	delete(r.captures, p.conn)
 	if p.stopIdle != nil {
 		p.stopIdle()
+	}
+	if notify {
+		slog.Info(previewLogClosed, "reason", string(reason), "seq", p.seq)
+		logFreed(p, string(reason))
+	} else {
+		logFreed(p, previewFreeDisconnect)
 	}
 	p.cancel()
 	if p.capture != nil {

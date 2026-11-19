@@ -12,7 +12,7 @@ cases:
   - {name: terminal-source-cap-cuts-with-notice, notice: 'the most one preview reads'}
   - {name: lru-eviction-closes-capture}
   - {name: source-changed-sentence, notice: 'transcript changed after part of it was shown'}
-  - {name: late-result-sentence, notice: 'part of this session changed after it was shown'}
+  - {name: late-result-sentence, notice: 'answers a tool call in a turn already shown'}
   - {name: grown-sentence, notice: 'session has grown since the preview opened'}
   - {name: unavailable-sentence, notice: 'no transcript preview is available'}
   - {name: oversized-record-sentence, notice: 'the preview stopped at'}

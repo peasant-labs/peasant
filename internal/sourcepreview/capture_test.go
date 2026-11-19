@@ -70,16 +70,17 @@ type captureOptionsSpec struct {
 	SliceReadBytes int64 `yaml:"sliceReadBytes"`
 	SourceCapBytes int64 `yaml:"sourceCapBytes"`
 	TurnCap        int   `yaml:"turnCap"`
-	HoldbackBytes  int   `yaml:"holdbackBytes"`
 }
 
 type actionSpec struct {
 	AfterPage int        `yaml:"afterPage"`
 	Do        actionKind `yaml:"do"`
 	Bytes     int64      `yaml:"bytes"`
-	From      string     `yaml:"from"`
-	To        string     `yaml:"to"`
-	Lines     []string   `yaml:"lines"`
+	// Fraction truncates to that share of the file's size instead of Bytes.
+	Fraction float64  `yaml:"fraction"`
+	From     string   `yaml:"from"`
+	To       string   `yaml:"to"`
+	Lines    []string `yaml:"lines"`
 }
 
 type captureExpect struct {
@@ -93,6 +94,7 @@ type captureExpect struct {
 	FirstPageHoldsNoPendingCall     bool     `yaml:"firstPageHoldsNoPendingCall"`
 	FirstPageTurns                  int      `yaml:"firstPageTurns"`
 	SomeTurnSentPending             bool     `yaml:"someTurnSentPending"`
+	NoTurnSentPendingBeforeEnd      bool     `yaml:"noTurnSentPendingBeforeEnd"`
 	UniqueAscendingTurns            bool     `yaml:"uniqueAscendingTurns"`
 	MinPages                        int      `yaml:"minPages"`
 	Pages                           int      `yaml:"pages"`
@@ -355,7 +357,15 @@ func applyAction(t *testing.T, action actionSpec, src source, capture *sourcepre
 	t.Helper()
 	switch action.Do {
 	case actionTruncate:
-		if err := os.Truncate(src.path, action.Bytes); err != nil {
+		size := action.Bytes
+		if action.Fraction > 0 {
+			info, err := os.Stat(src.path)
+			if err != nil {
+				t.Fatalf("measure the transcript: %v", err)
+			}
+			size = int64(float64(info.Size()) * action.Fraction)
+		}
+		if err := os.Truncate(src.path, size); err != nil {
 			t.Fatalf("truncate the transcript: %v", err)
 		}
 	case actionReplace:
@@ -504,7 +514,7 @@ func equalStrings(a, b []string) bool {
 
 func optionsFor(spec captureOptionsSpec) sourcepreview.CaptureOptions {
 	return sourcepreview.CaptureOptions{FirstReadBytes: spec.FirstReadBytes, SliceReadBytes: spec.SliceReadBytes,
-		SourceCapBytes: spec.SourceCapBytes, TurnCap: spec.TurnCap, HoldbackBytes: spec.HoldbackBytes}
+		SourceCapBytes: spec.SourceCapBytes, TurnCap: spec.TurnCap}
 }
 
 func TestCapture(t *testing.T) {
@@ -633,7 +643,21 @@ func checkCapture(t *testing.T, c captureCase, src source, opts sourcepreview.Ca
 			}
 		}
 		if !pending {
-			t.Fatalf("no turn was handed out with a pending call; the holdback bound never released one")
+			t.Fatalf("no turn was handed out with a pending call; the cut did not hand out the turns it held")
+		}
+	}
+	if e.NoTurnSentPendingBeforeEnd {
+		for i, page := range run.pages {
+			if page.Continuation != sourcepreview.ContinuationMore {
+				continue
+			}
+			for _, turn := range page.Turns {
+				for _, call := range turn.ToolCalls {
+					if call.Result == "" {
+						t.Fatalf("page %d handed out call %s without its result while the capture could still read on", i+1, call.ID)
+					}
+				}
+			}
 		}
 	}
 	if e.UniqueAscendingTurns {
