@@ -1,0 +1,21 @@
+fields:
+  PairMissing: stored_pair
+  Forced: source_state
+  SourceChanged: source_state
+  PublicationCannotBind: publication_bound
+  StructuralMismatch: stored_pair
+  OpenCodeClockMoved: source_state
+  FreshnessFutureSchema: source_state
+  FreshnessClockMoved: source_state
+  FreshnessSchemaOld: source_state
+  FreshnessPublicationNeeded: publication_bound
+  SourceClockMoved: source_state
+  SourceComparePending: source_compared
+  SourceCompared: source_compared
+  SourceUnproven: source_state
+  CaptureRecoveryNeeded: capture_recovery
+  PublicationCaptureMissing: publication_capture
+  PermanentRefusal: permanent_refusal
+  PublicationUnbound: publication_bound
+  ContentPending: content_pending
+  LatestAttemptSettled: latest_attempt
