@@ -1,0 +1,14 @@
+requiredNames:
+  - first-import
+  - installed-refresh
+  - exact-control
+cases:
+  - name: first-import
+    entries: 1000
+    refresh: false
+  - name: installed-refresh
+    entries: 1000
+    refresh: true
+  - name: exact-control
+    entries: 61
+    refresh: false
