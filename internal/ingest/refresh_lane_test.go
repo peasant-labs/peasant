@@ -174,6 +174,11 @@ func newRefreshLaneBenchWithVersions(t *testing.T, fixture refreshLaneFixture, t
 	if err := fs.WriteFile(sourcePath, []byte(transcript), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// The stored ingest clock has millisecond precision and the source clock
+	// does not. A baseline harvest that stamps its ingest time in the same
+	// millisecond as this write would leave a source clock that reads as
+	// moved, so a "current" source is written well before the harvest.
+	mem.ModTimes[sourcePath] = time.Now().Add(-time.Hour)
 	outputDir := filepath.Join(root, "output")
 	bench := &refreshLaneBench{
 		t: t, fixture: fixture, fs: fs, database: database,

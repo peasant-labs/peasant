@@ -7,6 +7,14 @@ test layer to its entry point.
 
 ### Tests never read your git configuration
 
+Executable fixtures written by tests use `internal/testkit/executable.Write`,
+which prevents Go forks from inheriting their writable descriptors. The
+`no-unsafe-executable-write` ast-grep rule catches octal, hexadecimal, and
+binary literal execute modes in test files and e2e support; decimal literals,
+digit separators, variable modes, and wrapper functions require manual review.
+An inert file may retain `os.WriteFile` with a `not executed:`
+explanation and a rule-specific suppression.
+
 A test result must not depend on the machine. Every package whose tests start a
 process (git, a shell script, `go`) has a `TestMain` that calls
 `gitconfig.RunWithIsolatedGitConfig` (`internal/testkit/gitconfig/gitconfig.go`). Goroutine-leak-checked packages pass `gitconfig.WithGoleak(m)` as the runner. Before any test runs it sets `GIT_CONFIG_GLOBAL=/dev/null` and `GIT_CONFIG_NOSYSTEM=1`,

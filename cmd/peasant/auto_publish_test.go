@@ -667,6 +667,8 @@ func TestVillageAuto(t *testing.T) {
 				foreign = "#!/bin/sh\n" + section
 			}
 			if foreign != "" {
+				// not executed: auto setup inspects and preserves the foreign hook.
+				// ast-grep-ignore: no-unsafe-executable-write -- foreign hook refusal fixture.
 				if err := os.WriteFile(filepath.Join(target, ".git", "hooks", "pre-push"), []byte(foreign), 0o755); err != nil {
 					t.Fatal(err)
 				}
