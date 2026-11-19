@@ -1,0 +1,68 @@
+id: ingest-test-arena
+language: Go
+severity: error
+message: Use newTestPipeline or pass WithArenaSizeBytes inline to bound the test staging arena.
+files:
+  - "**/*_test.go"
+rule:
+  all:
+    - pattern:
+        context: 'func _() { _ = ingest.NewPipeline($$$ARGS) }'
+        selector: call_expression
+    - not:
+        has:
+          any:
+            - pattern:
+                context: 'func _() { _ = ingest.WithArenaSizeBytes($SIZE) }'
+                selector: call_expression
+            - pattern:
+                context: 'func _() { _ = WithArenaSizeBytes($SIZE) }'
+                selector: call_expression
+          stopBy: end
+ignores:
+  - "internal/ingest/test_options_helpers_test.go"
+  # Measurement harnesses measure the production staging arena on purpose; not run by make check.
+  - "internal/ingest/managed_refresh_bench_test.go"
+  - "internal/ingest/import_profile_overhead_bench_test.go"
+  # These test binaries bound the arena for production-path CLI/API wiring in TestMain.
+  - "cmd/peasant/*_test.go"
+  - "internal/api/*_test.go"
+---
+id: ingest-package-test-arena
+language: Go
+severity: error
+message: Pass WithArenaSizeBytes inline to bound the test staging arena.
+files:
+  - "internal/ingest/*_test.go"
+rule:
+  all:
+    - pattern:
+        context: 'func _() { _ = NewPipeline($$$ARGS) }'
+        selector: call_expression
+    - not:
+        has:
+          pattern:
+            context: 'func _() { _ = WithArenaSizeBytes($SIZE) }'
+            selector: call_expression
+          stopBy: end
+---
+id: ingest-test-import-name
+language: Go
+severity: error
+message: Import the ingest package as ingest in test files so arena checks apply.
+files:
+  - "**/*_test.go"
+rule:
+  all:
+    - kind: import_spec
+    - regex: '(?s)^(?:\.|[A-Za-z_][A-Za-z_0-9]*)\s+.*["\x60]github\.com/peasant-labs/peasant/internal/ingest["\x60]$'
+    - not:
+        regex: '^ingest\s+'
+ignores:
+  - "internal/ingest/test_options_helpers_test.go"
+  # Measurement harnesses measure the production staging arena on purpose; not run by make check.
+  - "internal/ingest/managed_refresh_bench_test.go"
+  - "internal/ingest/import_profile_overhead_bench_test.go"
+  # These test binaries bound the arena for production-path CLI/API wiring in TestMain.
+  - "cmd/peasant/*_test.go"
+  - "internal/api/*_test.go"
