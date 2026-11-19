@@ -41,7 +41,10 @@ const (
 type mutation int
 
 const (
-	mutateAdapterStamp mutation = iota + 1
+	// mutateNone leaves the imported base as it is: the new-session smoke case
+	// times only the import.
+	mutateNone mutation = iota
+	mutateAdapterStamp
 	mutateIndexer
 )
 
@@ -434,6 +437,7 @@ func prepareBase(ctx context.Context, baseDir string, sessions, entries int, m m
 	}
 	target := ingest.GenerationTargets(ingest.HarvesterVersionRegistry)[ingest.HarnessClaudeCode]
 	switch m {
+	case mutateNone:
 	case mutateAdapterStamp:
 		if err := execSQL(ctx, db, `UPDATE sessions SET adapter_version = ?`, target.AdapterVersion-1); err != nil {
 			return caseShape{}, err

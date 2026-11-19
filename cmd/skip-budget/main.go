@@ -33,6 +33,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -70,7 +71,16 @@ func main() {
 	sessions := flag.Int("sessions", matrixSessions, "synthetic sessions per case (C4 always uses 2)")
 	entries := flag.Int("entries", matrixEntries, "entries per session (C4 always uses 10)")
 	rounds := flag.Int("rounds", 5, "rounds per case; each round runs both arms once")
+	importSample := flag.String("import-sample", "", "internal: import one new-session sample into this directory and print its wall time in ms")
 	flag.Parse()
+	if *importSample != "" {
+		shape, err := prepareBase(context.Background(), *importSample, smokeSessions, smokeEntries, mutateNone)
+		if err != nil {
+			fail(1, fmt.Sprintf("import sample in %s: %v", *importSample, err))
+		}
+		fmt.Println(shape.PrepareMs)
+		return
+	}
 	cases := matrixCases(*root)
 	if *list {
 		if err := json.NewEncoder(os.Stdout).Encode(report{Cases: cases}); err != nil {
@@ -145,37 +155,34 @@ func fail(code int, message string) {
 	os.Exit(code)
 }
 
-// runSmoke times the new-session full step: a fresh 2 x 10 import, five times.
+// smokeSessions and smokeEntries are the new-session smoke shape.
+const (
+	smokeSessions = 2
+	smokeEntries  = 10
+)
+
+// runSmoke times the new-session full step: a fresh 2 x 10 import into an
+// empty managed store, five times. Each sample runs in its own process, as a
+// harvest does, so no sample reuses a heap an earlier pipeline left behind.
 func runSmoke(dir string, opts harnessOptions) error {
-	tmp := filepath.Join(dir, "tmp")
-	if err := os.Mkdir(tmp, 0o700); err != nil {
-		return err
+	self, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("locate the harness binary to run each sample: %w", err)
 	}
 	samples := make([]int64, 0, 5)
 	for i := range 5 {
 		sampleDir := filepath.Join(dir, fmt.Sprintf("sample-%d", i+1))
-		cmd := exec.Command("go", "test", "-tags", "managed_refresh_bench", "./internal/ingest", "-run", "^TestManagedRefreshPrepare$", "-count=1")
-		cmd.Env = append(os.Environ(), "TMPDIR="+tmp, "PEASANT_MANAGED_REFRESH_PREPARE="+sampleDir,
-			"PEASANT_MANAGED_REFRESH_SESSIONS=2", "PEASANT_MANAGED_REFRESH_ENTRIES=10", "PEASANT_MANAGED_REFRESH_CASE=stamp-only")
-		if output, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("prepare sample %d: %w: %s", i+1, err, output)
-		}
-		data, err := os.ReadFile(filepath.Join(sampleDir, "shape.json"))
+		cmd := exec.Command(self, "-import-sample", sampleDir)
+		cmd.Stderr = os.Stderr
+		out, err := cmd.Output()
 		if err != nil {
-			return fmt.Errorf("read sample %d: %w", i+1, err)
+			return fmt.Errorf("import sample %d in %s: %w", i+1, sampleDir, err)
 		}
-		var shape struct {
-			Sessions        int   `json:"sessions"`
-			Entries         int   `json:"entriesPerSession"`
-			InitialImportMs int64 `json:"initialImportMs"`
+		ms, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
+		if err != nil {
+			return fmt.Errorf("sample %d printed %q, want its import wall time in ms: %w", i+1, out, err)
 		}
-		if err := json.Unmarshal(data, &shape); err != nil {
-			return fmt.Errorf("decode sample %d: %w", i+1, err)
-		}
-		if shape.Sessions != 2 || shape.Entries != 10 {
-			return fmt.Errorf("sample %d has unexpected shape", i+1)
-		}
-		samples = append(samples, shape.InitialImportMs)
+		samples = append(samples, ms)
 	}
 	sorted := slices.Clone(samples)
 	slices.Sort(sorted)
