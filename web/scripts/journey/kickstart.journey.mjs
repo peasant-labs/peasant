@@ -1039,6 +1039,12 @@ test('preview-end-says-final', async () => {
   await highlightsSay(pageG, Labels.FinalResponse);
   await expect(pane(pageG).getByText(Labels.LatestLoaded, { exact: false }).filter({ visible: true })).toHaveCount(0);
   await pane(pageG).getByRole('tab', { name: Labels.Trace }).click();
+  // The end of the trace is what this screen is about.
+  await pane(pageG).evaluate((root) => {
+    for (const element of [root, ...root.querySelectorAll('*')]) {
+      if (element.scrollHeight > element.clientHeight) element.scrollTop = element.scrollHeight;
+    }
+  });
   await shoot(pageG, '15-preview-end');
 });
 
@@ -1047,6 +1053,8 @@ test('preview-cut-shows-the-server-sentence', async () => {
   await loadToEnd(pageG);
   expect(previewReceived.at(-1).continuation, 'the capture was cut').toBe(LocalKickstartPreviewContinuation.Cut);
   await expect(pane(pageG).locator('.ks-preview-notice')).toContainText(fixture.preview.cutNotice);
+  await pane(pageG).locator('.ks-preview-notice').scrollIntoViewIfNeeded();
+  await expect(pane(pageG).locator('.ks-preview-notice')).toBeInViewport();
   await shoot(pageG, '16-preview-cut');
 });
 
