@@ -976,7 +976,8 @@ async function loadToEnd(page) {
 
 async function highlightsSay(page, words) {
   await pane(page).getByRole('tab', { name: new RegExp(`^${Labels.Highlights}`) }).click();
-  await expect(pane(page).getByText(words, { exact: false }).first()).toBeVisible();
+  // The outline rail names the same response; it is closed, so only the drawn tab counts.
+  await expect(pane(page).getByText(words, { exact: false }).filter({ visible: true }).first()).toBeVisible();
 }
 
 test('preview-session-in-the-viewer', async () => {
@@ -1010,7 +1011,7 @@ test('preview-scroll-to-end-loads-nothing', async () => {
 test('preview-position-reads-loaded-so-far', async () => {
   await expect(pane(pageG).getByText(Labels.LoadedSoFar, { exact: false }).first()).toBeVisible();
   await highlightsSay(pageG, Labels.LatestLoaded);
-  await expect(pane(pageG).getByText(Labels.FinalResponse, { exact: true })).toHaveCount(0);
+  await expect(pane(pageG).getByText(Labels.FinalResponse, { exact: true }).filter({ visible: true })).toHaveCount(0);
   await pane(pageG).getByRole('tab', { name: Labels.Trace }).click();
 });
 
@@ -1036,7 +1037,7 @@ test('preview-end-says-final', async () => {
   expect(last.continuation, 'the last frame ended the capture').toBe(LocalKickstartPreviewContinuation.End);
   await expect(pane(pageG).getByText(Labels.LoadedSoFar, { exact: false })).toHaveCount(0);
   await highlightsSay(pageG, Labels.FinalResponse);
-  await expect(pane(pageG).getByText(Labels.LatestLoaded, { exact: false })).toHaveCount(0);
+  await expect(pane(pageG).getByText(Labels.LatestLoaded, { exact: false }).filter({ visible: true })).toHaveCount(0);
   await pane(pageG).getByRole('tab', { name: Labels.Trace }).click();
   await shoot(pageG, '15-preview-end');
 });
@@ -1075,6 +1076,7 @@ test('preview-leaves-no-trace', async () => {
   expect(traces.databases, 'no IndexedDB database was opened').toEqual([]);
   expect(traces.caches, 'no Cache Storage was written').toEqual([]);
   expect(pageG.url(), 'the URL never changed').toBe(pageGHref);
+  expect(await pane(pageG).locator('a[href]').count(), 'the pane has no link that could change the URL').toBe(0);
   const origin = new URL(pageGHref).origin;
   const offsite = requests.filter((entry) => entry.tab === Tab.G && /^(https?|wss?):$/.test(entry.protocol) && entry.origin !== origin);
   expect(offsite, 'no request left this computer').toEqual([]);
