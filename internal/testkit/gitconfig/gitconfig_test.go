@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/peasant-labs/peasant/internal/defaults"
 )
 
 // hostileMarker is the prefix of every config key the hostile environment
@@ -48,7 +50,7 @@ func plantHostileGitEnvironment(t *testing.T) string {
 
 	for name, value := range map[string]string{
 		"HOME":                             home,
-		"XDG_CONFIG_HOME":                  filepath.Join(home, "xdg"),
+		defaults.EnvXDGConfigHome.String(): filepath.Join(home, "xdg"),
 		"GIT_CONFIG_GLOBAL":                poison,
 		"GIT_CONFIG_SYSTEM":                poison,
 		"GIT_CONFIG_NOSYSTEM":              "0",
