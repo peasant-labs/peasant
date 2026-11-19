@@ -511,6 +511,8 @@ func TestServiceUnitsVerifyWithSystemd(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(h.exe), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// not executed: systemd-analyze verifies unit syntax and executable access only.
+	// ast-grep-ignore: no-unsafe-executable-write -- verifier does not start the service.
 	if err := os.WriteFile(h.exe, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -598,6 +600,8 @@ func TestServiceExecutablePrefersStablePathEntry(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(versioned), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// not executed: this test compares resolved executable paths.
+	// ast-grep-ignore: no-unsafe-executable-write -- path resolution fixture.
 	if err := os.WriteFile(versioned, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -612,6 +616,8 @@ func TestServiceExecutablePrefersStablePathEntry(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(other), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// not executed: this test compares resolved executable paths.
+	// ast-grep-ignore: no-unsafe-executable-write -- path resolution fixture.
 	if err := os.WriteFile(other, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}

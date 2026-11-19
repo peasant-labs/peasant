@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/testkit/executable"
 	"gopkg.in/yaml.v3"
 )
 
@@ -110,7 +111,7 @@ func TestReleaseCandidateProvenance(t *testing.T) {
 			yq := "#!/bin/sh\n[ \"$#\" -eq 2 ] && [ \"$1\" = '-o=json' ] && [ \"$2\" = '.' ] || { echo UNEXPECTED_STUB_ARGUMENTS:yq >&2; exit 91; }\n[ \"$TEST_YQ_EXIT\" = 0 ] || exit \"$TEST_YQ_EXIT\"\ncat >/dev/null\nprintf '%s\\n' \"$TEST_CONFIG_JSON\"\n"
 			gh := "#!/bin/sh\n[ \"$#\" -eq 3 ] && [ \"$1\" = api ] && [ \"$2\" = --paginate ] && [ \"$3\" = \"repos/${GITHUB_REPOSITORY}/commits/${CANDIDATE}/pulls?per_page=100\" ] && [ \"$GH_TOKEN\" = readonly-test-token ] || { echo UNEXPECTED_STUB_ARGUMENTS:gh >&2; exit 92; }\nprintf '%s' \"$TEST_API_OUTPUT\"\nexit \"$TEST_API_EXIT\"\n"
 			for name, content := range map[string]string{"git": git, "yq": yq, "gh": gh} {
-				if err := os.WriteFile(filepath.Join(bin, name), []byte(content), 0o755); err != nil {
+				if err := executable.Write(filepath.Join(bin, name), []byte(content), 0o755); err != nil {
 					t.Fatal(err)
 				}
 			}
