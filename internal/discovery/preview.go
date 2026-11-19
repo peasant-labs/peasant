@@ -3,7 +3,6 @@ package discovery
 import (
 	"sort"
 
-	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/onboarding"
 )
@@ -12,14 +11,6 @@ const (
 	// DefaultSourceTurnsCacheSize is how many parsed sessions a preview reader
 	// keeps. The selection tree previews one row at a time.
 	DefaultSourceTurnsCacheSize = 4
-)
-
-// Preview read budgets are shared by every transcript origin. A file preview
-// uses the same numbers as an OpenCode preview so the two paths cannot drift.
-const (
-	PreviewReadBudgetBytes      = defaults.TranscriptContinuationReadBytes
-	PreviewFirstPageBudgetBytes = defaults.TranscriptInitialReadBytes
-	PreviewSliceBudgetBytes     = defaults.TranscriptContinuationReadBytes
 )
 
 // PreviewKind identifies the non-session row a preview describes.

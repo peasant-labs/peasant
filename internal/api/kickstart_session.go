@@ -144,8 +144,6 @@ type kickstartEnv struct {
 	// repository for the forest.
 	paths        ingest.PathIdentityResolver
 	repositories ingest.RepositoryIdentityResolver
-	// reader reads a session's first transcript page for a preview.
-	reader func(listings []onboarding.SessionListing) kickstartPreviewReader
 	// previewFS supplies the discovered source to the socket capture.
 	previewFS ingest.FileSystem
 	// writeRetention writes Claude Code's cleanupPeriodDays after a save. Nil
@@ -217,11 +215,6 @@ func (e kickstartEnv) withDefaults() kickstartEnv {
 	}
 	if e.nextSteps == nil {
 		e.nextSteps = onboarding.NextStepsWeb
-	}
-	if e.reader == nil {
-		e.reader = func(listings []onboarding.SessionListing) kickstartPreviewReader {
-			return discovery.NewSourceReader(&ingest.OSFileSystem{}, &ingest.ExecGitResolver{}, listings)
-		}
 	}
 	if e.previewFS == nil {
 		e.previewFS = &ingest.OSFileSystem{}

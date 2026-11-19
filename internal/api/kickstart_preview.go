@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"unicode/utf8"
 
@@ -13,9 +12,8 @@ import (
 )
 
 // The preview of a forest row is a bounded list of typed lines. A project or a
-// branch row describes the repository from the forest's own metadata. A session
-// row shows the first page of its transcript, read in place from the harness
-// source, so a session that was never imported previews like one that was.
+// branch row describes the repository from the forest's own metadata. Session
+// transcripts are served by the socket capture, not this HTTP preview.
 const (
 	// kickstartPreviewMaxLines bounds the lines of one preview, the closing
 	// notice included.
@@ -24,16 +22,8 @@ const (
 	kickstartPreviewMaxLineRunes = 400
 )
 
-// kickstartPreviewReader reads the first page of a discovered session.
-type kickstartPreviewReader interface {
-	Previewable(sessionID string) bool
-	Read(ctx context.Context, sessionID string) (discovery.SourcePreview, error)
-}
-
-var _ kickstartPreviewReader = (*discovery.SourceReader)(nil)
-
 // kickstartPreviewTarget is a forest row resolved for a preview, copied out of
-// the session so the transcript read runs without the store lock.
+// the session so a socket capture can run without the store lock.
 type kickstartPreviewTarget struct {
 	node       onboarding.Node
 	repository discovery.PreviewContext
@@ -90,55 +80,6 @@ func (st *kickstartSessions) preview(ctx context.Context, id, nodeID string) (sc
 	return schema.LocalKickstartPreview{Lines: lines.finish()}, nil
 }
 
-func (st *kickstartSessions) sessionPreviewLines(ctx context.Context, target kickstartPreviewTarget, lines *previewLines) error {
-	reader := st.env.reader(target.listings)
-	sessionID := target.node.SessionID
-	if sessionID == "" {
-		sessionID = target.node.ID
-	}
-	page, err := reader.Read(ctx, sessionID)
-	if errors.Is(err, discovery.ErrPreviewUnavailable) {
-		lines.text(discovery.PreviewUnavailableNote)
-		return nil
-	}
-	if err != nil {
-		// A reader error may contain source paths or transcript text. It must not
-		// be wrapped, logged, or copied into the response.
-		return newKickstartError(schema.LocalKickstartErrorPreviewUnreadable,
-			"The session preview could not be read from its source in internal/api.kickstartSessions.preview. Nothing was changed. The session still ingests normally; check that its transcript is readable, then preview it again.")
-	}
-	if len(page.Turns) == 0 {
-		lines.text(discovery.PreviewNoTurnsNote)
-	}
-	for _, turn := range page.Turns {
-		if !lines.hasRoom() {
-			// A turn is left that the bound has no room for, so the preview
-			// says it stopped.
-			lines.overflow()
-			break
-		}
-		lines.spacer()
-		lines.label(turn.Role.String(), "turn")
-		for _, call := range turn.ToolCalls {
-			lines.text("tool: " + call.Name)
-		}
-		for _, line := range strings.Split(turn.Content, "\n") {
-			if strings.TrimSpace(line) == "" {
-				continue
-			}
-			lines.text(line)
-		}
-	}
-	if page.More {
-		notice := discovery.PreviewCutNotice(page.ConsumedBytes, page.TotalBytes, page.More, false)
-		if notice == "" {
-			notice = discovery.PreviewShortenedNote
-		}
-		lines.cut(notice)
-	}
-	return nil
-}
-
 // previewLines accumulates the lines of one preview under the bounds.
 type previewLines struct {
 	lines []schema.LocalKickstartLine
@@ -148,10 +89,6 @@ type previewLines struct {
 }
 
 func newPreviewLines() *previewLines { return &previewLines{} }
-
-// overflow records that the source holds more than the bounds let the preview
-// show, so finish closes the preview with a notice.
-func (p *previewLines) overflow() { p.full = true }
 
 func (p *previewLines) hasRoom() bool { return !p.full && len(p.lines) < kickstartPreviewMaxLines-1 }
 
@@ -174,8 +111,6 @@ func (p *previewLines) label(text, fallback string) {
 }
 
 func (p *previewLines) text(text string) { p.add(schema.LocalKickstartLineText, text) }
-
-func (p *previewLines) spacer() { p.add(schema.LocalKickstartLineSpacer, "") }
 
 // cut closes a preview that stopped before the end of its source.
 func (p *previewLines) cut(note string) {

@@ -5,23 +5,19 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
-	"github.com/peasant-labs/peasant/internal/discovery"
-	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/onboarding"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"github.com/peasant-labs/schema"
 	"github.com/peasant-labs/schema/route"
 )
 
@@ -42,32 +38,23 @@ type previewPrivacySecrets struct {
 	Cursor      string `yaml:"cursor"`
 }
 
-type privacyReaderMode string
-
-const (
-	privacyReaderSuccess privacyReaderMode = "success"
-	privacyReaderFail    privacyReaderMode = "fail"
-	privacyReaderCancel  privacyReaderMode = "cancel"
-)
-
 type previewPrivacyCase struct {
-	Name         string            `yaml:"name"`
-	Row          string            `yaml:"row"`
-	Route        string            `yaml:"route"`
-	Method       string            `yaml:"method"`
-	Host         string            `yaml:"host"`
-	Origin       string            `yaml:"origin"`
-	Suffix       string            `yaml:"suffix"`
-	Reader       privacyReaderMode `yaml:"reader"`
-	UnknownSetup bool              `yaml:"unknownSetup"`
-	Noncanonical bool              `yaml:"noncanonical"`
-	EscapedRoute bool              `yaml:"escapedRoute"`
-	FallbackPath bool              `yaml:"fallbackPath"`
-	Status       int               `yaml:"status"`
-	Code         string            `yaml:"code"`
-	Expected     string            `yaml:"expected"`
-	NoStore      bool              `yaml:"noStore"`
-	RawLog       string            `yaml:"rawLog"`
+	Name         string `yaml:"name"`
+	Row          string `yaml:"row"`
+	Route        string `yaml:"route"`
+	Method       string `yaml:"method"`
+	Host         string `yaml:"host"`
+	Origin       string `yaml:"origin"`
+	Suffix       string `yaml:"suffix"`
+	UnknownSetup bool   `yaml:"unknownSetup"`
+	Noncanonical bool   `yaml:"noncanonical"`
+	EscapedRoute bool   `yaml:"escapedRoute"`
+	FallbackPath bool   `yaml:"fallbackPath"`
+	Status       int    `yaml:"status"`
+	Code         string `yaml:"code"`
+	Expected     string `yaml:"expected"`
+	NoStore      bool   `yaml:"noStore"`
+	RawLog       string `yaml:"rawLog"`
 }
 
 type previewPrivacyFixture struct {
@@ -75,43 +62,6 @@ type previewPrivacyFixture struct {
 	SocketCases   []string              `yaml:"socketCases"`
 	RequiredNames []string              `yaml:"requiredNames"`
 	Cases         []previewPrivacyCase  `yaml:"cases"`
-}
-
-// Only the source reader is replaced. All HTTP handling, routing, guard,
-// request logging, preview construction and error writing are production code.
-type privacyPreviewReader struct {
-	secrets previewPrivacySecrets
-	mode    privacyReaderMode
-	called  int
-	started chan struct{}
-	release chan struct{}
-}
-
-var _ kickstartPreviewReader = (*privacyPreviewReader)(nil)
-
-func (r *privacyPreviewReader) Previewable(string) bool { return true }
-
-func (r *privacyPreviewReader) Read(ctx context.Context, id string) (discovery.SourcePreview, error) {
-	r.called++
-	if id != r.secrets.SourceID {
-		return discovery.SourcePreview{}, errors.New("fixture reader got the wrong session")
-	}
-	switch r.mode {
-	case privacyReaderSuccess:
-		return discovery.SourcePreview{Turns: []ingest.Turn{{Role: schema.RoleUser, Content: r.secrets.Transcript}}}, nil
-	case privacyReaderFail:
-		return discovery.SourcePreview{}, fmt.Errorf("%s at %s: %s", r.secrets.ReaderError, r.secrets.RepoPath, r.secrets.Transcript)
-	case privacyReaderCancel:
-		close(r.started)
-		select {
-		case <-ctx.Done():
-			return discovery.SourcePreview{}, fmt.Errorf("%s at %s: %w", r.secrets.ReaderError, r.secrets.RepoPath, ctx.Err())
-		case <-r.release:
-			return discovery.SourcePreview{}, errors.New("fixture released the stalled reader")
-		}
-	default:
-		return discovery.SourcePreview{}, errors.New("fixture reader was unexpectedly called")
-	}
 }
 
 // TestKickstartPreviewPrivacy drives the handler installed by Server.Listen.
@@ -123,14 +73,15 @@ func TestKickstartPreviewPrivacy(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := fixture.Secrets
+	source := filepath.Join(t.TempDir(), "session.jsonl")
+	record := fmt.Sprintf("{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":%q}}\n", s.Transcript)
+	if err := os.WriteFile(source, []byte(record), 0600); err != nil {
+		t.Fatal(err)
+	}
 	projectID := fmt.Sprintf("repo:%d:%s", len(s.RepoPath), s.RepoPath)
 	branchID := fmt.Sprintf("branch:%d:%s%s", len(projectID), projectID, s.Branch)
-	reader := &privacyPreviewReader{secrets: s}
 	homes := newTestXDGHomes(t)
 	server := NewServer(homes.config(ServerConfig{ConfigPath: filepath.Join(homes.Config, "config.yaml")}))
-	server.kickstartTune = func(env *kickstartEnv) {
-		env.reader = func([]onboarding.SessionListing) kickstartPreviewReader { return reader }
-	}
 	if err := server.Listen(context.Background()); err != nil {
 		t.Fatalf("listen: %v", err)
 	}
@@ -140,7 +91,10 @@ func TestKickstartPreviewPrivacy(t *testing.T) {
 			_ = listener.Close()
 		}
 	})
-	server.kickstart.byID[s.SetupID] = &kickstartSession{forest: onboarding.Forest{Nodes: []onboarding.Node{
+	server.kickstart.byID[s.SetupID] = &kickstartSession{listings: []onboarding.SessionListing{{
+		SessionID: s.SourceID, Harness: "claude-code",
+		Source: onboarding.SessionSource{Path: source, Origin: onboarding.SessionSourceOriginFile},
+	}}, forest: onboarding.Forest{Nodes: []onboarding.Node{
 		{ID: projectID, Kind: onboarding.NodeKindProject, Label: "synthetic project"},
 		{ID: branchID, ParentID: projectID, Kind: onboarding.NodeKindBranch, Label: s.Branch},
 		{ID: s.NodeID, ParentID: branchID, Kind: onboarding.NodeKindSession, Label: "synthetic session", SessionID: s.SourceID, Labels: onboarding.Labels{Location: s.RepoPath}},
@@ -154,7 +108,6 @@ func TestKickstartPreviewPrivacy(t *testing.T) {
 			previous := slog.Default()
 			slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
 			defer slog.SetDefault(previous)
-			reader.mode, reader.called, reader.started, reader.release = c.Reader, 0, make(chan struct{}), make(chan struct{})
 			method := c.Method
 			if method == "" {
 				method = http.MethodGet
@@ -190,34 +143,7 @@ func TestKickstartPreviewPrivacy(t *testing.T) {
 				request.Header.Set("Origin", c.Origin)
 			}
 			response := httptest.NewRecorder()
-			if c.Reader == privacyReaderCancel {
-				ctx, cancel := context.WithCancel(request.Context())
-				defer cancel()
-				done := make(chan struct{})
-				go func() { server.server.Handler.ServeHTTP(response, request.WithContext(ctx)); close(done) }()
-				defer func() {
-					close(reader.release)
-					select {
-					case <-done:
-					case <-time.After(5 * time.Second):
-						t.Error("request did not stop after releasing the fixture reader")
-					}
-				}()
-				select {
-				case <-reader.started:
-				case <-time.After(5 * time.Second):
-					cancel()
-					t.Fatal("reader did not start")
-				}
-				cancel()
-				select {
-				case <-done:
-				case <-time.After(5 * time.Second):
-					t.Fatal("cancelled request did not finish")
-				}
-			} else {
-				server.server.Handler.ServeHTTP(response, request)
-			}
+			server.server.Handler.ServeHTTP(response, request)
 			if response.Code != c.Status {
 				t.Fatalf("status = %d, want %d; body %s", response.Code, c.Status, response.Body)
 			}
@@ -242,18 +168,12 @@ func TestKickstartPreviewPrivacy(t *testing.T) {
 					t.Errorf("error code = %q, want %q (decode error %v)", result.Code, c.Code, err)
 				}
 			}
-			if c.Reader != "" && reader.called != 1 {
-				t.Errorf("reader calls = %d, want 1", reader.called)
-			}
-			if c.Reader == "" && reader.called != 0 {
-				t.Errorf("reader called %d times unexpectedly", reader.called)
-			}
 			for _, secret := range secrets {
 				for _, representation := range []string{secret, url.PathEscape(secret), url.QueryEscape(secret)} {
 					if strings.Contains(logs.String(), representation) {
 						t.Errorf("application log contains synthetic marker %q: %s", representation, &logs)
 					}
-					// A successful preview intentionally serves raw source data. A mux
+					// Repository previews intentionally serve repository metadata. A mux
 					// redirect intentionally returns its URL, not an error response.
 					if c.Status >= 400 && strings.Contains(body, representation) {
 						t.Errorf("error body contains synthetic marker %q: %s", representation, body)
