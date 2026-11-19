@@ -72,7 +72,7 @@ const Labels = Object.freeze({
   ChooseSessions: 'choose sessions', SelectionSaved: 'your selection is saved',
   LoadMore: 'load more of this session', Raw: 'raw, on this computer only',
   LoadedSoFar: 'loaded so far', Highlights: 'highlights', FinalResponse: 'final response',
-  LatestLoaded: 'latest loaded response', Loading: 'loading', Trace: /^trace/,
+  LatestLoaded: 'latest loaded response', Loading: 'loading', Trace: /^full trace/,
 });
 const previewTitle = (prompt) => `preview ${prompt}`;
 // The trace is read past its end, then the page is given this long to start a
