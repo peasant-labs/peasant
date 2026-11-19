@@ -320,6 +320,9 @@ func (s *Store) deleteUnreferencedBlobs(ctx context.Context, sessionID schema.Se
 	defer s.pool.Put(conn)
 	var deleted int64
 	txnErr := error(nil)
+	// This batch stays deferred: its first statement is a DELETE, which takes
+	// the writer from an idle transaction and so waits on busy_timeout. Only a
+	// transaction that reads before it writes needs IMMEDIATE.
 	endFn := sqlitex.Transaction(conn)
 	defer endFn(&txnErr)
 	for _, digest := range digests {
