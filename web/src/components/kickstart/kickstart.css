@@ -194,6 +194,45 @@
   font-size: var(--fs-label);
   color: var(--ink-3);
 }
+/* A session row's raw preview: the transcript viewer, sized as a reading pane
+   inside the aside. The viewer owns its own scroller, so the pane has a fixed
+   block size and the page around it does not move as segments append. */
+.ks-session-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.ks-preview-raw {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  color: var(--ink-3);
+}
+.ks-session-preview-viewer {
+  height: min(70vh, 44rem);
+  min-height: 24rem;
+  min-width: 0;
+  overflow: hidden;
+  border: var(--bd);
+  background: var(--canvas);
+}
+.ks-preview-notice {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--ink-2);
+}
+.ks-preview-closed {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-2);
+}
 .ks-lines {
   display: flex;
   flex-direction: column;
