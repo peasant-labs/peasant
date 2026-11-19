@@ -323,3 +323,36 @@ states:
     error: "could not close the database \x1b]0;malicious terminal title\x07; the committed schema stays intact; inspect the original error and retry the command after checking the disk and filesystem permissions; this extra explanatory text exercises wrapping in narrow terminals without losing the final state"
     wantContains: ["all 1 step(s) committed", "the store is at schema 70", "the command then failed", "could not close the database"]
     wantAbsent: ["malicious terminal title", "rolled back", "nothing was changed"]
+
+  # The recount the 21,462-session upgrade reported: 14,200 sessions after
+  # 5m20s, a steady 44.375 sessions a second, a count every 100 sessions and
+  # a tick every two seconds between them. The estimate is the time LEFT for
+  # the step (7,262 sessions at that rate: 2m44s), not the step's total
+  # (8m4s): the elapsed time is on the step line, the estimate beside the bar.
+  - key: counted-step-estimate-is-time-remaining
+    plan:
+      from: 75
+      to: 81
+      storeBytes: 42949672960
+      steps:
+        - {version: 76, kind: schema, title: "rebuild the search index to remove stale results left by 0.16.1", cost: scales_with_text}
+        - {version: 77, kind: schema, title: "mark the stored turn counts for a recount", cost: quick}
+        - {version: 77, kind: recount, title: "recount the turn counts of every stored session", cost: scales_with_rows, counts: sessions}
+        - {version: 78, kind: schema, title: "widen the stored harness set for the antigravity cli and ide", cost: scales_with_rows}
+        - {version: 79, kind: schema, title: "store the import profile and give run outcomes stable ids", cost: quick}
+        - {version: 80, kind: schema, title: "add the missing publication capture outcome", cost: quick}
+        - {version: 81, kind: schema, title: "separate source diagnostic lanes", cost: scales_with_rows}
+    events:
+      - {kind: step_started, step: 1, elapsedMs: 0}
+      - {kind: step_finished, step: 1, elapsedMs: 1327000}
+      - {kind: step_started, step: 2, elapsedMs: 0}
+      - {kind: step_finished, step: 2, elapsedMs: 0}
+      - {kind: step_started, step: 3, elapsedMs: 0}
+      - {kind: step_progress, step: 3, elapsedMs: 314000, done: 13900, of: 21462}
+      - {kind: step_progress, step: 3, elapsedMs: 315493, done: 14000, of: 21462}
+      - {kind: step_progress, step: 3, elapsedMs: 316000, done: 14000, of: 21462}
+      - {kind: step_progress, step: 3, elapsedMs: 317746, done: 14100, of: 21462}
+      - {kind: step_progress, step: 3, elapsedMs: 318000, done: 14100, of: 21462}
+      - {kind: step_progress, step: 3, elapsedMs: 320000, done: 14200, of: 21462}
+    wantContains: ["step 3 of 7", "5m20s", "14200/21462", "estimate 2m44s", "total elapsed 27m27s"]
+    wantAbsent: ["estimate 8m4s", "finished 7 step(s)"]
