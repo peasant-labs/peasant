@@ -23,9 +23,16 @@ pushes the annotated tag on that commit. A tag triggers `release.yml`: the
 actor and tag are checked, `release-intent verify-tag` proves that the tag is
 reachable from `develop`, and the Nix, e2e, installed-package, and smoke gates
 remain. The credential-free build runs GoReleaser with `--skip=publish`,
-checks `dist/checksums.txt`, and hands `release-dist` to the confined GitHub
-Release publisher. The publisher can retry a partial asset upload. It does
-not publish to the Homebrew tap or AUR. The live Homebrew cask publisher must
+checks `dist/checksums.txt`, stages the release files in one flat
+`dist/assets` directory with the notes beside it, and hands `release-dist` to
+the confined GitHub Release publisher. The publisher refuses a tag that
+already has a release or a leftover draft, creates the draft and uploads every
+asset in one `gh release create --draft`, verifies the draft, then publishes
+it. A rerun after a published, complete release succeeds without changing it.
+A leftover draft is deleted by its id
+(`gh api -X DELETE repos/peasant-labs/peasant/releases/<id>`, never
+`gh release delete <tag>`) before a rerun; no new tag is needed. The publisher
+does not publish to the Homebrew tap or AUR. The live Homebrew cask publisher must
 be adopted separately; until then the existing final-tag cask smoke can fail
 because the tap still points to an older release.
 

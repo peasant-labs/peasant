@@ -1,0 +1,71 @@
+# GitHub Release publication contract for .github/workflows/release.yml.
+#
+# Publish: one gh release create makes the draft and uploads every asset to
+# that same release, so no second creator or upload action can fill a release
+# that is never published. The listed steps are the publish job's complete
+# step list, in order.
+#
+# Staging: the build job turns GoReleaser's dist into one flat dist/assets
+# directory, because gh release create refuses a directory, and keeps the
+# release notes beside it rather than inside it. The cases run the build
+# job's two staging steps against a fake GoReleaser dist.
+workflow: .github/workflows/release.yml
+publish:
+  job: publish
+  steps:
+    - Download the release artifacts
+    - Look for an existing release
+    - Verify the existing release is complete
+    - Refuse an existing release for the tag
+    - Create the draft release with its assets
+    - Verify the draft before publishing
+    - Publish the release
+    - Verify the published release
+  create_step: Create the draft release with its assets
+  create_run_contains:
+    - --draft
+    - --verify-tag
+    - --notes-file dist/release-notes.md
+    - "'dist/assets/*'"
+  allowed_actions:
+    - actions/download-artifact
+  forbidden_commands:
+    - gh release upload
+staging:
+  job: build
+  stage_step: Stage the release assets in one flat directory
+  verify_step: Verify the staged release assets
+  notes: release-notes.md
+  checksums: checksums.txt
+  checksummed:
+    - peasant_1.2.3_darwin_amd64.tar.gz
+    - peasant_1.2.3_darwin_arm64.tar.gz
+    - peasant_1.2.3_linux_amd64.deb
+    - peasant_1.2.3_linux_amd64.rpm
+    - peasant_1.2.3_linux_amd64.tar.gz
+    - peasant_1.2.3_linux_arm64.deb
+    - peasant_1.2.3_linux_arm64.rpm
+    - peasant_1.2.3_linux_arm64.tar.gz
+    - peasant_1.2.3_windows_amd64.exe
+    - peasant_1.2.3_windows_amd64.zip
+  metadata:
+    - CHANGELOG.md
+    - artifacts.json
+    - config.yaml
+    - metadata.json
+  build_outputs:
+    - peasant_linux_amd64_v1/peasant
+    - peasant_windows_amd64_v1/peasant.exe
+    - homebrew/Casks/peasant.rb
+  cases:
+    - name: goreleaser output stages flat
+      want_ok: true
+    - name: unchecksummed top-level file
+      add_top_level: [stray.txt]
+      want_ok: false
+    - name: missing metadata file
+      remove: [config.yaml]
+      want_ok: false
+    - name: asset changed after checksums
+      corrupt: [peasant_1.2.3_linux_amd64.deb]
+      want_ok: false
