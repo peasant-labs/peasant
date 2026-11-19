@@ -190,7 +190,12 @@ async function runPreviewStep(step: PreviewStep, spec: StreamSpec, state: Conver
   }
   if (step.expectSessionMeta !== undefined) {
     const { reads = [], lacks = [] } = step.expectSessionMeta;
-    const region = await waitFor(() => screen.getByRole('region', { name: 'session metadata' }));
+    // The viewer's metadata row, by its DOM class: the region's accessible name is Fairtrade's copy.
+    const region = await waitFor(() => {
+      const found = mounted.container.querySelector('.txn-meta');
+      if (found === null) throw new Error(`${at}: the viewer drew no session metadata`);
+      return found;
+    });
     // Each figure is one item; read them word by word so `2 turns` never matches `12 turns`.
     const items = [...region.children].map((item) => (item.textContent ?? '').replace(/\s+/g, ' ').trim());
     for (const figure of reads) expect(items, `${at}: the header reads ${figure}`).toContain(figure);
