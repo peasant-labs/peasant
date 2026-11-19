@@ -226,7 +226,9 @@ func TestManualSnippet_ComposesWithoutChangingTheHooksStatus(t *testing.T) {
 }
 
 // composeHook builds the hook the user would end up with after following the
-// snippet's placement instruction.
+// snippet's placement instruction. It stays text: the section is what Peasant
+// prints for the user to paste, so the pasted file is the subject under test,
+// not a stand-in.
 func composeHook(testCase manualCompositionCase, snippet string) string {
 	var body strings.Builder
 	body.WriteString("#!/bin/sh\n")

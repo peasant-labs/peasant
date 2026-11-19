@@ -703,6 +703,7 @@ func runLifecycleCase(t *testing.T, testCase lifecycleFixtureCase) {
 			if err != nil {
 				t.Fatalf("render manual snippet: %v", err)
 			}
+			// Data: install and status read this file; the test never runs it.
 			composed := "#!/bin/sh\n# a hook the user composed themselves\n" + snippet + "\nexit 0\n"
 			writeSeedFile(t, repo, path, composed, 0o755)
 			untouchable[path] = fileFingerprint(t, path)

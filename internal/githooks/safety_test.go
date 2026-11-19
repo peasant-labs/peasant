@@ -98,6 +98,7 @@ func TestLifecycle_SymlinkedSlotIsForeign(t *testing.T) {
 				targetDir = t.TempDir()
 			}
 			target := filepath.Join(targetDir, "shared-hook.sh")
+			// Data: the lifecycle must leave these bytes alone; nothing runs them.
 			if err := os.WriteFile(target, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 				t.Fatal(err)
 			}

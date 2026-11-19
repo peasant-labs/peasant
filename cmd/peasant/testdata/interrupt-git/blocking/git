@@ -1,0 +1,8 @@
+#!/bin/sh
+# Blocks harvest's git call for the interrupted project until the test writes
+# the FIFO. Only shell builtins: cancellation kills this process itself, with no
+# sleep process retaining its output pipes. Startup git probes for any other
+# directory fail at once so they finish before harvest arms its signal handler.
+[ "$1" = -C ] && [ "$2" = "$PEASANT_INTERRUPT_PROJECT" ] || exit 1
+printf ready > "$PEASANT_INTERRUPT_READY"
+read value < "$PEASANT_INTERRUPT_FIFO"

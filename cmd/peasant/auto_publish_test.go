@@ -657,6 +657,7 @@ func TestVillageAuto(t *testing.T) {
 			if c.Unrecorded {
 				target = w.fresh
 			}
+			// The hook in the slot is data auto reads to decide; the test never runs it.
 			foreign := c.ForeignHook
 			if c.HandAdded {
 				slot := filepath.Join(target, ".git", "hooks", "pre-push")

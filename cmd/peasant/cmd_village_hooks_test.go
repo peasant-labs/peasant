@@ -280,6 +280,7 @@ func TestVillageHooks_RefusesUnownedHookAndPrintsManualSection(t *testing.T) {
 	t.Parallel()
 	repo := hooksTestRepo(t)
 	path := hooksSlotPath(t, repo, githooks.EventPostCommit)
+	// Data: install and uninstall read this hook and must leave it alone.
 	existing := "#!/bin/sh\n# composed by the user\nmake lint || exit 1\nexit 0\n"
 	if err := os.WriteFile(path, []byte(existing), 0o700); err != nil {
 		t.Fatal(err)
@@ -330,6 +331,7 @@ func TestVillageHooks_EventsAreHandledIndependently(t *testing.T) {
 	t.Parallel()
 	repo := hooksTestRepo(t)
 	blocked := hooksSlotPath(t, repo, githooks.EventPrePush)
+	// Data: a foreign hook install reads and refuses; nothing runs it.
 	if err := os.WriteFile(blocked, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -363,6 +365,7 @@ func TestVillageHooks_PublicVisibilityNoticeNamesTheInstalledEvents(t *testing.T
 	t.Parallel()
 	repo := hooksTestRepo(t)
 	// post-commit is occupied by a foreign hook, so only pre-push is installed.
+	// The hook is data install reads; nothing runs it.
 	if err := os.WriteFile(hooksSlotPath(t, repo, githooks.EventPostCommit),
 		[]byte("#!/bin/sh\necho another tool\n"), 0o755); err != nil {
 		t.Fatal(err)
@@ -637,16 +640,22 @@ func hooksGit(t *testing.T, dir, binDir string, args ...string) string {
 	return string(out)
 }
 
-// hooksStubPeasant writes an executable `peasant` that records its arguments and
-// exits with exitCode, standing in for a real upload.
+// hooksStubPeasant links an executable `peasant` to the recording stub the
+// githooks tests own, which records its arguments and exits with exitCode,
+// standing in for a real upload.
 func hooksStubPeasant(t *testing.T, exitCode int) (binDir, logPath string) {
 	t.Helper()
 	binDir = t.TempDir()
 	logPath = filepath.Join(binDir, "invocations.log")
-	quoted := "'" + strings.ReplaceAll(logPath, "'", `'\''`) + "'"
-	stub := "#!/bin/sh\nprintf '%s\\n' \"$@\" >> " + quoted + "\nexit " + strconv.Itoa(exitCode) + "\n"
-	if err := os.WriteFile(filepath.Join(binDir, "peasant"), []byte(stub), 0o755); err != nil {
-		t.Fatalf("write peasant stub: %v", err)
+	stub, err := filepath.Abs(filepath.Join("..", "..", "internal", "githooks", "testdata", "recording-peasant.sh"))
+	if err != nil {
+		t.Fatalf("resolve peasant stub: %v", err)
+	}
+	if err := os.Symlink(stub, filepath.Join(binDir, "peasant")); err != nil {
+		t.Fatalf("link peasant stub: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "exit-code"), []byte(strconv.Itoa(exitCode)+"\n"), 0o644); err != nil {
+		t.Fatalf("write stub exit code: %v", err)
 	}
 	if err := os.WriteFile(logPath, nil, 0o644); err != nil {
 		t.Fatalf("create stub log: %v", err)
