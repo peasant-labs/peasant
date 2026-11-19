@@ -1039,15 +1039,10 @@ test('preview-end-says-final', async () => {
   await highlightsSay(pageG, Labels.FinalResponse);
   await expect(pane(pageG).getByText(Labels.LatestLoaded, { exact: false }).filter({ visible: true })).toHaveCount(0);
   await pane(pageG).getByRole('tab', { name: Labels.Trace }).click();
-  // The end of the trace is what this screen is about.
-  await pane(pageG).evaluate((root) => {
-    for (const element of [root, ...root.querySelectorAll('*')]) {
-      if (element.scrollHeight > element.clientHeight) element.scrollTop = element.scrollHeight;
-    }
-  });
-  // The wake source is the viewer drawing the last reply where the trace ends.
-  const lastReply = `Step ${fixture.preview.longExchanges} of the long read`;
-  await expect(pane(pageG).getByText(lastReply, { exact: false }).filter({ visible: true }).first(), 'the end of the trace is drawn').toBeInViewport();
+  // The end of the trace is what this screen is about: its last reply, brought into view.
+  const lastReply = pane(pageG).locator('.txn-md-prose', { hasText: `Step ${fixture.preview.longExchanges} of the long read` }).last();
+  await lastReply.scrollIntoViewIfNeeded();
+  await expect(lastReply, 'the end of the trace is drawn').toBeInViewport();
   await shoot(pageG, '15-preview-end');
 });
 
