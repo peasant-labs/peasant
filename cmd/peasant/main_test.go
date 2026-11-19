@@ -58,10 +58,10 @@ func TestMain(m *testing.M) {
 	// production slab per run, which is the dominant race-test memory cost.
 	os.Setenv(ingest.EnvArenaSizeBytes, strconv.Itoa(64*1024*1024)) // 64 MiB
 
-	code := gitconfig.RunWithIsolatedGitConfig(m)
-	if os.Getenv("PEASANT_TEST_KEEP_SCRATCH") != defaults.Key1.String() {
-		removePeasantMatrixBuildDir()
-		_ = os.RemoveAll(home)
-	}
-	os.Exit(code)
+	os.Exit(gitconfig.RunWithIsolatedGitConfig(gitconfig.WithCleanup(m, func() {
+		if os.Getenv("PEASANT_TEST_KEEP_SCRATCH") != defaults.Key1.String() {
+			removePeasantMatrixBuildDir()
+			_ = os.RemoveAll(home)
+		}
+	})))
 }

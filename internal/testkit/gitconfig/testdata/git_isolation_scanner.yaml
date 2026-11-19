@@ -5,13 +5,13 @@
 # least one violation; must-pass cases report none. Case names are pinned in
 # git_isolation_scanner_manifest.yaml.
 cases:
-  - name: an environment-only call after the runner is rejected
+  - name: isolation after goleak is rejected
     input:
       files:
         tool/tool_test.go: |
           package tool
           import ("os/exec"; "testing")
-          func TestMain(m *testing.M) { goleak.VerifyTestMain(m); gitconfig.IsolateGitConfig() }
+          func TestMain(m *testing.M) { goleak.VerifyTestMain(m); os.Exit(gitconfig.RunWithIsolatedGitConfig(m)) }
           func TestGit(t *testing.T) { _ = exec.Command("git", "status") }
     expected:
       needs: [tool]
@@ -21,14 +21,14 @@ cases:
       source: boundary
       ref: "isolation after the runner cannot protect its tests"
     mutation:
-      description: "move the environment-only call after the runner"
-  - name: a discarded environment-only error is rejected
+      description: "move the isolation exit after the goleak runner"
+  - name: a discarded isolation result is rejected
     input:
       files:
         tool/tool_test.go: |
           package tool
           import ("os/exec"; "testing")
-          func TestMain(m *testing.M) { gitconfig.IsolateGitConfig(); goleak.VerifyTestMain(m) }
+          func TestMain(m *testing.M) { gitconfig.RunWithIsolatedGitConfig(m) }
           func TestGit(t *testing.T) { _ = exec.Command("git", "status") }
     expected:
       needs: [tool]
@@ -36,9 +36,42 @@ cases:
     classification: must-fail
     provenance:
       source: boundary
-      ref: "discarded isolation errors must not permit tests to run"
+      ref: "a discarded failure code must not permit success without tests"
     mutation:
-      description: "discard the environment-only call error"
+      description: "discard the isolation runner exit code"
+  - name: a test runner called before isolation is rejected
+    input:
+      files:
+        tool/tool_test.go: |
+          package tool
+          import ("os/exec"; "testing")
+          func TestMain(m *testing.M) { m.Run(); os.Exit(gitconfig.RunWithIsolatedGitConfig(m)) }
+          func TestGit(t *testing.T) { _ = exec.Command("git", "status") }
+    expected:
+      needs: [tool]
+      violations: [tool]
+    classification: must-fail
+    provenance:
+      source: boundary
+      ref: "the test runner must not run before isolation"
+    mutation:
+      description: "run the tests before the isolated runner"
+  - name: a prelude before the isolated exit passes
+    input:
+      files:
+        tool/tool_test.go: |
+          package tool
+          import ("os/exec"; "testing")
+          func TestMain(m *testing.M) { os.Setenv("HOME", "/tmp"); os.Exit(gitconfig.RunWithIsolatedGitConfig(m)) }
+          func TestGit(t *testing.T) { _ = exec.Command("git", "status") }
+    expected:
+      needs: [tool]
+    classification: must-pass
+    provenance:
+      source: boundary
+      ref: "environment setup may precede the isolated exit"
+    mutation:
+      description: "add a setup prelude"
   - name: an isolated runner composes with goleak
     input:
       files:

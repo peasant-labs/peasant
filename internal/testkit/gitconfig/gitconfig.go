@@ -61,3 +61,19 @@ func isolationError(name string, err error) error {
 	return fmt.Errorf("gitconfig.RunWithIsolatedGitConfig: cannot change %s in the test process environment: %w; "+
 		"git children would read the developer's configuration, so no test was run", name, err)
 }
+
+// WithCleanup runs cleanup after the wrapped test runner returns.
+func WithCleanup(m interface{ Run() int }, cleanup func()) interface{ Run() int } {
+	return cleanupRunner{m: m, cleanup: cleanup}
+}
+
+type cleanupRunner struct {
+	m       interface{ Run() int }
+	cleanup func()
+}
+
+func (r cleanupRunner) Run() int {
+	code := r.m.Run()
+	r.cleanup()
+	return code
+}

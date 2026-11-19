@@ -23,8 +23,9 @@ helpers do.
 
 `TestEveryPackageThatStartsProcessesIsolatesGitConfig`
 (`internal/testkit/gitconfig/gitconfig_guard_test.go`) fails when a `_test.go` file
-imports `os/exec` and its package has no `TestMain` that calls the helper in a
-file without a build constraint. Its scanner cases live in
+imports `os/exec` and its package lacks an unconstrained `TestMain` ending in
+`os.Exit(gitconfig.RunWithIsolatedGitConfig(...))`, with no competing `m.Run`,
+`goleak.VerifyTestMain`, or `os.Exit` call. Setup before the exit is allowed. Its scanner cases live in
 `internal/testkit/gitconfig/testdata/git_isolation_scanner.yaml`.
 `TestIsolatedChildGitReadsNoHostileSource` runs a real child git under every
 hostile source and checks that it reads none of them once isolated.

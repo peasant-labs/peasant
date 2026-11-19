@@ -22,9 +22,7 @@ func TestMain(m *testing.M) {
 		// Runtime startup precedes TestMain; setting the env alone only affects children.
 		debug.SetMemoryLimit(2 * 1024 * 1024 * 1024)
 	}
-	code := gitconfig.RunWithIsolatedGitConfig(m)
-	removePeasantBuildDir()
-	os.Exit(code)
+	os.Exit(gitconfig.RunWithIsolatedGitConfig(gitconfig.WithCleanup(m, removePeasantBuildDir)))
 }
 
 func TestMemoryBudgetInheritedByChild(t *testing.T) {

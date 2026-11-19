@@ -143,6 +143,20 @@ func TestGoleakRunnerPreservesFailureCode(t *testing.T) {
 	}
 }
 
+func TestCleanupRunnerPreservesExitCode(t *testing.T) {
+	fake := &fakeTestRun{code: 7}
+	cleaned := false
+	code := WithCleanup(fake, func() {
+		if !fake.ran {
+			t.Error("cleanup ran before the tests")
+		}
+		cleaned = true
+	}).Run()
+	if code != fake.code || !cleaned {
+		t.Fatalf("cleanup runner returned %d (cleaned: %t), want %d and cleanup", code, cleaned, fake.code)
+	}
+}
+
 func TestGoleakRunnerReportsLeaks(t *testing.T) {
 	stop := make(chan struct{})
 	started := make(chan struct{})

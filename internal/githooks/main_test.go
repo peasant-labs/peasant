@@ -53,9 +53,7 @@ func TestMain(m *testing.M) {
 	os.Setenv(defaults.EnvXDGStateHome.String(), filepath.Join(home, ".local", "state"))
 	os.Setenv(envGitTerminalPrompt, "0")
 
-	code := gitconfig.RunWithIsolatedGitConfig(m)
-	_ = os.RemoveAll(home)
-	os.Exit(code)
+	os.Exit(gitconfig.RunWithIsolatedGitConfig(gitconfig.WithCleanup(m, func() { _ = os.RemoveAll(home) })))
 }
 
 // disposableRepo creates a brand-new git repository under the test's own

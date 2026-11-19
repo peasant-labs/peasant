@@ -131,29 +131,66 @@ func hasBuildConstraint(file *ast.File) bool {
 	return false
 }
 
-// callsIsolationFromTestMain reports whether file declares TestMain and its
-// body calls a function named RunWithIsolatedGitConfig.
+// callsIsolationFromTestMain accepts one unconditional final exit of the
+// isolation runner, and no competing test runner or exit anywhere in TestMain.
 func callsIsolationFromTestMain(file *ast.File) bool {
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Recv != nil || fn.Name.Name != "TestMain" || fn.Body == nil {
+		if !ok || fn.Recv != nil || fn.Name.Name != "TestMain" || fn.Body == nil || len(fn.Body.List) == 0 || fn.Type.Params == nil || len(fn.Type.Params.List) != 1 || len(fn.Type.Params.List[0].Names) != 1 {
 			continue
 		}
-		found := false
+		runner := fn.Type.Params.List[0].Names[0].Name
+		last, ok := fn.Body.List[len(fn.Body.List)-1].(*ast.ExprStmt)
+		if !ok {
+			continue
+		}
+		exit, ok := last.X.(*ast.CallExpr)
+		if !ok || !selectorIs(exit.Fun, "os", "Exit") || len(exit.Args) != 1 {
+			continue
+		}
+		isolation, ok := exit.Args[0].(*ast.CallExpr)
+		if !ok || !callNamed(isolation.Fun, isolationCall) {
+			continue
+		}
+		exits, isolations, competing := 0, 0, false
 		ast.Inspect(fn.Body, func(n ast.Node) bool {
-			if call, ok := n.(*ast.CallExpr); ok {
-				switch fun := call.Fun.(type) {
-				case *ast.SelectorExpr:
-					found = found || fun.Sel.Name == isolationCall
-				case *ast.Ident:
-					found = found || fun.Name == isolationCall
-				}
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
 			}
-			return !found
+			if selectorIs(call.Fun, "os", "Exit") {
+				exits++
+			}
+			if callNamed(call.Fun, isolationCall) {
+				isolations++
+			}
+			if selectorIs(call.Fun, runner, "Run") || selectorIs(call.Fun, "goleak", "VerifyTestMain") {
+				competing = true
+			}
+			return true
 		})
-		if found {
+		if exits == 1 && isolations == 1 && !competing {
 			return true
 		}
+	}
+	return false
+}
+
+func selectorIs(expr ast.Expr, receiver, name string) bool {
+	sel, ok := expr.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != name {
+		return false
+	}
+	ident, ok := sel.X.(*ast.Ident)
+	return ok && ident.Name == receiver
+}
+
+func callNamed(expr ast.Expr, name string) bool {
+	switch fun := expr.(type) {
+	case *ast.SelectorExpr:
+		return fun.Sel.Name == name
+	case *ast.Ident:
+		return fun.Name == name
 	}
 	return false
 }
@@ -187,9 +224,9 @@ func TestEveryPackageThatStartsProcessesIsolatesGitConfig(t *testing.T) {
 		t.Fatal("the scanner found no test package that imports os/exec; this module has several, so the scanner is broken")
 	}
 	for _, pkg := range report.Violations {
-		t.Errorf("package %s imports os/exec in its tests but has no TestMain calling gitconfig.%s, so git there reads the developer's "+
-			"configuration (for example commit.gpgsign); add `func TestMain(m *testing.M) { os.Exit(gitconfig.%s(m)) }` "+
-			"to a _test.go file in %s with no build constraint", pkg, isolationCall, isolationCall, pkg)
+		t.Errorf("package %s imports os/exec in its tests but lacks a safe isolating TestMain; "+
+			"end TestMain with `os.Exit(gitconfig.%s(m))` and remove other m.Run, goleak.VerifyTestMain, and os.Exit calls "+
+			"in a _test.go file in %s with no build constraint", pkg, isolationCall, pkg)
 	}
 }
 
