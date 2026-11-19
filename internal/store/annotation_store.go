@@ -682,7 +682,10 @@ func (s *Store) CreateAnnotation(ctx context.Context, params CreateAnnotationPar
 	nowMs := time.Now().UnixMilli()
 
 	// Transaction: parent + TPT child must succeed or fail together.
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, "create an annotation")
+	if err != nil {
+		return "", err
+	}
 	defer endFn(&err)
 	if params.EntryTarget != nil {
 		if err := s.validateIndexFormatIDsOnConn(conn, []string{params.EntryTarget.SessionID}); err != nil {
@@ -1334,7 +1337,10 @@ func (s *Store) CreateAnnotationAndSupersede(ctx context.Context, p ingest.Creat
 
 	// Defers run LIFO: endFn (transaction commit/rollback) defers before pool.Put,
 	// so the transaction closes before the connection returns to the pool.
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, "create an annotation superseding "+oldID)
+	if err != nil {
+		return "", err
+	}
 	defer endFn(&err)
 	if p.EntryTarget != nil {
 		if err := s.validateIndexFormatIDsOnConn(conn, []string{p.EntryTarget.SessionID}); err != nil {
@@ -1446,7 +1452,13 @@ func (s *Store) applyClassifierAnnotations(ctx context.Context, writes []ingest.
 	defer s.pool.Put(conn)
 
 	txnErr := error(nil)
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, fmt.Sprintf("apply %d classifier annotations", len(writes)))
+	if err != nil {
+		for i := range results {
+			results[i].Err = err
+		}
+		return results
+	}
 	txnOpen := true
 	defer func() {
 		if txnOpen {
@@ -2218,7 +2230,10 @@ func (s *Store) DeleteAnnotationsByAnnotator(ctx context.Context, annotatorName 
 	}
 	defer s.pool.Put(conn)
 
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, "delete the annotations of annotator "+annotatorName)
+	if err != nil {
+		return 0, err
+	}
 	defer endFn(&err)
 
 	// Step 1: Collect annotation IDs matching the filter.
@@ -3010,7 +3025,10 @@ func (s *Store) BatchCreateAnnotations(ctx context.Context, params []CreateAnnot
 	}
 	defer s.pool.Put(conn)
 
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, fmt.Sprintf("create %d annotations", len(params)))
+	if err != nil {
+		return nil, err
+	}
 	defer endFn(&err)
 
 	ids := make([]string, len(params))

@@ -49,7 +49,11 @@ SELECT id FROM ingest_log ORDER BY id DESC LIMIT 1 OFFSET ?) LIMIT ?)`, &sqlitex
 }
 
 func writeOutcomeBatch(conn *sqlite.Conn, runID int64, outcomes []ingest.RunOutcome) (err error) {
-	defer sqlitex.Transaction(conn)(&err)
+	endFn, err := beginWrite(conn, fmt.Sprintf("record %d session outcomes of audit run %d", len(outcomes), runID))
+	if err != nil {
+		return err
+	}
+	defer endFn(&err)
 	for _, outcome := range outcomes {
 		// The write boundary admits only a reason this build defines and still
 		// writes. The foreign key refuses an id with no seeded row.

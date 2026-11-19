@@ -126,7 +126,10 @@ func (s *Store) SaveCodexRolloutCatalog(ctx context.Context, catalog []ingest.Ro
 	}
 	defer s.pool.Put(conn)
 
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, "save the Codex rollout catalog")
+	if err != nil {
+		return fmt.Errorf("store.SaveCodexRolloutCatalog: %w; the catalog still holds what the previous full walk recorded", err)
+	}
 	defer endFn(&err)
 
 	for index := range catalog {

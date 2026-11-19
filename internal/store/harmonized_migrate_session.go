@@ -825,7 +825,11 @@ func (s *Store) stageMigrateObjects(ctx context.Context, prepared *preparedHarmo
 	// blob write lock is never held across the body writes. Every exit
 	// below ends the transaction and returns the connection explicitly.
 	txnErr := error(nil)
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, "stage the migration blobs of session "+prepared.sessionID.String())
+	if err != nil {
+		s.pool.Put(conn)
+		return err
+	}
 	for _, blob := range prepared.blobs {
 		if err := ctx.Err(); err != nil {
 			txnErr = err
@@ -854,7 +858,10 @@ func (s *Store) stageMigrateObjects(ctx context.Context, prepared *preparedHarmo
 		}
 		defer s.pool.Put(conn)
 		txnErr := error(nil)
-		endFn := sqlitex.Transaction(conn)
+		endFn, err := beginWrite(conn, "stage the migration bodies of session "+prepared.sessionID.String())
+		if err != nil {
+			return err
+		}
 		defer endFn(&txnErr)
 		for _, index := range batch {
 			if err := ctx.Err(); err != nil {
@@ -911,7 +918,10 @@ func (s *Store) upsertMigrateStats(ctx context.Context, oracle *migrateOracle) e
 	}
 	defer s.pool.Put(conn)
 	txnErr := error(nil)
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, "upsert the captured stats of session "+oracle.sessionID.String())
+	if err != nil {
+		return err
+	}
 	defer endFn(&txnErr)
 	stats := oracle.statsRaw
 	// The retained document's turn numbers are in whatever unit its producer
@@ -952,7 +962,10 @@ func (s *Store) commitMigrateSession(ctx context.Context, oracle *migrateOracle,
 	}
 	defer s.pool.Put(conn)
 	txnErr := error(nil)
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, "commit the converted session "+oracle.sessionID.String())
+	if err != nil {
+		return false, nil, err
+	}
 	defer endFn(&txnErr)
 	if err := deleteMigrateSharedOldRows(conn, oracle); err != nil {
 		txnErr = err

@@ -77,7 +77,11 @@ func (s *Store) SavePublication(ctx context.Context, record PublicationRecord) (
 		return fmt.Errorf("save publication receipt: acquire SQLite connection: %w", err)
 	}
 	defer s.pool.Put(conn)
-	defer sqlitex.Transaction(conn)(&err)
+	endFn, err := beginWrite(conn, "save the publication receipt of session "+record.SessionID)
+	if err != nil {
+		return fmt.Errorf("save publication receipt: %w", err)
+	}
+	defer endFn(&err)
 	// A project identity repair can move the local key while Village keeps the
 	// same transcript identity. Remove only that session's superseded key so the
 	// unique remote identity and its replacement receipt move atomically.
