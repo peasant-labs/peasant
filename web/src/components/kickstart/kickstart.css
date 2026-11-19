@@ -209,9 +209,11 @@
   font-size: var(--fs-label);
   color: var(--ink-3);
 }
+/* Sized to sit inside the wizard body above its foot at a desktop height, so
+   the viewer's own scroller, and the load-more control at its end, are never
+   half under the foot. */
 .ks-session-preview-viewer {
-  height: min(70vh, 44rem);
-  min-height: 24rem;
+  height: clamp(20rem, 58vh, 40rem);
   min-width: 0;
   overflow: hidden;
   border: var(--bd);
