@@ -98,7 +98,7 @@ func (s *Store) sweepSessionLocked(ctx context.Context, sessionID schema.Session
 		return bounded, err
 	}
 	if err := reportContentSweepSeam(contentSweepSeamFirstWrite); err != nil {
-		return result, fmt.Errorf("store: sweep session %s failed at its first delete: %w; no rows were deleted and the sweep flag remains set; free disk space and retry harvest or reclaim", sessionID, err)
+		return result, fmt.Errorf("store: sweep session %s failed at its first delete: %w; no rows were deleted and the sweep flag remains set; %s", sessionID, err, sweepRetryAdvice(err))
 	}
 
 	rows, err := s.deleteSupersededGenerationRows(ctx, sessionID, active, latestAttempt)

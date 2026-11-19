@@ -33,7 +33,7 @@ func (s *Store) sweepBoundedSession(ctx context.Context, sid schema.SessionID, a
 		return SweepResult{}, false, nil
 	}
 	if err != nil {
-		return SweepResult{}, true, fmt.Errorf("store: bounded sweep of session %s rolled back: %w; no rows were deleted and the sweep flag remains set; free disk space if full and retry harvest or reclaim", sid, err)
+		return SweepResult{}, true, fmt.Errorf("store: bounded sweep of session %s rolled back: %w; no rows were deleted and the sweep flag remains set; %s", sid, err, sweepRetryAdvice(err))
 	}
 	return result, true, nil
 }

@@ -1,0 +1,20 @@
+# The repair a refused sweep names, by the SQLite result code its first delete
+# failed with. Lock contention and a full disk need opposite actions, so each
+# case also names the advice that must NOT appear.
+cases:
+  - name: busy-names-lock-contention
+    code: SQLITE_BUSY
+    advice: held the store's SQLite writer for longer than the 5s busy timeout
+    forbidden: free disk space
+  - name: locked-names-lock-contention
+    code: SQLITE_LOCKED
+    advice: held the store's SQLite writer for longer than the 5s busy timeout
+    forbidden: free disk space
+  - name: full-names-disk-space
+    code: SQLITE_FULL
+    advice: the disk that holds the store is full; free disk space
+    forbidden: busy timeout
+  - name: ioerr-names-file-access
+    code: SQLITE_IOERR
+    advice: check that the store's database file is readable and writable
+    forbidden: free disk space
