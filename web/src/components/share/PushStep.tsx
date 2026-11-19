@@ -19,6 +19,7 @@ import {
   ShieldCheckIcon,
 } from 'lucide-react';
 import type { SetShareFooterActions } from '@/components/share/footer-actions';
+import ErrorCard from '@/components/ErrorCard';
 
 /** The village transcripts are published to. */
 function villageUrl(): string {
@@ -323,10 +324,10 @@ export function PushStep({
           message is shown verbatim; for the common "log in first" case it tells
           the user exactly what to do. No fabricated success. */}
       {phase === 'error' && topError && (
-        <div className="border border-danger/30 bg-danger-soft px-5 py-4" role="alert">
+        <ErrorCard>
           <p className="text-sm font-medium text-ink">Nothing was sent.</p>
           <p className="mt-1 text-[13px] text-danger">{topError}</p>
-        </div>
+        </ErrorCard>
       )}
 
       {/* Completion — only claim success when something actually published. */}
@@ -360,13 +361,13 @@ export function PushStep({
           as a failure, not "already up to date". */}
       {phase === 'done' && summary.done === 0 && (
         summary.errors > 0 ? (
-          <div className="border border-danger/30 bg-danger-soft px-5 py-4" role="alert">
+          <ErrorCard>
             <p className="text-sm font-medium text-ink">Nothing was sent.</p>
             <p className="mt-1 text-[13px] text-danger">
               {topError ??
                 `${summary.errors} session${summary.errors === 1 ? '' : 's'} failed; see the rows below.`}
             </p>
-          </div>
+          </ErrorCard>
         ) : (
           <div className="border border-rule bg-surface px-5 py-4">
             <p className="text-sm text-ink-2">

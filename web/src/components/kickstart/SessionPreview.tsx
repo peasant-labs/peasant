@@ -12,8 +12,10 @@ import type { LocalKickstartPreviewState } from '@peasant-labs/schema';
 import { Button, Skeleton } from '@/lib/ft-ui';
 import { useTheme } from '@/hooks/useTheme';
 import { useKickstartSourcePreview } from '@/lib/kickstart/useKickstartSourcePreview';
-import { READ_AGAIN } from '@/lib/kickstart/sourcePreview';
+import { PreviewNoticeTone, READ_AGAIN } from '@/lib/kickstart/sourcePreview';
+import { continueTurnLabels } from '@/lib/kickstart/previewTurnLabels';
 import { cookSegment } from '@/components/session-detail/v2/lib/transcriptSegments';
+import ErrorCard from '@/components/ErrorCard';
 
 /**
  * The raw preview of one session row, read on this computer and shown in the
@@ -88,7 +90,7 @@ export interface SessionPreviewProps {
 
 export default function SessionPreview({ sessionId, nodeId, label, scanGeneration }: SessionPreviewProps) {
   const preview = useKickstartSourcePreview(sessionId, nodeId, scanGeneration);
-  const { held, continuation, notice, canReadAgain, loadMore, readAgain } = preview;
+  const { held, continuation, notice, noticeTone, canReadAgain, loadMore, readAgain } = preview;
   const { theme } = useTheme();
   const [leftRailOpen, setLeftRailOpen] = useState(false);
   const [rightRailOpen, setRightRailOpen] = useState(false);
@@ -131,10 +133,14 @@ export default function SessionPreview({ sessionId, nodeId, label, scanGeneratio
     };
   }, [held, label, tail]);
 
-  const segments = useMemo(
-    () => (held === null ? [] : held.segments.map((segment) => cookSegment(held.header, segment, { tail }))),
-    [held, tail],
-  );
+  // Each segment is cooked alone, then given the labels the whole held
+  // session has, so turn numbers continue across loaded segments.
+  const segments = useMemo(() => {
+    if (held === null) return [];
+    const cooked = held.segments.map((segment) => cookSegment(held.header, segment, { tail }));
+    if (viewModel === null) return cooked;
+    return continueTurnLabels(cooked, viewModel.turns, held.segments.flatMap((segment) => segment.turns));
+  }, [held, tail, viewModel]);
   const directory = useMemo(() => (held === null ? null : directoryVM(held)), [held]);
 
   // Every segment the directory names is already held, so a jump or a
@@ -149,6 +155,14 @@ export default function SessionPreview({ sessionId, nodeId, label, scanGeneratio
 
   if (viewModel === null || directory === null) {
     if (notice !== null) {
+      if (noticeTone === PreviewNoticeTone.Error) {
+        return (
+          <ErrorCard className="ks-preview-closed">
+            <p className="ks-help ks-preview-error-text">{notice}</p>
+            {readAgainControl}
+          </ErrorCard>
+        );
+      }
       return (
         <div className="ks-preview-closed" role="status">
           <p className="ks-help">{notice}</p>
@@ -159,11 +173,18 @@ export default function SessionPreview({ sessionId, nodeId, label, scanGeneratio
     return <Skeleton label="reading the preview" avatar={false} lines={2} />;
   }
 
-  const continuationNotice = notice === null && readAgainControl === null ? undefined : (
-    <span className="ks-preview-notice" role="status">
+  const continuationBody = (
+    <>
       {notice !== null && <span>{notice}</span>}
       {continuation === TranscriptContinuationState.Failed && readAgainControl}
-    </span>
+    </>
+  );
+  // A stop that lost part of the session reads as an error card, with its
+  // `read again` inside; an end or a designed limit stays a plain notice.
+  const continuationNotice = notice === null && readAgainControl === null ? undefined : noticeTone === PreviewNoticeTone.Error ? (
+    <ErrorCard className="ks-preview-notice ks-preview-notice-error">{continuationBody}</ErrorCard>
+  ) : (
+    <span className="ks-preview-notice" role="status">{continuationBody}</span>
   );
 
   return (

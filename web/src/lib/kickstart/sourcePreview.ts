@@ -76,6 +76,56 @@ export const PREVIEW_CUT_SENTENCE = Object.freeze({
   [LocalKickstartPreviewCutReason.OriginNotResumable]: 'the preview shows what one read of this transcript holds; the rest cannot be read in parts.',
 } satisfies Record<CutReason, string>);
 
+/**
+ * How a stop reads: an error card or a plain notice. A stop the reader did not
+ * ask for and that lost part of the session is an error; a designed limit, the
+ * end, or a notice about the session is information.
+ */
+export const PreviewNoticeTone = Object.freeze({
+  Neutral: 'neutral',
+  Error: 'error',
+});
+export type PreviewNoticeTone = (typeof PreviewNoticeTone)[keyof typeof PreviewNoticeTone];
+
+/**
+ * The tone of a preview the server closed, by reason. The source moving under
+ * the capture, a transcript that cannot be read, and a broken exchange with the
+ * app are errors; the reader's own act, a timeout, a rescan or a row with
+ * nothing to show is not.
+ */
+export const PREVIEW_CLOSED_TONE = Object.freeze({
+  [LocalKickstartPreviewCloseReason.ClosedByClient]: PreviewNoticeTone.Neutral,
+  [LocalKickstartPreviewCloseReason.Replaced]: PreviewNoticeTone.Neutral,
+  [LocalKickstartPreviewCloseReason.SessionClosed]: PreviewNoticeTone.Neutral,
+  [LocalKickstartPreviewCloseReason.Rescanned]: PreviewNoticeTone.Neutral,
+  [LocalKickstartPreviewCloseReason.Idle]: PreviewNoticeTone.Neutral,
+  [LocalKickstartPreviewCloseReason.Evicted]: PreviewNoticeTone.Neutral,
+  [LocalKickstartPreviewCloseReason.Shutdown]: PreviewNoticeTone.Error,
+  [LocalKickstartPreviewCloseReason.SourceChanged]: PreviewNoticeTone.Error,
+  [LocalKickstartPreviewCloseReason.LateResult]: PreviewNoticeTone.Error,
+  [LocalKickstartPreviewCloseReason.Unreadable]: PreviewNoticeTone.Error,
+  [LocalKickstartPreviewCloseReason.OutOfOrder]: PreviewNoticeTone.Error,
+  [LocalKickstartPreviewCloseReason.SlowClient]: PreviewNoticeTone.Error,
+  [LocalKickstartPreviewCloseReason.RowNotFound]: PreviewNoticeTone.Neutral,
+  [LocalKickstartPreviewCloseReason.NotASessionRow]: PreviewNoticeTone.Neutral,
+  [LocalKickstartPreviewCloseReason.Unavailable]: PreviewNoticeTone.Error,
+  [LocalKickstartPreviewCloseReason.NoTurns]: PreviewNoticeTone.Neutral,
+  [LocalKickstartPreviewCloseReason.Capacity]: PreviewNoticeTone.Neutral,
+} satisfies Record<CloseReason, PreviewNoticeTone>);
+
+/**
+ * The tone of a preview the server cut short, by reason. The budgets are the
+ * preview's designed limits; a record too large to show is a failure to read
+ * the session.
+ */
+export const PREVIEW_CUT_TONE = Object.freeze({
+  [LocalKickstartPreviewCutReason.SourceBudget]: PreviewNoticeTone.Neutral,
+  [LocalKickstartPreviewCutReason.SerializedBudget]: PreviewNoticeTone.Neutral,
+  [LocalKickstartPreviewCutReason.TurnBudget]: PreviewNoticeTone.Neutral,
+  [LocalKickstartPreviewCutReason.OversizedRecord]: PreviewNoticeTone.Error,
+  [LocalKickstartPreviewCutReason.OriginNotResumable]: PreviewNoticeTone.Neutral,
+} satisfies Record<CutReason, PreviewNoticeTone>);
+
 /** The pane's own sentences: none of them comes from the server. */
 export const PreviewSentence = Object.freeze({
   /** The socket to the app dropped; a capture is never resumed after a reconnect. */

@@ -100,6 +100,8 @@ screens:
   - 14-preview-loading
   - 15-preview-end
   - 16-preview-cut
+  - 17-preview-labels-continue
+  - 18-preview-source-cap
 projects:
   - {name: dark-desktop, theme: dark, width: 1280, height: 900}
   - {name: light-desktop, theme: light, width: 1280, height: 900}
@@ -114,6 +116,7 @@ provenance:
   markers:
     - ks-session-preview
     - ks-preview-raw
+    - ks-preview-notice-error
   routes: [/kickstart/, /selection/]
 # The recordings: the ingest end-to-end fixture's Claude root session is the
 # template. Sessions name a prompt (the first is what the tree shows).
@@ -147,6 +150,9 @@ recordings:
         # One reply of 17 MiB after a short start: more than the 16 MiB a web
         # preview reads, so the capture stops before it with the server's sentence.
         - {name: oversized, branch: main, startedAt: "2026-02-10T09:00:00Z", prompts: ["Paste the ledger export.", "Keep going."], exchanges: 4, replyBytes: 24000, oversizedReplyBytes: 17825792}
+        # About 18 MiB of ordinary replies: the capture reads to the 16 MiB a web
+        # preview reads in all and stops there, a designed limit, not an error.
+        - {name: capped, branch: main, startedAt: "2026-02-11T09:00:00Z", prompts: ["Read the whole ledger archive.", "Keep going."], exchanges: 90, replyBytes: 200000}
   # Generated sessions that a scan reads but the journey never selects: enough that
   # the scan's progress is on screen long enough to be seen.
   filler: {repositories: 4, sessions: 80}
@@ -173,6 +179,7 @@ preview:
   longExchanges: 130
   growing: growing
   oversized: oversized
+  capped: capped
   grownNotice: this session has grown since the preview opened
   cutNotice: the preview stopped at
   appendExchanges: 3
