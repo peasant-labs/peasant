@@ -3,7 +3,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, write
 import { dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { parse } from 'yaml';
-import { License, LocalKickstartEventKind, LocalKickstartIngestState, LocalKickstartNodeKind, LocalKickstartPreviewContinuation, LocalKickstartPreviewEventKind, LocalKickstartPreviewOp, LocalKickstartScanState, LocalKickstartStopKind, MessageType } from '@peasant-labs/schema';
+import { License, LocalKickstartEventKind, LocalKickstartIngestState, LocalKickstartNodeKind, LocalKickstartPreviewContinuation, LocalKickstartPreviewCutReason, LocalKickstartPreviewEventKind, LocalKickstartPreviewOp, LocalKickstartScanState, LocalKickstartStopKind, MessageType } from '@peasant-labs/schema';
 import { railProblems } from './lib/kickstart-rail.mjs';
 import { longSessionLines } from './lib/kickstart-seed.mjs';
 
@@ -930,6 +930,7 @@ const previewSessions = {
   long: seeded.find((entry) => entry.name === fixture.preview.long),
   growing: seeded.find((entry) => entry.name === fixture.preview.growing),
   oversized: seeded.find((entry) => entry.name === fixture.preview.oversized),
+  capped: seeded.find((entry) => entry.name === fixture.preview.capped),
 };
 let pageG;
 let pageGHref;
@@ -960,8 +961,8 @@ async function openPreviewPage() {
     server.onMessage((message) => {
       const preview = previewMessage(message);
       if (preview) {
-        const { kind, seq, continuation, segment, reason } = preview.data ?? {};
-        previewReceived.push({ kind, seq, continuation, reason, segment: segment?.index ?? null });
+        const { kind, seq, continuation, segment, reason, cutReason } = preview.data ?? {};
+        previewReceived.push({ kind, seq, continuation, reason, cutReason, segment: segment?.index ?? null, firstTurn: segment?.firstTurn ?? null });
         if (previewHold.active && kind === LocalKickstartPreviewEventKind.Segment) {
           previewHold.queue.push(message);
           return;
@@ -1007,6 +1008,36 @@ async function loadToEnd(page) {
     await expect.poll(async () => await loadMore(page).count() === 0 || await loadMore(page).isEnabled(), { message: 'the pane applied the frame' }).toBe(true);
   }
   await expect(loadMore(page)).toHaveCount(0);
+}
+
+/**
+ * The stop notice's tone as drawn: whether it is announced as an alert, its
+ * computed background, and the danger-soft token resolved on the same page, so
+ * the comparison is against the theme on screen and not a copied colour.
+ */
+async function noticeTone(page) {
+  return pane(page).locator('.ks-preview-notice').evaluate((notice) => {
+    const probe = document.createElement('div');
+    probe.style.background = 'var(--danger-soft)';
+    notice.parentElement.appendChild(probe);
+    const dangerSoft = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return {
+      role: notice.getAttribute('role'),
+      alertsInPane: notice.closest('.ks-session-preview').querySelectorAll('[role="alert"]').length,
+      background: getComputedStyle(notice).backgroundColor,
+      dangerSoft,
+      radius: getComputedStyle(notice).borderTopLeftRadius,
+    };
+  });
+}
+
+/** The user-turn numbers drawn in the pane, in page order: `#3` reads 3. */
+async function userTurnNumbers(page) {
+  return pane(page).locator('article .txn-turnnum').evaluateAll((nodes) => nodes
+    .map((node) => (node.textContent ?? '').trim())
+    .filter((text) => /^#\d+$/.test(text))
+    .map((text) => Number(text.slice(1))));
 }
 
 async function highlightsSay(page, words) {
@@ -1066,6 +1097,21 @@ test('preview-load-more-appends-one-segment', async () => {
   expect(segmentsReceived() - segmentsBefore, 'and the server sent one segment').toBe(1);
 });
 
+test('preview-turn-labels-continue-across-segments', async () => {
+  // The second segment's first turn, brought into view with the end of the
+  // first segment above it: its number follows on from the first segment's.
+  const second = previewReceived.filter((entry) => entry.kind === LocalKickstartPreviewEventKind.Segment && entry.segment === 1).at(-1);
+  expect(second?.firstTurn, 'the second segment arrived').not.toBeNull();
+  const opening = pane(pageG).locator(`article[data-turn="${second.firstTurn}"]`);
+  await opening.scrollIntoViewIfNeeded();
+  await expect(opening).toBeVisible();
+  const numbers = await userTurnNumbers(pageG);
+  expect(numbers.length, 'prompts from both segments are drawn').toBeGreaterThan(2);
+  expect(numbers.every((value, at) => at === 0 || value > numbers[at - 1]), `prompt numbers rise through the loaded segments (saw ${numbers.join(', ')})`).toBe(true);
+  expect(Math.max(...numbers), 'the second segment continues the count').toBeGreaterThan(2);
+  await shoot(pageG, '17-preview-labels-continue');
+});
+
 test('preview-end-says-final', async () => {
   await loadToEnd(pageG);
   const last = previewReceived.at(-1);
@@ -1085,10 +1131,31 @@ test('preview-cut-shows-the-server-sentence', async () => {
   await openPreview(pageG, previewSessions.oversized);
   await loadToEnd(pageG);
   expect(previewReceived.at(-1).continuation, 'the capture was cut').toBe(LocalKickstartPreviewContinuation.Cut);
+  expect(previewReceived.at(-1).cutReason, 'by a record too large to show').toBe(LocalKickstartPreviewCutReason.OversizedRecord);
   await expect(pane(pageG).locator('.ks-preview-notice')).toContainText(fixture.preview.cutNotice);
   await pane(pageG).locator('.ks-preview-notice').scrollIntoViewIfNeeded();
   await expect(pane(pageG).locator('.ks-preview-notice')).toBeInViewport();
+  // A record the preview could not show is an error: the app's error card.
+  const tone = await noticeTone(pageG);
+  expect(tone.role, 'the oversized-record stop is announced as an alert').toBe('alert');
+  expect(tone.background, `its background is the ${theme()} theme's danger-soft`).toBe(tone.dangerSoft);
+  expect(tone.radius, 'the card is square').toBe('0px');
   await shoot(pageG, '16-preview-cut');
+});
+
+test('preview-source-cap-stays-neutral', async () => {
+  await openPreview(pageG, previewSessions.capped);
+  await loadToEnd(pageG);
+  expect(previewReceived.at(-1).continuation, 'the capture was cut').toBe(LocalKickstartPreviewContinuation.Cut);
+  expect(previewReceived.at(-1).cutReason, 'at the source cap').toBe(LocalKickstartPreviewCutReason.SourceBudget);
+  await pane(pageG).locator('.ks-preview-notice').scrollIntoViewIfNeeded();
+  await expect(pane(pageG).locator('.ks-preview-notice')).toBeInViewport();
+  // A designed limit is information, not an error.
+  const tone = await noticeTone(pageG);
+  expect(tone.role, 'the source-cap stop is a status').toBe('status');
+  expect(tone.alertsInPane, 'the pane shows no error card').toBe(0);
+  expect(tone.background, 'its background is not the danger tint').not.toBe(tone.dangerSoft);
+  await shoot(pageG, '18-preview-source-cap');
 });
 
 test('preview-grown-session-notice', async () => {
@@ -1100,6 +1167,9 @@ test('preview-grown-session-notice', async () => {
   await loadToEnd(pageG);
   expect(previewReceived.at(-1).continuation, 'the capture ended at the extent it fixed').toBe(LocalKickstartPreviewContinuation.End);
   await expect(pane(pageG).locator('.ks-preview-notice')).toContainText(fixture.preview.grownNotice);
+  const tone = await noticeTone(pageG);
+  expect(tone.role, 'the grown-session notice is a status').toBe('status');
+  expect(tone.background, 'its background is not the danger tint').not.toBe(tone.dangerSoft);
 });
 
 test('preview-leaves-no-trace', async () => {
