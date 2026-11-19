@@ -9,6 +9,7 @@ import { MockWebSocket } from '@/test/mockWebSocket';
 import { buildFrame, type FrameRequest, type StreamSpec } from '@/test/fixtures/sourcePreviewStream';
 import { PreviewNoticeTone, READ_AGAIN } from '@/lib/kickstart/sourcePreview';
 import { ERROR_CARD_CLASS } from '@/components/ErrorCard';
+import { PreviewSlotContent } from '@/components/kickstart/PreviewSlot';
 
 vi.mock('next/navigation', () => ({
   usePathname: () => '/selection',
@@ -41,6 +42,13 @@ interface PreviewStep {
   expectTurnLabels?: Record<string, string>;
   expectNoticeTone?: { tone: PreviewNoticeTone; text: string; readAgainInside?: boolean };
   expectStateInPane?: string;
+  expectPreviewColumn?: PreviewColumnCheck;
+}
+/** What the preview column holds: the viewer alone, or one state in the viewer's slot. */
+interface PreviewColumnCheck {
+  region: string;
+  holds: PreviewSlotContent;
+  absentText: string[];
 }
 const PREVIEW_KEYS = Object.freeze({
   serve: true,
@@ -57,6 +65,7 @@ const PREVIEW_KEYS = Object.freeze({
   expectTurnLabels: true,
   expectNoticeTone: true,
   expectStateInPane: true,
+  expectPreviewColumn: true,
 } satisfies Record<keyof PreviewStep, true>);
 /** Where the stream must not reach: the closed set an `expectPrivacy` step names. */
 const PreviewPrivacy = Object.freeze({
@@ -68,6 +77,9 @@ const PreviewPrivacy = Object.freeze({
 });
 type PreviewPrivacy = (typeof PreviewPrivacy)[keyof typeof PreviewPrivacy];
 const PRIVACY: readonly string[] = Object.values(PreviewPrivacy);
+/** The class prefix of the transcript viewer's own elements; its root carries one. */
+const VIEWER_ROOT_PREFIX = 'txn';
+const SLOT_CONTENTS: readonly string[] = Object.values(PreviewSlotContent);
 const CASE_KEYS = ['name', 'stream', 'steps', 'server', 'fakeTimers'];
 
 /** Every preview request the page put on any socket of this test, in order, each checked against the contract. */
@@ -248,14 +260,37 @@ async function runPreviewStep(step: PreviewStep, spec: StreamSpec, state: Conver
   if (step.expectStateInPane !== undefined) {
     const text = step.expectStateInPane;
     // jsdom has no layout, so the size is proven by structure: the state sits
-    // in the same block the viewer fills, whose size the stylesheet fixes.
+    // in the slot the viewer fills, whose size the stylesheet fixes.
     await waitFor(() => {
-      const box = mounted.container.querySelector('.ks-session-preview > .ks-session-preview-viewer');
-      if (box === null) throw new Error(`${at}: there is no reading pane`);
+      const box = mounted.container.querySelector('.ks-session-preview[data-preview-pane-state]');
+      if (box === null) throw new Error(`${at}: there is no preview slot holding a state`);
       // The reading skeleton names itself by its accessible label.
       const labels = [...box.querySelectorAll('[aria-label]')].map((element) => element.getAttribute('aria-label') ?? '');
-      expect([box.textContent ?? '', ...labels].join('\n'), `${at}: the pane holds "${text}"`).toContain(text);
+      expect([box.textContent ?? '', ...labels].join('\n'), `${at}: the slot holds "${text}"`).toContain(text);
     });
+  }
+  if (step.expectPreviewColumn !== undefined) {
+    const { region: name, holds, absentText } = step.expectPreviewColumn;
+    if (!SLOT_CONTENTS.includes(holds)) throw new Error(`${at}: expectPreviewColumn.holds is ${String(holds)}; it is one of ${SLOT_CONTENTS.join(', ')}`);
+    const region = await waitFor(() => screen.getByRole('region', { name }));
+    // The region is the column's only content: nothing above or beside it.
+    const column = region.parentElement;
+    expect(column === null ? [] : [...column.children], `${at}: the preview column holds the region alone`).toEqual([region]);
+    if (holds === PreviewSlotContent.Viewer) {
+      await waitFor(() => expect(region.querySelector('article[data-turn]'), `${at}: the viewer drew a turn`).not.toBeNull());
+      // The viewer's own root is the region's only child: no caption, heading or frame between them.
+      expect(region.children.length, `${at}: the region holds one element`).toBe(1);
+      const root = region.firstElementChild!;
+      expect([...root.classList].some((name) => name.startsWith(VIEWER_ROOT_PREFIX)), `${at}: the region's child is the viewer's root (class ${root.className})`).toBe(true);
+    } else {
+      expect(region.querySelector('article[data-turn]'), `${at}: no turn is drawn yet`).toBeNull();
+    }
+    // Text the column must not carry anywhere: a heading or caption that names it.
+    const elements = [column ?? region, ...(column ?? region).querySelectorAll('*')];
+    for (const text of absentText) {
+      const found = elements.filter((element) => element.children.length === 0 && (element.textContent ?? '').trim() === text);
+      expect(found.map((element) => element.outerHTML), `${at}: the column shows no "${text}"`).toEqual([]);
+    }
   }
   for (const check of step.expectPrivacy ?? []) {
     if (!PRIVACY.includes(check)) throw new Error(`${at}: expectPrivacy names ${check}; it is one of ${PRIVACY.join(', ')}`);
