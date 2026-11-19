@@ -221,16 +221,16 @@ type PipelineConfig struct {
 	// audit row. Nil records nothing and stores no stage row.
 	IndexProfiler *IndexProfiler
 	// DisableRefreshSkips runs an adapter refresh of a managed generation
-	// without its skips: no unchanged proof, no unchanged settle, and no
-	// metadata-only copy refresh. The refresh still takes the stored-metadata
-	// lane its decision names, and the index stage parses the stored
-	// transcript as it did before those skips existed. Every store capability
-	// stays wired; only the pipeline declines to use the three skips.
+	// without its skips: no unchanged proof and no unchanged settle. The
+	// refresh still takes the stored-metadata lane its decision names, and the
+	// index stage parses the stored transcript as it did before those skips
+	// existed. Every store capability stays wired; only the pipeline declines
+	// to use the skips.
 	//
 	// Baseline only: it lets a measurement time the skips against the work
 	// they avoid on the same prepared base, and no command sets it. It is read
-	// at one decision point, managedGenerationRefreshLane, which gates all
-	// three skips.
+	// at one decision point, managedGenerationRefreshLane, which gates both
+	// skips.
 	DisableRefreshSkips bool
 	// Validator is the optional managed-generation validator; nil skips it.
 	Validator ManagedGenerationValidator
@@ -350,8 +350,8 @@ type indexedMeta struct {
 	indexed              bool   // true if already indexed in the drain loop (skip INDEX, include in COMPUTE)
 	// managedGenerationRefresh marks a pair this run refreshed on the
 	// adapter-behind / adapter-stamp-absent stored-metadata lane for a managed
-	// generation. The index stage may settle it through the metadata-only
-	// generation refresh instead of parsing the transcript.
+	// generation. The index stage may settle it through the unchanged proof
+	// instead of parsing the transcript.
 	managedGenerationRefresh bool
 }
 
@@ -2049,9 +2049,9 @@ type indexParseResult struct {
 	entryCount int
 	startedAt  int64
 	logEntry   IndexLogEntry
-	// managedRefreshDuration is the time the metadata-only managed-generation
-	// refresh spent on the serialized write lane. It is the write half of a
-	// result that installed or settled a generation and parsed nothing.
+	// managedRefreshDuration is the time the unchanged settlement of a managed
+	// generation spent on the serialized write lane. It is the write half of a
+	// result that settled a generation and parsed nothing.
 	managedRefreshDuration time.Duration
 	parseDuration          time.Duration
 	bytes                  int64
@@ -2325,12 +2325,13 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 			result.im.captureRevision = input.expected.PublicationCaptureRevision
 		}
 		// A managed generation on the adapter-behind / adapter-stamp-absent
-		// lane settles through the store's metadata-only refresh instead of a
-		// transcript parse. The refresh runs after the pair install and the
-		// managed mirror (the index input's expected state was captured after
-		// both), on the same serialized write lane as every other store write.
-		// A refusal or a stale proof falls through to the ordinary parse path;
-		// the store keeps the old generation active until that parse commits.
+		// lane settles without a transcript parse when the store proves the
+		// captured input reproduces the active generation. The proof runs after
+		// the pair install and the managed mirror (the index input's expected
+		// state was captured after both); the settle runs on the same
+		// serialized write lane as every other store write. A failed proof, a
+		// proof error, or a refused settle parses; the store keeps the old
+		// generation active until that parse commits.
 		forceParse := false
 		_, canProve := p.metricsStore.(ManagedGenerationUnchangedProver)
 		if input.managedGenerationRefresh && canProve && input.metadata != nil && input.expected != nil && p.adapterSupportsStoredExtraction(input.session.Harness) {
@@ -2353,7 +2354,6 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 					proof.Mismatch = UnchangedMismatchNone
 				case ValidationNotProven:
 					proof.Mismatch = validation.Mismatch
-					forceParse = true
 				}
 			}
 			if proofErr == nil && !proof.Proven {
@@ -2383,25 +2383,6 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 				slog.Warn(logPrefix+": unchanged generation settlement refused", "session_id", im.session.SessionID, "error", settleErr)
 				forceParse = true
 			}
-		}
-		if !forceParse && input.managedGenerationRefresh && p.managedGenerationRefreshApplies(input) {
-			outcome, duration, refreshErr := p.refreshManagedGeneration(ctx, input, writeLane)
-			if refreshErr == nil {
-				reason := indexManagedRefreshReason + " (" + string(outcome.Disposition) + ")"
-				result.managedRefreshDuration = duration
-				result.logEntry = p.makeIndexLogEntry(im, IndexOutcomeSkipped, 0, result.startedAt, &reason, nil)
-				// No parser read the transcript: the refresh copied stored rows.
-				// The index log's byte count measures parsed work, so it must be
-				// zero even though the pair's transcript has a size.
-				result.bytes = 0
-				input.transcript, input.tree = nil, nil
-				return result
-			}
-			slog.Warn(logPrefix+": metadata-only managed generation refresh",
-				"session_id", im.session.SessionID,
-				"error", refreshErr,
-				"fallback", "transcript parse")
-			forceParse = true
 		}
 		if !forceParse && p.capturedInputBindsWithoutReparse(input) {
 			// The rule "bind without a re-parse" holds: the flush binds the
@@ -2612,9 +2593,9 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 const indexBindWithoutReparseReason = "stored index already matches captured input and current producer; bound to the refreshed metadata capture"
 
 // indexManagedRefreshReason is the index-log reason of a managed generation
-// settled by the metadata-only generation refresh. The disposition the store
-// reported is appended, so an installed generation and an unchanged capture
-// are distinguishable in the run report.
+// settled by the unchanged proof. The disposition the store reported is
+// appended. The text is kept as it was when a metadata copy could also settle
+// a session, so run reports stay comparable across builds.
 const indexManagedRefreshReason = "stored index already matches captured input; refreshed the managed generation metadata without a parse"
 
 // bindPublicationIndex performs the bind-only index write the rule "bind
@@ -2658,30 +2639,6 @@ func (p *Pipeline) bindPublicationIndex(ctx context.Context, result indexParseRe
 	slog.Warn(logPrefix+": bind index to metadata capture", "session_id", sid, "error", err)
 	errMsg := err.Error()
 	return p.makeIndexLogEntry(result.im, IndexOutcomeError, 0, result.startedAt, nil, &errMsg), time.Since(start)
-}
-
-// refreshManagedGeneration performs the metadata-only managed-generation
-// refresh for one captured input. It runs on the serialized store write lane so
-// the refresh transaction cannot interleave with a pair mirror or an index
-// write. The caller only reaches it after the pair install and managed mirror
-// committed, and the input's expected state was captured after both.
-//
-// The duration is the write half of the refresh; no parser ran, so the
-// pipeline reports zero parse work and the refresh's own cost separately.
-func (p *Pipeline) refreshManagedGeneration(ctx context.Context, input *CapturedIndexInput, writeLane *storeWriteLane) (ManagedGenerationRefreshOutcome, time.Duration, error) {
-	refresher, ok := p.metricsStore.(ManagedGenerationRefresher)
-	if !ok {
-		return ManagedGenerationRefreshOutcome{}, 0, fmt.Errorf(
-			"refresh the managed generation of session %s without a parse: the configured store has no metadata-only refresh capability; no generation was installed and the active authority is unchanged; use a store that can refresh a managed generation or let the ordinary parse path run",
-			input.session.SessionID)
-	}
-	start := time.Now()
-	var outcome ManagedGenerationRefreshOutcome
-	var err error
-	p.runStoreWrite(writeLane, StageIndex, func() {
-		outcome, err = refresher.RefreshManagedGenerationWithoutParse(ctx, managedGenerationRefreshRequest(input))
-	})
-	return outcome, time.Since(start), err
 }
 
 type indexWriteFlush struct {

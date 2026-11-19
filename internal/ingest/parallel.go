@@ -179,8 +179,8 @@ type workerResult struct {
 	retainedMetadataJSON []byte
 	// managedGenerationRefresh marks a pair this run refreshed on the
 	// adapter-behind / adapter-stamp-absent stored-metadata lane for a managed
-	// generation. The index stage may settle it through the metadata-only
-	// generation refresh instead of parsing the transcript.
+	// generation. The index stage may settle it through the unchanged proof
+	// instead of parsing the transcript.
 	managedGenerationRefresh bool
 	// transcriptData holds the already-read bytes for the in-memory index path.
 	// Nil on error or skip.

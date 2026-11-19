@@ -42,9 +42,7 @@ type mutation int
 
 const (
 	mutateAdapterStamp mutation = iota + 1
-	mutateAdapterContext
 	mutateIndexer
-	mutateAdapterStampSealless
 )
 
 // caseSpec is what one corpus case prepares, how its two arms run, and what
@@ -118,18 +116,6 @@ func caseSpecs() map[upgrade.MeasurementCase]caseSpec {
 			baselineLabel: "stored-metadata lane with the refresh skips disabled: parse, identical generation not installed",
 			baseline:      disableSkips, wantLane: ingest.RefreshLaneStoredMetadata, check: stampOnly,
 		},
-		upgrade.MeasurementCaseContextChange: {
-			id: upgrade.MeasurementCaseContextChange, mutation: mutateAdapterContext,
-			skipLabel:     "proof not proven, metadata-only copy refresh (stored-metadata lane)",
-			baselineLabel: "stored-metadata lane with the refresh skips disabled: parse and install",
-			baseline:      disableSkips, wantLane: ingest.RefreshLaneStoredMetadata,
-			check: func(n int, a arm, s sample) error {
-				if a == armBaseline {
-					return expect(a, s, parsesAll(n))
-				}
-				return expect(a, s, executed{Proofs: n, Copies: n})
-			},
-		},
 		upgrade.MeasurementCaseIndexerBump: {
 			id: upgrade.MeasurementCaseIndexerBump, mutation: mutateIndexer,
 			skipLabel:     "stored-index lane: re-index the stored transcript",
@@ -143,23 +129,6 @@ func caseSpecs() map[upgrade.MeasurementCase]caseSpec {
 					return expectLane(a, s, ingest.RefreshLaneNative, n)
 				}
 				return expectLane(a, s, ingest.RefreshLaneStoredIndex, n)
-			},
-		},
-		upgrade.MeasurementCaseLegacyRow: {
-			id: upgrade.MeasurementCaseLegacyRow, mutation: mutateAdapterStampSealless,
-			skipLabel:     "unchanged proof without a seal (not proven), then the fallback the build takes",
-			baselineLabel: "stored-metadata lane with the refresh skips disabled: parse",
-			baseline:      disableSkips, wantLane: ingest.RefreshLaneStoredMetadata,
-			check: func(n int, a arm, s sample) error {
-				if a == armBaseline {
-					return expect(a, s, parsesAll(n))
-				}
-				// The seal is absent on every generation, so no proof may
-				// hold. The fallback after it (a copy refresh or a parse) is
-				// what this case reports, so it is not fixed here.
-				fallback := s
-				fallback.Copies, fallback.Parses = 0, 0
-				return expect(a, fallback, executed{Proofs: n})
 			},
 		},
 		upgrade.MeasurementCaseUndeclaredProducer: {
@@ -188,7 +157,6 @@ type executed struct {
 	Proofs  int `json:"proofs"`
 	Proven  int `json:"proven"`
 	Settles int `json:"settles"`
-	Copies  int `json:"copies"`
 	Parses  int `json:"parses"`
 }
 
@@ -329,7 +297,7 @@ func runCase(ctx context.Context, spec caseSpec, opts harnessOptions) (string, e
 	}
 	report.Notes = append(report.Notes,
 		"Each round copies the prepared base outside the timed region and times one pipeline run; arms alternate order by round.",
-		"Settle and copy counts come from a store wrapper that counts calls; parses are index-log attempts with a measured parse duration.",
+		"Settle counts come from a store wrapper that counts calls; parses are index-log attempts with a measured parse duration.",
 		"INDEX includes settlement; no separate settle duration is persisted.")
 	if report.Smoke {
 		report.Notes = append(report.Notes, fmt.Sprintf("Smoke shape %d x %d: validates the case, not a budget. Budgets need %d x %d on a quiet machine.", opts.sessions, opts.entries, matrixSessions, matrixEntries))
@@ -388,28 +356,19 @@ func summarize(a *armSummary) {
 	a.MedianIndexMs = median(pick(func(s sample) float64 { return s.IndexStageMs }))
 }
 
-// countingStore counts the two store calls the profile cannot tell apart: an
-// unchanged settle and a metadata-only copy refresh. Every other capability is
-// promoted from the embedded store unchanged.
+// countingStore counts the unchanged settles, which the stored profile folds
+// into the INDEX stage. Every other capability is promoted from the embedded
+// store unchanged.
 type countingStore struct {
 	*store.Store
 	settles atomic.Int64
-	copies  atomic.Int64
 }
 
-var (
-	_ ingest.ManagedGenerationUnchangedProver = (*countingStore)(nil)
-	_ ingest.ManagedGenerationRefresher       = (*countingStore)(nil)
-)
+var _ ingest.ManagedGenerationUnchangedProver = (*countingStore)(nil)
 
 func (s *countingStore) SettleCapturedGenerationUnchanged(ctx context.Context, request ingest.ManagedGenerationUnchangedProof) (ingest.ManagedGenerationRefreshOutcome, error) {
 	s.settles.Add(1)
 	return s.Store.SettleCapturedGenerationUnchanged(ctx, request)
-}
-
-func (s *countingStore) RefreshManagedGenerationWithoutParse(ctx context.Context, request ingest.ManagedGenerationRefreshRequest) (ingest.ManagedGenerationRefreshOutcome, error) {
-	s.copies.Add(1)
-	return s.Store.RefreshManagedGenerationWithoutParse(ctx, request)
 }
 
 func openStore(dbPath, output string) (*store.Store, error) {
@@ -475,35 +434,16 @@ func prepareBase(ctx context.Context, baseDir string, sessions, entries int, m m
 	}
 	target := ingest.GenerationTargets(ingest.HarvesterVersionRegistry)[ingest.HarnessClaudeCode]
 	switch m {
-	case mutateAdapterStamp, mutateAdapterContext, mutateAdapterStampSealless:
-		project := ""
-		if m == mutateAdapterContext {
-			project = "skip budget forced context"
-		}
+	case mutateAdapterStamp:
 		if err := execSQL(ctx, db, `UPDATE sessions SET adapter_version = ?`, target.AdapterVersion-1); err != nil {
 			return caseShape{}, err
 		}
-		stamped, err := stampMetadata(output, target.AdapterVersion-1, project)
+		stamped, err := stampMetadata(output, target.AdapterVersion-1)
 		if err != nil {
 			return caseShape{}, err
 		}
 		if stamped != sessions {
 			return caseShape{}, fmt.Errorf("stamped %d metadata files, want %d", stamped, sessions)
-		}
-		if m == mutateAdapterStampSealless {
-			// The generation rows are immutable by trigger; a legacy row
-			// predates the seal, so lift the trigger, zero the seal, and
-			// restore the trigger exactly as the schema declares it.
-			if err := execSQL(ctx, db, `SAVEPOINT sealless;
-DROP TRIGGER session_generations_immutable;
-UPDATE session_generations SET candidate_digest = '`+strings.Repeat("0", 64)+`';
-CREATE TRIGGER session_generations_immutable BEFORE UPDATE ON session_generations
-BEGIN
-  SELECT RAISE(ABORT, 'generation rows are immutable; a new generation gets a new row');
-END;
-RELEASE sealless;`); err != nil {
-				return caseShape{}, err
-			}
 		}
 	case mutateIndexer:
 		if target.IndexerVersion < 2 {
@@ -591,7 +531,7 @@ func runRound(ctx context.Context, spec caseSpec, baseDir, roundDir string, roun
 		return sample{}, fmt.Errorf("run reported %d errors", result.Summary.Errors)
 	}
 	s.DBBytesAfter, s.WALBytes = fileSize(dbPath), fileSize(dbPath+"-wal")
-	s.Settles, s.Copies = int(counted.settles.Load()), int(counted.copies.Load())
+	s.Settles = int(counted.settles.Load())
 	for _, entry := range result.IndexLog {
 		s.Outcomes[entry.Outcome]++
 		if entry.ParseDuration != nil && *entry.ParseDuration > 0 {
@@ -638,11 +578,7 @@ func execSQL(ctx context.Context, db *store.Store, query string, args ...any) er
 		return err
 	}
 	defer db.Pool().Put(conn)
-	run := func() error { return sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{Args: args}) }
-	if len(args) == 0 && strings.Count(query, ";") > 1 {
-		run = func() error { return sqlitex.ExecuteScript(conn, query, nil) }
-	}
-	if err := run(); err != nil {
+	if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{Args: args}); err != nil {
 		return fmt.Errorf("prepare statement %q: %w", strings.SplitN(query, "\n", 2)[0], err)
 	}
 	return nil
@@ -689,10 +625,9 @@ func writeCorpus(root string, sessions, entries int) (int64, error) {
 	return total, nil
 }
 
-// stampMetadata rewrites every managed metadata file's adapter revision, and
-// its project name when one is given, then recomputes the metadata hash, as
-// an older build would have left the pair.
-func stampMetadata(output string, revision int, project string) (int, error) {
+// stampMetadata rewrites every managed metadata file's adapter revision, then
+// recomputes the metadata hash, as an older build would have left the pair.
+func stampMetadata(output string, revision int) (int, error) {
 	count := 0
 	err := filepath.WalkDir(output, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(d.Name(), defaults.MetadataSuffix) {
@@ -707,9 +642,6 @@ func stampMetadata(output string, revision int, project string) (int, error) {
 			return fmt.Errorf("decode managed metadata %s: %w", path, err)
 		}
 		meta.AdapterVersion = &revision
-		if project != "" {
-			meta.Project.Name = project
-		}
 		meta.MetadataHash = schema.ComputeMetadataHash(&meta)
 		encoded, err := json.Marshal(&meta)
 		if err != nil {

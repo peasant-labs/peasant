@@ -31,7 +31,7 @@ var _ ingest.ChangeScopeWithholder = (*withholdingClaudeAdapter)(nil)
 // TestUndeclaredProducerTakesTheFullStep runs the production pipeline on a
 // stamp-only adapter bump with the shipped adapter and with one that withholds
 // its change scope. The undeclared adapter makes the run parse instead of
-// proving, settling or copying, and the session's decision names it.
+// proving or settling, and the session's decision names it.
 func TestUndeclaredProducerTakesTheFullStep(t *testing.T) {
 	var fixture struct {
 		Cases []struct {
@@ -42,7 +42,6 @@ func TestUndeclaredProducerTakesTheFullStep(t *testing.T) {
 				Lane    string `yaml:"lane"`
 				Proofs  int64  `yaml:"proofs"`
 				Settles int64  `yaml:"settles"`
-				Copies  int64  `yaml:"copies"`
 				Builds  int64  `yaml:"builds"`
 			} `yaml:"want"`
 		} `yaml:"cases"`
@@ -95,7 +94,7 @@ func TestUndeclaredProducerTakesTheFullStep(t *testing.T) {
 				}
 				return adapter
 			}
-			counted := &proofCountingRefreshStore{countedManagedRefreshStore: &countedManagedRefreshStore{Store: db}}
+			counted := &proofCountingRefreshStore{Store: db}
 			var parses, builds atomic.Int64
 			var transcript []byte
 			result := runManagedRefreshPipelineConfigured(t, counted, source, output, &parses, &builds, &transcript, &ingest.OSFileSystem{}, &ingest.IndexProfiler{}, adapters, nil)
@@ -121,9 +120,9 @@ func TestUndeclaredProducerTakesTheFullStep(t *testing.T) {
 			if want := map[bool]int{true: 1, false: 0}[c.Undeclared]; named != want {
 				t.Fatalf("%d session results name the undeclared adapter, want %d: %+v", named, want, result.Sessions)
 			}
-			got := [4]int64{counted.proofs.Load(), counted.settles.Load(), counted.calls.Load(), builds.Load()}
-			if want := [4]int64{c.Want.Proofs, c.Want.Settles, c.Want.Copies, c.Want.Builds}; got != want {
-				t.Fatalf("proofs, settles, copies, builds = %v, want %v", got, want)
+			got := [3]int64{counted.proofs.Load(), counted.settles.Load(), builds.Load()}
+			if want := [3]int64{c.Want.Proofs, c.Want.Settles, c.Want.Builds}; got != want {
+				t.Fatalf("proofs, settles, builds = %v, want %v", got, want)
 			}
 		})
 	}

@@ -9,6 +9,10 @@
 // budget matrix, 240 sessions x 1000 entries over 5 rounds; run it only on a
 // quiet machine. A smaller shape is a smoke run and its report says so.
 //
+// C2 and C5 are retired: they measured the metadata-only copy refresh after a
+// failed proof, and a failed proof now parses, so neither has a skip left to
+// measure. Their ids are not reused.
+//
 // Exit condition: the harness exists to decide whether the conditional
 // legacy-row validation (#1036) and shared-mapping reuse (#1038) are worth
 // building. Once that decision is recorded on both issues, delete the harness
@@ -16,7 +20,7 @@
 // the stored run profile then carry the evidence.
 //
 //	go run -tags skipbudget ./cmd/skip-budget -list
-//	go run -tags skipbudget ./cmd/skip-budget -case C1,C2,C3,C5,C6 -base "$(git merge-base HEAD origin/develop)"
+//	go run -tags skipbudget ./cmd/skip-budget -case C1,C3,C6 -base "$(git merge-base HEAD origin/develop)"
 //	go run -tags skipbudget ./cmd/skip-budget -case C1 -base <rev> -sessions 2 -entries 10
 package main
 
@@ -60,7 +64,7 @@ const defaultRoot = "/tmp/opencode/peasant-1034"
 
 func main() {
 	list := flag.Bool("list", false, "print the planned cases without running them")
-	caseList := flag.String("case", "", "comma-separated cases to run: C1, C2, C3, C4, C5, C6")
+	caseList := flag.String("case", "", "comma-separated cases to run: C1, C3, C4, C6")
 	base := flag.String("base", "", "comparison base revision")
 	root := flag.String("root", defaultRoot, "absolute directory that holds one directory per case")
 	sessions := flag.Int("sessions", matrixSessions, "synthetic sessions per case (C4 always uses 2)")
@@ -69,10 +73,8 @@ func main() {
 	flag.Parse()
 	cases := []matrixCase{
 		{Name: upgrade.MeasurementCaseStampOnly, Shape: "stamp-only adapter bump: proof and settle vs parse"},
-		{Name: upgrade.MeasurementCaseContextChange, Shape: "forced context change: copy refresh vs parse and install"},
 		{Name: upgrade.MeasurementCaseIndexerBump, Shape: "indexer bump: stored-index lane vs native"},
 		{Name: upgrade.MeasurementCaseNewSession, Shape: "new session: 2 x 10"},
-		{Name: upgrade.MeasurementCaseLegacyRow, Shape: "legacy row: stamp-only bump without the seal"},
 		{Name: upgrade.MeasurementCaseUndeclaredProducer, Shape: "undeclared producer: the full step the plan names"},
 	}
 	for i := range cases {

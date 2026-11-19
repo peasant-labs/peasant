@@ -13,6 +13,64 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
+// ManagedGenerationRefreshDisposition is the closed set of outcomes an
+// unchanged settlement of a managed generation reports.
+type ManagedGenerationRefreshDisposition string
+
+const (
+	// ManagedGenerationRefreshUnchanged reports that the captured input
+	// reproduces the active generation. No generation is installed; only the
+	// mutable stats and the index binding are settled.
+	ManagedGenerationRefreshUnchanged ManagedGenerationRefreshDisposition = "unchanged"
+)
+
+// ManagedGenerationRefreshResult reports the committed disposition and the
+// generation that is the active read authority afterwards: the settled source
+// generation.
+type ManagedGenerationRefreshResult struct {
+	GenerationID string
+	Disposition  ManagedGenerationRefreshDisposition
+}
+
+// ManagedGenerationRefreshRefusalReason is the closed set of reasons an
+// unchanged settlement is refused without changing any row. A caller can
+// branch on it and fall back to a parse.
+type ManagedGenerationRefreshRefusalReason string
+
+const (
+	// ManagedGenerationRefreshSourceUnsupported: the active generation's stored
+	// parse counts are incomplete, so they cannot be carried into the settled
+	// stats.
+	ManagedGenerationRefreshSourceUnsupported ManagedGenerationRefreshRefusalReason = "source-unsupported"
+)
+
+// ErrManagedGenerationRefreshRefused is the sentinel every
+// ManagedGenerationRefreshError matches, so a caller can classify the refusal
+// without matching message text.
+var ErrManagedGenerationRefreshRefused = errors.New("managed generation unchanged settlement refused")
+
+// ManagedGenerationRefreshError is the actionable refusal of one unchanged
+// settlement. It names what was refused, why, the impact, and the caller's
+// next step; nothing changed.
+type ManagedGenerationRefreshError struct {
+	SessionID          schema.SessionID
+	SourceGenerationID string
+	Reason             ManagedGenerationRefreshRefusalReason
+	Detail             string
+}
+
+func (e *ManagedGenerationRefreshError) Error() string {
+	return fmt.Sprintf(
+		"store: refuse the unchanged settlement of session %s generation %s: %s; where: store.SettleManagedGenerationUnchanged, before any row changed; impact: the active authority is unchanged and the session stays refresh work; fix: %s",
+		e.SessionID, e.SourceGenerationID, e.Reason, e.Detail)
+}
+
+// Is reports the refusal class so a caller can test errors.Is against the
+// sentinel.
+func (e *ManagedGenerationRefreshError) Is(target error) bool {
+	return target == ErrManagedGenerationRefreshRefused
+}
+
 // ManagedGenerationUnchangedProof describes the actual captured input and SQL
 // state to compare. Expected is captured after the metadata pair was installed.
 type ManagedGenerationUnchangedProof struct {

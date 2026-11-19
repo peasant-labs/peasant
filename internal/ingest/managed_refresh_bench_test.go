@@ -2,7 +2,7 @@
 
 // Package ingest_test contains an opt-in, synthetic measurement harness for
 // managed-generation refresh after an adapter revision bump. It measures both
-// the metadata-only refresh and ordinary parse paths on the same prepared base.
+// the unchanged settle and ordinary parse paths on the same prepared base.
 // Keep this harness to answer whether the refresh saves time and write
 // amplification as entry counts grow, while retaining the same authority.
 // It is opt-in; build it with -tags managed_refresh_bench.
@@ -98,9 +98,10 @@ type managedRefreshShape struct {
 	InitialGenerations int64 `json:"initialGenerations"`
 	// Case selects the measured workload. "stamp-only" reproduces the common
 	// adapter bump whose projection is identical, so the parse baseline skips
-	// the generation write and the metadata-only refresh reports unchanged.
-	// "forced" also changes the project name in every stored metadata file, so
-	// both paths install a new generation and the clone cost is comparable.
+	// the generation write and the unchanged proof settles. "forced" also
+	// changes the project name in every stored metadata file, so the proof
+	// fails and the run parses and installs a new generation; only the parse
+	// path measures it.
 	Case string `json:"case"`
 	// ProjectName is the metadata-only change the prepare step forces into
 	// every stored metadata file. Empty for the stamp-only case.
@@ -406,6 +407,10 @@ func runManagedRefreshSample(tb testing.TB, base, lane, out string, classify boo
 	profiler := &ingest.IndexProfiler{}
 	pipeline := newManagedRefreshPipeline(tb, db, source, output, profiler, classify)
 	path := managedRefreshPath(tb)
+	if path == managedRefreshPathRefresh && shape.Case == managedRefreshCaseForced {
+		_ = db.Close()
+		tb.Fatalf("%s sample: the forced case changes the metadata context, so the unchanged proof fails and the run parses; no path settles it without a parse; measure it with PEASANT_MANAGED_REFRESH_PATH=%s", lane, managedRefreshPathParse)
+	}
 
 	rowsBefore := managedRefreshRowCounts(tb, db)
 	pageBefore := managedRefreshPageStats(tb, db)
@@ -556,7 +561,7 @@ WHERE p.capture_revision > 0
 	}
 
 	// The harness runs the same prepared base through either the ordinary parse
-	// path or the metadata-only refresh path. The assertions differ only by the
+	// path or the unchanged settle path. The assertions differ only by the
 	// path and the prepared case; the measured metrics are identical.
 	if sample.Summary.Errors != 0 || len(result.Diagnostics) != 0 {
 		tb.Fatalf("%s refresh reported %d errors and %d diagnostics", lane, sample.Summary.Errors, len(result.Diagnostics))
@@ -656,36 +661,18 @@ WHERE p.capture_revision > 0
 		if sample.Outcomes[string(ingest.IndexOutcomeSkipped)] != shape.Sessions {
 			tb.Fatalf("%s refresh skipped outcomes = %d, want %d (%v)", lane, sample.Outcomes[string(ingest.IndexOutcomeSkipped)], shape.Sessions, sample.Outcomes)
 		}
-		disposition := "unchanged"
-		if shape.Case == managedRefreshCaseForced {
-			disposition = "installed"
-		}
-		settles := managedRefreshDispositionCount(sample.OutcomeReasons, disposition)
+		settles := managedRefreshDispositionCount(sample.OutcomeReasons, string(ingest.ManagedGenerationRefreshUnchanged))
 		if settles != shape.Sessions {
-			tb.Fatalf("%s refresh disposition %q count = %d, want %d (%v)", lane, disposition, settles, shape.Sessions, sample.OutcomeReasons)
+			tb.Fatalf("%s refresh disposition %q count = %d, want %d (%v)", lane, ingest.ManagedGenerationRefreshUnchanged, settles, shape.Sessions, sample.OutcomeReasons)
 		}
-		if shape.Case == managedRefreshCaseForced {
-			sample.GenerationInstalls = settles
-		} else {
-			sample.GenerationInstalls = 0
-		}
+		sample.GenerationInstalls = 0
 		if sample.StatsUpdatedAfter <= sample.StatsUpdatedBefore {
 			tb.Fatalf("%s refresh did not settle captured stats: %d <= %d", lane, sample.StatsUpdatedAfter, sample.StatsUpdatedBefore)
 		}
-		switch shape.Case {
-		case managedRefreshCaseStampOnly:
-			if sample.GenerationsAdded != 0 {
-				tb.Fatalf("%s refresh added %d generation rows, want 0 for the unchanged case", lane, sample.GenerationsAdded)
-			}
-			sample.Notes = append(sample.Notes, "the metadata-only refresh reported unchanged, parsed nothing, installed no generation, and settled stats and binding")
-		case managedRefreshCaseForced:
-			if sample.GenerationsAdded != int64(shape.Sessions) {
-				tb.Fatalf("%s refresh added %d generation rows, want %d", lane, sample.GenerationsAdded, shape.Sessions)
-			}
-			sample.Notes = append(sample.Notes, "the metadata-only refresh installed a new generation per session and parsed nothing")
-		default:
-			tb.Fatalf("%s prepared case %q is not %s or %s", lane, shape.Case, managedRefreshCaseStampOnly, managedRefreshCaseForced)
+		if sample.GenerationsAdded != 0 {
+			tb.Fatalf("%s refresh added %d generation rows, want 0 for the unchanged case", lane, sample.GenerationsAdded)
 		}
+		sample.Notes = append(sample.Notes, "the unchanged proof held, parsed nothing, installed no generation, and settled stats and binding")
 	default:
 		tb.Fatalf("%s measurement path %q is not %s or %s", lane, path, managedRefreshPathParse, managedRefreshPathRefresh)
 	}
@@ -791,11 +778,11 @@ func managedRefreshDowngradeAdapter(tb testing.TB, db *store.Store, stored int) 
 }
 
 // managedRefreshStampMetadata rewrites every managed metadata file's adapter
-// revision, forces a context change, and recomputes the metadata hash. A
-// stamp-only change reproduces the active generation, so the integrated
-// metadata-only refresh would report unchanged and install nothing; the forced
-// project name is what makes the generation install observable. It returns the
-// file count.
+// revision, forces a context change when a project name is given, and
+// recomputes the metadata hash. A stamp-only change reproduces the active
+// generation, so the unchanged proof settles it and installs nothing; the
+// forced project name fails the proof, so the run parses and installs a new
+// generation. It returns the file count.
 func managedRefreshStampMetadata(tb testing.TB, output string, stored int, projectName string) int {
 	tb.Helper()
 	files, err := managedRefreshMetadataFiles(output)
@@ -1118,9 +1105,9 @@ func managedRefreshEnvBool(tb testing.TB, name string, fallback bool) bool {
 }
 
 // managedRefreshDispositionCount counts index-log reasons that name one
-// metadata-only refresh disposition. The pipeline appends the store's
-// disposition to the reason, so a test can prove the unchanged and installed
-// branches were the ones actually exercised.
+// unchanged-settle disposition. The pipeline appends the store's disposition
+// to the reason, so a test can prove the settle was the branch actually
+// exercised.
 func managedRefreshDispositionCount(reasons map[string]int, disposition string) int {
 	total := 0
 	needle := "(" + disposition + ")"
@@ -1147,7 +1134,7 @@ func managedRefreshCase(tb testing.TB) string {
 }
 
 // managedRefreshPath selects which lane the sample measures: the ordinary parse
-// path or the metadata-only refresh path. It is required so a sample can never
+// path or the unchanged settle path. It is required so a sample can never
 // silently assert the wrong lane.
 func managedRefreshPath(tb testing.TB) string {
 	tb.Helper()
