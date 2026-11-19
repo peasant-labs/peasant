@@ -210,17 +210,15 @@ func durationCorpus(tb testing.TB, root string, entries int, spanNS int64) {
 	if err := os.MkdirAll(workspace, 0o700); err != nil {
 		tb.Fatal(err)
 	}
-	for n := range 1 {
-		id := fmt.Sprintf("bec00000-0000-4000-8000-%012d", n+1)
-		path := filepath.Join(workspace, id+".jsonl")
-		content := durationTranscript(id, entries, filler, spanNS)
-		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-			tb.Fatal(err)
-		}
-		stamp := time.Unix(1_700_000_000+int64(n), 0)
-		if err := os.Chtimes(path, stamp, stamp); err != nil {
-			tb.Fatal(err)
-		}
+	const id = "bec00000-0000-4000-8000-000000000001"
+	path := filepath.Join(workspace, id+".jsonl")
+	content := durationTranscript(id, entries, filler, spanNS)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		tb.Fatal(err)
+	}
+	stamp := time.Unix(1_700_000_000, 0)
+	if err := os.Chtimes(path, stamp, stamp); err != nil {
+		tb.Fatal(err)
 	}
 }
 
