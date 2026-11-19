@@ -1,25 +1,16 @@
 package gitconfig
 
 import (
+	"fmt"
 	"os"
 	"testing"
 )
 
-var testsStarted bool
-
-type recordingRun struct{ m *testing.M }
-
-func (r recordingRun) Run() int {
-	testsStarted = true
-	return r.m.Run()
-}
-
-// TestMain uses the same exit path as other test packages. The test below
-// proves that its runner was invoked; the helper test pins exit-code passthrough.
-func TestMain(m *testing.M) { os.Exit(RunWithIsolatedGitConfig(recordingRun{m})) }
-
-func TestMainRunsTests(t *testing.T) {
-	if !testsStarted {
-		t.Fatal("TestMain did not invoke the test runner")
+// Isolate directly so a broken runner helper cannot skip this package's tests.
+func TestMain(m *testing.M) {
+	if err := isolateGitConfig(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
 	}
+	os.Exit(m.Run())
 }

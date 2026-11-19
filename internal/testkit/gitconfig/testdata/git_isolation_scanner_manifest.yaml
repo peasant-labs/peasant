@@ -13,3 +13,6 @@ requiredNames:
   - an isolating TestMain behind a build constraint is rejected
   - packages that start no process need no isolation
   - nested modules and testdata are not scanned
+  - helper package alone is exempt
+  - other package in helper module is not exempt
+  - same helper directory in another module is not exempt

@@ -8,6 +8,7 @@ cases:
   - name: isolation after goleak is rejected
     input:
       files:
+        go.mod: "module example.com/m\n\ngo 1.25\n"
         tool/tool_test.go: |
           package tool
           import ("os/exec"; "testing")
@@ -25,6 +26,7 @@ cases:
   - name: a discarded isolation result is rejected
     input:
       files:
+        go.mod: "module example.com/m\n\ngo 1.25\n"
         tool/tool_test.go: |
           package tool
           import ("os/exec"; "testing")
@@ -42,6 +44,7 @@ cases:
   - name: a test runner called before isolation is rejected
     input:
       files:
+        go.mod: "module example.com/m\n\ngo 1.25\n"
         tool/tool_test.go: |
           package tool
           import ("os/exec"; "testing")
@@ -59,6 +62,7 @@ cases:
   - name: a prelude before the isolated exit passes
     input:
       files:
+        go.mod: "module example.com/m\n\ngo 1.25\n"
         tool/tool_test.go: |
           package tool
           import ("os/exec"; "testing")
@@ -75,6 +79,7 @@ cases:
   - name: an isolated runner composes with goleak
     input:
       files:
+        go.mod: "module example.com/m\n\ngo 1.25\n"
         tool/tool_test.go: |
           package tool
           import ("os/exec"; "testing")
@@ -281,3 +286,53 @@ cases:
       ref: "a nested module runs its own tests; testdata is not compiled"
     mutation:
       description: "placed unisolated git tests in a nested module and under testdata"
+  - name: helper package alone is exempt
+    input:
+      files:
+        go.mod: "module github.com/peasant-labs/peasant\n\ngo 1.25\n"
+        internal/testkit/gitconfig/tool_test.go: |
+          package tool
+          import "os/exec"
+          var _ = exec.Command
+    expected:
+      needs: [internal/testkit/gitconfig]
+    classification: must-pass
+    provenance:
+      source: boundary
+      ref: "only the helper package may isolate without calling itself"
+    mutation:
+      description: "helper package alone is exempt"
+  - name: other package in helper module is not exempt
+    input:
+      files:
+        go.mod: "module github.com/peasant-labs/peasant\n\ngo 1.25\n"
+        other/testutil/tool_test.go: |
+          package tool
+          import "os/exec"
+          var _ = exec.Command
+    expected:
+      needs: [other/testutil]
+      violations: [other/testutil]
+    classification: must-fail
+    provenance:
+      source: boundary
+      ref: "only the helper package may isolate without calling itself"
+    mutation:
+      description: "other package in helper module is not exempt"
+  - name: same helper directory in another module is not exempt
+    input:
+      files:
+        go.mod: "module example.com/unrelated\n\ngo 1.25\n"
+        internal/testkit/gitconfig/tool_test.go: |
+          package tool
+          import "os/exec"
+          var _ = exec.Command
+    expected:
+      needs: [internal/testkit/gitconfig]
+      violations: [internal/testkit/gitconfig]
+    classification: must-fail
+    provenance:
+      source: boundary
+      ref: "only the helper package may isolate without calling itself"
+    mutation:
+      description: "same helper directory in another module is not exempt"

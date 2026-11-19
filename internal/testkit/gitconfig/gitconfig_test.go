@@ -111,11 +111,13 @@ func TestIsolatedChildGitReadsNoHostileSource(t *testing.T) {
 type fakeTestRun struct {
 	code   int
 	ran    bool
+	calls  int
 	global string
 }
 
 func (f *fakeTestRun) Run() int {
 	f.ran = true
+	f.calls++
 	f.global = os.Getenv("GIT_CONFIG_GLOBAL")
 	return f.code
 }
@@ -128,8 +130,8 @@ func TestRunWithIsolatedGitConfigRunsTheTestsIsolated(t *testing.T) {
 	if got := RunWithIsolatedGitConfig(fake); got != fake.code {
 		t.Errorf("exit code = %d, want the tests' own %d", got, fake.code)
 	}
-	if !fake.ran {
-		t.Fatal("the tests were never run")
+	if fake.calls != 1 {
+		t.Fatalf("runner calls = %d, want exactly one", fake.calls)
 	}
 	if fake.global != os.DevNull {
 		t.Errorf("tests ran with GIT_CONFIG_GLOBAL=%q, want %q", fake.global, os.DevNull)
@@ -173,5 +175,16 @@ func TestGoleakRunnerReportsLeaks(t *testing.T) {
 	<-done
 	if code != 1 || !fake.ran {
 		t.Fatalf("goleak runner returned %d (ran: %t), want 1 for the leaked goroutine", code, fake.ran)
+	}
+}
+
+// A failed isolation must never invoke the runner or report success.
+func TestRunWithIsolatedGitConfigFailsClosed(t *testing.T) {
+	const invalidKey = "INVALID=GIT_KEY"
+	isolatedGitSet[invalidKey] = "value"
+	defer delete(isolatedGitSet, invalidKey)
+	fake := &fakeTestRun{code: 7}
+	if code := RunWithIsolatedGitConfig(fake); code == 0 || fake.calls != 0 {
+		t.Fatalf("isolation failure returned %d and ran the runner %d times; want non-zero and zero runs", code, fake.calls)
 	}
 }

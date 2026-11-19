@@ -60,10 +60,26 @@ type gitIsolationReport struct {
 // of them with no TestMain calling the helper. A TestMain in a file with a
 // build constraint does not count: it may not be compiled on every platform.
 func scanGitIsolation(root string) (gitIsolationReport, error) {
+	moduleFile, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		return gitIsolationReport{}, fmt.Errorf("scan git isolation: read go.mod: %w", err)
+	}
+	const moduleDirective = "module"
+	modulePath := ""
+	for _, line := range strings.Split(string(moduleFile), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[0] == moduleDirective {
+			modulePath = strings.Trim(fields[1], `"`)
+			break
+		}
+	}
+	if modulePath == "" {
+		return gitIsolationReport{}, fmt.Errorf("scan git isolation: missing module directive in %s", root)
+	}
 	needs := map[string]bool{}
 	isolated := map[string]bool{}
 	fset := token.NewFileSet()
-	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -108,7 +124,9 @@ func scanGitIsolation(root string) (gitIsolationReport, error) {
 	var report gitIsolationReport
 	for pkg := range needs {
 		report.Needs = append(report.Needs, pkg)
-		if !isolated[pkg] {
+		// The helper package isolates directly so its tests cannot be skipped by a broken helper.
+		helperPackage := modulePath == "github.com/peasant-labs/peasant" && pkg == "internal/testkit/gitconfig"
+		if !isolated[pkg] && !helperPackage {
 			report.Violations = append(report.Violations, pkg)
 		}
 	}
