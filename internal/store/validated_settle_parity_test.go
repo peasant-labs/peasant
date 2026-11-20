@@ -32,6 +32,13 @@ var validatedSettleParityYAML []byte
 // parityStatsStamp pins the settle's stats stamp in both forks.
 const parityStatsStamp = 1_800_000_000_000
 
+// The two settle runs of the parity test; the mutation runs are named by the
+// fixture.
+const (
+	parityProvenRun    = "proven"
+	parityValidatedRun = "validated"
+)
+
 const paritySession = "abc00000-0000-4000-8000-000000000101"
 
 // parityTranscript is a synthetic Claude session; it carries no user data.
@@ -317,7 +324,7 @@ func TestValidatedSettleWritesLikeTheProvenSettle(t *testing.T) {
 	if out, err := exec.Command("cp", "-a", output, outputBackup).CombinedOutput(); err != nil {
 		t.Fatalf("snapshot the managed tree: %v: %s", err, out)
 	}
-	runs := append([]string{"proven", "validated"}, fixture.Mutations...)
+	runs := append([]string{parityProvenRun, parityValidatedRun}, fixture.Mutations...)
 	var forks []string
 	for _, run := range runs {
 		forks = append(forks, filepath.Join(root, run, "peasant.db"))
@@ -336,7 +343,7 @@ func TestValidatedSettleWritesLikeTheProvenSettle(t *testing.T) {
 		}
 		t.Run(run, func(t *testing.T) {
 			db := openParityStore(t, forks[i], output)
-			if run != "proven" {
+			if run != parityProvenRun {
 				parityForgeMetadataHash(t, db)
 			}
 			if slices.Contains(fixture.Mutations, run) {
@@ -347,10 +354,10 @@ func TestValidatedSettleWritesLikeTheProvenSettle(t *testing.T) {
 			if wrapped.settled != 1 || wrapped.settleErr != nil {
 				t.Fatalf("settles %d, error %v; want one settle", wrapped.settled, wrapped.settleErr)
 			}
-			if run == "proven" && wrapped.validation != nil {
+			if run == parityProvenRun && wrapped.validation != nil {
 				t.Fatalf("the proven fork asked the validator: %+v", wrapped.validation)
 			}
-			if run != "proven" && (wrapped.validation == nil || wrapped.validation.Outcome != ingest.ValidationProven || wrapped.validated == nil) {
+			if run != parityProvenRun && (wrapped.validation == nil || wrapped.validation.Outcome != ingest.ValidationProven || wrapped.validated == nil) {
 				t.Fatalf("the forged fork did not validate: %+v", wrapped.validation)
 			}
 			if err := db.Close(); err != nil {
@@ -362,11 +369,11 @@ func TestValidatedSettleWritesLikeTheProvenSettle(t *testing.T) {
 	if t.Failed() {
 		return
 	}
-	if got := parityDifferences(dumps["proven"], dumps["validated"], fixture.DrainClockColumns); !slices.Equal(got, fixture.AllowedDifferences) {
+	if got := parityDifferences(dumps[parityProvenRun], dumps[parityValidatedRun], fixture.DrainClockColumns); !slices.Equal(got, fixture.AllowedDifferences) {
 		t.Fatalf("the validated settle wrote differently from the proven settle: differing columns %v, want only %v", got, fixture.AllowedDifferences)
 	}
 	for _, mutation := range fixture.Mutations {
-		if got := parityDifferences(dumps["proven"], dumps[mutation], fixture.DrainClockColumns); slices.Equal(got, fixture.AllowedDifferences) {
+		if got := parityDifferences(dumps[parityProvenRun], dumps[mutation], fixture.DrainClockColumns); slices.Equal(got, fixture.AllowedDifferences) {
 			t.Errorf("mutation %s left the stores in parity; the parity test cannot see that write", mutation)
 		} else {
 			t.Logf("mutation %s differs in %v", mutation, got)

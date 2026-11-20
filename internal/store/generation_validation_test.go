@@ -27,17 +27,51 @@ var validationTermsManifestYAML []byte
 //go:embed testdata/refresh_read_slots.yaml
 var refreshReadSlotsYAML []byte
 
+// The closed vocabularies of validation_terms.yaml.
+type (
+	validationCaseKind      string
+	validationCaseCandidate string
+	validationCaseSetup     string
+	validationCaseBetween   string
+	validationCaseValidated string
+)
+
+const (
+	validationKindCheapOrder validationCaseKind = "cheap-order"
+	validationKindValidate   validationCaseKind = "validate"
+	validationKindSettle     validationCaseKind = "settle"
+
+	validationCandidateStored       validationCaseCandidate = "stored"
+	validationCandidateNone         validationCaseCandidate = "none"
+	validationCandidateContentDiffs validationCaseCandidate = "content-hash-differs"
+
+	validationSetupStatsOverflow validationCaseSetup = "stats-overflow-diagnostic"
+
+	validationBetweenInsertCommit    validationCaseBetween = "insert-commit"
+	validationBetweenActivateAnother validationCaseBetween = "activate-another"
+
+	validationValidatedActive validationCaseValidated = "active"
+	validationValidatedOther  validationCaseValidated = "other"
+
+	// forgedMetadataTriggerRestored is the mutation that forges the stored
+	// metadata_hash with the immutability trigger restored.
+	forgedMetadataTriggerRestored = "forged-metadata-trigger-restored"
+	// The settle outcomes of a settle case.
+	validationSettleSettled = "settled"
+	validationSettleRefused = "refused"
+)
+
 type validationTermsCase struct {
-	Name                string `yaml:"name"`
-	Kind                string `yaml:"kind"`
-	Mutation            string `yaml:"mutation"`
-	Candidate           string `yaml:"candidate"`
-	Setup               string `yaml:"setup"`
-	Between             string `yaml:"between"`
-	ValidatedGeneration string `yaml:"validatedGeneration"`
-	SkipValidation      bool   `yaml:"skipValidation"`
-	Outcome             string `yaml:"outcome"`
-	Mismatch            string `yaml:"mismatch"`
+	Name                string                  `yaml:"name"`
+	Kind                validationCaseKind      `yaml:"kind"`
+	Mutation            string                  `yaml:"mutation"`
+	Candidate           validationCaseCandidate `yaml:"candidate"`
+	Setup               validationCaseSetup     `yaml:"setup"`
+	Between             validationCaseBetween   `yaml:"between"`
+	ValidatedGeneration validationCaseValidated `yaml:"validatedGeneration"`
+	SkipValidation      bool                    `yaml:"skipValidation"`
+	Outcome             string                  `yaml:"outcome"`
+	Mismatch            string                  `yaml:"mismatch"`
 }
 
 func loadValidationTermsCases(t *testing.T) []validationTermsCase {
@@ -187,11 +221,11 @@ func TestManagedGenerationContextValidation(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.Name, func(t *testing.T) {
 			switch c.Kind {
-			case "cheap-order":
+			case validationKindCheapOrder:
 				runCheapOrderCase(t, shared)
-			case "validate":
+			case validationKindValidate:
 				runValidateCase(t, c)
-			case "settle":
+			case validationKindSettle:
 				runValidatedSettleCase(t, c)
 			default:
 				t.Fatalf("unknown case kind %q", c.Kind)
@@ -234,7 +268,7 @@ func prepareValidationCase(t *testing.T, c validationTermsCase) (*Store, Managed
 	candidate := storedValidationCandidate(t, s, p)
 	switch c.Mutation {
 	case "":
-	case "forged-metadata-trigger-restored":
+	case forgedMetadataTriggerRestored:
 		forgeMetadataHashTriggerRestored(t, s, p)
 		if proof, err := s.ProveManagedGenerationUnchanged(context.Background(), p); err != nil || proof.Mismatch != ingest.UnchangedNotProvenMetadata {
 			t.Fatalf("a forged metadata hash must fail the cheap proof on metadata-context: %+v, %v", proof, err)
@@ -244,17 +278,17 @@ func prepareValidationCase(t *testing.T, c validationTermsCase) (*Store, Managed
 	}
 	switch c.Setup {
 	case "":
-	case "stats-overflow-diagnostic":
+	case validationSetupStatsOverflow:
 		execTestSQL(t, s, `INSERT INTO session_generation_diagnostics(session_id,generation_id,ordinal,error_type,location,message,remediation) VALUES(?,?,0,'stats-overflow','stats','synthetic overflow','none')`, string(p.SessionID), p.GenerationID)
 	default:
 		t.Fatalf("unknown setup %q", c.Setup)
 	}
 	switch c.Candidate {
-	case "stored":
+	case validationCandidateStored:
 		return s, p, &candidate
-	case "none":
+	case validationCandidateNone:
 		return s, p, nil
-	case "content-hash-differs":
+	case validationCandidateContentDiffs:
 		candidate.Metadata.ContentHash = strings.Repeat("c", 64)
 		return s, p, &candidate
 	default:
@@ -322,17 +356,17 @@ func runValidatedSettleCase(t *testing.T, c validationTermsCase) {
 	}
 	validated := &ingest.ValidatedContext{GenerationID: p.GenerationID, Candidate: *candidate}
 	switch c.ValidatedGeneration {
-	case "active":
-	case "other":
+	case validationValidatedActive:
+	case validationValidatedOther:
 		validated.GenerationID = "another-generation"
 	default:
 		t.Fatalf("unknown validated generation %q", c.ValidatedGeneration)
 	}
 	switch c.Between {
 	case "":
-	case "insert-commit":
+	case validationBetweenInsertCommit:
 		execTestSQL(t, s, `INSERT INTO session_generation_commits(session_id,generation_id,ordinal,hash,message,author_name,author_email,commit_time,author_time) VALUES(?,?,0,?,'synthetic','a','a@example.invalid',1,1)`, string(p.SessionID), p.GenerationID, strings.Repeat("e", 40))
-	case "activate-another":
+	case validationBetweenActivateAnother:
 		next, blobs := buildTestGeneration(t, p.SessionID, "unchanged_next", "another body", "another input", "another output")
 		next.Generation.Metadata.ContentHash = strings.Repeat("b", 64)
 		next = filledCandidateForValidation(t, next, blobs)
@@ -351,7 +385,7 @@ func runValidatedSettleCase(t *testing.T, c validationTermsCase) {
 	p.UpdatedAtMs = 777
 	result, err := s.SettleManagedGenerationUnchanged(context.Background(), p)
 	switch c.Outcome {
-	case "settled":
+	case validationSettleSettled:
 		if err != nil || result.GenerationID != p.GenerationID {
 			t.Fatalf("validated settle = %+v, %v; want the active generation %s", result, err, p.GenerationID)
 		}
@@ -364,7 +398,7 @@ func runValidatedSettleCase(t *testing.T, c validationTermsCase) {
 			t.Fatalf("index state after the validated settle = %+v, %v", state, err)
 		}
 		assertNoNewGenerationRow(t, before, dumpStoreRows(t, s))
-	case "refused":
+	case validationSettleRefused:
 		var stale *ingest.StaleIndexWorkError
 		if !errors.As(err, &stale) {
 			t.Fatalf("validated settle error = %v (result %+v), want a stale-work refusal", err, result)

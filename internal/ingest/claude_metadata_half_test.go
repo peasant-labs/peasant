@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
@@ -93,6 +94,18 @@ type claudeHalfCorpusRow struct {
 }
 
 const moduleRootFromIngest = "../.."
+
+// claudeFixturePathMarker marks a fixture path as Claude's: every Claude
+// transcript fixture directory names the harness by its short identifier.
+var claudeFixturePathMarker = string(defaults.LegacyHarnessClaude)
+
+// claudeSubagentsDirName is the directory a Claude subagent transcript sits
+// in, under its owner's directory.
+const claudeSubagentsDirName = "subagents"
+
+// corpusWalkSkippedDirs are the repository directories the fixture-corpus
+// walk never enters: no Go test fixture lives in them.
+var corpusWalkSkippedDirs = []string{".git", "node_modules", "web", "third_party"}
 
 func loadClaudeMetadataHalfDocument(t *testing.T) claudeMetadataHalfDocument {
 	t.Helper()
@@ -198,7 +211,7 @@ func claudeFileFixtureInput(t *testing.T, rel string) (*ingest.ClaudeIndexer, in
 	}
 	sid := strings.TrimSuffix(filepath.Base(abs), ".jsonl")
 	metadata := makeReindexMeta(t, sid, abs)
-	if filepath.Base(filepath.Dir(abs)) == "subagents" {
+	if filepath.Base(filepath.Dir(abs)) == claudeSubagentsDirName {
 		parent, err := ingest.NewSessionID(filepath.Base(filepath.Dir(filepath.Dir(abs))))
 		if err != nil {
 			t.Fatalf("subagent owner of %s: %v", rel, err)
@@ -239,8 +252,7 @@ func TestClaudeTranscriptFixtureCorpusIsComplete(t *testing.T) {
 		}
 		rel = filepath.ToSlash(rel)
 		if entry.IsDir() {
-			switch entry.Name() {
-			case ".git", "node_modules", "web", "third_party":
+			if slices.Contains(corpusWalkSkippedDirs, entry.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -248,7 +260,7 @@ func TestClaudeTranscriptFixtureCorpusIsComplete(t *testing.T) {
 		if !strings.Contains(rel, "/testdata/") {
 			return nil
 		}
-		if strings.HasSuffix(rel, ".jsonl") && strings.Contains(strings.ToLower(rel), "claude") {
+		if strings.HasSuffix(rel, ".jsonl") && strings.Contains(strings.ToLower(rel), claudeFixturePathMarker) {
 			listed := false
 			for _, dir := range manifest.Directories {
 				if strings.HasPrefix(rel, dir+"/") {

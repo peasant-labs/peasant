@@ -33,14 +33,36 @@ type oracleCorpusFile struct {
 	Transcript string `yaml:"transcript"`
 }
 
+// oracleParse is what fork P's parse did to one session.
+type oracleParse string
+
+const (
+	oracleParseSkip    oracleParse = "skip"
+	oracleParseInstall oracleParse = "install"
+	oracleParseRefuse  oracleParse = "refuse"
+)
+
+// oracleNotAsked is fork V's answer for a session the refresh never brought
+// to the validator.
+const oracleNotAsked = "not-asked"
+
+// oracleChange is the change a named case makes to the recorded metadata.
+type oracleChange string
+
+const (
+	oracleChangeNone              oracleChange = "none"
+	oracleChangeRecordStartedBy   oracleChange = "record-started-by"
+	oracleChangeRecordContextFrom oracleChange = "record-context-from"
+)
+
 type oracleExpectation struct {
-	Validator string `yaml:"validator"`
-	Parse     string `yaml:"parse"`
+	Validator string      `yaml:"validator"`
+	Parse     oracleParse `yaml:"parse"`
 }
 
 type oracleCase struct {
 	Name                   string                       `yaml:"name"`
-	Change                 string                       `yaml:"change"`
+	Change                 oracleChange                 `yaml:"change"`
 	Sessions               []string                     `yaml:"sessions"`
 	SeedWithout            []string                     `yaml:"seedWithout"`
 	CreateBeforeRefresh    []string                     `yaml:"createBeforeRefresh"`
@@ -103,18 +125,15 @@ func loadOracleDocument(t *testing.T) oracleDocument {
 }
 
 // metadataLeafPaths reflects schema.UnifiedMetadata into its leaves, named by
-// their dotted JSON paths: a struct (or pointer to a struct) is descended, and
-// everything else is a leaf.
+// their dotted Go field paths: a struct (or pointer to a struct) is descended,
+// and everything else is a leaf.
 func metadataLeafPaths(t reflect.Type, prefix string, out *[]string) {
 	for i := range t.NumField() {
 		field := t.Field(i)
-		name := strings.Split(field.Tag.Get("json"), ",")[0]
-		if name == "-" || !field.IsExported() {
+		if !field.IsExported() {
 			continue
 		}
-		if name == "" {
-			name = field.Name
-		}
+		name := field.Name
 		kind := field.Type
 		if kind.Kind() == reflect.Pointer && kind.Elem().Kind() == reflect.Struct {
 			kind = kind.Elem()
@@ -153,7 +172,7 @@ func loadMetadataInventory(t *testing.T) []metadataInventoryRow {
 	return fixture.Fields
 }
 
-// metadataLeaf resolves a dotted JSON path to the settable value of one leaf,
+// metadataLeaf resolves a dotted Go field path to the settable value of one leaf,
 // allocating a nil pointer-to-struct on the way.
 func metadataLeaf(metadata *schema.UnifiedMetadata, path string) (reflect.Value, error) {
 	value := reflect.ValueOf(metadata).Elem()
@@ -164,22 +183,11 @@ func metadataLeaf(metadata *schema.UnifiedMetadata, path string) (reflect.Value,
 			}
 			value = value.Elem()
 		}
-		found := false
-		for i := range value.NumField() {
-			field := value.Type().Field(i)
-			name := strings.Split(field.Tag.Get("json"), ",")[0]
-			if name == "" {
-				name = field.Name
-			}
-			if name == part {
-				value = value.Field(i)
-				found = true
-				break
-			}
-		}
-		if !found {
+		field := value.FieldByName(part)
+		if !field.IsValid() {
 			return reflect.Value{}, &json.UnsupportedValueError{Str: "no field " + part + " in " + path}
 		}
+		value = field
 	}
 	return value, nil
 }
@@ -290,25 +298,25 @@ func seedOracleStore(t *testing.T, document oracleDocument, c oracleCase) oracle
 		switch {
 		case c.inventory != nil:
 			applyInventoryMutation(t, *c.inventory, sid, metadata)
-		case c.Change == "record-context-from":
+		case c.Change == oracleChangeRecordContextFrom:
 			source := schema.SessionID("22222222-2222-4222-8222-222222222222")
 			metadata.Relationships = append(metadata.Relationships, schema.SessionRelationship{
 				Kind: schema.SessionRelationshipContextFrom, TargetState: schema.RelationshipTargetKnown,
 				TargetLocalID: &source, Evidence: schema.EvidenceNativeTyped,
 				Anchor: &schema.PublicSourceAnchor{Kind: schema.PublicSourceAnchorGeneral},
 			})
-		case c.Change == "record-started-by":
+		case c.Change == oracleChangeRecordStartedBy:
 			owner := schema.SessionID("22222222-2222-4222-8222-222222222222")
 			metadata.Relationships = append(metadata.Relationships, schema.SessionRelationship{
 				Kind: schema.SessionRelationshipStartedBy, TargetState: schema.RelationshipTargetKnown,
 				TargetLocalID: &owner, Evidence: schema.EvidenceNativeTyped,
 			})
-		case c.Change == "none" || c.Change == "":
+		case c.Change == oracleChangeNone || c.Change == "":
 		default:
 			t.Fatalf("unknown oracle change %q", c.Change)
 		}
 	}, c.Sessions...)
-	if c.inventory != nil && c.inventory.Field == "metadataHash" {
+	if c.inventory != nil && c.inventory.Field == "MetadataHash" {
 		// The rewrite re-seals the hash; this row forges it after.
 		rewriteManagedMetadataRaw(t, seed.output, func(document map[string]any) {
 			var forged string
@@ -397,25 +405,25 @@ func oracleActiveGenerations(t *testing.T, db *store.Store) map[string]string {
 }
 
 // oracleParseOutcome reads what fork P's parse did to one session.
-func oracleParseOutcome(t *testing.T, seed oracleSeed, result *ingest.PipelineResult, sid string) string {
+func oracleParseOutcome(t *testing.T, seed oracleSeed, result *ingest.PipelineResult, sid string) oracleParse {
 	t.Helper()
 	for _, entry := range result.IndexLog {
 		if string(entry.SessionID) == sid && entry.Reason != nil && *entry.Reason == "projection unchanged" {
-			return "skip"
+			return oracleParseSkip
 		}
 	}
 	after := oracleActiveGenerations(t, seed.db)
 	if after[sid] != "" && after[sid] != seed.before[sid] {
-		return "install"
+		return oracleParseInstall
 	}
-	return "refuse"
+	return oracleParseRefuse
 }
 
 // oracleValidatorOutcome reads fork V's validator answer for one session.
 func oracleValidatorOutcome(store *halfValidatingStore, sid string) string {
 	result, asked := store.outcome(ingest.SessionID(sid))
 	if !asked {
-		return "not-asked"
+		return oracleNotAsked
 	}
 	return string(result.Outcome)
 }
@@ -466,10 +474,10 @@ func oracleViolations(observed oracleObservation) []string {
 	var violations []string
 	for sid, o := range observed {
 		proven := o.Validator == string(ingest.ValidationProven)
-		unsupported := o.Validator == string(ingest.ValidationUnsupported) || o.Validator == "not-asked"
-		skip := o.Parse == "skip"
+		unsupported := o.Validator == string(ingest.ValidationUnsupported) || o.Validator == oracleNotAsked
+		skip := o.Parse == oracleParseSkip
 		if proven && !skip {
-			violations = append(violations, sid+": proven but the parse did not skip ("+o.Parse+")")
+			violations = append(violations, sid+": proven but the parse did not skip ("+string(o.Parse)+")")
 		}
 		if skip && !unsupported && !proven {
 			violations = append(violations, sid+": the parse skipped but the validator answered "+o.Validator)
@@ -554,7 +562,7 @@ func TestValidatedSettleCandidateWindow(t *testing.T) {
 	for _, w := range document.Windows {
 		t.Run(w.Name, func(t *testing.T) {
 			t.Parallel()
-			seed := seedOracleStore(t, document, oracleCase{Name: w.Name, Change: "none"})
+			seed := seedOracleStore(t, document, oracleCase{Name: w.Name, Change: oracleChangeNone})
 			validating := newHalfValidatingStore(seed.db, seed.output, &ingest.OSFileSystem{})
 			validating.forceValidation = true
 			sid := ingest.SessionID(w.Session)
