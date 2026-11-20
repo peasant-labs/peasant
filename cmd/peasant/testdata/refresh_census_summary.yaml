@@ -29,5 +29,5 @@ cases:
     census: true
     empty: true
     forecast: true
-    contains: ["refresh census: 0 sessions"]
+    contains: ["refresh census: 0 sessions (forecast)"]
     absent: ["forecast (not stored"]
