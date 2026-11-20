@@ -410,24 +410,34 @@ func (s UpgradeStep) rebuildsSearchIndex() bool {
 }
 
 // searchRebuildEstimateOnConn estimates the whole search index rebuild from
-// the current index's size, which the plan reads from two rows of the
-// index (fts5IndexBytesOnConn), at the fastest and slowest rebuild rates
-// measured for it (defaults.StoreUpgradeSearchRebuildIndexBytesPerSecond*).
-// The rebuild re-tokenizes the same text, so the stale index predicts the
-// rebuilt one. An index whose size cannot be read gets no estimate; the step
-// is still planned as long.
+// the current index's size, which the plan reads from two rows of the index
+// (fts5IndexBytesOnConn). The rebuild re-tokenizes the same text, so the
+// stale index predicts the rebuilt one. An index whose size cannot be read
+// gets no estimate; the step is still planned as long.
 func searchRebuildEstimateOnConn(conn *sqlite.Conn) UpgradeEstimate {
 	basis, err := fts5IndexBytesOnConn(conn, "session_search_fts")
-	if err != nil || basis <= 0 {
+	if err != nil {
+		return UpgradeEstimate{}
+	}
+	return searchRebuildEstimate(basis)
+}
+
+// searchRebuildEstimate is the band for a search index of basis bytes: the
+// basis at the fastest and the slowest rebuild rate measured for it
+// (defaults.StoreUpgradeSearchRebuildIndexBytesPerSecond*). An index larger
+// than the largest measured one is marked extrapolated. A basis of zero or
+// less has no estimate.
+func searchRebuildEstimate(basis int64) UpgradeEstimate {
+	if basis <= 0 {
 		return UpgradeEstimate{}
 	}
 	at := func(bytesPerSecond int64) time.Duration {
 		return time.Duration(float64(basis) / float64(bytesPerSecond) * float64(time.Second))
 	}
 	return UpgradeEstimate{
-		BasisBytes: basis,
-		Low:        at(defaults.StoreUpgradeSearchRebuildIndexBytesPerSecondFast),
-		High:       at(defaults.StoreUpgradeSearchRebuildIndexBytesPerSecondSlow),
+		Low:          at(defaults.StoreUpgradeSearchRebuildIndexBytesPerSecondFast),
+		High:         at(defaults.StoreUpgradeSearchRebuildIndexBytesPerSecondSlow),
+		Extrapolated: basis > defaults.StoreUpgradeSearchRebuildMeasuredIndexBytes,
 	}
 }
 

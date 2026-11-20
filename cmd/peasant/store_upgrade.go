@@ -397,17 +397,24 @@ func storeUpgradeCostLabel(cost store.UpgradeCost) string {
 
 // storeUpgradeEstimateLabel renders a step's estimate as a band in whole
 // minutes, or as "under a minute" when even its slow end is shorter. It says
-// "estimate" so it is never read as a measurement of this run.
+// "estimate" so it is never read as a measurement of this run, and says when
+// the store is larger than any the band was measured on.
 func storeUpgradeEstimateLabel(estimate store.UpgradeEstimate) string {
-	if estimate.High < time.Minute {
-		return "estimate: under a minute"
-	}
+	var label string
 	low := max(int64(estimate.Low/time.Minute), 1)
 	high := int64((estimate.High + time.Minute - 1) / time.Minute)
-	if low >= high {
-		return fmt.Sprintf("estimate: about %d minute(s)", high)
+	switch {
+	case estimate.High < time.Minute:
+		label = "estimate: under a minute"
+	case low >= high:
+		label = fmt.Sprintf("estimate: about %d minute(s)", high)
+	default:
+		label = fmt.Sprintf("estimate: %d to %d minutes", low, high)
 	}
-	return fmt.Sprintf("estimate: %d to %d minutes", low, high)
+	if estimate.Extrapolated {
+		label += ", not measured on an index this large"
+	}
+	return label
 }
 
 // storeUpgradeProgressMode chooses who renders an upgrade's progress. The

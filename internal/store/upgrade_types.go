@@ -186,12 +186,12 @@ type UpgradeStep struct {
 // step's basis divided by the fastest and the slowest rate measured for it.
 // It is an estimate, not a bound: a slower or busier machine takes longer.
 type UpgradeEstimate struct {
-	// BasisBytes is the size the estimate divides: for the search index
-	// rebuild, the search index's size read from its structure record.
-	BasisBytes int64
 	// Low and High bound the band: the basis at the fastest and at the
 	// slowest measured rate.
 	Low, High time.Duration
+	// Extrapolated says the basis is larger than any measured: the band is
+	// carried past the measurements and can be short.
+	Extrapolated bool
 }
 
 // Known reports whether the step has an estimate.

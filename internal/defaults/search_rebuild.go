@@ -35,17 +35,24 @@ const SearchRebuildHashBytes = 64 << 20
 // record, the estimate's basis) rebuilt per second at the widened budget.
 // The plan shows the basis divided by each, as a band.
 //
-// Derivation, from the measurement above on the 2.1 GB store (1,289,506,144
-// index bytes): the fast rate is the fastest run of the bare statement,
-// 130 s (9.9 MB/s); the slow rate is the slowest run of the whole upgrade
-// step, 460 s at load average 14 (2.8 MB/s; the three step runs took 221,
-// 270 and 460 s). The per-byte rate still falls as the index grows (merges
-// past the budget), and the test machine was shared: the one real data
-// point, a 21,462-session store whose 4.3 GB index rebuilt at FTS5's default
-// budget in 22m7s (3.2 MB/s), ran about twice as fast as this machine did at
-// that budget on a third of that index (1.9 MB/s). So the band is an
-// estimate from two machines, not a bound.
+// Derivation, from the whole upgrade step (76) on the 2.1 GB store
+// (1,289,506,144 index bytes), six runs over two sessions on 2026-11-19 at
+// load average 3.5 to 22: 91, 100, 125, 221, 270 and 460 s. The fast rate is
+// the fastest run (91 s, 14.1 MB/s); the slow rate is the slowest (460 s at
+// load average 14, 2.8 MB/s). The per-byte rate still falls as the index
+// grows (merges past the budget), and the test machine was shared: the one
+// real data point, a 21,462-session store whose 4.3 GB index rebuilt at
+// FTS5's default budget in 22m7s (3.2 MB/s), ran about twice as fast as
+// this machine did at that budget on a third of that index (1.9 MB/s). So
+// the band is an estimate from two machines, not a bound.
 const (
-	StoreUpgradeSearchRebuildIndexBytesPerSecondFast int64 = 9_900_000
+	StoreUpgradeSearchRebuildIndexBytesPerSecondFast int64 = 14_100_000
 	StoreUpgradeSearchRebuildIndexBytesPerSecondSlow int64 = 2_800_000
+
+	// StoreUpgradeSearchRebuildMeasuredIndexBytes is the largest search
+	// index the rates were measured on (the 2.1 GB store above). The plan
+	// marks the estimate of a larger index as carried past the measurements:
+	// the per-byte rate still falls as the index grows, so its band can be
+	// short.
+	StoreUpgradeSearchRebuildMeasuredIndexBytes int64 = 1_289_506_144
 )
