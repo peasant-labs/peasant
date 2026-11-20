@@ -363,12 +363,13 @@ type Pipeline struct {
 	runLockPath   string
 	runLockNoWait bool
 
-	fs       FileSystem
-	git      GitResolver
-	adapters map[Harness]AdapterFactory
-	config   PipelineConfig
-	store    SessionStore // nil = skip DB insert (backward compatible)
-	salt     salt.Salt    // per-installation HMAC salt for project hash derivation
+	fs             FileSystem
+	git            GitResolver
+	adapters       map[Harness]AdapterFactory
+	config         PipelineConfig
+	progressLogger *slog.Logger
+	store          SessionStore // nil = skip DB insert (backward compatible)
+	salt           salt.Salt    // per-installation HMAC salt for project hash derivation
 
 	// adapterCapabilities caches what each registered adapter declares, read
 	// once per harness by adapterCapabilityFor. The factory's inputs are
@@ -5016,7 +5017,11 @@ func (p *Pipeline) indexComputeAndFinalize(
 		// bytes actually parsed. Unknown prior sizes make the total unknown.
 		sizes := make(map[SessionID]int64, len(indexSessions))
 		var totalBytes, priorBytes int64
-		known := prog != nil && indexProgressLogsPaired(slog.Default(), len(priorIndexLogEntries), priorDone)
+		logger := p.progressLogger
+		if logger == nil {
+			logger = slog.Default()
+		}
+		known := prog != nil && indexProgressLogsPaired(logger, len(priorIndexLogEntries), priorDone)
 		if known {
 			for _, log := range priorIndexLogEntries {
 				if log.Bytes == nil || *log.Bytes <= 0 || *log.Bytes > int64(^uint64(0)>>1)-priorBytes {

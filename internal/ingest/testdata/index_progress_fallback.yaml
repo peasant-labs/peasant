@@ -1,0 +1,6 @@
+name: missing-prior-log
+streamedOutcomes: 2
+priorLogs: 1
+diagnostic: "streamed_outcomes=2 index_logs=1"
+wantDone: 2
+wantTotal: 2
