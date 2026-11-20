@@ -468,7 +468,10 @@ generation on a reader connection. A match is checked again under the session
 lock before settlement. The same candidate is used for both checks.
 
 An unsupported indexer, a changed context, a read error, or a refused settlement
-falls back to parsing. A non-context mismatch goes straight to parsing, as do
+falls back to parsing. Today only the Claude Code indexer builds a metadata
+candidate. A session whose generation records two or more relationships also
+parses: the stored relationship read does not return each relationship's
+position, so neither the parse's own skip nor this comparison can match it. A non-context mismatch goes straight to parsing, as do
 explicit rebuilds and runs with refresh skips disabled. No stored generation is
 copied. The reader concurrency bound is defined by
 `defaults.ManagedRefreshReadSlots` and the store connection pool.
