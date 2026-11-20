@@ -312,7 +312,33 @@ func TestManagedGenerationUnchangedProofPipelineRoutes(t *testing.T) {
 		}
 		t.Fatal("missing proof profile stage")
 	}
+	flagRoute := func(reindex bool, configure func(*ingest.PipelineConfig)) func(*testing.T) {
+		return func(t *testing.T) {
+			source, output, _, _, db, _ := setup(t)
+			if reindex {
+				conn, err := db.Pool().Take(t.Context())
+				if err != nil {
+					t.Fatal(err)
+				}
+				err = sqlitex.Execute(conn, `UPDATE sessions SET index_version = 0`, nil)
+				db.Pool().Put(conn)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			counted := &proofCountingRefreshStore{Store: db, contextUnproven: true}
+			var parses, builds atomic.Int64
+			var transcript []byte
+			result := runManagedRefreshPipelineConfigured(t, counted, source, output, &parses, &builds, &transcript, &ingest.OSFileSystem{}, &ingest.IndexProfiler{}, ingest.DefaultAdapterRegistry, configure)
+			if result.Summary.Errors != 0 || counted.proofs.Load() != 0 || counted.validationCalls.Load() != 0 || builds.Load() != 1 {
+				t.Fatalf("summary %+v proofs %d validations %d builds %d", result.Summary, counted.proofs.Load(), counted.validationCalls.Load(), builds.Load())
+			}
+		}
+	}
 	routes := map[string]func(*testing.T){
+		"disable-refresh-skips-never-validates": flagRoute(false, func(cfg *ingest.PipelineConfig) { cfg.DisableRefreshSkips = true }),
+		"force-never-validates":                 flagRoute(false, func(cfg *ingest.PipelineConfig) { cfg.Force = true }),
+		"reindex-never-validates":               flagRoute(true, func(cfg *ingest.PipelineConfig) { cfg.Reindex = true }),
 		"proven": func(t *testing.T) {
 			source, output, empty, id, db, _ := setup(t)
 			before := managedRefreshPipelineRows(t, db, `SELECT c.turn_count || ':' || c.conversation_turn_count || ':' || c.input_submission_count || ':' || s.input_submission_count FROM sessions s JOIN session_captured_stats c USING (session_id) WHERE s.session_id = ?`, id)
