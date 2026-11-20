@@ -119,7 +119,6 @@ rules:
     web/src/components/session-detail/v2/SessionDetailV2.test.tsx: 12
     web/src/components/session-detail/v2/SessionNotIndexed.tsx: 6
     web/src/components/session-detail/v2/lib/relationshipLink.test.ts: 3
-    web/src/components/session-detail/v2/lib/scopeTurns.ts: 1
     web/src/components/session-detail/v2/publish/publishModel.test.ts: 4
     web/src/components/session-detail/v2/publish/publishModel.ts: 1
     web/src/components/session-detail/v2/publish/segmentConsent.test.ts: 3

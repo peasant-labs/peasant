@@ -1070,6 +1070,38 @@ async function userTurnNumbers(page) {
     .map((text) => Number(text.slice(1))));
 }
 
+/**
+ * The preview's pinned timeline, as drawn: the trace is scrolled past its
+ * header so the timeline pins, then the pinned header is read. A preview's
+ * timeline is the minimap over the loaded turns, one band per turn, never the
+ * segment ticks a stored windowed read draws, and it carries no caption.
+ * Returns the band count.
+ */
+async function expectPreviewMinimap(page) {
+  const stream = pane(page).locator('.txn-stream');
+  await stream.evaluate((element) => {
+    if (element.scrollTop < 200) {
+      element.scrollTop = 200;
+      element.dispatchEvent(new Event('scroll'));
+    }
+  });
+  const pinned = pane(page).locator('.txn-sticky');
+  await expect(pinned.locator('.txn-minimap'), 'the pinned timeline is the minimap').toBeVisible();
+  const drawn = await pinned.evaluate((header) => ({
+    sliders: [...header.querySelectorAll('[role="slider"]')].map((slider) => slider.className),
+    bands: header.querySelectorAll('.txn-minimap-seg').length,
+    valueMax: header.querySelector('.txn-minimap')?.getAttribute('aria-valuemax') ?? null,
+    segmentTicks: header.querySelectorAll('.txn-scrub').length,
+    text: (header.textContent ?? '').trim(),
+  }));
+  expect(drawn.sliders, 'the pinned timeline is one slider, the minimap').toEqual(['txn-minimap']);
+  expect(drawn.bands, 'the minimap draws a band per loaded turn').toBeGreaterThan(0);
+  expect(drawn.valueMax, 'the minimap spans its bands').toBe(String(drawn.bands - 1));
+  expect(drawn.segmentTicks, 'a preview draws no segment ticks').toBe(0);
+  expect(drawn.text, 'the pinned timeline carries no caption').toBe('');
+  return drawn.bands;
+}
+
 async function highlightsSay(page, words) {
   await pane(page).getByRole('tab', { name: new RegExp(`^${Labels.Highlights}`) }).click();
   // The outline rail names the same response; it is closed, so only the drawn tab counts.
@@ -1114,8 +1146,12 @@ test('preview-scroll-to-end-loads-nothing', async () => {
   expect(previewSent.slice(before), 'reading to the end of the trace, wheeling and resizing sent nothing').toEqual([]);
 });
 
+// The minimap's band count after the first segment, which `load more` must grow.
+let previewFirstBands = 0;
+
 test('preview-position-reads-loaded-so-far', async () => {
   await expect(pane(pageG).getByText(Labels.LoadedSoFar, { exact: false }).first()).toBeVisible();
+  previewFirstBands = await expectPreviewMinimap(pageG);
   await highlightsSay(pageG, Labels.LatestLoaded);
   await expect(pane(pageG).getByText(Labels.FinalResponse, { exact: true }).filter({ visible: true })).toHaveCount(0);
   await pane(pageG).getByRole('tab', { name: Labels.Trace }).click();
@@ -1135,6 +1171,8 @@ test('preview-load-more-appends-one-segment', async () => {
   await expect(loadMore(pageG)).toBeEnabled();
   expect(sent(LocalKickstartPreviewOp.More) - moreBefore, 'one activation sent one request').toBe(1);
   expect(segmentsReceived() - segmentsBefore, 'and the server sent one segment').toBe(1);
+  // The appended segment's turns join the minimap.
+  await expect.poll(() => expectPreviewMinimap(pageG), { message: 'the minimap grew by the loaded turns' }).toBeGreaterThan(previewFirstBands);
 });
 
 test('preview-turn-labels-continue-across-segments', async () => {

@@ -43,6 +43,7 @@ interface PreviewStep {
   expectNoticeTone?: { tone: PreviewNoticeTone; text: string; readAgainInside?: boolean };
   expectStateInPane?: string;
   expectPreviewColumn?: PreviewColumnCheck;
+  expectMinimap?: { bands: number };
 }
 /** What the preview column holds: the viewer alone, or one state in the viewer's slot. */
 interface PreviewColumnCheck {
@@ -66,6 +67,7 @@ const PREVIEW_KEYS = Object.freeze({
   expectNoticeTone: true,
   expectStateInPane: true,
   expectPreviewColumn: true,
+  expectMinimap: true,
 } satisfies Record<keyof PreviewStep, true>);
 /** Where the stream must not reach: the closed set an `expectPrivacy` step names. */
 const PreviewPrivacy = Object.freeze({
@@ -80,6 +82,17 @@ const PRIVACY: readonly string[] = Object.values(PreviewPrivacy);
 /** The class prefix of the transcript viewer's own elements; its root carries one. */
 const VIEWER_ROOT_PREFIX = 'txn';
 const SLOT_CONTENTS: readonly string[] = Object.values(PreviewSlotContent);
+/**
+ * The viewer's pinned timeline, by Fairtrade's DOM classes: the header that
+ * pins once the trace scrolls, the minimap and its per-turn bands, and the
+ * segment-tick scrubber a windowed read draws instead.
+ */
+const Timeline = Object.freeze({
+  Pinned: '.txn-sticky',
+  Minimap: '.txn-minimap',
+  Band: '.txn-minimap-seg',
+  SegmentTicks: '.txn-scrub',
+});
 const CASE_KEYS = ['name', 'stream', 'steps', 'server', 'fakeTimers'];
 
 /** Every preview request the page put on any socket of this test, in order, each checked against the contract. */
@@ -256,6 +269,23 @@ async function runPreviewStep(step: PreviewStep, spec: StreamSpec, state: Conver
     } else {
       throw new Error(`${at}: expectNoticeTone names tone ${String(tone)}; it is one of ${Object.values(PreviewNoticeTone).join(', ')}`);
     }
+  }
+  if (step.expectMinimap !== undefined) {
+    const { bands } = step.expectMinimap;
+    // The timeline pins once the trace scrolls past its header.
+    await scrollToEnd(mounted, at);
+    const pinned = await waitFor(() => {
+      const found = mounted.container.querySelector<HTMLElement>(`[data-preview-session] ${Timeline.Pinned}`);
+      if (found === null) throw new Error(`${at}: the viewer pinned no timeline header`);
+      return found;
+    });
+    await waitFor(() => expect(pinned.querySelectorAll(Timeline.Band).length, `${at}: one minimap band per loaded turn`).toBe(bands));
+    const sliders = [...pinned.querySelectorAll<HTMLElement>('[role="slider"]')];
+    expect(sliders.length, `${at}: the pinned timeline is one slider`).toBe(1);
+    expect(sliders[0]!.matches(Timeline.Minimap), `${at}: the slider is the minimap (class ${sliders[0]!.className})`).toBe(true);
+    expect(sliders[0]!.getAttribute('aria-valuemax'), `${at}: the minimap spans the loaded turns`).toBe(String(bands - 1));
+    expect(pinned.querySelector(Timeline.SegmentTicks), `${at}: a preview draws no segment ticks`).toBeNull();
+    expect((pinned.textContent ?? '').trim(), `${at}: the pinned timeline carries no caption`).toBe('');
   }
   if (step.expectStateInPane !== undefined) {
     const text = step.expectStateInPane;
