@@ -6,6 +6,11 @@ All notable changes to Peasant are recorded here. The format follows
 GitHub Releases, which hold the signed artifacts and checksums. A version that
 was tagged but not published links to its tag instead.
 
+## [0.21.2] - 2026-11-20
+
+- drop the empty forecast header and tidy progress follow-ups (#1126)
+- let the sweep wait for the SQLite writer instead of failing as locked (#1127)
+
 ## [0.21.1] - 2026-11-19
 
 - create the release draft and its assets in one command (#1103)
