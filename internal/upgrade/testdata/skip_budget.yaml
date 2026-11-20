@@ -13,21 +13,30 @@
 #             skip replaces.
 # The ratio the validator checks is (proof + settle) / avoided.
 #
-# proven-settle (C1, stamp-only adapter bump): (82.025 + 1166.654) / 16230.268
-#   = 0.077. Wall: 11052 ms against 25847 ms.
-# stored-index (C3, indexer bump): (0 + 17211.152) / 39884.35 = 0.432. The
-#   lane has no proof. Wall: 22555 ms against 50865 ms.
+# proven-settle (C1, stamp-only adapter bump): (98.077 + 1161.793) / 15322.876
+#   = 0.082. Wall medians: 5500.570 ms against 20068.291 ms (ratio 0.274).
+#   Wall min–max: skip 5329.447–6099.094 ms; baseline 19901.781–20529.832 ms.
+#   INDEX min–max: skip 1121.664–1333.833 ms; baseline 15249.097–15644.007 ms.
+#   Skip proof min–max: 62.006–153.575 ms.
+# stored-index (C3, indexer bump): 15895.061 / 35430.329 = 0.449. The lane has
+#   no proof. Wall medians: 21568.407 ms against 45752.144 ms (ratio 0.471).
+#   Wall min–max: skip 20925.720–21801.179 ms; baseline 44996.532–46106.574 ms.
+#   INDEX min–max: skip 15815.532–15992.401 ms; baseline 35329.255–36482.771 ms.
 #
-# Provenance is recorded as each report recorded it, so the command is the one
-# that actually produced the numbers. The proven-settle command selects C2 and
-# C5, which were retired after that run and which the harness now rejects; the
-# row's own cases list ([C1]) names the report it reads, and the equivalent
-# current command is `-case C1`. Restating the old command as `-case C1` would
-# make the provenance describe a run that never happened.
+# Wall figures and spreads are informational; ValidateMeasured does not read
+# them. C1's wall ratio fell from 0.428 to 0.274 while its budget ratio stayed
+# roughly flat. Wall covers more than INDEX, and the cause is unconfirmed.
+# The prior rows were measured at different heads (0c4084f45 and c14b7259a)
+# without recorded spreads, so the change cannot be attributed to per-process
+# sampling alone.
 #
-# Both rows were measured at heads before the failed-proof change (0c4084f45
-# and c14b7259a). That change did not touch either measured path: the proven
-# settle and the stored-index lane run the same code, so the numbers stand.
+# Measured on an AMD Ryzen 9 7950X3D (32 logical CPUs), 240 x 1000, five
+# rounds, one process per arm sample, in the Nix shell with GOTOOLCHAIN=go1.26.0.
+# C1 start/end load averages (includes the run): 0.25/0.58/2.05 and 1.60/1.24/2.01.
+# C3 start/end (includes the run): 1.60/1.24/2.01 and 2.30/2.97/2.67.
+# CI, runner VMs and test processes were checked before, every 30 seconds
+# during, and after each case; earlier attempts were discarded when CI became
+# active. Head and base are the same commit: this is a re-measure at one head.
 #
 # A not-proven proof parses, so the stored-metadata lane has no other skip to
 # budget; the copy refresh that once filled that gap was measured slower than
@@ -41,27 +50,27 @@ budgets:
     lane: stored-metadata
     disposition: proven
     cases: [C1]
-    proof: 82.025
-    settle: 1166.654
-    avoided: 16230.268
+    proof: 98.077
+    settle: 1161.793
+    avoided: 15322.876
     provenance:
-      head: 0c4084f45bfc6430b6e363a00eee7a09480c4e28
-      base: 5908f8e1e
-      command: 'go run -tags skipbudget ./cmd/skip-budget -case C1,C2,C3,C5,C6 -base 5908f8e1e'
-      date: '2026-11-18T23:26:55Z'
+      head: 2fb31a933d110ca668b16550bb288e7bb0da0c47
+      base: 2fb31a933
+      command: 'nix develop --command env GOTOOLCHAIN=go1.26.0 go run -tags skipbudget ./cmd/skip-budget -case C1 -base 2fb31a933 -root /tmp/opencode/skip-remeasure -sessions 240 -entries 1000 -rounds 5'
+      date: '2026-11-20T05:20:03Z'
       samples: 5
   - name: stored-index
     lane: stored-index
     disposition: index
     cases: [C3]
     proof: 0
-    settle: 17211.152
-    avoided: 39884.35
+    settle: 15895.061
+    avoided: 35430.329
     provenance:
-      head: c14b7259ab9a1d42f65896808fec49e5149aac12
-      base: a8eaf1e84
-      command: 'go run -tags skipbudget ./cmd/skip-budget -case C3,C6 -base a8eaf1e84'
-      date: '2026-11-19T06:05:45Z'
+      head: 2fb31a933d110ca668b16550bb288e7bb0da0c47
+      base: 2fb31a933
+      command: 'nix develop --command env GOTOOLCHAIN=go1.26.0 go run -tags skipbudget ./cmd/skip-budget -case C3 -base 2fb31a933 -root /tmp/opencode/skip-remeasure -sessions 240 -entries 1000 -rounds 5'
+      date: '2026-11-20T05:23:38Z'
       samples: 5
 cases:
   - name: winning-ratio
