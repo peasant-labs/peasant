@@ -60,7 +60,7 @@ type oracleExpectation struct {
 	Validator string `yaml:"validator"`
 	// Mismatch is the validator's mismatch when it answered not proven.
 	Mismatch ingest.UnchangedProofMismatch `yaml:"mismatch"`
-	Parse    oracleParse                  `yaml:"parse"`
+	Parse    oracleParse                   `yaml:"parse"`
 }
 
 // oracleSessionObservation is one session's result in both forks.
