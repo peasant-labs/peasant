@@ -2349,8 +2349,8 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 			slog.Info(logPrefix+": refresh proof", "session_id", im.session.SessionID, "proven", proof.Proven, "mismatch", proof.Mismatch, "error", proofErr)
 			var validated *ValidatedContext
 			if proofErr == nil && !proof.Proven && proof.Mismatch.IsContext() {
-				validation, context := p.validateRefresh(ctx, input, indexer)
-				validated = context
+				var validation ManagedGenerationValidationResult
+				validation, validated = p.validateRefresh(ctx, input, indexer)
 				switch validation.Outcome {
 				case ValidationProven:
 					proof.Proven = true
