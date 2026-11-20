@@ -104,7 +104,10 @@ func (s *Store) UpdateOriginState(ctx context.Context, sessionID ingest.SessionI
 		return fmt.Errorf("store: take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
-	end := sqlitex.Transaction(conn)
+	end, err := beginWrite(conn, "record the origin of session "+sessionID.String())
+	if err != nil {
+		return err
+	}
 	defer end(&err)
 	// Origin is a separately derived fact, not extraction metadata or indexed
 	// transcript input. Preserve the existing proof (including an unready one)

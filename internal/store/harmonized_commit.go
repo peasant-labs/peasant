@@ -291,7 +291,10 @@ func splitStageBatch(cfg ingest.WriteConfig, sessions []stagedSessionObjects) []
 // orphans.
 func (s *Store) stageBatchTxn(conn *sqlite.Conn, batch stageBatch) error {
 	txnErr := error(nil)
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, fmt.Sprintf("stage a batch of %d sessions", len(batch.sessions)))
+	if err != nil {
+		return fmt.Errorf("%w; nothing was staged", err)
+	}
 	defer endFn(&txnErr)
 	for _, sessionID := range batch.sessions {
 		if err := sqlitex.Execute(conn, `UPDATE sessions SET content_sweep_pending = 1 WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{string(sessionID)}}); err != nil {
@@ -1418,7 +1421,10 @@ func stampSkippedHarmonized(ctx context.Context, s *Store, prepared *preparedHar
 	}
 	defer s.pool.Put(conn)
 	txnErr := error(nil)
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, "record the skip bookkeeping of session "+prepared.sessionID.String())
+	if err != nil {
+		return err
+	}
 	defer endFn(&txnErr)
 	active, err := readActiveGenerationOnConn(conn, prepared.sessionID)
 	if err != nil {
@@ -1614,7 +1620,10 @@ func repairHarmonizedObjects(ctx context.Context, s *Store, prepared *preparedHa
 	}
 	defer s.pool.Put(conn)
 	txnErr := error(nil)
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, "repair the stored objects of session "+prepared.sessionID.String())
+	if err != nil {
+		return err
+	}
 	defer endFn(&txnErr)
 	if err := sqlitex.Execute(conn, `PRAGMA defer_foreign_keys = ON`, nil); err != nil {
 		txnErr = fmt.Errorf("store: defer foreign keys for the repair of session %s: %w", prepared.sessionID, err)

@@ -1,0 +1,8 @@
+# Required-name manifest for write_transaction_contention: deletion protection by NAME, never by count.
+requiredNames:
+  - origin-state-vs-commit-after-its-read
+  - index-state-vs-commit-after-its-read
+  - parent-cache-vs-commit-after-its-read
+  - prune-vs-commit-after-its-read
+  - insert-sessions-vs-commit-after-its-read
+  - origin-state-vs-held-writer

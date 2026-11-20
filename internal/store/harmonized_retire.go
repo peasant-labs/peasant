@@ -105,7 +105,10 @@ func (s *Store) DropRetiredProjectionTables(ctx context.Context) error {
 		return err
 	}
 	txnErr := error(nil)
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, "drop the retired projection tables")
+	if err != nil {
+		return fmt.Errorf("%w; the tables are unchanged", err)
+	}
 	defer endFn(&txnErr)
 	if err := sqlitex.ExecuteScript(conn, retirementDropStatements, nil); err != nil {
 		txnErr = fmt.Errorf("store: drop the retired projection tables: %w; the tables are unchanged", err)

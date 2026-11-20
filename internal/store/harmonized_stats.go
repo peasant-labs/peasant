@@ -211,7 +211,10 @@ func (s *Store) UpsertCapturedStats(ctx context.Context, stats CapturedStats) (a
 		return false, fmt.Errorf("store: take connection for captured stats upsert %s: %w", stats.SessionID, err)
 	}
 	defer s.pool.Put(conn)
-	end := sqlitex.Transaction(conn)
+	end, err := beginWrite(conn, "upsert the captured stats of session "+stats.SessionID.String())
+	if err != nil {
+		return false, err
+	}
 	defer end(&err)
 	return upsertCapturedStatsOnConn(conn, stats)
 }

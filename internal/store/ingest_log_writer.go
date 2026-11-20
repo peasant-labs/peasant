@@ -40,7 +40,11 @@ func (s *Store) LogIngestRun(ctx context.Context, entry ingest.IngestLogEntry) e
 }
 
 func insertIngestRun(conn *sqlite.Conn, entry ingest.IngestLogEntry) (runID int64, err error) {
-	defer sqlitex.Transaction(conn)(&err)
+	endFn, err := beginWrite(conn, "record the ingest run")
+	if err != nil {
+		return 0, err
+	}
+	defer endFn(&err)
 	if err := sqlitex.Execute(conn, sqlInsertIngestLog, &sqlitex.ExecOptions{
 		Args: []any{
 			entry.StartedAt,
