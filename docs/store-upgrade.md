@@ -461,7 +461,14 @@ plan is still printed so the operator can inspect it and fix the evidence read.
 
 On the stored-metadata lane of a managed generation, a harvest first tries to
 prove that the refreshed metadata reproduces the stored generation. A proven
-session settles its bookkeeping without a parse. Any other answer (the proof
-fails, cannot be read, or its settle is refused) parses the stored transcript
-once and installs the result; there is no intermediate copy of the stored
-generation.
+session settles its bookkeeping without a parse. When only metadata or redaction
+context prevents that proof, a supported indexer can build a metadata candidate
+from the captured transcript. The store compares that candidate with the active
+generation on a reader connection. A match is checked again under the session
+lock before settlement. The same candidate is used for both checks.
+
+An unsupported indexer, a changed context, a read error, or a refused settlement
+falls back to parsing. A non-context mismatch goes straight to parsing, as do
+explicit rebuilds and runs with refresh skips disabled. No stored generation is
+copied. The reader concurrency bound is defined by
+`defaults.ManagedRefreshReadSlots` and the store connection pool.
