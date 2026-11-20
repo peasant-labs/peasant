@@ -38,13 +38,35 @@
 # during, and after each case; earlier attempts were discarded when CI became
 # active. Head and base are the same commit: this is a re-measure at one head.
 #
-# A not-proven proof parses, so the stored-metadata lane has no other skip to
-# budget; the copy refresh that once filled that gap was measured slower than
-# the parse when metadata changed and removed.
+# validated-settle (C7, adapter bump over a stale stored metadata hash; every
+#   session's cheap proof fails on the metadata context, its metadata candidate
+#   validates, and the validated settle runs): (703.195 + 3427.512) / 20700.209
+#   = 0.200. All 1,200 session runs validated and settled; zero parses. Wall
+#   medians: 8722.514 ms against 25953.076 ms (ratio 0.336).
+#   Wall min–max: skip 8397.496–13709.901 ms; baseline 24009.475–29837.845 ms.
+#   INDEX min–max: skip 3379.996–7851.601 ms; baseline 18294.085–24260.268 ms.
+#   Skip proof min–max: 93.031–1502.021 ms.
+#   What the ratio covers: the metadata candidate and the validator run inside
+#   the INDEX stage, in the parser workers between the proof and the settle,
+#   and INDEX is that stage's wall time, so settle (skip INDEX) already holds
+#   the validation; proof is added on top, as for proven-settle. The report's
+#   medianValidateMs (8272.491 ms) is the refresh_validate stage, a sum of
+#   per-session times across the parallel workers (per session, median
+#   32.217 ms), so it is larger than the INDEX wall and is not added again.
+#   Measured at head 5c5e62e55 with that head as base, 240 x 1000, five rounds,
+#   one process per arm sample, clean worktree. The machine was not idle:
+#   start/end load averages 15.49/15.87/15.90 and 9.16/12.57/14.55; the
+#   maintainer accepted a busy machine for this row, so its spreads are wider
+#   than C1's and C3's.
+#
+# Any other failed proof parses, so the stored-metadata lane has no further
+# skip to budget; the copy refresh that once filled that gap was measured
+# slower than the parse when metadata changed and removed.
 measurementRequired: true
 requiredNames:
   - proven-settle
   - stored-index
+  - validated-settle
 budgets:
   - name: proven-settle
     lane: stored-metadata
@@ -72,6 +94,21 @@ budgets:
       command: 'nix develop --command env GOTOOLCHAIN=go1.26.0 go run -tags skipbudget ./cmd/skip-budget -case C3 -base 2fb31a933 -root /tmp/opencode/skip-remeasure -sessions 240 -entries 1000 -rounds 5'
       date: '2026-11-20T05:23:38Z'
       samples: 5
+  - name: validated-settle
+    lane: stored-metadata
+    disposition: validated
+    cases: [C7]
+    proof: 703.195
+    settle: 3427.512
+    avoided: 20700.209
+    provenance:
+      head: 5c5e62e553a078d1d61a4087f71fc6a26266ec26
+      base: 5c5e62e55
+      command: 'nix develop --command env GOTOOLCHAIN=go1.26.0 go run -tags skipbudget ./cmd/skip-budget -case C7 -base 5c5e62e55 -root /tmp/opencode/c7 -sessions 240 -entries 1000 -rounds 5'
+      date: '2026-11-20T11:01:03Z'
+      samples: 5
+dispositions: [proven, validated, index]
+unknownDispositions: [copied, ""]
 cases:
   - name: winning-ratio
     proof: 1
