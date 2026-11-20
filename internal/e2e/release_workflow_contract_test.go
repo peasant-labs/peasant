@@ -1431,3 +1431,112 @@ func releaseWorkflowRepoRoot(t *testing.T) string {
 		}
 	}
 }
+
+//go:embed testdata/workflows/private-install.yaml
+var privateInstallFixture []byte
+
+func TestWorkflowPrivateNpmInstall(t *testing.T) {
+	var fixture struct {
+		Required []string `yaml:"required_names"`
+		Checks   []struct {
+			Name     string `yaml:"name"`
+			Pattern  string `yaml:"pattern"`
+			Workflow string `yaml:"workflow"`
+			Job      string `yaml:"job"`
+			Step     string `yaml:"step"`
+			Run      string `yaml:"run"`
+		} `yaml:"checks"`
+	}
+	if err := yaml.Unmarshal(privateInstallFixture, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	checks := make(map[string]int)
+	dir := filepath.Join(releaseWorkflowRepoRoot(t), ".github", "workflows")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, check := range fixture.Checks {
+		checks[check.Name]++
+		switch check.Name {
+		case "no_global_npm":
+			pattern, err := regexp.Compile(check.Pattern)
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, entry := range entries {
+				if entry.IsDir() || !(strings.HasSuffix(entry.Name(), ".yml") || strings.HasSuffix(entry.Name(), ".yaml")) {
+					continue
+				}
+				found = true
+				data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+				if err != nil {
+					t.Fatal(err)
+				}
+				var doc struct {
+					Jobs map[string]struct {
+						Steps []struct {
+							Name string `yaml:"name"`
+							Run  string `yaml:"run"`
+						} `yaml:"steps"`
+					} `yaml:"jobs"`
+				}
+				if err := yaml.Unmarshal(data, &doc); err != nil {
+					t.Fatal(err)
+				}
+				for job, v := range doc.Jobs {
+					for _, step := range v.Steps {
+						if pattern.MatchString(step.Run) {
+							t.Errorf("%s job %s step %s uses global npm install", entry.Name(), job, step.Name)
+						}
+					}
+				}
+			}
+			if !found {
+				t.Fatal("no workflow files found")
+			}
+		case "private_ast_grep":
+			data, err := os.ReadFile(filepath.Join(dir, check.Workflow))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var doc struct {
+				Jobs map[string]struct {
+					Steps []struct {
+						Name string `yaml:"name"`
+						Run  string `yaml:"run"`
+					} `yaml:"steps"`
+				} `yaml:"jobs"`
+			}
+			if err := yaml.Unmarshal(data, &doc); err != nil {
+				t.Fatal(err)
+			}
+			n := 0
+			for _, step := range doc.Jobs[check.Job].Steps {
+				if step.Name == check.Step {
+					n++
+					if step.Run != check.Run {
+						t.Errorf("%s job %s step %s does not use the job-private install", check.Workflow, check.Job, check.Step)
+					}
+				}
+			}
+			if n != 1 {
+				t.Errorf("%s job %s: found %d install steps, want 1", check.Workflow, check.Job, n)
+			}
+		default:
+			t.Fatalf("unknown check %q", check.Name)
+		}
+	}
+	if len(fixture.Required) != 2 || checks["no_global_npm"] != 1 || checks["private_ast_grep"] != 1 {
+		t.Fatal("private npm install fixture must retain both required checks")
+	}
+	for _, name := range fixture.Required {
+		if checks[name] != 1 {
+			t.Errorf("required check %s appears %d times", name, checks[name])
+		}
+	}
+	if len(fixture.Required) != len(checks) {
+		t.Fatal("fixture required names differ from checks")
+	}
+}

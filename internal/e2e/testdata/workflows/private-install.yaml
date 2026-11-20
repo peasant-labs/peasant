@@ -1,0 +1,14 @@
+required_names: [no_global_npm, private_ast_grep]
+checks:
+  - name: no_global_npm
+    pattern: '(?m)\bnpm\s+(install|i)\b[^\n]*(--global\b|(?:^|\s)-g(?:\s|$))'
+  - name: private_ast_grep
+    workflow: tests.yml
+    job: check
+    step: Install ast-grep
+    run: |
+      set -euo pipefail
+      prefix="$RUNNER_TEMP/ast-grep"
+      npm install --prefix "$prefix" --no-save --no-package-lock @ast-grep/cli@0.51.2
+      echo "$prefix/node_modules/.bin" >> "$GITHUB_PATH"
+      "$prefix/node_modules/.bin/ast-grep" --version
