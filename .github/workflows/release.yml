@@ -598,9 +598,10 @@ jobs:
 
   # Post-publish macOS smoke: on final tags, install from the live tap.
   # The tap publishes on its own scheduled poll (see peasant-labs/homebrew-tap
-  # publish-cask.yml) and peasant holds no tap credential, so this job waits for the tap to carry the tagged version
-  # before installing. A tap that never catches up still fails the smoke rather
-  # than certifying an older package as the current release.
+  # publish-cask.yml) and peasant holds no tap credential, so this job waits
+  # for the tap to carry the tagged version before installing. A tap that never
+  # catches up still fails the smoke rather than certifying an older package as
+  # the current release.
   macos-cask-smoke:
     name: macos cask smoke (final only)
     needs: publish

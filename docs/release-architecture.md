@@ -269,7 +269,7 @@ signatures, and provenance attestations are deferred release-hardening work.
 | Stale Nix `vendorHash` on the release PR | `tests.yml` release group | `vendor-hash` fails and the queue ejects the release PR before it lands or is tagged | Let the `automation/vendor-hash` PR land; the bot rebuilds the release PR |
 | Manual/non-App `v*` tag attempt | GitHub tag ruleset / `release.yml` | GitHub rejects the ref mutation; if policy drift lets an event reach Actions, the actor guard fails before checkout | Do not bypass or weaken the rule; create releases only through the release batch |
 | Stale Nix `vendorHash` on a release tag | `release.yml` | `nix-vendor-hash` job fails before Goreleaser | Do not move the tag; land the vendor-hash fix on `develop` and let the bot cut a new version |
-| Existing release tag | `release-batch.yml` | Tag step hard-fails and refuses to move it | Never move or delete the tag; read the `plan` output and fix forward |
+| Existing release tag | `release-batch.yml` | Tag step hard-fails and refuses to move it | Read the `plan` output and [fix forward](release-runbook.md#fix-forward) |
 | Invalid PR title | `title-guard.yml` | `check-title` fails on the PR and in the merge group | Retitle to `type(scope)[level]: subject` (remove a queued PR from the queue first) |
 | Stale release PR content | `title-guard.yml` | `release-content-stale`; the PR cannot land | None: `release-batch.yml` rebuilds the release PR |
 | Web dashboard build failure | `release.yml` / `release-e2e.yml` / `release-validate.yml` | Artifact production stops before Goreleaser; no stub dashboard is publishable | Fix the frontend build or dependency pin and rerun the gate |

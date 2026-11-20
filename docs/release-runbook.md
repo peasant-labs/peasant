@@ -343,11 +343,8 @@ In order:
    [Verdict inheritance](#verdict-inheritance). A failure ejects it before it
    lands or is tagged.
 4. Once it lands, `release-batch.yml` pushes the annotated tag on that commit,
-   and the tag push triggers `release.yml`:
-   `guard` and `verify-tag` run in parallel; `nix-vendor-hash` needs `guard`;
-   the two e2e gates need both of those and run in parallel; `build` needs all of
-   them; `publish` needs `guard`, `verify-tag` and `build`; the smokes follow
-   `publish`.
+   and the tag push triggers `release.yml` (job order: the
+   [§1 diagram](#1-the-release-model)):
    - **guard** job: verifies the tag push actor is `peasant-labs-releaser[bot]`
      (actor ID `291504229`) and classifies the tag with `release-guard parse-tag`.
    - **verify-tag** job: `release-intent verify-tag` proves `develop` reaches the tag.
@@ -377,11 +374,16 @@ In order:
      this job starts the server rather than only reading `version`.
    - **macos-cask-smoke** job (final tags): waits for the tap to carry the tagged
      version, then installs the cask and asserts its version.
-5. Verify the Release on the Releases page. It holds 15 assets: 4 `.tar.gz`,
-   1 Windows `.zip`, 1 bare Windows `.exe`, 2 `.deb`, 2 `.rpm`, `checksums.txt`,
-   and the GoReleaser metadata `CHANGELOG.md`, `artifacts.json`, `config.yaml`
-   and `metadata.json` (the set `build` stages; v0.22.0 matches). Verify AUR and nixpkgs only after their separate
-   publication checklist items are approved and enabled.
+5. Verify the Release on the Releases page. It holds 15 assets, the set `build`
+   stages (v0.22.0 matches):
+   - 4 `.tar.gz`, 1 Windows `.zip`, 1 bare Windows `.exe`;
+   - 2 `.deb`, 2 `.rpm`;
+   - `checksums.txt`;
+   - the GoReleaser metadata `CHANGELOG.md`, `artifacts.json`, `config.yaml`,
+     and `metadata.json`.
+
+   Verify AUR and nixpkgs only after their separate publication checklist items
+   are approved and enabled.
 
 ---
 
@@ -424,16 +426,16 @@ After any re-run, repeat the §4 verification: the full artifact set,
 
 ### Fix forward
 
-1. Classify the failure. A publisher-side failure (`publish` or a transient
-   runner fault) is a rerun of the failed jobs; delete an unpublished draft by
-   its id first. A gate that failed because of the tag's own tree (for example
-   `nix-vendor-hash` or an e2e gate) burns the version.
+1. Classify the failure, and rerun failed jobs first. A publisher-side failure,
+   or any job that failed on a runner fault or a flake, is a rerun; delete an
+   unpublished draft by its id before rerunning `publish`. Only a failure caused
+   by the tag's own tree (for example a stale `nix-vendor-hash`) burns the
+   version.
 2. For a burned version, land a fix PR through the merge queue.
 3. The planner computes the next version from the titles landed since the
    burned tag, and `release-batch.yml` opens the release PR. If none of them is
    a releasing title (a `chore`/`ci`/`docs` fix carries no level), dispatch
    `cut-release.yml` with `patch`.
-4. Never create, move, or delete a tag by hand.
 
 ---
 
@@ -448,13 +450,10 @@ rc-only packaging validation matrix.
 
 `release.yml` also runs `make nix-vendor-hash` before Goreleaser. If that command
 would edit `flake.nix`, the release stops before publishing and reports that the tag
-was created from a stale source tree. The version is burned; do not repair the tag:
+was created from a stale source tree. The version is burned; follow
+[fix forward](#fix-forward), landing the `automation/vendor-hash` PR as the fix.
 
-1. Merge the `automation/vendor-hash` PR (`chore(nix): update vendor hash`)
-   through the queue.
-2. Let the planner cut the next release. That title carries no level, so
-   dispatch `cut-release.yml` with `patch` unless a releasing PR also landed
-   ([fix forward](#fix-forward)).
+If no such PR is open, dispatch `nix-vendor-hash.yml`.
 
 The companion `nix-vendor-hash.yml` workflow keeps `develop` warm after dependency
 or package-input changes land. It runs on pushes to `develop` touching Go module
