@@ -319,7 +319,10 @@ func applyV23DataMigration(pool *sqlitex.Pool) error {
 		}
 	}()
 
-	endTxn := sqlitex.Transaction(conn)
+	endTxn, txnErr := beginWrite(conn, "apply the version 23 data migration")
+	if txnErr != nil {
+		return fmt.Errorf("store.applyV23DataMigration: %w", txnErr)
+	}
 	// endTxn runs first (LIFO), committing or rolling back before FK is re-enabled.
 	defer endTxn(&txnErr)
 

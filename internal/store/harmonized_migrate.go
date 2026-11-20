@@ -919,7 +919,10 @@ func (s *Store) migrateConsolidateSearch(ctx context.Context) (bool, error) {
 		return false, nil
 	}
 	txnErr := error(nil)
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, "consolidate the search index")
+	if err != nil {
+		return false, fmt.Errorf("%w; the index is unchanged", err)
+	}
 	defer endFn(&txnErr)
 	for _, trigger := range []string{"session_entries_ai", "session_entries_ad", "session_entries_au"} {
 		if err := sqlitex.ExecuteTransient(conn, `DROP TRIGGER IF EXISTS `+trigger, nil); err != nil {

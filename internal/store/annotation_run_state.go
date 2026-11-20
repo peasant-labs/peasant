@@ -164,8 +164,11 @@ func (s *Store) SaveAnnotationRunState(ctx context.Context, state ingest.Annotat
 		return fmt.Errorf("store: take connection for annotation_run_state save: %w", err)
 	}
 	defer s.pool.Put(conn)
-	endSnapshot := sqlitex.Save(conn)
-	defer endSnapshot(&retErr)
+	endFn, err := beginWrite(conn, "save the annotation run state of session "+state.SessionID.String())
+	if err != nil {
+		return err
+	}
+	defer endFn(&retErr)
 	if err := s.ValidateIndexFormatsOnConn(conn, []schema.SessionID{state.SessionID}); err != nil {
 		return err
 	}

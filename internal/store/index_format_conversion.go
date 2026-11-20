@@ -8,7 +8,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
-	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 )
 
@@ -66,7 +65,10 @@ func (s *Store) ConvertIndexFormat(ctx context.Context, sessionID schema.Session
 		return fmt.Errorf("store: take index conversion connection: %w", err)
 	}
 	defer s.pool.Put(conn)
-	end := sqlitex.Transaction(conn)
+	end, err := beginWrite(conn, "convert the index format of session "+sessionID.String())
+	if err != nil {
+		return err
+	}
 	defer end(&err)
 	before, err := readIndexStateOnConn(conn, sessionID)
 	if err != nil {
