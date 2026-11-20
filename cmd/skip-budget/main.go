@@ -5,9 +5,12 @@
 //
 // Every case cleans and writes under <root>/<case>/: it prepares its base
 // once, then runs the skip arm and the baseline arm once per round on a fresh
-// copy of that base, alternating their order. The default shape is the
-// budget matrix, 240 sessions x 1000 entries over 5 rounds; run it only on a
-// quiet machine. A smaller shape is a smoke run and its report says so.
+// copy of that base, alternating their order. Every arm sample runs in its
+// own child process (-sample case-arm), so each pipeline run starts on a
+// fresh heap instead of paying to zero a staging arena an earlier run freed.
+// The default shape is the budget matrix, 240 sessions x 1000 entries over 5
+// rounds; run it only on a quiet machine. A smaller shape is a smoke run and
+// its report says so.
 //
 // C2 and C5 are retired: they measured the metadata-only copy refresh after a
 // failed proof, and a failed proof now parses, so neither has a skip left to
@@ -70,11 +73,16 @@ func main() {
 	sessions := flag.Int("sessions", matrixSessions, "synthetic sessions per case (C4 always uses 2)")
 	entries := flag.Int("entries", matrixEntries, "entries per session (C4 always uses 10)")
 	rounds := flag.Int("rounds", 5, "rounds per case; each round runs both arms once")
-	sampleKind := flag.String("sample", "", "internal: run one sample of this kind in this process (import) and print it as JSON")
+	sampleKind := flag.String("sample", "", "internal: run one sample of this kind in this process (new-session-import, case-arm) and print it as JSON")
 	sampleDir := flag.String("sample-dir", "", "internal: the directory the -sample run writes into")
+	sampleBase := flag.String("sample-base", "", "internal: the prepared base a run sample copies")
+	sampleCase := flag.String("sample-case", "", "internal: the case a run sample measures")
+	sampleArm := flag.String("sample-arm", "", "internal: the arm a run sample runs: skip or baseline")
+	sampleRound := flag.Int("sample-round", 0, "internal: the round a run sample belongs to")
 	flag.Parse()
 	if *sampleKind != "" {
-		if err := runSampleChild(context.Background(), *sampleKind, *sampleDir, smokeSessions, smokeEntries, os.Stdout); err != nil {
+		f := sampleFlags{Kind: *sampleKind, Dir: *sampleDir, Base: *sampleBase, Case: *sampleCase, Arm: *sampleArm, Round: *sampleRound}
+		if err := runSampleChild(context.Background(), f, smokeSessions, smokeEntries, os.Stdout); err != nil {
 			fail(1, err.Error())
 		}
 		return
@@ -112,6 +120,10 @@ func main() {
 	opts := harnessOptions{root: *root, sessions: *sessions, entries: *entries, rounds: *rounds,
 		head: strings.TrimSpace(string(head)), base: *base, command: strings.Join(append([]string{"go run -tags skipbudget ./cmd/skip-budget"}, os.Args[1:]...), " "),
 		dirty: len(strings.TrimSpace(string(status))) != 0}
+	self, err := os.Executable()
+	if err != nil {
+		fail(1, fmt.Sprintf("locate the harness binary to run each sample: %v", err))
+	}
 	specs := caseSpecs()
 	ctx := context.Background()
 	for _, c := range selected {
@@ -121,7 +133,7 @@ func main() {
 			}
 			continue
 		}
-		path, err := runCase(ctx, specs[c], opts)
+		path, err := runCase(ctx, specs[c], opts, harnessRunCommand(self))
 		if err != nil {
 			fail(1, fmt.Sprintf("%s failed: %v", c, err))
 		}

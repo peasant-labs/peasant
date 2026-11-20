@@ -1,19 +1,41 @@
-# Child behaviours the new-session smoke runner must accept or refuse.
+# Child behaviours the sample runners must accept or refuse. Every sample
+# runs in its own child process.
+#   sample:    new-session-import drives the new-session smoke runner;
+#              case-arm drives one 2 x 10 round of the stamp-only case,
+#              both arms.
 #   child:     import imports a sessions x 10 corpus; garbage prints a line
-#              that is not a sample result.
+#              that is not a sample result; run runs the arm sample it is
+#              given; run-miscount runs it and reports one extra parse.
 #   wantError: a substring of the runner's error; empty means it succeeds.
 requiredNames:
   - smoke-shape
   - session-count-mismatch
   - garbage-output
+  - run-arms
+  - run-count-mismatch
+  - run-garbage-output
 cases:
   - name: smoke-shape
+    sample: new-session-import
     child: import
     sessions: 2
   - name: session-count-mismatch
+    sample: new-session-import
     child: import
     sessions: 3
     wantError: want the 2 x 10 smoke shape
   - name: garbage-output
+    sample: new-session-import
     child: garbage
     wantError: want one JSON sample result
+  - name: run-arms
+    sample: case-arm
+    child: run
+  - name: run-count-mismatch
+    sample: case-arm
+    child: run-miscount
+    wantError: skip arm executed
+  - name: run-garbage-output
+    sample: case-arm
+    child: garbage
+    wantError: want one JSON sample
