@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/peasant-labs/peasant/internal/testkit/executable"
 )
 
 // writeFakeGo writes an executable stand-in for `go test` that parses the
@@ -57,7 +59,7 @@ if [ -n "${FAKE_GO_SYNC_DIR:-}" ]; then
 fi
 : > "$profile"
 `
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+	if err := executable.Write(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake go: %v", err)
 	}
 	return path

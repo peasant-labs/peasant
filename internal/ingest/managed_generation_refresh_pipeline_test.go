@@ -103,10 +103,10 @@ func (s *proofCountingRefreshStore) ValidateManagedGenerationUnchanged(ctx conte
 	return s.Store.ValidateManagedGenerationUnchanged(ctx, request)
 }
 
-func (s *proofCountingRefreshStore) SettleCapturedGenerationUnchanged(ctx context.Context, request ingest.ManagedGenerationUnchangedProof) (ingest.ManagedGenerationRefreshOutcome, error) {
+func (s *proofCountingRefreshStore) SettleCapturedGenerationUnchanged(ctx context.Context, request ingest.ManagedGenerationUnchangedProof) (ingest.ManagedGenerationUnchangedSettleOutcome, error) {
 	s.settles.Add(1)
 	if s.settleRefused {
-		return ingest.ManagedGenerationRefreshOutcome{}, &ingest.StaleIndexWorkError{SessionID: request.SessionID}
+		return ingest.ManagedGenerationUnchangedSettleOutcome{}, &ingest.StaleIndexWorkError{SessionID: request.SessionID}
 	}
 	if s.forgeSettleCounts {
 		input, conversation := int64(903), int64(902)

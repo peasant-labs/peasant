@@ -369,7 +369,7 @@ type countingStore struct {
 
 var _ ingest.ManagedGenerationUnchangedProver = (*countingStore)(nil)
 
-func (s *countingStore) SettleCapturedGenerationUnchanged(ctx context.Context, request ingest.ManagedGenerationUnchangedProof) (ingest.ManagedGenerationRefreshOutcome, error) {
+func (s *countingStore) SettleCapturedGenerationUnchanged(ctx context.Context, request ingest.ManagedGenerationUnchangedProof) (ingest.ManagedGenerationUnchangedSettleOutcome, error) {
 	s.settles.Add(1)
 	return s.Store.SettleCapturedGenerationUnchanged(ctx, request)
 }

@@ -108,7 +108,7 @@ func TestUnchangedSettlementSecondRun(t *testing.T) {
 				t.Fatalf("prove: %+v, %v", proof, err)
 			}
 			settled, err := b.database.SettleManagedGenerationUnchanged(t.Context(), request)
-			if err != nil || settled.Disposition != store.ManagedGenerationRefreshUnchanged {
+			if err != nil || settled.GenerationID != generationID {
 				t.Fatalf("settle: %+v, %v", settled, err)
 			}
 			state, err = b.database.ReadIndexState(t.Context(), b.sessionID)

@@ -13,6 +13,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/peasant-labs/peasant/internal/testkit/executable"
 )
 
 const (
@@ -190,7 +192,7 @@ func writePeasantBinWrapper(dir, command string) (string, error) {
 		b.WriteString(shellQuote(arg))
 	}
 	b.WriteString(" \"$@\"\n")
-	if err := os.WriteFile(path, []byte(b.String()), 0o700); err != nil {
+	if err := executable.Write(path, []byte(b.String()), 0o700); err != nil {
 		return "", fmt.Errorf("write wrapper %s: %w", path, err)
 	}
 	return path, nil
