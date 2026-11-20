@@ -48,8 +48,8 @@
     "test:directive-guard": "node scripts/test-directive-prologue.mjs"
   },
   "dependencies": {
-    "@peasant-labs/fairtrade": "0.1.1",
-    "@peasant-labs/schema": "0.58.0",
+    "@peasant-labs/fairtrade": "0.2.1",
+    "@peasant-labs/schema": "0.58.1",
     "@xyflow/react": "^12.10.1",
     "clsx": "^2.1.1",
     "diff": "^9.0.0",

@@ -39,6 +39,8 @@
 #                  state, absentText: [whole texts no element of the column may read]}
 #   expectNoticeTone how the stop's notice reads: {tone: error | neutral, text: words of it,
 #                  readAgainInside: true when `read again` sits in the error card}
+#   expectMinimap  the pinned timeline is the minimap over the loaded turns: one slider,
+#                  no segment ticks and no caption: {bands: one per loaded turn}
 #
 # Every transcript is synthetic. `marker` texts exist only in the stream, so
 # finding one in storage or a URL is a leak.
@@ -131,6 +133,7 @@ requiredNames:
   - end-stays-neutral
   - failed-preview-keeps-the-pane
   - preview-column-is-the-viewer-alone
+  - preview-timeline-is-the-minimap-over-loaded-turns
 defaultServer:
   "GET /api/v1/kickstart/status": {body: {configured: true}}
   "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
@@ -576,3 +579,18 @@ cases:
       - serve: {segment: 0}
       - expectPreviewColumn: {region: session preview, holds: viewer, absentText: [preview, "raw, on this computer only"]}
       - expectNoText: ["raw, on this computer only"]
+
+  # A preview reads the session front to back, so its pinned timeline is the
+  # minimap over the turns loaded so far, never the windowed read's segment
+  # ticks, and it grows by the turns each `load more` appends. The scrubber's
+  # old "loaded so far" caption is not drawn.
+  - name: preview-timeline-is-the-minimap-over-loaded-turns
+    stream: six-prompts
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - expectMinimap: {bands: 10}
+      - click: load more of this session
+      - serve: {segment: 1}
+      - expectMinimap: {bands: 13}
