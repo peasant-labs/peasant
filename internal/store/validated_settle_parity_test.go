@@ -4,7 +4,6 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -47,85 +46,42 @@ const parityTranscript = `{"type":"user","sessionId":"abc00000-0000-4000-8000-00
 {"type":"user","sessionId":"abc00000-0000-4000-8000-000000000101","uuid":"u2","parentUuid":"a1","cwd":"/work/project","timestamp":"2026-01-01T00:00:02Z","message":{"role":"user","content":"second synthetic prompt"}}
 `
 
-// paritySettleStore settles through the store with the stats stamp pinned,
-// and, when the pipeline supplies no candidate, validates with the real
-// Claude metadata half and carries the proven answer into the settle.
+// paritySettleStore observes the real store under the refresh: it records
+// the validator's answer the pipeline asked for (with the candidate the
+// pipeline built), and settles through the store with the stats stamp
+// pinned so both forks write the same bytes.
 type paritySettleStore struct {
 	*store.Store
-	indexer *ingest.ClaudeIndexer
-	output  string
 
-	mu         sync.Mutex
-	validation *ingest.ManagedGenerationValidationResult
-	validated  *ingest.ValidatedContext
-	settled    int
-	settleErr  error
+	mu           sync.Mutex
+	validation   *ingest.ManagedGenerationValidationResult
+	hadCandidate bool
+	carried      bool
+	settled      int
+	settleErr    error
 }
 
 var _ ingest.ManagedGenerationValidator = (*paritySettleStore)(nil)
 
 func (s *paritySettleStore) ValidateManagedGenerationUnchanged(ctx context.Context, request ingest.ManagedGenerationValidationRequest) (ingest.ManagedGenerationValidationResult, error) {
-	if request.Candidate == nil {
-		transcript, err := parityManagedFile(s.output, string(request.SessionID)+"--transcript.jsonl")
-		if err != nil {
-			return ingest.ManagedGenerationValidationResult{}, err
-		}
-		recorded := request.Metadata
-		candidate, err := s.indexer.BuildGenerationMetadata(ctx, ingest.GenerationBuildInput{
-			Session:            ingest.DiscoveredSession{SessionID: request.SessionID, Harness: ingest.HarnessClaudeCode, SourceFormat: ingest.SourceFormatJSONL},
-			GenerationID:       "candidate-only",
-			RecordedMetadata:   &recorded,
-			CapturedTranscript: transcript,
-		})
-		if err == nil {
-			request.Candidate = &candidate
-		}
-	}
 	result, err := s.Store.ValidateManagedGenerationUnchanged(ctx, request)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.hadCandidate = request.Candidate != nil
 	if err == nil {
 		s.validation = &result
-		if result.Outcome == ingest.ValidationProven {
-			s.validated = &ingest.ValidatedContext{GenerationID: request.GenerationID, Candidate: *request.Candidate}
-		}
 	}
 	return result, err
 }
 
 func (s *paritySettleStore) SettleCapturedGenerationUnchanged(ctx context.Context, request ingest.ManagedGenerationUnchangedProof) (ingest.ManagedGenerationUnchangedSettleOutcome, error) {
-	s.mu.Lock()
-	if request.Validated == nil {
-		request.Validated = s.validated
-	}
-	s.mu.Unlock()
 	outcome, err := s.Store.SettleCapturedGenerationUnchangedAtForTest(ctx, request, parityStatsStamp)
 	s.mu.Lock()
 	s.settled++
 	s.settleErr = err
+	s.carried = request.Validated != nil
 	s.mu.Unlock()
 	return outcome, err
-}
-
-func parityManagedFile(output, name string) ([]byte, error) {
-	var found string
-	err := filepath.WalkDir(output, func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if !entry.IsDir() && entry.Name() == name {
-			found = path
-			return filepath.SkipAll
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	if found == "" {
-		return nil, errors.New("no managed file " + name)
-	}
-	return os.ReadFile(found)
 }
 
 func runParityPipeline(t *testing.T, db *store.Store, wrapped interface {
@@ -349,7 +305,7 @@ func TestValidatedSettleWritesLikeTheProvenSettle(t *testing.T) {
 			if slices.Contains(fixture.Mutations, run) {
 				store.SetValidatedSettleMutationForTest(t, run)
 			}
-			wrapped := &paritySettleStore{Store: db, indexer: ingest.NewClaudeIndexer(&ingest.OSFileSystem{}), output: output}
+			wrapped := &paritySettleStore{Store: db}
 			runParityPipeline(t, db, wrapped, empty, output, wrapped)
 			if wrapped.settled != 1 || wrapped.settleErr != nil {
 				t.Fatalf("settles %d, error %v; want one settle", wrapped.settled, wrapped.settleErr)
@@ -357,8 +313,11 @@ func TestValidatedSettleWritesLikeTheProvenSettle(t *testing.T) {
 			if run == parityProvenRun && wrapped.validation != nil {
 				t.Fatalf("the proven fork asked the validator: %+v", wrapped.validation)
 			}
-			if run != parityProvenRun && (wrapped.validation == nil || wrapped.validation.Outcome != ingest.ValidationProven || wrapped.validated == nil) {
-				t.Fatalf("the forged fork did not validate: %+v", wrapped.validation)
+			if run != parityProvenRun && (wrapped.validation == nil || wrapped.validation.Outcome != ingest.ValidationProven || !wrapped.hadCandidate || !wrapped.carried) {
+				t.Fatalf("the forged fork did not validate through the pipeline: answer %+v, candidate supplied %t, answer carried to the settle %t", wrapped.validation, wrapped.hadCandidate, wrapped.carried)
+			}
+			if run == parityProvenRun && wrapped.carried {
+				t.Fatal("the proven fork's settle carried a validated answer")
 			}
 			if err := db.Close(); err != nil {
 				t.Fatal(err)

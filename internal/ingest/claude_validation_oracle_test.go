@@ -212,10 +212,18 @@ func applyInventoryMutation(t *testing.T, row metadataInventoryRow, sid string, 
 }
 
 // seamClaudeIndexer runs a seam before each managed build, the point in a
-// parse that matches the point before the validator in a validated refresh.
+// parse that matches the point before the validator in a validated refresh,
+// and records each metadata half the pipeline runs.
 type seamClaudeIndexer struct {
 	*ingest.ClaudeIndexer
 	before func()
+	halves *halfRecorder
+}
+
+func (i seamClaudeIndexer) BuildGenerationMetadata(ctx context.Context, input ingest.GenerationBuildInput) (ingest.GenerationMetadataCandidate, error) {
+	candidate, err := i.ClaudeIndexer.BuildGenerationMetadata(ctx, input)
+	i.halves.record(input.Session.SessionID, err)
+	return candidate, err
 }
 
 func (i seamClaudeIndexer) BuildGeneration(ctx context.Context, input ingest.GenerationBuildInput) (ingest.GenerationCandidate, error) {
@@ -239,7 +247,7 @@ func (s *oracleProveSeam) ProveCapturedGenerationUnchanged(ctx context.Context, 
 }
 
 // runOraclePipeline runs one Claude pipeline over source into output.
-func runOraclePipeline(t *testing.T, db managedRefreshPipelineStore, source, output string, disableSkips bool, beforeBuild func()) *ingest.PipelineResult {
+func runOraclePipeline(t *testing.T, db managedRefreshPipelineStore, source, output string, disableSkips bool, beforeBuild func(), halves *halfRecorder) *ingest.PipelineResult {
 	t.Helper()
 	fs := &ingest.OSFileSystem{}
 	cfg := makePipelineConfig(output)
@@ -252,7 +260,7 @@ func runOraclePipeline(t *testing.T, db managedRefreshPipelineStore, source, out
 	cfg.StalenessThreshold = 0
 	cfg.DisableRefreshSkips = disableSkips
 	indexers := ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})
-	indexers[ingest.HarnessClaudeCode] = seamClaudeIndexer{ClaudeIndexer: ingest.NewClaudeIndexer(fs, ingest.WithClaudeFullDepth(true)), before: beforeBuild}
+	indexers[ingest.HarnessClaudeCode] = seamClaudeIndexer{ClaudeIndexer: ingest.NewClaudeIndexer(fs, ingest.WithClaudeFullDepth(true)), before: beforeBuild, halves: halves}
 	pipeline, err := newTestPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg,
 		ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithSalt(db.InstallationSalt()),
 		ingest.WithIndexers(indexers), ingest.WithLogger(db), ingest.WithIndexLogger(db),
@@ -287,7 +295,7 @@ func seedOracleStore(t *testing.T, document oracleDocument, c oracleCase) oracle
 	}
 	seed.db = openManagedRefreshPipelineStore(t, filepath.Join(root, "db"), seed.output)
 	t.Cleanup(func() { _ = seed.db.Close() })
-	first := runOraclePipeline(t, seed.db, seed.source, seed.output, false, nil)
+	first := runOraclePipeline(t, seed.db, seed.source, seed.output, false, nil, nil)
 	if first.Summary.Indexed == 0 {
 		t.Fatalf("the first import indexed nothing: %+v", first.Summary)
 	}
@@ -330,7 +338,7 @@ func seedOracleStore(t *testing.T, document oracleDocument, c oracleCase) oracle
 		writeOracleFile(t, seed.source, document, path)
 	}
 	if c.InstallFirst {
-		installed := runOraclePipeline(t, seed.db, seed.empty, seed.output, true, nil)
+		installed := runOraclePipeline(t, seed.db, seed.empty, seed.output, true, nil, nil)
 		if installed.Summary.Errors != 0 {
 			t.Fatalf("the installing refresh failed: %+v", installed.Summary)
 		}
@@ -419,13 +427,18 @@ func oracleParseOutcome(t *testing.T, seed oracleSeed, result *ingest.PipelineRe
 	return oracleParseRefuse
 }
 
-// oracleValidatorOutcome reads fork V's validator answer for one session.
-func oracleValidatorOutcome(store *halfValidatingStore, sid string) string {
+// oracleValidatorOutcome reads fork V's answer for one session: the
+// validator's, unsupported when the pipeline's metadata half refused and so
+// had no candidate to ask with, or not-asked.
+func oracleValidatorOutcome(store *halfValidatingStore, halves *halfRecorder, sid string) string {
 	result, asked := store.outcome(ingest.SessionID(sid))
-	if !asked {
-		return oracleNotAsked
+	if asked {
+		return string(result.Outcome)
 	}
-	return string(result.Outcome)
+	if halves.refusal(ingest.SessionID(sid)) != nil {
+		return string(ingest.ValidationUnsupported)
+	}
+	return oracleNotAsked
 }
 
 // oracleObservation is both forks' result for every session of one case.
@@ -440,17 +453,19 @@ func runOracleCase(t *testing.T, document oracleDocument, c oracleCase) oracleOb
 		return seed.empty
 	}
 	v := seedOracleStore(t, document, c)
-	validating := newHalfValidatingStore(v.db, v.output, &ingest.OSFileSystem{})
+	validating := newHalfValidatingStore(v.db)
 	validating.forceValidation = true
+	halves := newHalfRecorder()
 	remove := func(seed oracleSeed) func() {
 		var once sync.Once
 		return func() { once.Do(func() { removeOracleFiles(t, seed.source, c.RemoveBeforeValidation) }) }
 	}
 	removeV := remove(v)
-	runOraclePipeline(t, &oracleProveSeam{halfValidatingStore: validating, before: removeV}, refreshSource(v), v.output, false, removeV)
+	runOraclePipeline(t, &oracleProveSeam{halfValidatingStore: validating, before: removeV}, refreshSource(v), v.output, false, removeV, halves)
+	validating.assertWiring(t)
 
 	p := seedOracleStore(t, document, c)
-	parsed := runOraclePipeline(t, p.db, refreshSource(p), p.output, true, remove(p))
+	parsed := runOraclePipeline(t, p.db, refreshSource(p), p.output, true, remove(p), nil)
 
 	observed := oracleObservation{}
 	sessions := map[string]bool{}
@@ -464,7 +479,7 @@ func runOracleCase(t *testing.T, document oracleDocument, c oracleCase) oracleOb
 		sessions[sid] = true
 	}
 	for sid := range sessions {
-		observed[sid] = oracleExpectation{Validator: oracleValidatorOutcome(validating, sid), Parse: oracleParseOutcome(t, p, parsed, sid)}
+		observed[sid] = oracleExpectation{Validator: oracleValidatorOutcome(validating, halves, sid), Parse: oracleParseOutcome(t, p, parsed, sid)}
 	}
 	return observed
 }
@@ -563,7 +578,8 @@ func TestValidatedSettleCandidateWindow(t *testing.T) {
 		t.Run(w.Name, func(t *testing.T) {
 			t.Parallel()
 			seed := seedOracleStore(t, document, oracleCase{Name: w.Name, Change: oracleChangeNone})
-			validating := newHalfValidatingStore(seed.db, seed.output, &ingest.OSFileSystem{})
+			validating := newHalfValidatingStore(seed.db)
+			halves := newHalfRecorder()
 			validating.forceValidation = true
 			sid := ingest.SessionID(w.Session)
 			var removed sync.Once
@@ -579,9 +595,10 @@ func TestValidatedSettleCandidateWindow(t *testing.T) {
 			prove := &oracleProveSeam{halfValidatingStore: validating, before: func() {
 				removed.Do(func() { removeOracleFiles(t, seed.source, w.RemoveBeforeValidation) })
 			}}
-			result := runOraclePipeline(t, prove, seed.empty, seed.output, false, nil)
-			if got := oracleValidatorOutcome(validating, w.Session); got != w.Validator {
-				t.Fatalf("validator = %s, want %s (half error %v)", got, w.Validator, validating.halfErrors[sid])
+			result := runOraclePipeline(t, prove, seed.empty, seed.output, false, nil, halves)
+			validating.assertWiring(t)
+			if got := oracleValidatorOutcome(validating, halves, w.Session); got != w.Validator {
+				t.Fatalf("validator = %s, want %s (half error %v)", got, w.Validator, halves.refusal(sid))
 			}
 			validating.mu.Lock()
 			settleErr, settled := validating.settled[sid]

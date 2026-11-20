@@ -3,7 +3,6 @@ package ingest_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,44 +15,36 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// halfValidatingStore wraps a real store so a refresh run asks the real
-// validator with the real Claude metadata half: when the pipeline's request
-// carries no candidate, it builds one from the request's captured metadata and
-// the managed transcript bytes, exactly as the builder's input would carry
-// them, and remembers a proven answer so the settle carries it. A pipeline
-// that already supplies the candidate and the validated answer passes through
-// unchanged.
+// halfValidatingStore observes the real store under a refresh run. The
+// pipeline builds the metadata candidate once and asks the store's validator;
+// this wrapper only records each answer and settle, checks that the pipeline
+// supplied the candidate and carried a proven answer into the settle, and
+// offers two seams: forceValidation turns a proven cheap proof into a
+// metadata-context mismatch so the validator answers for every session, and
+// afterValidation runs between the validator's answer and the settle.
 type halfValidatingStore struct {
 	*store.Store
-	indexer *ingest.ClaudeIndexer
-	output  string
-	// forceValidation turns a proven cheap proof into a metadata-context
-	// mismatch, so the validator answers for every session.
 	forceValidation bool
-	// afterValidation runs between the validator's answer and the return to
-	// the pipeline: the point before the settle where a filesystem race can
-	// happen.
 	afterValidation func(sid ingest.SessionID)
 
 	mu          sync.Mutex
 	outcomes    map[ingest.SessionID]ingest.ManagedGenerationValidationResult
-	halfErrors  map[ingest.SessionID]error
 	cheapProven map[ingest.SessionID]bool
-	validated   map[ingest.SessionID]*ingest.ValidatedContext
+	proven      map[ingest.SessionID]bool
 	settled     map[ingest.SessionID]error
+	// wiring records a pipeline that asked without a candidate or settled a
+	// proven answer without carrying it.
+	wiring []string
 }
 
 var _ ingest.ManagedGenerationValidator = (*halfValidatingStore)(nil)
 
-func newHalfValidatingStore(db *store.Store, output string, fs ingest.FileSystem) *halfValidatingStore {
+func newHalfValidatingStore(db *store.Store) *halfValidatingStore {
 	return &halfValidatingStore{
 		Store:       db,
-		indexer:     ingest.NewClaudeIndexer(fs, ingest.WithClaudeFullDepth(true)),
-		output:      output,
 		outcomes:    map[ingest.SessionID]ingest.ManagedGenerationValidationResult{},
-		halfErrors:  map[ingest.SessionID]error{},
 		cheapProven: map[ingest.SessionID]bool{},
-		validated:   map[ingest.SessionID]*ingest.ValidatedContext{},
+		proven:      map[ingest.SessionID]bool{},
 		settled:     map[ingest.SessionID]error{},
 	}
 }
@@ -70,23 +61,14 @@ func (s *halfValidatingStore) ProveCapturedGenerationUnchanged(ctx context.Conte
 }
 
 func (s *halfValidatingStore) ValidateManagedGenerationUnchanged(ctx context.Context, request ingest.ManagedGenerationValidationRequest) (ingest.ManagedGenerationValidationResult, error) {
-	if request.Candidate == nil {
-		candidate, err := s.buildCandidate(ctx, request)
-		if err != nil {
-			s.mu.Lock()
-			s.halfErrors[request.SessionID] = err
-			s.mu.Unlock()
-		} else {
-			request.Candidate = &candidate
-		}
-	}
 	result, err := s.Store.ValidateManagedGenerationUnchanged(ctx, request)
 	s.mu.Lock()
+	if request.Candidate == nil {
+		s.wiring = append(s.wiring, "the pipeline asked the validator for "+string(request.SessionID)+" without a candidate")
+	}
 	if err == nil {
 		s.outcomes[request.SessionID] = result
-	}
-	if err == nil && result.Outcome == ingest.ValidationProven {
-		s.validated[request.SessionID] = &ingest.ValidatedContext{GenerationID: request.GenerationID, Candidate: *request.Candidate}
+		s.proven[request.SessionID] = result.Outcome == ingest.ValidationProven
 	}
 	s.mu.Unlock()
 	if s.afterValidation != nil {
@@ -97,8 +79,8 @@ func (s *halfValidatingStore) ValidateManagedGenerationUnchanged(ctx context.Con
 
 func (s *halfValidatingStore) SettleCapturedGenerationUnchanged(ctx context.Context, request ingest.ManagedGenerationUnchangedProof) (ingest.ManagedGenerationUnchangedSettleOutcome, error) {
 	s.mu.Lock()
-	if request.Validated == nil {
-		request.Validated = s.validated[request.SessionID]
+	if s.proven[request.SessionID] && (request.Validated == nil || request.Validated.Candidate.Metadata.SessionID != request.SessionID) {
+		s.wiring = append(s.wiring, "the pipeline settled "+string(request.SessionID)+" without the validated answer")
 	}
 	s.mu.Unlock()
 	outcome, err := s.Store.SettleCapturedGenerationUnchanged(ctx, request)
@@ -108,25 +90,6 @@ func (s *halfValidatingStore) SettleCapturedGenerationUnchanged(ctx context.Cont
 	return outcome, err
 }
 
-// buildCandidate runs the production metadata half over the same inputs the
-// builder receives: the captured metadata and the managed transcript bytes.
-func (s *halfValidatingStore) buildCandidate(ctx context.Context, request ingest.ManagedGenerationValidationRequest) (ingest.GenerationMetadataCandidate, error) {
-	transcript, err := managedTranscriptBytes(s.output, request.SessionID)
-	if err != nil {
-		return ingest.GenerationMetadataCandidate{}, err
-	}
-	recorded := request.Metadata
-	return s.indexer.BuildGenerationMetadata(ctx, ingest.GenerationBuildInput{
-		Session: ingest.DiscoveredSession{
-			SessionID: request.SessionID, Harness: ingest.HarnessClaudeCode,
-			SourceFormat: ingest.SourceFormatJSONL, SourcePath: ingest.ResolvedPath(recorded.Source.FilePath),
-		},
-		GenerationID:       "candidate-only",
-		RecordedMetadata:   &recorded,
-		CapturedTranscript: transcript,
-	})
-}
-
 func (s *halfValidatingStore) outcome(sid ingest.SessionID) (ingest.ManagedGenerationValidationResult, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -134,28 +97,45 @@ func (s *halfValidatingStore) outcome(sid ingest.SessionID) (ingest.ManagedGener
 	return result, ok
 }
 
-// managedTranscriptBytes reads the managed transcript of one session from the
-// pipeline's output tree.
-func managedTranscriptBytes(output string, sid ingest.SessionID) ([]byte, error) {
-	name := string(sid) + "--transcript" + defaults.ExtJSONL.String()
-	var found string
-	err := filepath.WalkDir(output, func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if !entry.IsDir() && entry.Name() == name {
-			found = path
-			return filepath.SkipAll
-		}
-		return nil
-	})
+// assertWiring fails the test when the pipeline did not hand the candidate
+// or the validated answer through.
+func (s *halfValidatingStore) assertWiring(t *testing.T) {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, problem := range s.wiring {
+		t.Error(problem)
+	}
+}
+
+// halfRecorder records, per session, the refusal of the metadata half the
+// pipeline ran, so a test can tell "no candidate" from "never asked".
+type halfRecorder struct {
+	mu      sync.Mutex
+	refused map[ingest.SessionID]error
+	built   map[ingest.SessionID]int
+}
+
+func newHalfRecorder() *halfRecorder {
+	return &halfRecorder{refused: map[ingest.SessionID]error{}, built: map[ingest.SessionID]int{}}
+}
+
+func (r *halfRecorder) record(sid ingest.SessionID, err error) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.built[sid]++
 	if err != nil {
-		return nil, err
+		r.refused[sid] = err
 	}
-	if found == "" {
-		return nil, errors.New("no managed transcript for " + string(sid))
-	}
-	return os.ReadFile(found)
+}
+
+func (r *halfRecorder) refusal(sid ingest.SessionID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.refused[sid]
 }
 
 // rewriteManagedMetadata applies change to every managed metadata sidecar of
