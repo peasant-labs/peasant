@@ -1,0 +1,5 @@
+probes:
+  - name: direct-and-shadowed
+    source: direct.gosrc
+  - name: deferred-wrappers
+    source: wrapped.gosrc

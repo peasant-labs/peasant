@@ -225,14 +225,13 @@ func (s *Store) unreferencedBodyDigests(ctx context.Context, sessionID schema.Se
 // before deleting the row anyway. A referenced body aborts the batch through
 // its foreign key: the transaction rolls back and the error names the
 // session, so a stray delete is never silent.
-func (s *Store) deleteVerifiedBodies(ctx context.Context, sessionID schema.SessionID, digests []string) (int64, error) {
+func (s *Store) deleteVerifiedBodies(ctx context.Context, sessionID schema.SessionID, digests []string) (count int64, txnErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("store: take connection to delete %d bodies for session %s: %w; no row was deleted", len(digests), sessionID, err)
 	}
 	defer s.pool.Put(conn)
 	var deleted int64
-	txnErr := error(nil)
 	// The batch verifies each body before deleting it, so it reads first.
 	// IMMEDIATE takes the writer before that read: a deferred transaction's
 	// later upgrade fails with BUSY at once, without waiting on busy_timeout,
@@ -312,14 +311,13 @@ func (s *Store) unreferencedBlobDigests(ctx context.Context, sessionID schema.Se
 // objects in one transaction. The chunks cascade from the header, so one
 // statement per object removes the whole object. A referenced blob aborts
 // the batch through its foreign key, like a referenced body.
-func (s *Store) deleteUnreferencedBlobs(ctx context.Context, sessionID schema.SessionID, digests []string) (int64, error) {
+func (s *Store) deleteUnreferencedBlobs(ctx context.Context, sessionID schema.SessionID, digests []string) (count int64, txnErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("store: take connection to delete %d blobs for session %s: %w; no row was deleted", len(digests), sessionID, err)
 	}
 	defer s.pool.Put(conn)
 	var deleted int64
-	txnErr := error(nil)
 	// The batch's first statement is a DELETE, which would take the writer
 	// from an idle deferred transaction and wait on busy_timeout too. It
 	// begins IMMEDIATE anyway so every store write follows one rule (see
