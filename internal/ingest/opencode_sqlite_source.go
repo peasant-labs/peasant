@@ -10,6 +10,32 @@ import (
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 )
 
+// payloadSize measures SQLite payloads without materializing their rows.
+func (a *OpenCodeAdapter) payloadSize(ctx context.Context, session DiscoveredSession) (int64, error) {
+	var size OpenCodePayloadSize
+	err := a.withOpenCodeSQLiteSource(ctx, session.SourcePath.String(), func(source OpenCodeSQLiteSource) error {
+		switch session.TranscriptOrigin {
+		case TranscriptOriginOpenCodeLegacySQLite:
+			id, err := NewOpenCodeLegacySessionID(string(session.SessionID))
+			if err != nil {
+				return err
+			}
+			size, err = source.LegacySessionPayloadSize(ctx, id)
+			return err
+		case TranscriptOriginOpenCodeCurrentSQLite:
+			id, err := NewOpenCodeCurrentSessionID(string(session.SessionID))
+			if err != nil {
+				return err
+			}
+			size, err = source.CurrentSessionPayloadSize(ctx, id)
+			return err
+		default:
+			return nil
+		}
+	})
+	return size.Bytes, err
+}
+
 // OpenCodeCatalogScope identifies one bounded catalog projection.
 type OpenCodeCatalogScope string
 
