@@ -64,6 +64,11 @@ const (
 	// against a table in which the adapter declares no change scope: the
 	// full step the plan names.
 	MeasurementCaseUndeclaredProducer MeasurementCase = "C6"
+	// MeasurementCaseHashDrift is an adapter bump over generations whose
+	// stored metadata hash is stale: the cheap proof fails on the metadata
+	// context, and the validated settle (metadata candidate, context
+	// validation, settle) runs against the baseline parse.
+	MeasurementCaseHashDrift MeasurementCase = "C7"
 )
 
 // AllMeasurementCases lists every case in matrix order.
@@ -72,6 +77,7 @@ var AllMeasurementCases = []MeasurementCase{
 	MeasurementCaseIndexerBump,
 	MeasurementCaseNewSession,
 	MeasurementCaseUndeclaredProducer,
+	MeasurementCaseHashDrift,
 }
 
 // NewMeasurementCase validates a raw case id at an input boundary.
