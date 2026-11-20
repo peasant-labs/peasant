@@ -208,6 +208,12 @@ type sample struct {
 // censusRow is one census row as a sample carries it from the child to the
 // parent. It writes the row as the census does, reason as its stable code,
 // and reads that form back through the reason's validating constructor.
+//
+// The decoder lives here rather than as RefreshCensusRow.UnmarshalJSON:
+// the census is an output the pipeline writes into reports and never reads
+// back, and this build-tagged harness is the only reader. A production
+// decoder would be a new trust boundary in internal/ingest that nothing
+// shipped exercises.
 type censusRow struct {
 	ingest.RefreshCensusRow
 }
@@ -302,7 +308,7 @@ const (
 // child process through command, alternating the arm order by round. A sample
 // that did not execute what the case expects fails the case before any
 // report is written.
-func runCase(ctx context.Context, spec caseSpec, opts harnessOptions, command runCommand) (string, error) {
+func runCase(ctx context.Context, spec caseSpec, opts harnessOptions, command sampleCommand) (string, error) {
 	dir, err := cleanCaseDir(opts.root, spec.id)
 	if err != nil {
 		return "", err

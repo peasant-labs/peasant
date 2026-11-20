@@ -7,14 +7,18 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/upgrade"
 )
@@ -22,52 +26,68 @@ import (
 //go:embed testdata/smoke_samples.yaml
 var smokeSamplesYAML []byte
 
-// The test binary doubles as the sample child: these variables select the
-// child behaviour, so the runner is driven through real child processes.
+//go:embed testdata/sample_flags.yaml
+var sampleFlagsYAML []byte
+
+// The test binary doubles as the sample child. The environment selects the
+// child behaviour; the sample itself arrives as the harness flags after
+// "--", parsed by the same flag set the harness binds, so the runner is
+// driven through real child processes and the real argv path.
 const (
 	childModeEnv     = "SKIP_BUDGET_TEST_CHILD"
-	childDirEnv      = "SKIP_BUDGET_TEST_CHILD_DIR"
 	childSessionsEnv = "SKIP_BUDGET_TEST_CHILD_SESSIONS"
-	childFlagsEnv    = "SKIP_BUDGET_TEST_CHILD_FLAGS"
 )
 
 type childMode string
 
 const (
-	childModeImport  childMode = "import"
+	// childModeImport and childModeRun run the sample the flags name, as the
+	// harness child does. childModeImport imports SKIP_BUDGET_TEST_CHILD_SESSIONS
+	// sessions instead of the smoke count.
+	childModeImport childMode = "import"
+	childModeRun    childMode = "run"
+	// childModeGarbage prints a line that is not a sample.
 	childModeGarbage childMode = "garbage"
-	// childModeRun runs the arm sample the flags name, as the harness child
-	// does; childModeRunMiscount runs it and then reports one extra parse.
-	childModeRun         childMode = "run"
-	childModeRunMiscount childMode = "run-miscount"
+	// The remaining modes run the case-arm sample, then misreport it.
+	childModeRunMiscount     childMode = "run-miscount"
+	childModeRunWrongRound   childMode = "run-wrong-round"
+	childModeRunWrongArm     childMode = "run-wrong-arm"
+	childModeRunParentPID    childMode = "run-parent-pid"
+	childModeRunUnknownCause childMode = "run-unknown-reason"
+	childModeRunTwoSamples   childMode = "run-two-samples"
 )
+
+// misreports rewrites an honest case-arm sample before the child prints it.
+var misreports = map[childMode]func(*sample){
+	childModeRunMiscount:   func(s *sample) { s.Parses++ },
+	childModeRunWrongRound: func(s *sample) { s.Round++ },
+	childModeRunWrongArm: func(s *sample) {
+		s.Arm = map[arm]arm{armSkip: armBaseline, armBaseline: armSkip}[s.Arm]
+	},
+	childModeRunParentPID: func(s *sample) { s.PID = os.Getppid() },
+	// A reason id this build does not define prints an empty code.
+	childModeRunUnknownCause: func(s *sample) { s.Census[0].Reason = ingest.OutcomeReason(-1) },
+}
 
 func init() { runTestChild = runChildIfAsked }
 
 // runChildIfAsked runs the child behaviour the environment selects and exits;
 // with no child mode set it returns and the tests run.
 func runChildIfAsked() {
-	switch childMode(os.Getenv(childModeEnv)) {
-	case "":
+	mode := childMode(os.Getenv(childModeEnv))
+	if mode == "" {
 		return
-	case childModeGarbage:
+	}
+	if mode == childModeGarbage {
 		fmt.Println("not a sample result")
 		os.Exit(0)
-	case childModeImport:
-		sessions, err := strconv.Atoi(os.Getenv(childSessionsEnv))
-		if err == nil {
-			err = runSampleChild(context.Background(), sampleFlags{Kind: string(sampleKindImport), Dir: os.Getenv(childDirEnv)}, sessions, smokeEntries, os.Stdout)
-		}
-		exitChild(err)
-	case childModeRun, childModeRunMiscount:
-		exitChild(runArmChild(childMode(os.Getenv(childModeEnv)) == childModeRunMiscount))
-	default:
-		fmt.Fprintf(os.Stderr, "%s=%q is not a child mode\n", childModeEnv, os.Getenv(childModeEnv))
-		os.Exit(2)
 	}
-}
-
-func exitChild(err error) {
+	fs := flag.NewFlagSet("skip-budget", flag.ContinueOnError)
+	f := bindSampleFlags(fs)
+	err := fs.Parse(argsAfterDashes(os.Args))
+	if err == nil {
+		err = runTestChildMode(mode, *f)
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -75,43 +95,83 @@ func exitChild(err error) {
 	os.Exit(0)
 }
 
-// runArmChild runs the arm sample the flags in the environment name through
-// the harness child; miscount makes it report one parse more than it ran.
-func runArmChild(miscount bool) error {
-	var f sampleFlags
-	if err := json.Unmarshal([]byte(os.Getenv(childFlagsEnv)), &f); err != nil {
-		return fmt.Errorf("%s: %w", childFlagsEnv, err)
+func argsAfterDashes(args []string) []string {
+	if i := slices.Index(args, "--"); i >= 0 {
+		return args[i+1:]
 	}
-	if !miscount {
-		return runSampleChild(context.Background(), f, 0, 0, os.Stdout)
+	return nil
+}
+
+func runTestChildMode(mode childMode, f sampleFlags) error {
+	ctx := context.Background()
+	switch mode {
+	case childModeImport:
+		sessions, err := strconv.Atoi(os.Getenv(childSessionsEnv))
+		if err != nil {
+			return fmt.Errorf("%s: %w", childSessionsEnv, err)
+		}
+		return runSampleChild(ctx, f, sessions, smokeEntries, os.Stdout)
+	case childModeRun:
+		return runSampleChild(ctx, f, smokeSessions, smokeEntries, os.Stdout)
 	}
 	var out bytes.Buffer
-	if err := runSampleChild(context.Background(), f, 0, 0, &out); err != nil {
+	if err := runSampleChild(ctx, f, smokeSessions, smokeEntries, &out); err != nil {
 		return err
+	}
+	if mode == childModeRunTwoSamples {
+		_, err := os.Stdout.Write(append(out.Bytes(), out.Bytes()...))
+		return err
+	}
+	misreport, ok := misreports[mode]
+	if !ok {
+		return fmt.Errorf("%s=%q is not a child mode", childModeEnv, mode)
 	}
 	var s sample
 	if err := json.Unmarshal(out.Bytes(), &s); err != nil {
 		return err
 	}
-	s.Parses++
+	misreport(&s)
 	return json.NewEncoder(os.Stdout).Encode(s)
+}
+
+// testChildCommand launches the test binary as the child for one sample,
+// with the sample's harness flags after "--". It records each launch.
+type testChildCommand struct {
+	mode     childMode
+	sessions int
+	mu       sync.Mutex
+	launched []sampleFlags
+}
+
+func (c *testChildCommand) command(f sampleFlags) *exec.Cmd {
+	c.mu.Lock()
+	c.launched = append(c.launched, f)
+	c.mu.Unlock()
+	cmd := exec.Command(os.Args[0], append([]string{"-test.run=^$", "--"}, f.args()...)...)
+	cmd.Env = append(os.Environ(), childModeEnv+"="+string(c.mode), childSessionsEnv+"="+strconv.Itoa(c.sessions))
+	return cmd
+}
+
+type smokeSampleCase struct {
+	Name      string     `yaml:"name"`
+	Sample    sampleKind `yaml:"sample"`
+	Child     childMode  `yaml:"child"`
+	Sessions  int        `yaml:"sessions"`
+	Rounds    int        `yaml:"rounds"`
+	WantOrder []arm      `yaml:"wantOrder"`
+	WantError string     `yaml:"wantError"`
 }
 
 // TestSmokeSamplesRunInChildProcesses drives the new-session smoke runner
 // and a corpus case's arm runner with the test binary as their child: each
-// sample must come from its own process and directory, and a child that
-// imported the wrong shape, reported counts the case does not expect, or
-// printed something other than a result fails the run before any report.
+// sample must come from its own process and directory, the arm order must
+// alternate by round, and a child that imported the wrong shape, misreported
+// its sample, or printed anything but one result fails the run before any
+// report.
 func TestSmokeSamplesRunInChildProcesses(t *testing.T) {
 	var fixture struct {
-		RequiredNames []string `yaml:"requiredNames"`
-		Cases         []struct {
-			Name      string     `yaml:"name"`
-			Sample    sampleKind `yaml:"sample"`
-			Child     childMode  `yaml:"child"`
-			Sessions  int        `yaml:"sessions"`
-			WantError string     `yaml:"wantError"`
-		} `yaml:"cases"`
+		RequiredNames []string          `yaml:"requiredNames"`
+		Cases         []smokeSampleCase `yaml:"cases"`
 	}
 	if err := testutil.DecodeFixtureYAML(smokeSamplesYAML, &fixture); err != nil {
 		t.Fatal(err)
@@ -123,72 +183,63 @@ func TestSmokeSamplesRunInChildProcesses(t *testing.T) {
 	if err := testutil.RequireFixtureNames("smoke_samples.yaml", "case", fixture.RequiredNames, present); err != nil {
 		t.Fatal(err)
 	}
-	const samples = 2
 	for _, c := range fixture.Cases {
-		if _, err := newSampleKind(string(c.Sample)); err != nil {
+		kind, err := newSampleKind(string(c.Sample))
+		if err != nil {
 			t.Fatalf("case %s: %v", c.Name, err)
 		}
-		if c.Sample == sampleKindRun {
-			t.Run(c.Name, func(t *testing.T) { testRunSamples(t, c.Child, c.WantError) })
+		if kind == sampleKindRun {
+			t.Run(c.Name, func(t *testing.T) { testRunSamples(t, c) })
 			continue
 		}
-		t.Run(c.Name, func(t *testing.T) {
-			dir := t.TempDir()
-			command := func(sampleDir string) *exec.Cmd {
-				cmd := exec.Command(os.Args[0], "-test.run=^$")
-				cmd.Env = append(os.Environ(), childModeEnv+"="+string(c.Child), childDirEnv+"="+sampleDir,
-					childSessionsEnv+"="+strconv.Itoa(c.Sessions))
-				return cmd
-			}
-			results, err := runSmoke(dir, harnessOptions{}, samples, command)
-			if c.WantError != "" {
-				if err == nil || !strings.Contains(err.Error(), c.WantError) {
-					t.Fatalf("runSmoke error = %v, want one containing %q", err, c.WantError)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(results) != samples {
-				t.Fatalf("runSmoke returned %d samples, want %d", len(results), samples)
-			}
-			pids, dirs := map[int]bool{os.Getpid(): true}, map[string]bool{}
-			for _, r := range results {
-				if pids[r.PID] || dirs[r.Dir] {
-					t.Fatalf("sample %+v shares a process or directory with the runner or another sample", r)
-				}
-				pids[r.PID], dirs[r.Dir] = true, true
-				if _, err := os.Stat(filepath.Join(r.Dir, "db", "peasant.db")); err != nil {
-					t.Fatalf("sample %+v left no store in its directory: %v", r, err)
-				}
-			}
-			if _, err := os.Stat(filepath.Join(dir, "report.json")); err != nil {
-				t.Fatalf("runSmoke wrote no report: %v", err)
-			}
-		})
+		t.Run(c.Name, func(t *testing.T) { testImportSamples(t, c) })
 	}
 }
 
-// testRunSamples runs one smoke round of the stamp-only case, both arms, with
-// the test binary as each arm's child.
-func testRunSamples(t *testing.T, child childMode, wantError string) {
-	root := t.TempDir()
-	command := func(f sampleFlags) *exec.Cmd {
-		flags, err := json.Marshal(f)
-		if err != nil {
-			t.Fatal(err)
+func testImportSamples(t *testing.T, c smokeSampleCase) {
+	const samples = 2
+	dir := t.TempDir()
+	child := &testChildCommand{mode: c.Child, sessions: c.Sessions}
+	results, err := runSmoke(dir, harnessOptions{}, samples, child.command)
+	if c.WantError != "" {
+		if err == nil || !strings.Contains(err.Error(), c.WantError) {
+			t.Fatalf("runSmoke error = %v, want one containing %q", err, c.WantError)
 		}
-		cmd := exec.Command(os.Args[0], "-test.run=^$")
-		cmd.Env = append(os.Environ(), childModeEnv+"="+string(child), childFlagsEnv+"="+string(flags))
-		return cmd
+		return
 	}
-	opts := harnessOptions{root: root, sessions: smokeSessions, entries: smokeEntries, rounds: 1}
-	path, err := runCase(context.Background(), caseSpecs()[upgrade.MeasurementCaseStampOnly], opts, command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != samples {
+		t.Fatalf("runSmoke returned %d samples, want %d", len(results), samples)
+	}
+	pids, dirs := map[int]bool{os.Getpid(): true}, map[string]bool{}
+	for _, r := range results {
+		if pids[r.PID] || dirs[r.Dir] {
+			t.Fatalf("sample %+v shares a process or directory with the runner or another sample", r)
+		}
+		pids[r.PID], dirs[r.Dir] = true, true
+		if _, err := os.Stat(filepath.Join(r.Dir, "db", "peasant.db")); err != nil {
+			t.Fatalf("sample %+v left no store in its directory: %v", r, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "report.json")); err != nil {
+		t.Fatalf("runSmoke wrote no report: %v", err)
+	}
+}
+
+// testRunSamples runs c.Rounds smoke rounds (default one) of the stamp-only
+// case, both arms, with the test binary as each arm's child.
+func testRunSamples(t *testing.T, c smokeSampleCase) {
+	root := t.TempDir()
+	rounds := max(c.Rounds, 1)
+	child := &testChildCommand{mode: c.Child}
+	opts := harnessOptions{root: root, sessions: smokeSessions, entries: smokeEntries, rounds: rounds}
+	path, err := runCase(context.Background(), caseSpecs()[upgrade.MeasurementCaseStampOnly], opts, child.command)
 	reportPath := filepath.Join(root, string(upgrade.MeasurementCaseStampOnly), "report.json")
-	if wantError != "" {
-		if err == nil || !strings.Contains(err.Error(), wantError) {
-			t.Fatalf("runCase error = %v, want one containing %q", err, wantError)
+	if c.WantError != "" {
+		if err == nil || !strings.Contains(err.Error(), c.WantError) {
+			t.Fatalf("runCase error = %v, want one containing %q", err, c.WantError)
 		}
 		if _, statErr := os.Stat(reportPath); !os.IsNotExist(statErr) {
 			t.Fatalf("a failed case left a report at %s: %v", reportPath, statErr)
@@ -197,6 +248,18 @@ func testRunSamples(t *testing.T, child childMode, wantError string) {
 	}
 	if err != nil {
 		t.Fatal(err)
+	}
+	if c.WantOrder != nil {
+		var order []arm
+		for i, f := range child.launched {
+			if want := i/samplesPerRound + 1; f.Round != want {
+				t.Fatalf("launch %d ran round %d, want round %d", i+1, f.Round, want)
+			}
+			order = append(order, arm(f.Arm))
+		}
+		if !slices.Equal(order, c.WantOrder) {
+			t.Fatalf("children ran arms in order %v, want %v", order, c.WantOrder)
+		}
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -207,8 +270,8 @@ func testRunSamples(t *testing.T, child childMode, wantError string) {
 		t.Fatal(err)
 	}
 	all := append(report.Skip.Samples, report.Baseline.Samples...)
-	if len(all) != samplesPerRound {
-		t.Fatalf("report holds %d samples, want both arms of one round", len(all))
+	if len(all) != samplesPerRound*rounds {
+		t.Fatalf("report holds %d samples, want both arms of %d rounds", len(all), rounds)
 	}
 	pids := map[int]bool{os.Getpid(): true}
 	for _, s := range all {
@@ -221,3 +284,53 @@ func testRunSamples(t *testing.T, child childMode, wantError string) {
 
 // samplesPerRound is one sample per arm.
 const samplesPerRound = 2
+
+// TestSampleFlagsRoundTripThroughTheFlagSet checks that the flags the parent
+// renders for each sample kind are exactly the expected list, and that the
+// flag set the harness binds parses them back to the same sample.
+func TestSampleFlagsRoundTripThroughTheFlagSet(t *testing.T) {
+	var fixture struct {
+		RequiredNames []string `yaml:"requiredNames"`
+		Cases         []struct {
+			Name  string `yaml:"name"`
+			Flags struct {
+				Kind  string `yaml:"kind"`
+				Dir   string `yaml:"dir"`
+				Base  string `yaml:"base"`
+				Case  string `yaml:"case"`
+				Arm   string `yaml:"arm"`
+				Round int    `yaml:"round"`
+			} `yaml:"flags"`
+			WantArgs []string `yaml:"wantArgs"`
+		} `yaml:"cases"`
+	}
+	if err := testutil.DecodeFixtureYAML(sampleFlagsYAML, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	present := map[string]bool{}
+	for _, c := range fixture.Cases {
+		present[c.Name] = true
+	}
+	if err := testutil.RequireFixtureNames("sample_flags.yaml", "case", fixture.RequiredNames, present); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range fixture.Cases {
+		t.Run(c.Name, func(t *testing.T) {
+			want := sampleFlags(c.Flags)
+			if got := want.args(); !slices.Equal(got, c.WantArgs) {
+				t.Fatalf("args() = %q, want %q", got, c.WantArgs)
+			}
+			fs := flag.NewFlagSet("skip-budget", flag.ContinueOnError)
+			got := bindSampleFlags(fs)
+			if err := fs.Parse(c.WantArgs); err != nil {
+				t.Fatal(err)
+			}
+			if *got != want || fs.NArg() != 0 {
+				t.Fatalf("parsed %+v with %d left over, want %+v", *got, fs.NArg(), want)
+			}
+			if _, err := got.validate(); err != nil {
+				t.Fatalf("validate() = %v, want the parsed flags accepted", err)
+			}
+		})
+	}
+}

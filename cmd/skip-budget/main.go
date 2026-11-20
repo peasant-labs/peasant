@@ -69,25 +69,23 @@ func main() {
 	list := flag.Bool("list", false, "print the planned cases without running them")
 	caseList := flag.String("case", "", "comma-separated cases to run: C1, C3, C4, C6")
 	base := flag.String("base", "", "comparison base revision")
-	root := flag.String("root", defaultRoot, "absolute directory that holds one directory per case")
+	root := flag.String("root", defaultRoot, "directory that holds one directory per case")
 	sessions := flag.Int("sessions", matrixSessions, "synthetic sessions per case (C4 always uses 2)")
 	entries := flag.Int("entries", matrixEntries, "entries per session (C4 always uses 10)")
 	rounds := flag.Int("rounds", 5, "rounds per case; each round runs both arms once")
-	sampleKind := flag.String("sample", "", "internal: run one sample of this kind in this process (new-session-import, case-arm) and print it as JSON")
-	sampleDir := flag.String("sample-dir", "", "internal: the directory the -sample run writes into")
-	sampleBase := flag.String("sample-base", "", "internal: the prepared base a run sample copies")
-	sampleCase := flag.String("sample-case", "", "internal: the case a run sample measures")
-	sampleArm := flag.String("sample-arm", "", "internal: the arm a run sample runs: skip or baseline")
-	sampleRound := flag.Int("sample-round", 0, "internal: the round a run sample belongs to")
+	child := bindSampleFlags(flag.CommandLine)
 	flag.Parse()
-	if *sampleKind != "" {
-		f := sampleFlags{Kind: *sampleKind, Dir: *sampleDir, Base: *sampleBase, Case: *sampleCase, Arm: *sampleArm, Round: *sampleRound}
-		if err := runSampleChild(context.Background(), f, smokeSessions, smokeEntries, os.Stdout); err != nil {
+	if child.Kind != "" {
+		if err := runSampleChild(context.Background(), *child, smokeSessions, smokeEntries, os.Stdout); err != nil {
 			fail(1, err.Error())
 		}
 		return
 	}
-	cases := matrixCases(*root)
+	absRoot, err := filepath.Abs(*root)
+	if err != nil {
+		fail(2, fmt.Sprintf("resolve -root %q: %v", *root, err))
+	}
+	cases := matrixCases(absRoot)
 	if *list {
 		if err := json.NewEncoder(os.Stdout).Encode(report{Cases: cases}); err != nil {
 			fmt.Fprintf(os.Stderr, "skip-budget: writing matrix to stdout failed: %v\n", err)
@@ -117,23 +115,24 @@ func main() {
 	if err != nil {
 		fail(1, fmt.Sprintf("read worktree state: %v", err))
 	}
-	opts := harnessOptions{root: *root, sessions: *sessions, entries: *entries, rounds: *rounds,
+	opts := harnessOptions{root: absRoot, sessions: *sessions, entries: *entries, rounds: *rounds,
 		head: strings.TrimSpace(string(head)), base: *base, command: strings.Join(append([]string{"go run -tags skipbudget ./cmd/skip-budget"}, os.Args[1:]...), " "),
 		dirty: len(strings.TrimSpace(string(status))) != 0}
 	self, err := os.Executable()
 	if err != nil {
 		fail(1, fmt.Sprintf("locate the harness binary to run each sample: %v", err))
 	}
+	command := harnessSampleCommand(self)
 	specs := caseSpecs()
 	ctx := context.Background()
 	for _, c := range selected {
 		if c == upgrade.MeasurementCaseNewSession {
-			if err := runSmokeCase(opts); err != nil {
+			if err := runSmokeCase(opts, command); err != nil {
 				fail(1, fmt.Sprintf("%s failed: %v", c, err))
 			}
 			continue
 		}
-		path, err := runCase(ctx, specs[c], opts, harnessRunCommand(self))
+		path, err := runCase(ctx, specs[c], opts, command)
 		if err != nil {
 			fail(1, fmt.Sprintf("%s failed: %v", c, err))
 		}
