@@ -27,6 +27,7 @@ cases:
     mismatch: content-hash
     validatorCalls: 1
     builds: 1
+    unsupported: true
   - name: missing-validator-parses
     missing: true
     builds: 1

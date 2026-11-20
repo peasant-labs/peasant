@@ -72,6 +72,7 @@ type proofCountingRefreshStore struct {
 	forgeSettleCounts bool
 	validationCalls   atomic.Int64
 	forceUnproven     bool
+	contextUnproven   bool
 	validationResult  *ingest.ManagedGenerationValidationResult
 	validationRequest ingest.ManagedGenerationValidationRequest
 	validationError   bool
@@ -87,11 +88,17 @@ func (s *proofCountingRefreshStore) ProveCapturedGenerationUnchanged(ctx context
 	if s.forceUnproven && err == nil {
 		proof = ingest.UnchangedProof{Mismatch: ingest.UnchangedNotProvenSeal}
 	}
+	if s.contextUnproven && err == nil {
+		proof = ingest.UnchangedProof{Mismatch: ingest.UnchangedNotProvenMetadata}
+	}
 	s.proof = proof
 	return proof, err
 }
 
 func (s *proofCountingRefreshStore) ValidateManagedGenerationUnchanged(ctx context.Context, request ingest.ManagedGenerationValidationRequest) (ingest.ManagedGenerationValidationResult, error) {
+	if s.validationMissing {
+		return ingest.ManagedGenerationValidationResult{Outcome: ingest.ValidationUnsupported}, nil
+	}
 	s.validationCalls.Add(1)
 	s.validationRequest = request
 	if s.validationError {
@@ -107,6 +114,13 @@ func (s *proofCountingRefreshStore) SettleCapturedGenerationUnchanged(ctx contex
 	s.settles.Add(1)
 	if s.settleRefused {
 		return ingest.ManagedGenerationUnchangedSettleOutcome{}, &ingest.StaleIndexWorkError{SessionID: request.SessionID}
+	}
+	if s.contextUnproven && s.validationResult != nil && s.validationResult.Outcome == ingest.ValidationProven {
+		if request.Validated == nil || request.Validated.GenerationID != request.Expected.ActiveGenerationID ||
+			s.validationRequest.Candidate == nil || request.Validated.Candidate.Metadata.SessionID != s.validationRequest.Candidate.Metadata.SessionID {
+			return ingest.ManagedGenerationUnchangedSettleOutcome{}, fmt.Errorf("synthetic settle: validated candidate was not forwarded")
+		}
+		return ingest.ManagedGenerationUnchangedSettleOutcome{GenerationID: request.Validated.GenerationID}, nil
 	}
 	if s.forgeSettleCounts {
 		input, conversation := int64(903), int64(902)
@@ -185,7 +199,7 @@ func TestManagedGenerationValidationPipelineSeam(t *testing.T) {
 			runManagedRefreshPipeline(t, db, source, output)
 			generationID := managedRefreshPipelineActiveGeneration(t, db, id)
 			managedRefreshPipelineDowngrade(t, db, ingest.GenerationTargets(ingest.HarvesterVersionRegistry)[ingest.HarnessClaudeCode].AdapterVersion-1)
-			counted := &proofCountingRefreshStore{Store: db, forceUnproven: true, validationError: tc.Error, validationMissing: tc.Missing}
+			counted := &proofCountingRefreshStore{Store: db, contextUnproven: true, validationError: tc.Error, validationMissing: tc.Missing}
 			if tc.Outcome != "" {
 				outcome, err := ingest.NewValidationOutcome(tc.Outcome)
 				if err != nil {
@@ -231,13 +245,13 @@ func TestManagedGenerationValidationPipelineSeam(t *testing.T) {
 			found, unsupported := false, false
 			for _, stage := range profiler.StageTotals() {
 				if stage.Stage == ingest.StageRefreshValidate {
-					found = stage.Total == 1 && stage.Done == 0
+					found = stage.Total == 1 && stage.Done == int(tc.Settles)
 				}
 				if stage.Stage == ingest.StageRefreshValidateUnsupported {
 					unsupported = stage.Total == 1 && stage.Done == 0
 				}
 			}
-			if found != (tc.ValidatorCalls == 1) || unsupported != tc.Unsupported {
+			if !found || unsupported != (tc.Unsupported || tc.Missing || tc.Error) {
 				t.Fatalf("validation profile attempts=%t unsupported=%t", found, unsupported)
 			}
 		})
@@ -275,6 +289,7 @@ func TestManagedGenerationUnchangedProofPipelineRoutes(t *testing.T) {
 		t.Helper()
 		unproven := mode == "unproven"
 		counted := &proofCountingRefreshStore{Store: db, proofError: mode == "proof-error", settleRefused: mode == "settle-refused", forgeSettleCounts: mode == "", forceUnproven: unproven, validationMissing: unproven}
+		counted.validationResult = &ingest.ManagedGenerationValidationResult{Outcome: ingest.ValidationNotProven, Mismatch: ingest.UnchangedNotProvenMetadata}
 		fs := &nativeCountingRefreshFS{OSFileSystem: &ingest.OSFileSystem{}, source: source}
 		profiler := &ingest.IndexProfiler{}
 		parses, builds := &atomic.Int64{}, &atomic.Int64{}
@@ -757,6 +772,12 @@ func (i countingManagedRefreshIndexer) BuildGeneration(ctx context.Context, inpu
 		i.calls.Add(1)
 	}
 	return i.ClaudeIndexer.BuildGeneration(ctx, input)
+}
+
+// The validator seam tests need a candidate, not a second copy of the Claude
+// metadata algorithm. The store double decides the validation outcome.
+func (i countingManagedRefreshIndexer) BuildGenerationMetadata(_ context.Context, input ingest.GenerationBuildInput) (ingest.GenerationMetadataCandidate, error) {
+	return ingest.GenerationMetadataCandidate{Metadata: *input.RecordedMetadata}, nil
 }
 
 func (i countingManagedRefreshIndexer) IndexTranscript(ctx context.Context, session ingest.DiscoveredSession) ([]schema.SessionEntry, error) {
