@@ -21,9 +21,14 @@ import (
 // identity, the stats-excluded metadata hash, the adapter revision and the
 // install stamps), and also the activation seal, which only a parse can
 // recompute; the seal's presence is a separate term. Diagnostics drop the
-// stats-overflow row the stats upsert writes, and relationship ordinals are
-// cleared on both sides, since the stored read orders by ordinal without
-// returning it. Order counts everywhere else.
+// stats-overflow row the stats upsert writes. Order counts.
+//
+// Relationships compare exactly as the parse's skip compares them: the stored
+// read orders them by ordinal without returning it, so a stored relationship
+// reads with ordinal zero while a mapped one carries its position. A
+// generation with two or more relationships therefore never compares equal,
+// here or in the skip; the validator must never prove what the parse would
+// not skip.
 //
 // It reads the generation row and the context rows only: no mapping row, no
 // body, no blob and no stat. The caller owns the transaction.
@@ -64,21 +69,16 @@ func candidateContextMatchesOnConn(conn *sqlite.Conn, sid schema.SessionID, gene
 }
 
 // comparableContextChildren keeps only the context rows of a generation's
-// children, in their stored order, with the stats-overflow diagnostic dropped
-// and the relationship ordinals cleared.
+// children, in their stored order, with the stats-overflow diagnostic dropped.
 func comparableContextChildren(children GenerationChildren) GenerationChildren {
 	captured := capturedGenerationChildren(children)
-	out := GenerationChildren{
-		Subagents:    captured.Subagents,
-		Commits:      captured.Commits,
-		Associations: captured.Associations,
-		Diagnostics:  captured.Diagnostics,
+	return GenerationChildren{
+		Subagents:     captured.Subagents,
+		Commits:       captured.Commits,
+		Associations:  captured.Associations,
+		Diagnostics:   captured.Diagnostics,
+		Relationships: captured.Relationships,
 	}
-	for _, relationship := range captured.Relationships {
-		relationship.Ordinal = 0
-		out.Relationships = append(out.Relationships, relationship)
-	}
-	return out
 }
 
 // loadGenerationContextChildrenOnConn reads the context rows of one
