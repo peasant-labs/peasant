@@ -74,6 +74,15 @@ func loadSandboxSearchRebuildFixture(t *testing.T) sandboxSearchRebuildFixture {
 // It logs the load average before every timed run: the machine is shared.
 // It never runs in the gate and builds its stores only under /tmp/opencode.
 //
+// Necessity: the rebuild's cost is a property of FTS5's segment merging at
+// scale, which no fixture-sized store shows (a few megabytes fit in one
+// flush at any budget); the gate tests prove the budget is applied and
+// results are unchanged, and this measurement supplies the numbers behind
+// defaults.SearchRebuildHashBytes, the estimate rates and the search rebuild
+// disk factor. Exit condition: re-run it and update those constants when
+// the bundled SQLite (and so FTS5) is re-vendored or FTS5's default hash
+// size changes; delete it if the budget ever becomes adaptive at run time.
+//
 //	PEASANT_SANDBOX_UPGRADE_DIR=/tmp/opencode/<dir> \
 //	PEASANT_SANDBOX_REBUILD_TEXT_MB=128,256,512,1024,2048 \
 //	PEASANT_SANDBOX_REBUILD_REPEATS=3 \
@@ -181,8 +190,8 @@ func TestSandboxSearchRebuildMeasure(t *testing.T) {
 					if !step.Step.Cost.Long() {
 						t.Fatalf("step 76 planned as %s; the synthetic residue did not reach the plan", step.Step.Cost)
 					}
-					t.Logf("REBUILD upgrade run %d: text %d bytes, step 76 %s (%.2f MB/s), wal +%d bytes, load %s",
-						run, textBytes, step.Duration.Round(time.Millisecond), float64(textBytes)/step.Duration.Seconds()/1e6, step.WALBytes, load)
+					t.Logf("REBUILD upgrade run %d: text %d bytes, step 76 %s (%.2f MB/s), wal +%d bytes (%.3f of the database), load %s",
+						run, textBytes, step.Duration.Round(time.Millisecond), float64(textBytes)/step.Duration.Seconds()/1e6, step.WALBytes, float64(step.WALBytes)/float64(baseInfo.Size()), load)
 				}
 				if !found {
 					t.Fatal("the upgrade ran no step 76")
@@ -218,6 +227,9 @@ func TestSandboxSearchRebuildMeasure(t *testing.T) {
 						}
 					}
 					elapsed := time.Since(started)
+					// The log only grows inside the transaction, so its size
+					// right after the commit is the rebuild's whole log.
+					walBytes := sandboxFileBytes(work + "-wal")
 					digest := sandboxSearchDigest(t, conn, fixture)
 					segments := sandboxFTSSegments(t, conn)
 					if err := conn.Close(); err != nil {
@@ -228,8 +240,8 @@ func TestSandboxSearchRebuildMeasure(t *testing.T) {
 						baselineDigest = digest
 					}
 					same := digest == baselineDigest
-					t.Logf("REBUILD variant %-13s run %d: %s (%.2f MB/s), %d segments after, results identical to the first variant: %v, load %s",
-						variant.Name, run, elapsed.Round(time.Millisecond), float64(textBytes)/elapsed.Seconds()/1e6, segments, same, load)
+					t.Logf("REBUILD variant %-13s run %d: %s (%.2f MB/s), wal %d bytes (%.3f of the database), %d segments after, results identical to the first variant: %v, load %s",
+						variant.Name, run, elapsed.Round(time.Millisecond), float64(textBytes)/elapsed.Seconds()/1e6, walBytes, float64(walBytes)/float64(baseInfo.Size()), segments, same, load)
 					if !same {
 						t.Errorf("variant %s changed the query results", variant.Name)
 					}
@@ -297,6 +309,15 @@ func sandboxPositiveInts(t *testing.T, variable string, fallback []int) []int {
 		values = append(values, n)
 	}
 	return values
+}
+
+// sandboxFileBytes is the size of a file, or 0 when it is missing.
+func sandboxFileBytes(path string) int64 {
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0
+	}
+	return info.Size()
 }
 
 // sandboxLoadAverage is the one-minute load average, or "unknown".

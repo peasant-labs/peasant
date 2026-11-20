@@ -72,7 +72,7 @@ next starts, but readers can delay reuse of the previous step's log space.
 | entry table rebuild | 2.0 | 75 (override) | the entry table with its indexes, and the two search indexes the step rebuilds, on a store whose text is in the bodies; the whole database on a store whose text is in the entry rows | observed: the largest sampled log plus later database growth was 1.760 times the entry table and search indexes with the text in the entry rows, 1.020 times with the text in the bodies, and 1.848 times at the row bound; 2.0 is about 8% above the largest observed ratio, not a guaranteed peak |
 | entry table rebuild | 2.0 | 11 (override) | the entry table with its indexes; a store that old keeps its text in the entry rows, so the whole database | the same factor |
 | session tables rebuild | 2.0 | 73 and 78 (override) | `sessions` and `daily_summary_harness` with their indexes, every row read from its record header (at most a million rows each; past that, the whole database) | historical measurement with the earlier estimator: the step's log grew 1.02 to 1.03 times its estimated tables, 1.40 to 1.45 times a database those tables fill; the plan asked for 1.38 to 1.43 times what the log used |
-| search rebuild | 0.39 | every `scales_with_text` step that copies no table: 35, and 76 on a store with stale search results | the database | derived from the search index build estimate; not measured |
+| search rebuild | 0.50 | every `scales_with_text` step that copies no table: 35, and 76 on a store with stale search results | the database | measured on 76: the log grew 0.379 of the database with the rebuild's widened budget (0.333 at FTS5's default); 0.50 adds a margin of 0.12 |
 | row-scaled | 0.01 | every `scales_with_rows` step but 11, 73 and 78 | the database | measured on 70 to 74: at most 0.0018 for one step, 0.0032 for five |
 | quick | 0.001 | every `quick` step | the database | measured: the quick step wrote nothing |
 
@@ -315,28 +315,33 @@ arrives during the statement rolls back when the statement returns.
 
 At FTS5's default in-memory postings budget (1 MiB) the one statement is
 super-linear in the indexed text: it writes a segment per megabyte of
-postings and merges those segments again and again while it runs. On
-synthetic stores of 131 MB to 2.1 GB of indexed text its time grew about as
-text^1.2. Every whole-index rebuild therefore raises the index's budget to
-`defaults.SearchRebuildHashBytes` (64 MiB) for its own run and removes the
-setting before it commits: the rebuild a harvest runs when the search index
-needs one, and the search trigger repair (76) of an upgrade. The repair is a
-shipped migration script, so the upgrade stores the budget in a write of its
-own just before the step and the step's transaction removes it. A failed step
-removes it at once; a cancelled or killed one can leave it on the store, which
-is still behind, and the next upgrade repeats the step and removes it. The
-postings, and so every search result and rank, are the same at any budget.
-On the 2.1 GB store the rebuild statement took 147 s at the widened budget
-and 692 s at the default (medians of three runs). It is still slightly
-super-linear once the postings pass the wider budget.
+postings and merges those segments again and again while it runs. Every
+whole-index rebuild therefore raises the index's budget to
+`defaults.SearchRebuildHashBytes` for its own run and removes the setting
+before it commits, in the same transaction as the rebuild: the rebuild a
+harvest, a prune or the content sweep runs when the search index needs one,
+and the search trigger repair (76) of an upgrade. The repair is a shipped
+migration script that cannot change, so the upgrade sets the budget in the
+step's transaction before the script (the migration engine's `Before` hook)
+and removes it after the script; a step that fails, is cancelled or is killed
+rolls both back with it. The postings, and so every search result and rank,
+are the same at any budget. The measurements and the remaining
+super-linearity above the wider budget are recorded beside the constant in
+`internal/defaults/search_rebuild.go`.
 
 The plan estimates the rebuild before it starts. It reads the search index's
 size from the index's structure record (two rows, no text) and divides it by
 the fastest and the slowest rebuild rate measured at the widened budget, so
 the plan line reads, for example, `long: scales with the stored text;
-estimate: 5 to 21 minutes`. The rates are in `internal/defaults/search_rebuild.go`
-with their measurement. They come from a shared test machine; a slower or
-busier machine can take longer than the band.
+estimate: 5 to 21 minutes`. An index larger than the largest one measured
+adds `not measured on an index this large`: the per-byte rate still falls as
+the index grows, so the band can be short there. `peasant migrate --dry-run
+--json` carries the same band as `estimate.low_seconds` and
+`estimate.high_seconds` (and `estimate.extrapolated`) on the step, and omits
+`estimate` for a step without one. The rates, the measured size and their
+provenance are in `internal/defaults/search_rebuild.go`; they come from a
+shared test machine, so a slower or busier machine can take longer than the
+band.
 
 A command that already owns the terminal with its own progress program, such
 as `peasant harvest`, prints plain lines instead of mounting a second inline
