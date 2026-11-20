@@ -452,7 +452,13 @@ jobs:
           node-version: 26
 
       - name: Install ast-grep
-        run: npm install --global @ast-grep/cli@0.51.2
+        # The pool's tool cache is shared across concurrent VMs; keep this install job-private.
+        run: |
+          set -euo pipefail
+          prefix="$RUNNER_TEMP/ast-grep"
+          npm install --prefix "$prefix" --no-save --no-package-lock @ast-grep/cli@0.51.2
+          echo "$prefix/node_modules/.bin" >> "$GITHUB_PATH"
+          "$prefix/node_modules/.bin/ast-grep" --version
 
       # Cache the Go build + module dirs. The key is namespaced `-go-amd64-`:
       # `runner.os` is `Linux` on the arm64 runner too, so the old shared
