@@ -39,7 +39,7 @@ type ValidationBudget struct {
 
 // ManagedGenerationValidationRequest describes a captured generation.
 // This shape is separate from ManagedGenerationUnchangedProof because it also
-// carries the generation identity and budget required by a future validator.
+// carries the generation identity, budget and optional metadata candidate.
 type ManagedGenerationValidationRequest struct {
 	SessionID     SessionID
 	GenerationID  string
@@ -49,6 +49,8 @@ type ManagedGenerationValidationRequest struct {
 	FormatTarget  int
 	Expected      *SessionIndexState
 	Budget        ValidationBudget
+	// Candidate is nil when no metadata candidate is available.
+	Candidate *GenerationMetadataCandidate
 }
 
 // ManagedGenerationValidationResult is a validated outcome and its detail.
