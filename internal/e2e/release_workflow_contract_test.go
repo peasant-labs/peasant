@@ -1435,108 +1435,97 @@ func releaseWorkflowRepoRoot(t *testing.T) string {
 //go:embed testdata/workflows/private-install.yaml
 var privateInstallFixture []byte
 
+type privateWorkflow struct {
+	Jobs map[string]struct {
+		Steps []struct {
+			Name string `yaml:"name"`
+			Run  string `yaml:"run"`
+		} `yaml:"steps"`
+	} `yaml:"jobs"`
+}
+type privateInstallConfig struct {
+	Required []string `yaml:"required_names"`
+	Global   string   `yaml:"global_pattern"`
+	Prefix   string   `yaml:"prefix_pattern"`
+	Install  string   `yaml:"install_pattern"`
+	Path     string   `yaml:"path_pattern"`
+	Workflow string   `yaml:"workflow"`
+	Job      string   `yaml:"job"`
+	Step     string   `yaml:"step"`
+	Cases    []struct {
+		Name  string `yaml:"name"`
+		Input string `yaml:"input"`
+		Want  bool   `yaml:"want"`
+	} `yaml:"cases"`
+}
+
+// The runner tool cache is shared; inspect actual workflow steps and exercise the matcher independently.
 func TestWorkflowPrivateNpmInstall(t *testing.T) {
-	var fixture struct {
-		Required []string `yaml:"required_names"`
-		Checks   []struct {
-			Name     string `yaml:"name"`
-			Pattern  string `yaml:"pattern"`
-			Workflow string `yaml:"workflow"`
-			Job      string `yaml:"job"`
-			Step     string `yaml:"step"`
-			Run      string `yaml:"run"`
-		} `yaml:"checks"`
-	}
-	if err := yaml.Unmarshal(privateInstallFixture, &fixture); err != nil {
+	var f privateInstallConfig
+	if err := yaml.Unmarshal(privateInstallFixture, &f); err != nil {
 		t.Fatal(err)
 	}
-	checks := make(map[string]int)
+	global := regexp.MustCompile(f.Global)
+	continuation := regexp.MustCompile(`\\\n\s*`)
+	normalize := func(s string) string { return continuation.ReplaceAllString(s, " ") }
+	seen := make(map[string]bool)
+	for _, c := range f.Cases {
+		if seen[c.Name] {
+			t.Fatalf("duplicate case %q", c.Name)
+		}
+		seen[c.Name] = true
+		if got := global.MatchString(normalize(c.Input)); got != c.Want {
+			t.Errorf("case %s: global = %v, want %v", c.Name, got, c.Want)
+		}
+	}
+	for _, name := range f.Required {
+		if !seen[name] {
+			t.Errorf("missing required case %s", name)
+		}
+	}
+	if len(seen) != len(f.Required) {
+		t.Fatal("case names differ from manifest")
+	}
 	dir := filepath.Join(releaseWorkflowRepoRoot(t), ".github", "workflows")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, check := range fixture.Checks {
-		checks[check.Name]++
-		switch check.Name {
-		case "no_global_npm":
-			pattern, err := regexp.Compile(check.Pattern)
-			if err != nil {
-				t.Fatal(err)
-			}
-			found := false
-			for _, entry := range entries {
-				if entry.IsDir() || !(strings.HasSuffix(entry.Name(), ".yml") || strings.HasSuffix(entry.Name(), ".yaml")) {
-					continue
+	var target []string
+	found := false
+	for _, entry := range entries {
+		if entry.IsDir() || !(strings.HasSuffix(entry.Name(), ".yml") || strings.HasSuffix(entry.Name(), ".yaml")) {
+			continue
+		}
+		found = true
+		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var doc privateWorkflow
+		if err := yaml.Unmarshal(data, &doc); err != nil {
+			t.Fatal(err)
+		}
+		for job, value := range doc.Jobs {
+			for _, step := range value.Steps {
+				if global.MatchString(normalize(step.Run)) {
+					t.Errorf("%s job %s step %s uses global npm install", entry.Name(), job, step.Name)
 				}
-				found = true
-				data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
-				if err != nil {
-					t.Fatal(err)
-				}
-				var doc struct {
-					Jobs map[string]struct {
-						Steps []struct {
-							Name string `yaml:"name"`
-							Run  string `yaml:"run"`
-						} `yaml:"steps"`
-					} `yaml:"jobs"`
-				}
-				if err := yaml.Unmarshal(data, &doc); err != nil {
-					t.Fatal(err)
-				}
-				for job, v := range doc.Jobs {
-					for _, step := range v.Steps {
-						if pattern.MatchString(step.Run) {
-							t.Errorf("%s job %s step %s uses global npm install", entry.Name(), job, step.Name)
-						}
-					}
+				if entry.Name() == f.Workflow && job == f.Job && step.Name == f.Step {
+					target = append(target, normalize(step.Run))
 				}
 			}
-			if !found {
-				t.Fatal("no workflow files found")
-			}
-		case "private_ast_grep":
-			data, err := os.ReadFile(filepath.Join(dir, check.Workflow))
-			if err != nil {
-				t.Fatal(err)
-			}
-			var doc struct {
-				Jobs map[string]struct {
-					Steps []struct {
-						Name string `yaml:"name"`
-						Run  string `yaml:"run"`
-					} `yaml:"steps"`
-				} `yaml:"jobs"`
-			}
-			if err := yaml.Unmarshal(data, &doc); err != nil {
-				t.Fatal(err)
-			}
-			n := 0
-			for _, step := range doc.Jobs[check.Job].Steps {
-				if step.Name == check.Step {
-					n++
-					if step.Run != check.Run {
-						t.Errorf("%s job %s step %s does not use the job-private install", check.Workflow, check.Job, check.Step)
-					}
-				}
-			}
-			if n != 1 {
-				t.Errorf("%s job %s: found %d install steps, want 1", check.Workflow, check.Job, n)
-			}
-		default:
-			t.Fatalf("unknown check %q", check.Name)
 		}
 	}
-	if len(fixture.Required) != 2 || checks["no_global_npm"] != 1 || checks["private_ast_grep"] != 1 {
-		t.Fatal("private npm install fixture must retain both required checks")
+	if !found {
+		t.Fatal("no workflow files found")
 	}
-	for _, name := range fixture.Required {
-		if checks[name] != 1 {
-			t.Errorf("required check %s appears %d times", name, checks[name])
+	if len(target) != 1 {
+		t.Fatalf("%s job %s: found %d install steps, want 1", f.Workflow, f.Job, len(target))
+	}
+	for _, pattern := range []string{f.Prefix, f.Install, f.Path} {
+		if !regexp.MustCompile(pattern).MatchString(target[0]) {
+			t.Errorf("%s job %s step %s lacks private install invariant %q", f.Workflow, f.Job, f.Step, pattern)
 		}
-	}
-	if len(fixture.Required) != len(checks) {
-		t.Fatal("fixture required names differ from checks")
 	}
 }
