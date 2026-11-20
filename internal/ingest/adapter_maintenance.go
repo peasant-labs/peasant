@@ -604,7 +604,7 @@ func (p *Pipeline) appendPairRepairWork(ctx context.Context, entries []DiffEntry
 			entries[outcome.queuedIndex].repairMetadataPath = outcome.metadataPath
 			// A missing or damaged pair is a native repair regardless of what
 			// the queued path would otherwise have done.
-			entries[outcome.queuedIndex].Decision = RefreshDecision{Reason: RefreshReasonPairMissing, Lane: RefreshLaneNative}
+			entries[outcome.queuedIndex].Decision = decideRefresh(refreshEvidence{StoredRow: true, PairMissing: true})
 			entries[outcome.queuedIndex].Status = DiffUpdated
 		case pairRepairAppend:
 			entries = append(entries, outcome.entry)
@@ -715,7 +715,7 @@ func (p *Pipeline) pairRepairDecision(ctx context.Context, sid SessionID, entrie
 		}
 	}
 	return pairRepairOutcome{kind: pairRepairAppend, entry: DiffEntry{
-		Session: session, Status: DiffUpdated, Decision: RefreshDecision{Reason: RefreshReasonPairMissing, Lane: RefreshLaneNative},
+		Session: session, Status: DiffUpdated, Decision: decideRefresh(refreshEvidence{StoredRow: true, PairMissing: true}),
 		pairRepair: true, repairMetadataPath: metadataPath,
 	}, damaged: true}
 }

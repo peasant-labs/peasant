@@ -1548,7 +1548,7 @@ func printSummaryWithForecast(w io.Writer, result *ingest.PipelineResult, verbos
 	if result.CensusStored || forecast {
 		census = result.Census
 	}
-	if forecast && census != nil {
+	if forecast && census != nil && census.Sessions() > 0 {
 		fmt.Fprintln(w, "forecast (not stored; indexed bytes are not yet measured):")
 	}
 	if forecast && result.CensusForecastNeedsReindexRouting {

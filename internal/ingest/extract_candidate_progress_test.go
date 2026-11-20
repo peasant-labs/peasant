@@ -53,6 +53,69 @@ func (a *blockedCandidateAdapter) ExtractMetadata(ctx context.Context, _ ingest.
 
 var _ ingest.SourceAdapter = (*blockedCandidateAdapter)(nil)
 
+type failingCandidateAdapter struct{ blockedCandidateAdapter }
+
+func (*failingCandidateAdapter) ExtractMetadata(context.Context, ingest.DiscoveredSession) (*ingest.UnifiedMetadata, error) {
+	return nil, errors.New("synthetic extraction failure")
+}
+
+var _ ingest.SourceAdapter = (*failingCandidateAdapter)(nil)
+
+func TestFailedCaptureAdvancesExtractBytes(t *testing.T) {
+	var fixture struct {
+		RequiredNames []string `yaml:"requiredFailureNames"`
+		Cases         []struct {
+			Name       string   `yaml:"name"`
+			SessionIDs []string `yaml:"sessionIds"`
+		} `yaml:"failureCases"`
+	}
+	if err := yaml.Unmarshal(extractCandidateProgressYAML, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	seen := make(map[string]bool)
+	for _, row := range fixture.Cases {
+		seen[row.Name] = true
+		t.Run(row.Name, func(t *testing.T) {
+			fs := &noDeleteFileSystem{FileSystem: testutil.NewMemFS()}
+			adapter := &failingCandidateAdapter{}
+			for _, raw := range row.SessionIDs {
+				id, err := ingest.NewSessionID(raw)
+				if err != nil {
+					t.Fatal(err)
+				}
+				path := "/synthetic/" + raw + ".jsonl"
+				if err := fs.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				adapter.sessions = append(adapter.sessions, ingest.DiscoveredSession{SessionID: id, Harness: ingest.HarnessClaudeCode, SourcePath: ingest.ResolvedPath(path), SourceFormat: ingest.SourceFormatJSONL, ModTime: time.Unix(1, 0)})
+			}
+			progress := ingest.NewProgressState()
+			cfg := ingest.PipelineConfig{OutputDir: "/synthetic-output", Progress: progress, Parallelism: 1, Sources: map[ingest.Harness]ingest.SourceConfig{ingest.HarnessClaudeCode: {Enabled: true}}}
+			adapters := map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessClaudeCode: func(ingest.FileSystem, ingest.GitResolver, salt.Salt) ingest.SourceAdapter { return adapter }}
+			pipeline, err := newTestPipeline(fs, testutil.NoGitResolver(), adapters, cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := pipeline.Run(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Summary.Errors != len(row.SessionIDs) {
+				t.Fatalf("errors = %d, want %d", result.Summary.Errors, len(row.SessionIDs))
+			}
+			stage := progress.Snapshot()[ingest.StageExtract]
+			if !stage.Ended || stage.BytesTotal != int64(len(row.SessionIDs))*3 || stage.BytesDone != stage.BytesTotal {
+				t.Fatalf("failed capture progress = %+v", stage)
+			}
+		})
+	}
+	for _, name := range fixture.RequiredNames {
+		if !seen[name] {
+			t.Fatalf("missing case %q", name)
+		}
+	}
+}
+
 func TestPipelinePublishesCandidatesBeforeCaptureCompletes(t *testing.T) {
 	var fixture struct {
 		RequiredNames []string `yaml:"requiredNames"`

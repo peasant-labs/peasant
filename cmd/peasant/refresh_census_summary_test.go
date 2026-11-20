@@ -21,6 +21,7 @@ func TestHarvestAndKickstartCensusSummary(t *testing.T) {
 			Name           string   `yaml:"name"`
 			Stored         bool     `yaml:"stored"`
 			Census         bool     `yaml:"census"`
+			Empty          bool     `yaml:"empty"`
 			Forecast       bool     `yaml:"forecast"`
 			ReindexRouting bool     `yaml:"reindexRouting"`
 			Contains       []string `yaml:"contains"`
@@ -45,6 +46,9 @@ func TestHarvestAndKickstartCensusSummary(t *testing.T) {
 			result := &ingest.PipelineResult{CensusStored: row.Stored, CensusForecastNeedsReindexRouting: row.ReindexRouting}
 			if row.Census {
 				result.Census = &ingest.RefreshCensus{Rows: []ingest.RefreshCensusRow{{Reason: ingest.OutcomeReasonRefreshNew, Lane: ingest.RefreshLaneNative, Sessions: 1, SourceBytes: 1024}}}
+				if row.Empty {
+					result.Census.Rows = nil
+				}
 			}
 			var output bytes.Buffer
 			printSummaryWithForecast(&output, result, false, false, "", "", nil, 0, row.Forecast)
