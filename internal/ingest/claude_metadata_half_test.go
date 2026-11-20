@@ -255,6 +255,13 @@ func TestClaudeTranscriptFixtureCorpusIsComplete(t *testing.T) {
 			if slices.Contains(corpusWalkSkippedDirs, entry.Name()) {
 				return filepath.SkipDir
 			}
+			// A nested checkout (a git worktree inside this one) is another
+			// tree's fixtures, not this module's.
+			if rel != "." {
+				if _, err := os.Stat(filepath.Join(path, ".git")); err == nil {
+					return filepath.SkipDir
+				}
+			}
 			return nil
 		}
 		if !strings.Contains(rel, "/testdata/") {
