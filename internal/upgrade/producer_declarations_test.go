@@ -6,10 +6,35 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
 )
+
+// Every adapter's declared input must match the capability used by refresh.
+func TestAdapterDeclarationInputMatchesExtractor(t *testing.T) {
+	declarations, err := ProducerDeclarations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	inputs := make(map[string]ProducerInput)
+	for _, declaration := range declarations {
+		if declaration.Kind == ProducerKindAdapter {
+			inputs[declaration.Name] = declaration.Input
+		}
+	}
+	for harness, factory := range ingest.DefaultAdapterRegistry {
+		input, ok := inputs[string(harness)]
+		if !ok {
+			t.Fatalf("adapter %s has no declaration", harness)
+		}
+		_, extracts := factory(nil, nil, salt.Salt{}).(ingest.TranscriptMetadataExtractor)
+		if (input == ProducerInputStoredTranscript) != extracts {
+			t.Errorf("adapter %s declares input %s; transcript extractor = %t", harness, input, extracts)
+		}
+	}
+}
 
 // TestEveryRegisteredProducerHasOneDeclaration enumerates each registry on
 // its own and requires exactly one declaration per registered producer, and
