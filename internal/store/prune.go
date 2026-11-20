@@ -131,7 +131,10 @@ func (s *Store) PruneSessions(ctx context.Context, sessionIDs []ingest.SessionID
 		}
 	}()
 
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, fmt.Sprintf("prune %d sessions", len(sessionIDs)))
+	if err != nil {
+		return ingest.PruneResult{}, fmt.Errorf("store.PruneSessions: %w; nothing was pruned", err)
+	}
 	ended := false
 	defer func() {
 		if !ended {

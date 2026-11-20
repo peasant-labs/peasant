@@ -50,7 +50,10 @@ func (s *Store) WriteSessionCommitProjection(ctx context.Context, sessionID inge
 	}
 	defer s.pool.Put(conn)
 
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, "write the commits of session "+sessionID.String())
+	if err != nil {
+		return err
+	}
 	defer endFn(&err)
 	if err = upsertSessionCommitsOnConn(conn, sessionID, commits, preserveExisting); err != nil {
 		return fmt.Errorf("store.WriteSessionCommitProjection: write the current commit projection for session %s: %w; the projection write was rolled back and the saved pair identity was left intact; restore database access and retry", sessionID, err)
@@ -65,7 +68,10 @@ func (s *Store) writeSessionCommits(ctx context.Context, sessionID ingest.Sessio
 	}
 	defer s.pool.Put(conn)
 
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, "write the commits of session "+sessionID.String())
+	if err != nil {
+		return err
+	}
 	defer endFn(&err)
 	if err := upsertSessionCommitsOnConn(conn, sessionID, commits, preserveExisting); err != nil {
 		return err

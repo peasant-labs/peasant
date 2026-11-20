@@ -159,7 +159,10 @@ func (s *Store) RebuildSearchIndex(ctx context.Context, progress func(done, of i
 // report a rolled-back rebuild as a success. A cancellation that arrives
 // before the commit rolls the transaction back.
 func runSearchRebuildTransaction(ctx context.Context, conn *sqlite.Conn, rebuild func() error) (err error) {
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, "rebuild the search index")
+	if err != nil {
+		return fmt.Errorf("%w; the index is unchanged and search still refuses", err)
+	}
 	defer func() {
 		if err == nil {
 			err = ctx.Err()

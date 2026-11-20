@@ -45,7 +45,11 @@ func (s *Store) UpdateIndexState(ctx context.Context, sessionID ingest.SessionID
 		return fmt.Errorf("store: take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
-	defer sqlitex.Transaction(conn)(&err)
+	endFn, err := beginWrite(conn, "stamp the index state of session "+sessionID.String())
+	if err != nil {
+		return err
+	}
+	defer endFn(&err)
 	if err := validateIndexerRevisionOnConn(conn, sessionID, version); err != nil {
 		return err
 	}
@@ -67,7 +71,11 @@ func (s *Store) UpdateIndexStateWithSessionEntriesHash(ctx context.Context, sess
 		return fmt.Errorf("store: take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
-	defer sqlitex.Transaction(conn)(&err)
+	endFn, err := beginWrite(conn, "stamp the index state of session "+sessionID.String())
+	if err != nil {
+		return err
+	}
+	defer endFn(&err)
 	if err := validateIndexerRevisionOnConn(conn, sessionID, version); err != nil {
 		return err
 	}

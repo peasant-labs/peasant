@@ -48,7 +48,10 @@ func (s *Store) SyncModels(ctx context.Context, models []ingest.ModelInfo) error
 
 	// The deferred end commits only when err is nil and rolls back otherwise,
 	// so every failure below must assign err before returning.
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, fmt.Sprintf("sync %d models", len(models)))
+	if err != nil {
+		return err
+	}
 	defer endFn(&err)
 
 	// One prepare for the whole loop: the statement text is constant, so the

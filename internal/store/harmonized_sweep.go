@@ -320,10 +320,17 @@ func (s *Store) deleteUnreferencedBlobs(ctx context.Context, sessionID schema.Se
 	defer s.pool.Put(conn)
 	var deleted int64
 	txnErr := error(nil)
-	// This batch stays deferred: its first statement is a DELETE, which takes
-	// the writer from an idle transaction and so waits on busy_timeout. Only a
-	// transaction that reads before it writes needs IMMEDIATE.
-	endFn := sqlitex.Transaction(conn)
+	// The batch's first statement is a DELETE, which would take the writer
+	// from an idle deferred transaction and wait on busy_timeout too. It
+	// begins IMMEDIATE anyway so every store write follows one rule (see
+	// beginWrite) and a read added before the delete cannot reopen the race.
+	// It calls ImmediateTransaction directly, like deleteVerifiedBodies,
+	// because a refused sweep reports the kept flag and the sweep's own
+	// retry step, which beginWrite's generic wording would not.
+	endFn, err := sqlitex.ImmediateTransaction(conn)
+	if err != nil {
+		return 0, fmt.Errorf("store: begin the delete of %d blobs for session %s: %w; no row was deleted and the sweep flag remains set; %s", len(digests), sessionID, err, sweepRetryAdvice(err))
+	}
 	defer endFn(&txnErr)
 	for _, digest := range digests {
 		if err := ctx.Err(); err != nil {

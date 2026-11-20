@@ -174,7 +174,10 @@ func (s *Store) CommitPull(ctx context.Context, commit PullCommit) (err error) {
 	}
 	defer s.pool.Put(conn)
 
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, "commit pulled transcript "+string(commit.Transcript.TranscriptID))
+	if err != nil {
+		return err
+	}
 	defer endFn(&err)
 
 	t := commit.Transcript
@@ -237,7 +240,10 @@ func (s *Store) UpsertPulledAnnotations(ctx context.Context, annotations []Pulle
 	}
 	defer s.pool.Put(conn)
 
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, fmt.Sprintf("upsert %d pulled annotations", len(annotations)))
+	if err != nil {
+		return 0, 0, 0, err
+	}
 	defer endFn(&err)
 
 	for i := range annotations {
