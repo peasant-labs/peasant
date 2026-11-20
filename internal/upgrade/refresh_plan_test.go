@@ -346,8 +346,8 @@ var refreshHarnessRenameCases []byte
 func TestPlanRefreshHistoricalHarnessRename(t *testing.T) {
 	var fixture struct {
 		Cases []struct {
-			Name, Input, Output string
-			Renamed, Unknown    bool
+			Name, Input string
+			Unknown     bool
 		} `yaml:"cases"`
 		RequiredNames []string `yaml:"requiredNames"`
 	}
