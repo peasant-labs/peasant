@@ -8,9 +8,18 @@ import { ReviewSurface } from './ReviewSurface';
 import type { ProjectHash } from '@/lib/navigation/projectRoutes';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
-vi.mock('@/lib/navigation/useProjectIdentity', () => ({
-  useProjectIdentity: (identity: string) => ({ state: { phase: 'ready', requestedIdentity: identity, projectHash: identity, label: 'fixture project' } }),
-}));
+// Only the hook is replaced: every other export, such as the phase constants the
+// surface compares against, comes from the real module so the mock cannot drift.
+vi.mock('@/lib/navigation/useProjectIdentity', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/navigation/useProjectIdentity')>();
+  return {
+    ...actual,
+    useProjectIdentity: (identity: string) => ({
+      state: { phase: actual.ProjectIdentityPhase.Ready, requestedIdentity: identity, projectHash: identity as ProjectHash, label: 'fixture project' },
+      retry: () => {},
+    }),
+  };
+});
 interface Fixture {
   projectHash: ProjectHash; branch: string; nextBranch: string; file: string; expectedText: string; error: string;
   review: ReviewListPayload; detail: ChangeDetailPayload; diff: ChangeDiffPayload;
