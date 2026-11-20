@@ -1,0 +1,6 @@
+# The read-slot cap of the context validator for a store's connection pool:
+# min(defaults.ManagedRefreshReadSlots, max(1, poolSize/2)).
+cases:
+  - {poolSize: 2, slots: 1}
+  - {poolSize: 10, slots: 4}
+  - {poolSize: 20, slots: 4}

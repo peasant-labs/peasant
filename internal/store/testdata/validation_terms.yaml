@@ -1,0 +1,52 @@
+# Context validation and the validated settle against one synthetic managed
+# generation (the unchanged-proof setup).
+#
+# kind:
+#   cheap-order  every shared unchanged-proof mismatch case, proved through the
+#                term evaluator's stored-digest mode, yields the same mismatch
+#                as before the evaluator was shared.
+#   validate     ValidateManagedGenerationUnchanged with the candidate named by
+#                `candidate`.
+#   settle       validate first (expected proven unless `skipValidation`), then
+#                SettleManagedGenerationUnchanged with a validated answer for
+#                the generation named by `validatedGeneration`.
+# mutation:      a shared unchanged-proof mutation applied before validating
+#                (see applyUnchangedProofMutation), or
+#                forged-metadata-trigger-restored: the stored metadata_hash is
+#                forged to another non-zero value with the immutability
+#                trigger lifted and restored exactly.
+# candidate:     stored (the generation's own metadata), none (nil candidate),
+#                content-hash-differs.
+# setup:         stats-overflow-diagnostic stores only a stats-overflow
+#                diagnostic row on the active generation.
+# between:       a change made after validation and before the settle:
+#                insert-commit adds a context row to the active generation;
+#                activate-another installs a different generation.
+# outcome:       proven | not-proven | unsupported | settled | refused.
+cases:
+  - name: cheap-order-unchanged
+    kind: cheap-order
+
+  - {name: state-term-wins-over-context/generation-not-active, kind: validate, mutation: mutation-active, candidate: stored, outcome: not-proven, mismatch: generation-not-active}
+  - {name: state-term-wins-over-context/generation-unsupported, kind: validate, mutation: mutation-unsupported, candidate: stored, outcome: not-proven, mismatch: generation-unsupported}
+  - {name: state-term-wins-over-context/latest-attempt-held, kind: validate, mutation: latest-attempt, candidate: stored, outcome: not-proven, mismatch: latest-attempt-held}
+  - {name: state-term-wins-over-context/content-hash, kind: validate, mutation: mutation-content, candidate: stored, outcome: not-proven, mismatch: content-hash}
+  - {name: state-term-wins-over-context/source-format, kind: validate, mutation: mutation-source-format, candidate: stored, outcome: not-proven, mismatch: source-format}
+  - {name: state-term-wins-over-context/harness, kind: validate, mutation: mutation-harness, candidate: stored, outcome: not-proven, mismatch: harness}
+  - {name: state-term-wins-over-context/completeness, kind: validate, mutation: mutation-completeness, candidate: stored, outcome: not-proven, mismatch: completeness}
+  - {name: state-term-wins-over-context/source-evidence, kind: validate, mutation: mutation-source-evidence, candidate: stored, outcome: not-proven, mismatch: source-evidence}
+  - {name: state-term-wins-over-context/index-not-current, kind: validate, mutation: indexer, candidate: stored, outcome: not-proven, mismatch: index-not-current}
+  - {name: state-term-wins-over-context/input-proof-missing, kind: validate, mutation: mutation-input, candidate: stored, outcome: not-proven, mismatch: input-proof-missing}
+  - {name: state-term-wins-over-context/null-input-proof, kind: validate, mutation: null-input-proof, candidate: stored, outcome: not-proven, mismatch: input-proof-missing}
+  - {name: state-term-wins-over-context/seal-missing, kind: validate, mutation: seal, candidate: stored, outcome: not-proven, mismatch: seal-missing}
+
+  - {name: no-candidate-is-unsupported, kind: validate, candidate: none, outcome: unsupported}
+  - {name: stale-metadata-hash-is-proven, kind: validate, mutation: forged-metadata-trigger-restored, candidate: stored, outcome: proven}
+  - {name: stats-overflow-diagnostic-is-ignored, kind: validate, setup: stats-overflow-diagnostic, candidate: stored, outcome: proven}
+  - {name: content-identity-differs, kind: validate, candidate: content-hash-differs, outcome: not-proven, mismatch: metadata-context}
+
+  - {name: validated-settle-settles, kind: settle, mutation: forged-metadata-trigger-restored, candidate: stored, validatedGeneration: active, outcome: settled}
+  - {name: validated-settle-rechecks-context-under-the-lock, kind: settle, mutation: forged-metadata-trigger-restored, candidate: stored, validatedGeneration: active, between: insert-commit, outcome: refused}
+  - {name: validated-settle-refuses-another-generation, kind: settle, mutation: forged-metadata-trigger-restored, candidate: stored, validatedGeneration: other, outcome: refused}
+  - {name: validated-settle-refuses-a-moved-generation, kind: settle, mutation: forged-metadata-trigger-restored, candidate: stored, validatedGeneration: active, between: activate-another, outcome: refused}
+  - {name: validated-settle-never-skips-a-state-term, kind: settle, mutation: latest-attempt, candidate: stored, validatedGeneration: active, skipValidation: true, outcome: refused}

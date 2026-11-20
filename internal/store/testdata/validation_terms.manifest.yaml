@@ -1,0 +1,23 @@
+requiredNames:
+  - cheap-order-unchanged
+  - state-term-wins-over-context/generation-not-active
+  - state-term-wins-over-context/generation-unsupported
+  - state-term-wins-over-context/latest-attempt-held
+  - state-term-wins-over-context/content-hash
+  - state-term-wins-over-context/source-format
+  - state-term-wins-over-context/harness
+  - state-term-wins-over-context/completeness
+  - state-term-wins-over-context/source-evidence
+  - state-term-wins-over-context/index-not-current
+  - state-term-wins-over-context/input-proof-missing
+  - state-term-wins-over-context/null-input-proof
+  - state-term-wins-over-context/seal-missing
+  - no-candidate-is-unsupported
+  - stale-metadata-hash-is-proven
+  - stats-overflow-diagnostic-is-ignored
+  - content-identity-differs
+  - validated-settle-settles
+  - validated-settle-rechecks-context-under-the-lock
+  - validated-settle-refuses-another-generation
+  - validated-settle-refuses-a-moved-generation
+  - validated-settle-never-skips-a-state-term
