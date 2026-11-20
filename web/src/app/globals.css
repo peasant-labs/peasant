@@ -865,6 +865,29 @@ textarea::placeholder {
   }
 }
 
+/* What only the setup wizard adds to that. Its body sits a little tighter
+   than the frame's default. */
+.ks-wizard .swz-body {
+  padding-block: var(--sp-3);
+}
+@media (max-width: 767px) {
+  /* A phone gives the selection tree the width. */
+  .ks-wizard .swz-body:has(.ks-tree) {
+    padding-inline: var(--sp-2);
+  }
+}
+@media (max-width: 40rem) {
+  /* A narrow foot cannot hold back, the count and up to three buttons on one
+     line: back and the count keep the first line, and the answers take a
+     second full-width line of their own, right-aligned, in the same order. */
+  .wizard-host .swz-foot:has(.ks-foot-answers) {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .wizard-host .swz-foot-end:has(.ks-foot-answers) {
+    grid-column: 1 / -1;
+  }
+}
+
 /* ============================================
    TRANSCRIPT KEYBOARD-HINT STRIP
    ============================================
