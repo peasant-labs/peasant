@@ -1,6 +1,7 @@
 requiredNames:
   - unsupported-parses
   - proven-settles
+  - validated-settle-refused-parses
   - not-proven-parses
   - validator-error-parses
   - inconsistent-proven-parses

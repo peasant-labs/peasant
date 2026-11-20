@@ -169,6 +169,7 @@ func TestManagedGenerationValidationPipelineSeam(t *testing.T) {
 			ValidatorCalls int64  `yaml:"validatorCalls"`
 			Builds         int64  `yaml:"builds"`
 			Settles        int64  `yaml:"settles"`
+			SettleRefused  bool   `yaml:"settleRefused"`
 			Unsupported    bool   `yaml:"unsupported"`
 			Diagnostic     bool   `yaml:"diagnostic"`
 		} `yaml:"cases"`
@@ -199,7 +200,7 @@ func TestManagedGenerationValidationPipelineSeam(t *testing.T) {
 			runManagedRefreshPipeline(t, db, source, output)
 			generationID := managedRefreshPipelineActiveGeneration(t, db, id)
 			managedRefreshPipelineDowngrade(t, db, ingest.GenerationTargets(ingest.HarvesterVersionRegistry)[ingest.HarnessClaudeCode].AdapterVersion-1)
-			counted := &proofCountingRefreshStore{Store: db, contextUnproven: true, validationError: tc.Error, validationMissing: tc.Missing}
+			counted := &proofCountingRefreshStore{Store: db, contextUnproven: true, validationError: tc.Error, validationMissing: tc.Missing, settleRefused: tc.SettleRefused}
 			if tc.Outcome != "" {
 				outcome, err := ingest.NewValidationOutcome(tc.Outcome)
 				if err != nil {
