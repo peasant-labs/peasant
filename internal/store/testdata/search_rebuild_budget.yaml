@@ -1,0 +1,46 @@
+# The whole search index rebuild with its widened postings budget. Each case
+# rebuilds a store whose postings need several flushes at FTS5's default
+# budget, and compares the result with a rebuild at the default budget on a
+# copy of the same store: the same rows and ranks for every query, one
+# segment, and no stored budget left behind. The stopped cases stop the
+# search trigger repair inside its transaction and check that it rolled back.
+requiredNames:
+  - repair-step-commits
+  - repair-step-fails
+  - repair-step-cancelled
+  - search-index-rebuild-commits
+# Body rows of filler text added to the store before the rebuild. Words are
+# drawn from w0..w(vocabulary-1) with a fixed seed.
+filler:
+  rows: 600
+  rowBytes: 6000
+  vocabulary: 20000
+queries:
+  - "w1"
+  - "w19999"
+  - "w123 w4*"
+  - "w12*"
+  - "NEAR(w1* w2*, 3)"
+  - "(w5 OR w6) NOT w7"
+  - "bodyseedterm"
+  - "mitochondria"
+cases:
+  # The search trigger repair on a store with stale results: Upgrade raises
+  # the budget, the migration's rebuild uses it, and the step removes it.
+  - name: repair-step-commits
+    entry: repair-step
+    outcome: commit
+  # The step fails inside its transaction after its rebuild.
+  - name: repair-step-fails
+    entry: repair-step
+    outcome: fail
+  # The upgrade is cancelled inside the step's transaction. The cancelled
+  # connection may keep the budget on the behind store; the next upgrade
+  # repeats the step and must leave none.
+  - name: repair-step-cancelled
+    entry: repair-step
+    outcome: cancel
+  # The rebuild a harvest runs when the search index needs one.
+  - name: search-index-rebuild-commits
+    entry: search-index-rebuild
+    outcome: commit

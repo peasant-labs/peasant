@@ -657,7 +657,7 @@ func Upgrade(ctx context.Context, dbPath string, opts UpgradeOptions) (report Up
 		if step.Kind == UpgradeStepRecount {
 			stepErr = applyRecountStep(ctx, conn, step, progress.count, opts.afterRecountSession)
 		} else {
-			stepErr = applyUpgradeStep(ctx, conn, step.Version, progress.count, opts.afterDataFill)
+			stepErr = applySchemaStep(ctx, conn, step, progress.count, opts.afterDataFill)
 		}
 		close(stopTicks)
 		<-ticksDone
@@ -684,6 +684,40 @@ func Upgrade(ctx context.Context, dbPath string, opts UpgradeOptions) (report Up
 	}
 	truncateWAL(pool)
 	return report, nil
+}
+
+// applySchemaStep applies one planned schema step. The search trigger repair
+// on a store with stale results rebuilds the whole search index inside its
+// shipped migration script, which cannot change; so before that step the
+// upgrade raises the index's postings budget in a write of its own (the
+// script's rebuild reads it from the index's configuration), and the step's
+// transaction removes it again before it commits. A step that fails rolls
+// back and the budget is removed in a write of its own. A cancelled step
+// can leave the connection unable to write until it is returned, and a
+// process can be killed between the two writes: the stored budget then
+// stays on a store that is still behind, which only an upgrade opens, and
+// the next upgrade, which repeats the step, removes it. It changes no search
+// result in the meantime.
+func applySchemaStep(ctx context.Context, conn *sqlite.Conn, step UpgradeStep, report func(done, of int64), afterDataFill func(version int) error) error {
+	if step.Version != searchRepairSchemaVersion || !step.Cost.Long() {
+		return applyUpgradeStep(ctx, conn, step.Version, report, afterDataFill)
+	}
+	if err := widenSearchRebuildHashOnConn(conn); err != nil {
+		return err
+	}
+	err := applyUpgradeStep(ctx, conn, step.Version, report, func(version int) error {
+		if err := restoreSearchRebuildHashOnConn(conn); err != nil {
+			return err
+		}
+		if afterDataFill != nil {
+			return afterDataFill(version)
+		}
+		return nil
+	})
+	if err != nil && conn.AutocommitEnabled() {
+		_ = restoreSearchRebuildHashOnConn(conn)
+	}
+	return err
 }
 
 // applyUpgradeStep applies the one migration that produces version. This is
