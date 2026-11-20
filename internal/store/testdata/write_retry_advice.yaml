@@ -1,0 +1,47 @@
+# The repair a refused store write names, by its cause. The test wraps each
+# cause the way a store error carries it, calls writeRetryAdvice with the
+# case's retry step, and requires every advice fragment, no forbidden
+# fragment, and the retry step as the advice's ending.
+#
+# cause: a SQLite result code by its SQLite name, or a context error by its
+#        Go name (the closed set the sweep advice fixture also uses).
+# namesBusyTimeout: the advice must name the store's real busy timeout; the
+#        test derives that text from defaults.SQLiteBusyTimeout.
+cases:
+  - name: busy-names-lock-contention
+    cause: SQLITE_BUSY
+    retry: retry
+    advice: [held the store's SQLite writer, let it finish]
+    forbidden: [free disk space, cancelled]
+    namesBusyTimeout: true
+  - name: locked-names-lock-contention
+    cause: SQLITE_LOCKED
+    retry: retry the import
+    advice: [held the store's SQLite writer, let it finish]
+    forbidden: [free disk space, cancelled]
+    namesBusyTimeout: true
+  - name: full-names-disk-space
+    cause: SQLITE_FULL
+    retry: retry
+    advice: [the disk that holds the store is full; free disk space]
+    forbidden: [busy timeout, cancelled]
+  - name: ioerr-names-full-disk-and-permissions
+    cause: SQLITE_IOERR
+    retry: retry
+    advice: [the disk may be full, check the file's permissions]
+    forbidden: [busy timeout, cancelled]
+  - name: interrupt-names-cancellation
+    cause: SQLITE_INTERRUPT
+    retry: retry
+    advice: [the operation was cancelled, nothing is wrong with the store]
+    forbidden: [free disk space, busy timeout, readable and writable]
+  - name: wrapped-context-canceled-names-cancellation
+    cause: context.Canceled
+    retry: retry
+    advice: [the operation was cancelled, nothing is wrong with the store]
+    forbidden: [free disk space, busy timeout, readable and writable]
+  - name: wrapped-context-deadline-names-cancellation
+    cause: context.DeadlineExceeded
+    retry: retry
+    advice: [the operation was cancelled, nothing is wrong with the store]
+    forbidden: [free disk space, busy timeout, readable and writable]
