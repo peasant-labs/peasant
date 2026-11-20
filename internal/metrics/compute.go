@@ -236,7 +236,7 @@ func computeDuration(_ context.Context, _ ingest.SessionID, entries []schema.Ses
 		return nil
 	}
 
-	durationMin := float64(maxTs-minTs) / 60000.0
+	durationMin := ingest.DurationMsToMinutes(maxTs - minTs)
 	return &ingest.SessionMetrics{QualityMetrics: schema.QualityMetrics{DurationMinutes: &durationMin}}
 }
 

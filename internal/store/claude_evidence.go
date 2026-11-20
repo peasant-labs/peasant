@@ -591,7 +591,10 @@ func (s *Store) SaveClaudeEvidence(ctx context.Context, upserts []ingest.ClaudeT
 	}
 	defer s.pool.Put(conn)
 
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, "save Claude transcript evidence")
+	if err != nil {
+		return fmt.Errorf("store.SaveClaudeEvidence: %w", err)
+	}
 	defer endFn(&err)
 	return saveClaudeEvidenceOnConn(conn, upserts, deletes)
 }

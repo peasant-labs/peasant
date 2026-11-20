@@ -1,34 +1,77 @@
-# Measurements remain unmeasured until the corpus runs on an idle machine.
-# Each row names the harness command and the cases whose reports supply its
-# costs. Head, base, date, samples and costs stay empty until a quiet-machine
-# run at the default 240 x 1000 shape fills them from those reports.
-# measurementRequired is false until the quiet-machine report lands. Set it to
-# true (or remove it; the loader defaults to true) in the same change that
-# fills the rows: every row must then pass the measured-budget validator.
-measurementRequired: false
+# Measured budgets, one row per planned skip, each from its own 240 x 1000
+# harness report (5 rounds). Every row must pass the measured-budget validator.
+#
+# Field mapping, all in milliseconds and all medians over the report's rounds:
+#   proof   = skip arm medianProofMs: the stored refresh_proof stage.
+#   settle  = skip arm medianIndexStageMs: the INDEX stage of the skip arm. The
+#             stored profile has no separate settle stage, so INDEX (which
+#             holds the settle, or the stored-index re-index) is the skip's own
+#             cost. The proof runs inside the index stage, so its time may be
+#             counted twice; that can only overstate the skip's cost, which
+#             keeps the ratio conservative.
+#   avoided = baseline arm medianIndexStageMs: the INDEX stage of the work the
+#             skip replaces.
+# The ratio the validator checks is (proof + settle) / avoided.
+#
+# proven-settle (C1, stamp-only adapter bump): (98.077 + 1161.793) / 15322.876
+#   = 0.082. Wall medians: 5500.570 ms against 20068.291 ms (ratio 0.274).
+#   Wall min–max: skip 5329.447–6099.094 ms; baseline 19901.781–20529.832 ms.
+#   INDEX min–max: skip 1121.664–1333.833 ms; baseline 15249.097–15644.007 ms.
+#   Skip proof min–max: 62.006–153.575 ms.
+# stored-index (C3, indexer bump): 15895.061 / 35430.329 = 0.449. The lane has
+#   no proof. Wall medians: 21568.407 ms against 45752.144 ms (ratio 0.471).
+#   Wall min–max: skip 20925.720–21801.179 ms; baseline 44996.532–46106.574 ms.
+#   INDEX min–max: skip 15815.532–15992.401 ms; baseline 35329.255–36482.771 ms.
+#
+# Wall figures and spreads are informational; ValidateMeasured does not read
+# them. C1's wall ratio fell from 0.428 to 0.274 while its budget ratio stayed
+# roughly flat. Wall covers more than INDEX, and the cause is unconfirmed.
+# The prior rows were measured at different heads (0c4084f45 and c14b7259a)
+# without recorded spreads, so the change cannot be attributed to per-process
+# sampling alone.
+#
+# Measured on an AMD Ryzen 9 7950X3D (32 logical CPUs), 240 x 1000, five
+# rounds, one process per arm sample, in the Nix shell with GOTOOLCHAIN=go1.26.0.
+# C1 start/end load averages (includes the run): 0.25/0.58/2.05 and 1.60/1.24/2.01.
+# C3 start/end (includes the run): 1.60/1.24/2.01 and 2.30/2.97/2.67.
+# CI, runner VMs and test processes were checked before, every 30 seconds
+# during, and after each case; earlier attempts were discarded when CI became
+# active. Head and base are the same commit: this is a re-measure at one head.
+#
+# A not-proven proof parses, so the stored-metadata lane has no other skip to
+# budget; the copy refresh that once filled that gap was measured slower than
+# the parse when metadata changed and removed.
+measurementRequired: true
 requiredNames:
   - proven-settle
-  - copy-refresh
   - stored-index
 budgets:
   - name: proven-settle
     lane: stored-metadata
     disposition: proven
-    cases: [C1, C5]
+    cases: [C1]
+    proof: 98.077
+    settle: 1161.793
+    avoided: 15322.876
     provenance:
-      command: 'go run -tags skipbudget ./cmd/skip-budget -case C1,C2,C3,C5,C6 -base "$(git merge-base HEAD origin/develop)"'
-  - name: copy-refresh
-    lane: stored-metadata
-    disposition: copy
-    cases: [C2]
-    provenance:
-      command: 'go run -tags skipbudget ./cmd/skip-budget -case C1,C2,C3,C5,C6 -base "$(git merge-base HEAD origin/develop)"'
+      head: 2fb31a933d110ca668b16550bb288e7bb0da0c47
+      base: 2fb31a933
+      command: 'nix develop --command env GOTOOLCHAIN=go1.26.0 go run -tags skipbudget ./cmd/skip-budget -case C1 -base 2fb31a933 -root /tmp/opencode/skip-remeasure -sessions 240 -entries 1000 -rounds 5'
+      date: '2026-11-20T05:20:03Z'
+      samples: 5
   - name: stored-index
     lane: stored-index
     disposition: index
     cases: [C3]
+    proof: 0
+    settle: 15895.061
+    avoided: 35430.329
     provenance:
-      command: 'go run -tags skipbudget ./cmd/skip-budget -case C1,C2,C3,C5,C6 -base "$(git merge-base HEAD origin/develop)"'
+      head: 2fb31a933d110ca668b16550bb288e7bb0da0c47
+      base: 2fb31a933
+      command: 'nix develop --command env GOTOOLCHAIN=go1.26.0 go run -tags skipbudget ./cmd/skip-budget -case C3 -base 2fb31a933 -root /tmp/opencode/skip-remeasure -sessions 240 -entries 1000 -rounds 5'
+      date: '2026-11-20T05:23:38Z'
+      samples: 5
 cases:
   - name: winning-ratio
     proof: 1

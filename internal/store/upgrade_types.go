@@ -172,11 +172,30 @@ type UpgradeStep struct {
 	Counts UpgradeUnit
 	// StampEffect describes the migration's effect on refresh evidence.
 	StampEffect StampEffect
+	// Estimate is the step's expected duration, measured from the store
+	// before it starts. Only a step whose time follows from a size the plan
+	// can read cheaply has one; the zero value means none.
+	Estimate UpgradeEstimate
 
 	// recount is the pending_recounts marker a recount step clears; it is
 	// empty for every other kind.
 	recount string
 }
+
+// UpgradeEstimate is the expected duration of one step as a band: the
+// step's basis divided by the fastest and the slowest rate measured for it.
+// It is an estimate, not a bound: a slower or busier machine takes longer.
+type UpgradeEstimate struct {
+	// Low and High bound the band: the basis at the fastest and at the
+	// slowest measured rate.
+	Low, High time.Duration
+	// Extrapolated says the basis is larger than any measured: the band is
+	// carried past the measurements and can be short.
+	Extrapolated bool
+}
+
+// Known reports whether the step has an estimate.
+func (e UpgradeEstimate) Known() bool { return e.High > 0 }
 
 // UpgradePlan is what an upgrade of one store would do. PlanUpgrade builds
 // it without changing a file.

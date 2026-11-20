@@ -329,7 +329,7 @@ func assertScanReuseEquivalence(t *testing.T, dir string, surface ReadSurface, f
 		if version == CurrentSchemaVersion() {
 			break
 		}
-		if err := applyUpgradeStep(t.Context(), conn, version+1, nil, nil); err != nil {
+		if err := applyUpgradeStep(t.Context(), conn, version+1, false, nil, nil); err != nil {
 			t.Fatalf("upgrade %s from version %d: %v", surface, version, err)
 		}
 	}

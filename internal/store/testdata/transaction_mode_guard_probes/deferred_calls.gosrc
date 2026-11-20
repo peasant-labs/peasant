@@ -1,0 +1,32 @@
+package store
+
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+
+func (s *Store) probeDeferredHelper(conn *sqlite.Conn) (err error) {
+	defer sqlitex.Transaction(conn)(&err)
+	return readThenWrite(conn)
+}
+
+func probeDeferredLiteral(conn *sqlite.Conn) error {
+	if err := sqlitex.ExecuteTransient(conn, "BEGIN", nil); err != nil {
+		return err
+	}
+	return readThenWrite(conn)
+}
+
+func probeOutermostSavepoint(conn *sqlite.Conn) (err error) {
+	defer sqlitex.Save(conn)(&err)
+	return readThenWrite(conn)
+}
+
+func probeImmediate(conn *sqlite.Conn) (err error) {
+	end, err := beginWrite(conn, "write the probe")
+	if err != nil {
+		return err
+	}
+	defer end(&err)
+	if err := sqlitex.ExecuteTransient(conn, "BEGIN IMMEDIATE", nil); err != nil {
+		return err
+	}
+	return readThenWrite(conn)
+}

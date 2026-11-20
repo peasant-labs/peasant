@@ -1548,11 +1548,13 @@ func printSummaryWithForecast(w io.Writer, result *ingest.PipelineResult, verbos
 	if result.CensusStored || forecast {
 		census = result.Census
 	}
-	if forecast && census != nil {
+	if forecast && census != nil && census.Sessions() > 0 {
 		fmt.Fprintln(w, "forecast (not stored; indexed bytes are not yet measured):")
 	}
 	if forecast && result.CensusForecastNeedsReindexRouting {
 		fmt.Fprintln(w, "refresh census unavailable: reindex dry-run stops before source routing and index decisions assign refresh reasons; run without --dry-run to record the actual census")
+	} else if forecast && census != nil && census.Sessions() == 0 {
+		fmt.Fprintln(w, "refresh census: 0 sessions (forecast)")
 	} else {
 		for _, line := range ingest.CensusLines(census) {
 			fmt.Fprintln(w, line)

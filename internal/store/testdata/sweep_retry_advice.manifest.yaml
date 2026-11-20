@@ -1,0 +1,11 @@
+# Required-name manifest for sweep_retry_advice: deletion protection by NAME, never by count.
+requiredNames:
+  - busy-names-lock-contention
+  - locked-names-lock-contention
+  - full-names-disk-space
+  - ioerr-names-full-disk-and-permissions
+  - ioerr-write-names-full-disk-and-permissions
+  - interrupt-names-cancellation
+  - context-canceled-names-cancellation
+  - context-deadline-names-cancellation
+  - corrupt-names-file-access

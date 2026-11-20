@@ -4,6 +4,7 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,6 +20,12 @@ var progressInputBytesYAML []byte
 
 //go:embed testdata/progress_input_bytes_invalid.yaml
 var invalidProgressInputBytesYAML []byte
+
+//go:embed testdata/progress_input_bytes_missing_want.yaml
+var missingWantBytesYAML []byte
+
+//go:embed testdata/index_progress_pairing.yaml
+var indexProgressPairingYAML []byte
 
 type progressInputKind string
 
@@ -78,6 +85,53 @@ func TestProgressInputBytesFixtureRejectsMisspelledKey(t *testing.T) {
 	_, err := decodeProgressInputBytes(invalidProgressInputBytesYAML)
 	if err == nil || !strings.Contains(err.Error(), "wantBytess") {
 		t.Fatalf("misspelled key: got %v, want unknown-field error", err)
+	}
+}
+
+func TestProgressInputBytesFixtureRejectsKnownWithoutBytes(t *testing.T) {
+	_, err := decodeProgressInputBytes(missingWantBytesYAML)
+	if err == nil || !strings.Contains(err.Error(), "requires a positive wantBytes") {
+		t.Fatalf("known without bytes: got %v", err)
+	}
+}
+
+func TestIndexProgressLogPairing(t *testing.T) {
+	var fixture struct {
+		RequiredNames []string `yaml:"requiredNames"`
+		Cases         []struct {
+			Name       string `yaml:"name"`
+			Logs       int    `yaml:"logs"`
+			Done       int    `yaml:"done"`
+			Paired     bool   `yaml:"paired"`
+			Diagnostic string `yaml:"diagnostic"`
+		} `yaml:"cases"`
+	}
+	decoder := yaml.NewDecoder(bytes.NewReader(indexProgressPairingYAML))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&fixture); err != nil {
+		t.Fatal(err)
+	}
+	seen := make(map[string]bool)
+	for _, row := range fixture.Cases {
+		seen[row.Name] = true
+		t.Run(row.Name, func(t *testing.T) {
+			var output bytes.Buffer
+			logger := slog.New(slog.NewTextHandler(&output, &slog.HandlerOptions{Level: slog.LevelDebug}))
+			if got := indexProgressLogsPaired(logger, row.Logs, row.Done); got != row.Paired {
+				t.Fatalf("paired = %t, want %t", got, row.Paired)
+			}
+			if row.Diagnostic != "" && !strings.Contains(output.String(), row.Diagnostic) {
+				t.Fatalf("missing diagnostic %q: %s", row.Diagnostic, output.String())
+			}
+			if row.Paired && output.Len() != 0 {
+				t.Fatalf("unexpected diagnostic: %s", output.String())
+			}
+		})
+	}
+	for _, name := range fixture.RequiredNames {
+		if !seen[name] {
+			t.Fatalf("missing case %q", name)
+		}
 	}
 }
 

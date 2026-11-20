@@ -12,6 +12,7 @@ import (
 	"testing"
 	"text/template"
 
+	"github.com/peasant-labs/peasant/internal/testkit/executable"
 	"gopkg.in/yaml.v3"
 )
 
@@ -118,7 +119,8 @@ func TestMissingChangelogFailsWithoutOutput(t *testing.T) {
 
 type workflow struct {
 	Jobs map[string]struct {
-		Steps []workflowStep `yaml:"steps"`
+		Env   map[string]string `yaml:"env"`
+		Steps []workflowStep    `yaml:"steps"`
 	} `yaml:"jobs"`
 }
 
@@ -182,6 +184,15 @@ func TestMountedReleaseHeader(t *testing.T) {
 	if publish.Env["TAG"] != "${{ github.ref_name }}" {
 		t.Fatal("release build must use the triggering tag")
 	}
+	// The runner gives every step its job's env, so the step runs with the
+	// build job's literal values; an expression there cannot be resolved here.
+	var jobEnv []string
+	for key, value := range release.Jobs["build"].Env {
+		if strings.Contains(value, "${{") {
+			t.Fatalf("build job env %s = %q is an expression this mounted test cannot resolve", key, value)
+		}
+		jobEnv = append(jobEnv, key+"="+value)
+	}
 
 	configBytes, err := os.ReadFile(filepath.Join(root, ".goreleaser.yml"))
 	if err != nil {
@@ -223,11 +234,11 @@ func TestMountedReleaseHeader(t *testing.T) {
 			capture := filepath.Join(dir, "published-header")
 			argsFile := filepath.Join(dir, "publisher-args")
 			stub := "#!/bin/sh\nmkdir -p dist\nprintf '%s' \"$PEASANT_RELEASE_HEADER\" > \"$CAPTURE\"\nprintf '%s\\n' \"$@\" > \"$ARGS_FILE\"\n"
-			writeTestFile(t, filepath.Join(runner, "goreleaser-bin", "goreleaser"), stub, 0o700)
+			writeTestExecutable(t, filepath.Join(runner, "goreleaser-bin", "goreleaser"), stub)
 			for _, step := range []workflowStep{publish} {
 				cmd := exec.Command("bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", step.Run)
 				cmd.Dir = dir
-				cmd.Env = append(os.Environ(), "TAG="+c.Tag, "VERSION="+c.Tag, "RUNNER_TEMP="+runner, "CAPTURE="+capture, "ARGS_FILE="+argsFile, "GOWORK=off")
+				cmd.Env = append(append(os.Environ(), jobEnv...), "TAG="+c.Tag, "VERSION="+c.Tag, "RUNNER_TEMP="+runner, "CAPTURE="+capture, "ARGS_FILE="+argsFile, "GOWORK=off")
 				output, runErr := cmd.CombinedOutput()
 				if c.ErrorContains != "" {
 					if runErr == nil || !strings.Contains(string(output), c.ErrorContains) {
@@ -293,5 +304,15 @@ func writeTestFile(t *testing.T, path, content string, mode os.FileMode) {
 	}
 	if err := os.WriteFile(path, []byte(content), mode); err != nil {
 		t.Fatal(fmt.Errorf("write synthetic fixture %s: %w", path, err))
+	}
+}
+
+func writeTestExecutable(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := executable.Write(path, []byte(content), 0o700); err != nil {
+		t.Fatal(err)
 	}
 }

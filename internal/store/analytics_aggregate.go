@@ -47,6 +47,7 @@ type AnalyticsSession struct {
 // row, every other session reads the legacy analysis record. The same
 // expression feeds the quality rows, so a session's duration is one number in
 // the page and in the summary.
+// SQL duration divisions mirror ingest.DurationMsToMinutes.
 const analyticsDurationExpr = `COALESCE(CASE WHEN s.active_generation_id IS NOT NULL THEN CAST(c.duration_ms AS REAL) / 60000.0 ELSE m.duration_minutes END, 0)`
 
 // analyticsTokensOutExpr mirrors the authority output-token expression in

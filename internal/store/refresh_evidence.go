@@ -56,13 +56,13 @@ func ReadRefreshEvidence(ctx context.Context, path string) ([]RefreshSessionEvid
 	// boundaries: v10 adds index tracking, v55 the adapter stamp, and v56
 	// the index input proof.
 	index, adapter, proof := "0", "NULL", "NULL"
-	if version >= 10 {
+	if version >= indexTrackingVersion {
 		index = "index_version"
 	}
-	if version >= 55 {
+	if version >= adapterStampVersion {
 		adapter = "adapter_version"
 	}
-	if version >= 56 {
+	if version >= indexInputProofVersion {
 		proof = "indexed_input_hash"
 	}
 	query := "SELECT session_id, model_harness, schema_version, " + adapter + ", " + index + ", " + proof + " FROM sessions ORDER BY session_id"

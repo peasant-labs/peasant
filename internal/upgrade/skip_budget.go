@@ -9,13 +9,13 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 )
 
-// SkipDisposition distinguishes the outcomes of the stored-metadata lane.
-// The refresh decision itself does not distinguish proof settlement from copy.
+// SkipDisposition names the skip a lane takes. The stored-metadata lane skips
+// the parse only through a proven settle; a proof that fails parses, so it has
+// no skip of its own to budget.
 type SkipDisposition string
 
 const (
 	SkipProven SkipDisposition = "proven"
-	SkipCopy   SkipDisposition = "copy"
 	SkipIndex  SkipDisposition = "index"
 )
 
@@ -32,7 +32,7 @@ func PlannedSkipPaths() ([]SkipPath, error) {
 		switch lane {
 		case ingest.RefreshLaneNone, ingest.RefreshLaneNative:
 		case ingest.RefreshLaneStoredMetadata:
-			paths = append(paths, SkipPath{lane, SkipProven}, SkipPath{lane, SkipCopy})
+			paths = append(paths, SkipPath{lane, SkipProven})
 		case ingest.RefreshLaneStoredIndex:
 			paths = append(paths, SkipPath{lane, SkipIndex})
 		default:
@@ -50,17 +50,16 @@ const (
 	// MeasurementCaseStampOnly is an adapter bump that changes no metadata:
 	// the proof and its settle against the baseline parse.
 	MeasurementCaseStampOnly MeasurementCase = "C1"
-	// MeasurementCaseContextChange is an adapter bump that changes the
-	// project context: the copy refresh against the baseline parse.
-	MeasurementCaseContextChange MeasurementCase = "C2"
+	// C2 (a context change) and C5 (a legacy row without the seal) are
+	// retired. Both measured the metadata-only copy refresh after a failed
+	// proof; a failed proof now parses, so neither has a skip to measure. Their
+	// ids are not reused, so an old report cannot be read as a new case.
+
 	// MeasurementCaseIndexerBump is an indexer bump: the stored-index lane
 	// against the native capture and parse.
 	MeasurementCaseIndexerBump MeasurementCase = "C3"
 	// MeasurementCaseNewSession imports new sessions: the full step.
 	MeasurementCaseNewSession MeasurementCase = "C4"
-	// MeasurementCaseLegacyRow is the stamp-only bump on generations whose
-	// seal is absent: the not-proven rate and the parse it falls back to.
-	MeasurementCaseLegacyRow MeasurementCase = "C5"
 	// MeasurementCaseUndeclaredProducer is the stamp-only bump planned
 	// against a table in which the adapter declares no change scope: the
 	// full step the plan names.
@@ -70,10 +69,8 @@ const (
 // AllMeasurementCases lists every case in matrix order.
 var AllMeasurementCases = []MeasurementCase{
 	MeasurementCaseStampOnly,
-	MeasurementCaseContextChange,
 	MeasurementCaseIndexerBump,
 	MeasurementCaseNewSession,
-	MeasurementCaseLegacyRow,
 	MeasurementCaseUndeclaredProducer,
 }
 

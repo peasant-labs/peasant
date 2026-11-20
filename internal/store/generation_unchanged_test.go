@@ -3,7 +3,9 @@ package store
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -213,7 +215,7 @@ func TestManagedGenerationUnchangedSettle(t *testing.T) {
 	p.Metadata.Stats.ConversationTurnCount = &conversation
 	p.Metadata.Stats.InputSubmissionCount = &count
 	result, err := s.SettleManagedGenerationUnchanged(context.Background(), p)
-	if err != nil || result.Disposition != ManagedGenerationRefreshUnchanged {
+	if err != nil || result.GenerationID != p.GenerationID {
 		t.Fatalf("settlement = %+v, error = %v", result, err)
 	}
 	after, err := wal.CountWALCommitFrames(dbPath)
@@ -341,12 +343,26 @@ PRAGMA writable_schema=OFF;`, version+1), nil)
 			if err != nil || !proof.Proven {
 				t.Fatalf("proof = %+v, error = %v", proof, err)
 			}
-			if _, err := s.SettleManagedGenerationUnchanged(context.Background(), request); err == nil {
-				t.Fatal("settlement accepted missing parse count")
+			before, err := s.ReadCapturedStats(context.Background(), request.SessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			beforeState, err := s.ReadIndexState(context.Background(), request.SessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = s.SettleManagedGenerationUnchanged(context.Background(), request)
+			var refusal *ManagedGenerationUnchangedSettleError
+			if !errors.As(err, &refusal) {
+				t.Fatalf("settlement error = %v, want missing-count refusal", err)
 			}
 			stats, err := s.ReadCapturedStats(context.Background(), request.SessionID)
 			if err != nil {
 				t.Fatal(err)
+			}
+			afterState, err := s.ReadIndexState(context.Background(), request.SessionID)
+			if err != nil || !reflect.DeepEqual(beforeState, afterState) || !reflect.DeepEqual(before, stats) {
+				t.Fatalf("refused settlement changed stats or index state: error = %v", err)
 			}
 			switch c.Column {
 			case "turn_count":
@@ -385,7 +401,7 @@ func TestManagedGenerationUnchangedSettleRefusesMovedPointer(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := s.SettleManagedGenerationUnchanged(context.Background(), p)
-	if err == nil || result.Disposition == ManagedGenerationRefreshUnchanged {
+	if err == nil {
 		t.Fatalf("moved generation settled: %+v, %v", result, err)
 	}
 }

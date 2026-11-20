@@ -169,6 +169,11 @@
 
               nativeBuildInputs = nativeBuildDeps pkgs;
 
+              # jq: scripts/release-header's provenance test runs the release
+              # workflow's real shell step, whose decision is a jq program;
+              # only git, yq, and the GitHub API are stubbed.
+              nativeCheckInputs = [ pkgs.jq ];
+
               # No -race: the data-race detector requires cgo, and this build is
               # CGO_ENABLED=0. The authoritative race-enabled FULL suite runs in
               # `make check` / CI (incl. the CGO=0 leg).

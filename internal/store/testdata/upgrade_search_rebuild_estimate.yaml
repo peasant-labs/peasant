@@ -1,0 +1,34 @@
+# The upgrade plan's estimate of the search trigger repair.
+#
+# planCases: the v75 window names the writes made between migrations 75 and
+# 76 (see the v76 fixtures). A delete leaves stale results, so the repair
+# rebuilds the index and the plan estimates it from the index's size; an
+# insert alone leaves none, so the repair is quick and has no estimate; a
+# tampered store whose retired index is gone rebuilds too, after a warning.
+#
+# bandCases: the band for a given search index size, against the measured
+# rates in internal/defaults/search_rebuild.go: Low is the basis at the fast
+# rate, High at the slow rate, and a basis above the largest measured index
+# is extrapolated.
+requiredNames:
+  - stale-results-rebuild
+  - insert-only-quick
+  - retired-index-missing-rebuild
+  - no-index
+  - small-index
+  - at-the-measured-size
+  - beyond-the-measured-size
+# Body rows of filler text, so the index's pages dominate its size.
+filler:
+  rows: 200
+  rowBytes: 6000
+  vocabulary: 20000
+planCases:
+  - {name: stale-results-rebuild, window: delete, wantEstimate: true}
+  - {name: insert-only-quick, window: insert, wantEstimate: false}
+  - {name: retired-index-missing-rebuild, window: tampered, wantEstimate: true}
+bandCases:
+  - {name: no-index, basisBytes: 0, wantEstimate: false}
+  - {name: small-index, basisBytes: 12000000, wantEstimate: true, wantExtrapolated: false}
+  - {name: at-the-measured-size, basisBytes: 1289506144, wantEstimate: true, wantExtrapolated: false}
+  - {name: beyond-the-measured-size, basisBytes: 4300000000, wantEstimate: true, wantExtrapolated: true}

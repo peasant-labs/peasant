@@ -584,7 +584,7 @@ func TestMixedIndexFormatsPipelineUpgradesOnlyItsDeclaringHarness(t *testing.T) 
 				storetest.MirrorRetainedPair(t, db, fs, "/managed", path, meta.SessionID)
 			}
 			legacyHarness := schema.HarnessClaudeCode
-			prepare, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), ingest.DefaultAdapterRegistry, ingest.PipelineConfig{Reindex: true, Force: true, Harness: &legacyHarness, OutputDir: "/managed"}, ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithIndexers(indexers), ingest.WithHarvesterVersions(versions))
+			prepare, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), ingest.DefaultAdapterRegistry, ingest.PipelineConfig{Reindex: true, Force: true, Harness: &legacyHarness, OutputDir: "/managed"}, ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithIndexers(indexers), ingest.WithHarvesterVersions(versions), ingest.WithArenaSizeBytes(64<<20))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -602,7 +602,7 @@ func TestMixedIndexFormatsPipelineUpgradesOnlyItsDeclaringHarness(t *testing.T) 
 					t.Fatal(err)
 				}
 			}
-			pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), ingest.DefaultAdapterRegistry, ingest.PipelineConfig{Reindex: true, OutputDir: "/managed"}, ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithIndexLogger(db), ingest.WithIndexers(indexers), ingest.WithHarvesterVersions(versions))
+			pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), ingest.DefaultAdapterRegistry, ingest.PipelineConfig{Reindex: true, OutputDir: "/managed"}, ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithIndexLogger(db), ingest.WithIndexers(indexers), ingest.WithHarvesterVersions(versions), ingest.WithArenaSizeBytes(64<<20))
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -363,7 +363,11 @@ func writeStoreUpgradePlan(w io.Writer, plan store.UpgradePlan) {
 		fmt.Fprintf(w, "the local store at %s needs an upgrade: schema %d to %d, %d step(s)\n", plan.DBPath, plan.From, plan.To, len(plan.Steps))
 	}
 	for i, step := range plan.Steps {
-		fmt.Fprintf(w, "  %d. %s (%s)\n", i+1, step.Title, storeUpgradeCostLabel(step.Cost))
+		label := storeUpgradeCostLabel(step.Cost)
+		if step.Estimate.Known() {
+			label += "; " + storeUpgradeEstimateLabel(step.Estimate)
+		}
+		fmt.Fprintf(w, "  %d. %s (%s)\n", i+1, step.Title, label)
 	}
 	if !plan.HasLongStep() && !storeUpgradeDiskTight(plan) {
 		return
@@ -389,6 +393,28 @@ func storeUpgradeCostLabel(cost store.UpgradeCost) string {
 	default:
 		return "quick"
 	}
+}
+
+// storeUpgradeEstimateLabel renders a step's estimate as a band in whole
+// minutes, or as "under a minute" when even its slow end is shorter. It says
+// "estimate" so it is never read as a measurement of this run, and says when
+// the store is larger than any the band was measured on.
+func storeUpgradeEstimateLabel(estimate store.UpgradeEstimate) string {
+	var label string
+	low := max(int64(estimate.Low/time.Minute), 1)
+	high := int64((estimate.High + time.Minute - 1) / time.Minute)
+	switch {
+	case estimate.High < time.Minute:
+		label = "estimate: under a minute"
+	case low >= high:
+		label = fmt.Sprintf("estimate: about %d minute(s)", high)
+	default:
+		label = fmt.Sprintf("estimate: %d to %d minutes", low, high)
+	}
+	if estimate.Extrapolated {
+		label += ", not measured on an index this large"
+	}
+	return label
 }
 
 // storeUpgradeProgressMode chooses who renders an upgrade's progress. The

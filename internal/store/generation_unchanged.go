@@ -13,6 +13,28 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
+// ManagedGenerationUnchangedSettleResult reports the
+// generation that is the active read authority afterwards: the settled source
+// generation.
+type ManagedGenerationUnchangedSettleResult struct {
+	GenerationID string
+}
+
+// ManagedGenerationUnchangedSettleError is the actionable refusal of one unchanged
+// settlement. It names what was refused, why, the impact, and the caller's
+// next step; nothing changed.
+type ManagedGenerationUnchangedSettleError struct {
+	SessionID          schema.SessionID
+	SourceGenerationID string
+	Detail             string
+}
+
+func (e *ManagedGenerationUnchangedSettleError) Error() string {
+	return fmt.Sprintf(
+		"store: refuse the unchanged settlement of session %s generation %s: source-unsupported; where: store.SettleManagedGenerationUnchanged, before any row changed; impact: the active authority is unchanged and the session stays refresh work; fix: %s",
+		e.SessionID, e.SourceGenerationID, e.Detail)
+}
+
 // ManagedGenerationUnchangedProof describes the actual captured input and SQL
 // state to compare. Expected is captured after the metadata pair was installed.
 type ManagedGenerationUnchangedProof struct {
@@ -135,7 +157,7 @@ func proveManagedGenerationOnConn(conn *sqlite.Conn, p ManagedGenerationUnchange
 
 // SettleManagedGenerationUnchanged repeats the proof under the session lock
 // and an immediate transaction, so changed authority cannot be settled.
-func (s *Store) SettleManagedGenerationUnchanged(ctx context.Context, p ManagedGenerationUnchangedProof) (result ManagedGenerationRefreshResult, err error) {
+func (s *Store) SettleManagedGenerationUnchanged(ctx context.Context, p ManagedGenerationUnchangedProof) (result ManagedGenerationUnchangedSettleResult, err error) {
 	if s.sessionLocker == nil || p.UpdatedAtMs <= 0 {
 		return result, fmt.Errorf("store: settle unchanged generation for %s: session locking or capture time is missing; nothing was written; configure generation support and supply the capture time", p.SessionID)
 	}
@@ -166,9 +188,8 @@ func (s *Store) SettleManagedGenerationUnchanged(ctx context.Context, p ManagedG
 		return result, fmt.Errorf("store: read parse counts for unchanged settlement of %s: %w; nothing was written; restore database access and retry", p.SessionID, readErr)
 	}
 	if readErr != nil || stored.TurnCount == nil || stored.ConversationTurnCount == nil || stored.InputSubmissionCount == nil {
-		return result, &ManagedGenerationRefreshError{
+		return result, &ManagedGenerationUnchangedSettleError{
 			SessionID: p.SessionID, SourceGenerationID: p.GenerationID,
-			Reason: ManagedGenerationRefreshSourceUnsupported,
 			Detail: "the stored parse counts are incomplete; re-parse the source to restore authoritative counts",
 		}
 	}
@@ -204,5 +225,5 @@ func (s *Store) SettleManagedGenerationUnchanged(ctx context.Context, p ManagedG
 			return result, err
 		}
 	}
-	return ManagedGenerationRefreshResult{GenerationID: p.GenerationID, Disposition: ManagedGenerationRefreshUnchanged}, nil
+	return ManagedGenerationUnchangedSettleResult{GenerationID: p.GenerationID}, nil
 }

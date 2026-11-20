@@ -1,0 +1,34 @@
+package store
+
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+
+const sqlStampProbe = `UPDATE sessions SET indexed_at = ? WHERE session_id = ?`
+
+const sqlReadProbe = `SELECT indexed_at FROM sessions WHERE session_id = ?`
+
+func (s *Store) probeReadOnlyWritesLiteral(conn *sqlite.Conn) (err error) {
+	defer sqlitex.Save(conn)(&err)
+	return sqlitex.ExecuteTransient(conn, `insert into sessions(session_id) values (?)`, nil)
+}
+
+func (s *Store) probeReadOnlyWritesConst(conn *sqlite.Conn) (err error) {
+	defer sqlitex.Save(conn)(&err)
+	return sqlitex.ExecuteTransient(conn, sqlStampProbe, nil)
+}
+
+func (s *Store) probeReadOnlyReads(conn *sqlite.Conn) (err error) {
+	defer sqlitex.Save(conn)(&err)
+	return sqlitex.ExecuteTransient(conn, sqlReadProbe, nil)
+}
+
+func (s *Store) probeReadOnlyWritesThroughCTE(conn *sqlite.Conn) (err error) {
+	defer sqlitex.Save(conn)(&err)
+	return sqlitex.ExecuteTransient(conn, `-- stale rows first
+/* bounded */ WITH stale AS (SELECT session_id FROM sessions) DELETE FROM sessions WHERE session_id IN stale`, nil)
+}
+
+func (s *Store) probeReadOnlyReadsThroughCTE(conn *sqlite.Conn) (err error) {
+	defer sqlitex.Save(conn)(&err)
+	return sqlitex.ExecuteTransient(conn, `-- recent rows
+WITH recent AS (SELECT session_id FROM sessions) SELECT * FROM recent`, nil)
+}

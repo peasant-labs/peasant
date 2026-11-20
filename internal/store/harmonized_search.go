@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
@@ -159,7 +160,10 @@ func (s *Store) RebuildSearchIndex(ctx context.Context, progress func(done, of i
 // report a rolled-back rebuild as a success. A cancellation that arrives
 // before the commit rolls the transaction back.
 func runSearchRebuildTransaction(ctx context.Context, conn *sqlite.Conn, rebuild func() error) (err error) {
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, "rebuild the search index")
+	if err != nil {
+		return fmt.Errorf("%w; the index is unchanged and search still refuses", err)
+	}
 	defer func() {
 		if err == nil {
 			err = ctx.Err()
@@ -262,14 +266,80 @@ func rebuildSearchIndexOnConn(ctx context.Context, conn *sqlite.Conn) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("store: rebuild the search index: %w; the index is unchanged and search still refuses", err)
 	}
+	// The wider postings budget and its removal commit with the rebuild in
+	// the caller's transaction, so the store keeps no trace of either.
+	if err := widenSearchRebuildHashOnConn(conn); err != nil {
+		return err
+	}
 	if err := sqlitex.Execute(conn, `INSERT INTO session_search_fts(session_search_fts) VALUES('rebuild')`, nil); err != nil {
 		return fmt.Errorf("store: rebuild the search index over the union view: %w; the index is unchanged and search still refuses; free disk space and retry", err)
+	}
+	if err := restoreSearchRebuildHashOnConn(conn); err != nil {
+		return err
 	}
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("store: rebuild the search index: %w; the index is unchanged and search still refuses", err)
 	}
 	if err := sqlitex.Execute(conn, `UPDATE session_search_state SET needs_rebuild = 0 WHERE id = 1`, nil); err != nil {
 		return fmt.Errorf("store: clear the search rebuild flag after the rebuild: %w; the index was rebuilt but search still refuses; retry the flag clear", err)
+	}
+	return nil
+}
+
+// fts5DefaultHashBytes is FTS5's own in-memory postings budget
+// (FTS5_DEFAULT_HASHSIZE in the bundled SQLite): the pending postings size
+// at which it writes them to a new segment. It is the budget every write
+// except a whole-index rebuild uses.
+const fts5DefaultHashBytes = 1 << 20
+
+// searchHashConfigKey is the FTS5 configuration option that sets the
+// in-memory postings budget.
+const searchHashConfigKey = "hashsize"
+
+// widenSearchRebuildHashOnConn raises the union search index's in-memory
+// postings budget to defaults.SearchRebuildHashBytes for the whole-index
+// rebuild that follows on this connection. With FTS5's default budget a
+// rebuild writes a segment per megabyte of postings and merges those
+// segments again and again while it runs; a wider budget writes fewer,
+// larger segments and merges each posting fewer times. The postings, and so
+// every search result and rank, are the same. FTS5 keeps the option in the
+// index's _config table, so restoreSearchRebuildHashOnConn must follow.
+func widenSearchRebuildHashOnConn(conn *sqlite.Conn) error {
+	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_search_fts(session_search_fts, rank) VALUES(?, ?)`, &sqlitex.ExecOptions{
+		Args: []any{searchHashConfigKey, defaults.SearchRebuildHashBytes},
+	}); err != nil {
+		return fmt.Errorf("store: raise the search index's postings budget to %d bytes before its rebuild: %w; the index is unchanged; retry, and if it fails again check that the database is writable", defaults.SearchRebuildHashBytes, err)
+	}
+	return nil
+}
+
+// restoreSearchRebuildHashOnConn returns the union search index to FTS5's
+// default postings budget and removes the stored option, so the store holds
+// the configuration it had before widenSearchRebuildHashOnConn (Peasant
+// stores no budget otherwise). Setting the default first makes every
+// connection, this one included, reload FTS5's configuration; deleting the
+// row then leaves the index on the built-in default. A store with no stored
+// budget is left untouched.
+func restoreSearchRebuildHashOnConn(conn *sqlite.Conn) error {
+	stored := false
+	if err := sqlitex.ExecuteTransient(conn, `SELECT 1 FROM session_search_fts_config WHERE k = ?`, &sqlitex.ExecOptions{
+		Args:       []any{searchHashConfigKey},
+		ResultFunc: func(*sqlite.Stmt) error { stored = true; return nil },
+	}); err != nil {
+		return fmt.Errorf("store: read the search index's stored postings budget after its rebuild: %w; the rebuild is not committed; retry", err)
+	}
+	if !stored {
+		return nil
+	}
+	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_search_fts(session_search_fts, rank) VALUES(?, ?)`, &sqlitex.ExecOptions{
+		Args: []any{searchHashConfigKey, fts5DefaultHashBytes},
+	}); err != nil {
+		return fmt.Errorf("store: return the search index's postings budget to the default after its rebuild: %w; the rebuild is not committed; retry", err)
+	}
+	if err := sqlitex.ExecuteTransient(conn, `DELETE FROM session_search_fts_config WHERE k = ?`, &sqlitex.ExecOptions{
+		Args: []any{searchHashConfigKey},
+	}); err != nil {
+		return fmt.Errorf("store: remove the search index's stored postings budget after its rebuild: %w; the rebuild is not committed; retry", err)
 	}
 	return nil
 }

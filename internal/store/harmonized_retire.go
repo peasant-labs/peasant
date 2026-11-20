@@ -91,7 +91,7 @@ func CheckRetirementReady(statuses []RetirementPreconditionStatus) error {
 // serving non-native sessions. The drop is idempotent: a retired database
 // whose tables are already gone evaluates to all-passed and the IF EXISTS
 // statements change nothing.
-func (s *Store) DropRetiredProjectionTables(ctx context.Context) error {
+func (s *Store) DropRetiredProjectionTables(ctx context.Context) (txnErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return fmt.Errorf("store: take connection to drop the retired projection tables: %w; the tables are unchanged", err)
@@ -104,8 +104,10 @@ func (s *Store) DropRetiredProjectionTables(ctx context.Context) error {
 	if err := CheckRetirementReady(statuses); err != nil {
 		return err
 	}
-	txnErr := error(nil)
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, "drop the retired projection tables")
+	if err != nil {
+		return fmt.Errorf("%w; the tables are unchanged", err)
+	}
 	defer endFn(&txnErr)
 	if err := sqlitex.ExecuteScript(conn, retirementDropStatements, nil); err != nil {
 		txnErr = fmt.Errorf("store: drop the retired projection tables: %w; the tables are unchanged", err)

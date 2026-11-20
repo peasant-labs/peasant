@@ -88,8 +88,8 @@ importers:
         specifier: 9.39.1
         version: 9.39.1(jiti@2.7.0)(supports-color@7.2.0)
       eslint-plugin-unstring:
-        specifier: 0.2.1
-        version: 0.2.1(eslint@9.39.1(jiti@2.7.0)(supports-color@7.2.0))(typescript@5.9.3)
+        specifier: 0.3.0
+        version: 0.3.0(eslint@9.39.1(jiti@2.7.0)(supports-color@7.2.0))(typescript@5.9.3)
       jsdom:
         specifier: ^26.0.0
         version: 26.1.0(supports-color@7.2.0)
@@ -1805,8 +1805,8 @@ packages:
     resolution: {integrity: sha512-/veY75JbMK4j1yjvuUxuVsiS/hr/4iHs9FTT6cgTexxdE0Ly/glccBAkloH/DofkjRbZU3bnoj38mOmhkZ0lHw==}
     engines: {node: '>=12'}
 
-  eslint-plugin-unstring@0.2.1:
-    resolution: {integrity: sha512-a3PLjZm9PNHFc0cb9Q8HJUl92wEwqvv9jjoUx2IXXibWnLLHzSUk7iXQ4k/HKewhzrkK+W1XtwND6i9jx22Xxw==}
+  eslint-plugin-unstring@0.3.0:
+    resolution: {integrity: sha512-F7GfGsLRDjQF2IXNtB6K3x5Xir+TTTpRK+Nre7QpOg9T7Xs4zLQJPr4DnuHEHc9cRmZ97RRNhakVIxXET5DaBw==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
     peerDependencies:
       eslint: '>=9'
@@ -4662,7 +4662,7 @@ snapshots:
 
   escape-string-regexp@5.0.0: {}
 
-  eslint-plugin-unstring@0.2.1(eslint@9.39.1(jiti@2.7.0)(supports-color@7.2.0))(typescript@5.9.3):
+  eslint-plugin-unstring@0.3.0(eslint@9.39.1(jiti@2.7.0)(supports-color@7.2.0))(typescript@5.9.3):
     dependencies:
       eslint: 9.39.1(jiti@2.7.0)(supports-color@7.2.0)
       typescript: 5.9.3

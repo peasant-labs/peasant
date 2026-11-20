@@ -1,0 +1,9 @@
+requiredNames:
+  - first-import
+  - installed-refresh
+  - exact-control
+  - truncated-row-recovery
+  - submillisecond-source
+  - future-capture-clock
+  - retained-duration
+  - retained-output-tokens

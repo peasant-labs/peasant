@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/peasant-labs/peasant/internal/testkit/executable"
 )
 
 func TestPeasantBinSeamUsesInjectedCommand(t *testing.T) {
@@ -377,7 +379,7 @@ func installFakePeasant(t *testing.T, name, path string) string {
 	if err != nil {
 		t.Fatalf("read the %s stand-in for peasant from %s: %v", name, scriptPath, err)
 	}
-	if err := os.WriteFile(path, script, 0o700); err != nil {
+	if err := executable.Write(path, script, 0o700); err != nil {
 		t.Fatalf("install the %s stand-in for peasant at %s: %v", name, path, err)
 	}
 	return path

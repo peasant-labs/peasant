@@ -98,8 +98,8 @@
     "sqlitefile/file.go": "c92b66ef3436efc2a6757bf87f8219d78a66eaffba0e23f9ab26429f163f0a2f",
     "sqlitefile/file_test.go": "c1be03b73663492d690b13af5533c6dd79d5e1963eef2fd3e27a92711a70cfaf",
     "sqlitemigration/example_test.go": "c299e6f8cb5d5680385d152cfdb1c54920fdd4583557be5a58d17267dcfd3e00",
-    "sqlitemigration/sqlitemigration.go": "c9b915b0d83845aeeefe9a6a86c9503db1edeabcc85610d9b5bb64006ac20242",
-    "sqlitemigration/sqlitemigration_test.go": "fdb1dd070ee567be7df9e4d031695192db9f35cf39fe4252c26b58aed2d6dd0c",
+    "sqlitemigration/sqlitemigration.go": "5e45b26569255e9a0693c1cbdbc515498f703a0cc9ebfe730490c64536fd57b5",
+    "sqlitemigration/sqlitemigration_test.go": "c728db9e5583d6dcfbd35d062a3abe00d8f9e02654f66f13a46cd765ae902fff",
     "sqlitex/example_test.go": "502d38c60f7252046d3bbe07002ace31135ed2c693f719db5f980a5758ab42ae",
     "sqlitex/exec.go": "aa754c86aa9bd9cf673b12f74a9fb666c891645edfb89be36febb9b1b3c40d7b",
     "sqlitex/exec_test.go": "7fcd68a091001de2a9e893f3d50c2dc9f6b53fd94336064837f768d8ee9b46d5",
@@ -120,7 +120,7 @@
     "go.work": "UPSTREAM.go.work.txt",
     "go.work.sum": "UPSTREAM.go.work.sum.txt"
   },
-  "patch_sha256": "2d75897fa3dda9b56d98f6768001f766f0ac9836f52070d9063dd32960f1d7ec",
+  "patch_sha256": "8cd702b67c64a95625665fd6bbab594a8ce16d40ff3f298374d680e3f5040b24",
   "native_pointer_lines": {
     "blob.go": [
       "blobPtr := *(*uintptr)(unsafe.Pointer(blobPtrPtr))"

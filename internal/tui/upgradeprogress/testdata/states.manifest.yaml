@@ -14,3 +14,4 @@ requiredStates:
   - failed-between-steps
   - failed-after-all-steps
   - failed-after-all-steps-sanitizes-terminal-controls
+  - counted-step-estimate-is-time-remaining

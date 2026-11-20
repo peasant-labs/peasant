@@ -20,7 +20,7 @@ type ManagedGenerationUnchangedProof struct {
 // proof and its separately revalidated settlement.
 type ManagedGenerationUnchangedProver interface {
 	ProveCapturedGenerationUnchanged(context.Context, ManagedGenerationUnchangedProof) (UnchangedProof, error)
-	SettleCapturedGenerationUnchanged(context.Context, ManagedGenerationUnchangedProof) (ManagedGenerationRefreshOutcome, error)
+	SettleCapturedGenerationUnchanged(context.Context, ManagedGenerationUnchangedProof) (ManagedGenerationUnchangedSettleOutcome, error)
 }
 
 // UnchangedProofMismatch identifies why an equality proof could not be made.

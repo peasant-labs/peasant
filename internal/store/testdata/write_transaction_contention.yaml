@@ -1,0 +1,42 @@
+# Store writes that read before their first write, run beside a writer on
+# another SQLite connection. Every case runs a production store entry point.
+#
+# path   the store entry point under test.
+# seam   where the competing connection writes:
+#          first-write  it tries to write and commit when the path prepares
+#                       its first write, after the path's reads. A DEFERRED
+#                       path would let that commit land and then fail its
+#                       write with "database is locked"; an IMMEDIATE path
+#                       already holds the writer, so the competitor is
+#                       refused and writes once the path has committed.
+#          held-writer  it holds the writer, uncommitted, for longer than
+#                       the path's busy timeout. The path must refuse before
+#                       it writes and name lock contention as the cause.
+# expect what the case proves:
+#          competitor-waits-then-both-written   (first-write)
+#          refused-with-lock-advice              (held-writer)
+cases:
+  - name: origin-state-vs-commit-after-its-read
+    path: update-origin-state
+    seam: first-write
+    expect: competitor-waits-then-both-written
+  - name: index-state-vs-commit-after-its-read
+    path: update-index-state
+    seam: first-write
+    expect: competitor-waits-then-both-written
+  - name: parent-cache-vs-commit-after-its-read
+    path: reconcile-parent-cache
+    seam: first-write
+    expect: competitor-waits-then-both-written
+  - name: prune-vs-commit-after-its-read
+    path: prune-sessions
+    seam: first-write
+    expect: competitor-waits-then-both-written
+  - name: insert-sessions-vs-commit-after-its-read
+    path: insert-sessions
+    seam: first-write
+    expect: competitor-waits-then-both-written
+  - name: origin-state-vs-held-writer
+    path: update-origin-state
+    seam: held-writer
+    expect: refused-with-lock-advice

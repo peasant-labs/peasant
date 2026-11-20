@@ -83,6 +83,6 @@
     "yaml": "2.9.0",
     "eslint": "9.39.1",
     "typescript-eslint": "8.46.4",
-    "eslint-plugin-unstring": "0.2.1"
+    "eslint-plugin-unstring": "0.3.0"
   }
 }

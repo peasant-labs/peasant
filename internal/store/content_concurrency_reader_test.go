@@ -23,6 +23,8 @@ type concurrencyReaderCase struct {
 	CrossProcess bool   `yaml:"crossProcess"`
 	FirstText    string `yaml:"firstText"`
 	NextText     string `yaml:"nextText"`
+	// Path belongs to the sweep-writer cases, which the white-box runner owns.
+	Path string `yaml:"path"`
 }
 
 func TestContentConcurrencyReaders(t *testing.T) {

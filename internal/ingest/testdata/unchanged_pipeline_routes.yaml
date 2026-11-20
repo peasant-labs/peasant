@@ -1,7 +1,16 @@
+# Routes of the index stage after an adapter bump on the stored-metadata lane.
+# proven settles; every other route parses the stored transcript once and never
+# copies the stored generation.
+#
+# metadata-context:          the metadata context changed, so the proof fails
+#                            on the metadata; the parse installs the change.
+# unproven-unchanged-parses: the metadata did not change but the proof still
+#                            fails (an unsealed legacy row) and no validator
+#                            answers; the parse runs.
 cases:
   - name: proven
   - name: index-not-current
   - name: metadata-context
-  - name: copy-refused
+  - name: unproven-unchanged-parses
   - name: proof-error
   - name: settle-refused

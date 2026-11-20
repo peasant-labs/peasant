@@ -2,8 +2,26 @@ package ingest
 
 import (
 	"context"
+	"log/slog"
 	"path/filepath"
 )
+
+// indexProgressLogsPaired refuses a byte estimate when streamed outcomes and
+// their logs no longer describe the same set of sessions.
+func indexProgressLogsPaired(logger *slog.Logger, logs, done int) bool {
+	if logs == done {
+		return true
+	}
+	logger.Debug("index progress uses session counts: streamed outcome and log counts differ",
+		"streamed_outcomes", done, "index_logs", logs)
+	return false
+}
+
+type inputPayloadSizer interface {
+	payloadSize(context.Context, DiscoveredSession) (int64, error)
+}
+
+var _ inputPayloadSizer = (*OpenCodeAdapter)(nil)
 
 // extractInputBytes measures the input the extract worker expects to read.
 // Zero means unknown; a failed optional measurement never changes the harvest.
@@ -33,35 +51,15 @@ func (p *Pipeline) extractInputBytes(ctx context.Context, entry DiffEntry) int64
 		if !ok {
 			return 0
 		}
-		adapter, ok := factory(p.fs, p.git, p.salt).(*OpenCodeAdapter)
+		adapter, ok := factory(p.fs, p.git, p.salt).(inputPayloadSizer)
 		if !ok {
 			return 0
 		}
-		var size OpenCodePayloadSize
-		err := adapter.withOpenCodeSQLiteSource(ctx, session.SourcePath.String(), func(source OpenCodeSQLiteSource) error {
-			switch session.TranscriptOrigin {
-			case TranscriptOriginOpenCodeLegacySQLite:
-				id, err := NewOpenCodeLegacySessionID(string(session.SessionID))
-				if err != nil {
-					return err
-				}
-				size, err = source.LegacySessionPayloadSize(ctx, id)
-				return err
-			case TranscriptOriginOpenCodeCurrentSQLite:
-				id, err := NewOpenCodeCurrentSessionID(string(session.SessionID))
-				if err != nil {
-					return err
-				}
-				size, err = source.CurrentSessionPayloadSize(ctx, id)
-				return err
-			default:
-				return nil
-			}
-		})
+		size, err := adapter.payloadSize(ctx, session)
 		if err != nil {
 			return 0
 		}
-		return size.Bytes
+		return size
 	}
 	if session.Harness == HarnessOpenCode && session.OriginalRoot != "" {
 		// The JSON source is a directory of message and part files, not

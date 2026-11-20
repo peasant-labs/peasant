@@ -1,0 +1,3 @@
+required_names:
+  - delete-annotations
+  - batch-create-annotations

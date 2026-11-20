@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -23,6 +24,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/upgrade"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 )
@@ -37,15 +39,31 @@ const (
 	armBaseline arm = "baseline"
 )
 
+var allArms = []arm{armSkip, armBaseline}
+
+func newArm(raw string) (arm, error) {
+	a := arm(raw)
+	if !slices.Contains(allArms, a) {
+		return "", fmt.Errorf("arm %q is not one of %v", raw, allArms)
+	}
+	return a, nil
+}
+
 // mutation is the change a case applies to the imported base before any round.
 type mutation int
 
+// The zero value is not a mutation, so a case that forgets to name one fails
+// to prepare instead of measuring an unchanged base.
 const (
 	mutateAdapterStamp mutation = iota + 1
-	mutateAdapterContext
 	mutateIndexer
-	mutateAdapterStampSealless
+	// mutateNone leaves the imported base as it is. Only the new-session
+	// smoke case uses it: it times the import itself.
+	mutateNone
 )
+
+// defined reports whether m is one of the mutations above.
+func (m mutation) defined() bool { return m >= mutateAdapterStamp && m <= mutateNone }
 
 // caseSpec is what one corpus case prepares, how its two arms run, and what
 // each arm must have executed for the report to be evidence.
@@ -118,18 +136,6 @@ func caseSpecs() map[upgrade.MeasurementCase]caseSpec {
 			baselineLabel: "stored-metadata lane with the refresh skips disabled: parse, identical generation not installed",
 			baseline:      disableSkips, wantLane: ingest.RefreshLaneStoredMetadata, check: stampOnly,
 		},
-		upgrade.MeasurementCaseContextChange: {
-			id: upgrade.MeasurementCaseContextChange, mutation: mutateAdapterContext,
-			skipLabel:     "proof not proven, metadata-only copy refresh (stored-metadata lane)",
-			baselineLabel: "stored-metadata lane with the refresh skips disabled: parse and install",
-			baseline:      disableSkips, wantLane: ingest.RefreshLaneStoredMetadata,
-			check: func(n int, a arm, s sample) error {
-				if a == armBaseline {
-					return expect(a, s, parsesAll(n))
-				}
-				return expect(a, s, executed{Proofs: n, Copies: n})
-			},
-		},
 		upgrade.MeasurementCaseIndexerBump: {
 			id: upgrade.MeasurementCaseIndexerBump, mutation: mutateIndexer,
 			skipLabel:     "stored-index lane: re-index the stored transcript",
@@ -143,23 +149,6 @@ func caseSpecs() map[upgrade.MeasurementCase]caseSpec {
 					return expectLane(a, s, ingest.RefreshLaneNative, n)
 				}
 				return expectLane(a, s, ingest.RefreshLaneStoredIndex, n)
-			},
-		},
-		upgrade.MeasurementCaseLegacyRow: {
-			id: upgrade.MeasurementCaseLegacyRow, mutation: mutateAdapterStampSealless,
-			skipLabel:     "unchanged proof without a seal (not proven), then the fallback the build takes",
-			baselineLabel: "stored-metadata lane with the refresh skips disabled: parse",
-			baseline:      disableSkips, wantLane: ingest.RefreshLaneStoredMetadata,
-			check: func(n int, a arm, s sample) error {
-				if a == armBaseline {
-					return expect(a, s, parsesAll(n))
-				}
-				// The seal is absent on every generation, so no proof may
-				// hold. The fallback after it (a copy refresh or a parse) is
-				// what this case reports, so it is not fixed here.
-				fallback := s
-				fallback.Copies, fallback.Parses = 0, 0
-				return expect(a, fallback, executed{Proofs: n})
 			},
 		},
 		upgrade.MeasurementCaseUndeclaredProducer: {
@@ -188,12 +177,13 @@ type executed struct {
 	Proofs  int `json:"proofs"`
 	Proven  int `json:"proven"`
 	Settles int `json:"settles"`
-	Copies  int `json:"copies"`
 	Parses  int `json:"parses"`
 }
 
 // sample is one timed pipeline run over a fresh copy of the prepared base.
 type sample struct {
+	// PID is the child process that ran the sample.
+	PID          int     `json:"pid"`
 	Round        int     `json:"round"`
 	Arm          arm     `json:"arm"`
 	WallMs       float64 `json:"wallMs"`
@@ -207,12 +197,45 @@ type sample struct {
 	UndeclaredDecisions int                         `json:"undeclaredDecisions"`
 	ParsedBytes         int64                       `json:"parsedBytes"`
 	Outcomes            map[ingest.IndexOutcome]int `json:"outcomes"`
-	Census              []ingest.RefreshCensusRow   `json:"census"`
+	Census              []censusRow                 `json:"census"`
 	CensusLanes         map[ingest.RefreshLane]int  `json:"censusLanes"`
 	WriteLane           *ingest.WriteLaneStats      `json:"writeLane,omitempty"`
 	DBBytes             int64                       `json:"dbBytesBefore"`
 	DBBytesAfter        int64                       `json:"dbBytesAfter"`
 	WALBytes            int64                       `json:"walBytesAfter"`
+}
+
+// censusRow is one census row as a sample carries it from the child to the
+// parent. It writes the row as the census does, reason as its stable code,
+// and reads that form back through the reason's validating constructor.
+//
+// The decoder lives here rather than as RefreshCensusRow.UnmarshalJSON:
+// the census is an output the pipeline writes into reports and never reads
+// back, and this build-tagged harness is the only reader. A production
+// decoder would be a new trust boundary in internal/ingest that nothing
+// shipped exercises.
+type censusRow struct {
+	ingest.RefreshCensusRow
+}
+
+func (r *censusRow) UnmarshalJSON(data []byte) error {
+	var wire struct {
+		Reason      string             `json:"reason"`
+		Lane        ingest.RefreshLane `json:"lane"`
+		Sessions    int                `json:"sessions"`
+		SourceBytes int64              `json:"source_bytes"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&wire); err != nil {
+		return fmt.Errorf("decode census row: %w", err)
+	}
+	reason, err := ingest.NewOutcomeReason(wire.Reason)
+	if err != nil {
+		return fmt.Errorf("decode census row on lane %s: %w", wire.Lane, err)
+	}
+	r.RefreshCensusRow = ingest.RefreshCensusRow{Reason: reason, Lane: wire.Lane, Sessions: wire.Sessions, SourceBytes: wire.SourceBytes}
+	return nil
 }
 
 // armSummary is the order statistics of one arm's samples.
@@ -232,6 +255,11 @@ type caseShape struct {
 	Entries     int   `json:"entriesPerSession"`
 	CorpusBytes int64 `json:"corpusBytes"`
 	PrepareMs   int64 `json:"prepareMs"`
+	// ImportedEntries is the entry count the initial import indexed, and
+	// ActiveGenerations the sessions it left with an active managed
+	// generation.
+	ImportedEntries   int   `json:"importedEntries"`
+	ActiveGenerations int64 `json:"activeGenerations"`
 }
 
 // planEvidence is what the read-only planner says about the prepared base.
@@ -276,7 +304,11 @@ const (
 	matrixEntries  = 1000
 )
 
-func runCase(ctx context.Context, spec caseSpec, opts harnessOptions) (string, error) {
+// runCase prepares the case's base once, then runs each arm sample in its own
+// child process through command, alternating the arm order by round. A sample
+// that did not execute what the case expects fails the case before any
+// report is written.
+func runCase(ctx context.Context, spec caseSpec, opts harnessOptions, command sampleCommand) (string, error) {
 	dir, err := cleanCaseDir(opts.root, spec.id)
 	if err != nil {
 		return "", err
@@ -303,7 +335,8 @@ func runCase(ctx context.Context, spec caseSpec, opts harnessOptions) (string, e
 			order = []arm{armBaseline, armSkip}
 		}
 		for _, a := range order {
-			s, err := runRound(ctx, spec, baseDir, filepath.Join(dir, fmt.Sprintf("round-%d-%s", round, a)), round, a)
+			s, err := collectRunSample(sampleFlags{Kind: string(sampleKindRun), Dir: filepath.Join(dir, fmt.Sprintf("round-%d-%s", round, a)),
+				Base: baseDir, Case: string(spec.id), Arm: string(a), Round: round}, command)
 			if err != nil {
 				return "", fmt.Errorf("%s round %d %s arm: %w", spec.id, round, a, err)
 			}
@@ -328,8 +361,8 @@ func runCase(ctx context.Context, spec caseSpec, opts harnessOptions) (string, e
 		report.NotProvenRate = float64(proofs-proven) / float64(proofs)
 	}
 	report.Notes = append(report.Notes,
-		"Each round copies the prepared base outside the timed region and times one pipeline run; arms alternate order by round.",
-		"Settle and copy counts come from a store wrapper that counts calls; parses are index-log attempts with a measured parse duration.",
+		"Each sample runs in its own child process on a fresh heap: it copies the prepared base outside the timed region and times one pipeline run; arms alternate order by round.",
+		"Settle counts come from a store wrapper that counts calls; parses are index-log attempts with a measured parse duration.",
 		"INDEX includes settlement; no separate settle duration is persisted.")
 	if report.Smoke {
 		report.Notes = append(report.Notes, fmt.Sprintf("Smoke shape %d x %d: validates the case, not a budget. Budgets need %d x %d on a quiet machine.", opts.sessions, opts.entries, matrixSessions, matrixEntries))
@@ -388,28 +421,19 @@ func summarize(a *armSummary) {
 	a.MedianIndexMs = median(pick(func(s sample) float64 { return s.IndexStageMs }))
 }
 
-// countingStore counts the two store calls the profile cannot tell apart: an
-// unchanged settle and a metadata-only copy refresh. Every other capability is
-// promoted from the embedded store unchanged.
+// countingStore counts the unchanged settles, which the stored profile folds
+// into the INDEX stage. Every other capability is promoted from the embedded
+// store unchanged.
 type countingStore struct {
 	*store.Store
 	settles atomic.Int64
-	copies  atomic.Int64
 }
 
-var (
-	_ ingest.ManagedGenerationUnchangedProver = (*countingStore)(nil)
-	_ ingest.ManagedGenerationRefresher       = (*countingStore)(nil)
-)
+var _ ingest.ManagedGenerationUnchangedProver = (*countingStore)(nil)
 
-func (s *countingStore) SettleCapturedGenerationUnchanged(ctx context.Context, request ingest.ManagedGenerationUnchangedProof) (ingest.ManagedGenerationRefreshOutcome, error) {
+func (s *countingStore) SettleCapturedGenerationUnchanged(ctx context.Context, request ingest.ManagedGenerationUnchangedProof) (ingest.ManagedGenerationUnchangedSettleOutcome, error) {
 	s.settles.Add(1)
 	return s.Store.SettleCapturedGenerationUnchanged(ctx, request)
-}
-
-func (s *countingStore) RefreshManagedGenerationWithoutParse(ctx context.Context, request ingest.ManagedGenerationRefreshRequest) (ingest.ManagedGenerationRefreshOutcome, error) {
-	s.copies.Add(1)
-	return s.Store.RefreshManagedGenerationWithoutParse(ctx, request)
 }
 
 func openStore(dbPath, output string) (*store.Store, error) {
@@ -445,6 +469,9 @@ func newPipeline(db *store.Store, metricsStore ingest.MetricsStore, adapters map
 // prepareBase writes the synthetic corpus, imports it once into a managed
 // store, and applies the case's mutation. Every round copies this base.
 func prepareBase(ctx context.Context, baseDir string, sessions, entries int, m mutation) (caseShape, error) {
+	if !m.defined() {
+		return caseShape{}, fmt.Errorf("mutation %d is not defined; name the case's mutation", m)
+	}
 	source, output, dbDir := filepath.Join(baseDir, "source"), filepath.Join(baseDir, "output"), filepath.Join(baseDir, "db")
 	for _, dir := range []string{source, output, dbDir} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -473,37 +500,26 @@ func prepareBase(ctx context.Context, baseDir string, sessions, entries int, m m
 	if result.Summary.New != sessions || result.Summary.Errors != 0 {
 		return caseShape{}, fmt.Errorf("initial import summary %+v, want %d new sessions and no errors", result.Summary, sessions)
 	}
+	shape := caseShape{Sessions: sessions, Entries: entries, CorpusBytes: corpus, PrepareMs: prepareMs}
+	for _, entry := range result.IndexLog {
+		shape.ImportedEntries += entry.EntriesCount
+	}
+	if shape.ActiveGenerations, err = queryInt(ctx, db, `SELECT count(*) FROM sessions WHERE active_generation_id IS NOT NULL`); err != nil {
+		return caseShape{}, err
+	}
 	target := ingest.GenerationTargets(ingest.HarvesterVersionRegistry)[ingest.HarnessClaudeCode]
 	switch m {
-	case mutateAdapterStamp, mutateAdapterContext, mutateAdapterStampSealless:
-		project := ""
-		if m == mutateAdapterContext {
-			project = "skip budget forced context"
-		}
+	case mutateNone:
+	case mutateAdapterStamp:
 		if err := execSQL(ctx, db, `UPDATE sessions SET adapter_version = ?`, target.AdapterVersion-1); err != nil {
 			return caseShape{}, err
 		}
-		stamped, err := stampMetadata(output, target.AdapterVersion-1, project)
+		stamped, err := stampMetadata(output, target.AdapterVersion-1)
 		if err != nil {
 			return caseShape{}, err
 		}
 		if stamped != sessions {
 			return caseShape{}, fmt.Errorf("stamped %d metadata files, want %d", stamped, sessions)
-		}
-		if m == mutateAdapterStampSealless {
-			// The generation rows are immutable by trigger; a legacy row
-			// predates the seal, so lift the trigger, zero the seal, and
-			// restore the trigger exactly as the schema declares it.
-			if err := execSQL(ctx, db, `SAVEPOINT sealless;
-DROP TRIGGER session_generations_immutable;
-UPDATE session_generations SET candidate_digest = '`+strings.Repeat("0", 64)+`';
-CREATE TRIGGER session_generations_immutable BEFORE UPDATE ON session_generations
-BEGIN
-  SELECT RAISE(ABORT, 'generation rows are immutable; a new generation gets a new row');
-END;
-RELEASE sealless;`); err != nil {
-				return caseShape{}, err
-			}
 		}
 	case mutateIndexer:
 		if target.IndexerVersion < 2 {
@@ -515,7 +531,7 @@ RELEASE sealless;`); err != nil {
 	default:
 		return caseShape{}, fmt.Errorf("mutation %d is not defined", m)
 	}
-	return caseShape{Sessions: sessions, Entries: entries, CorpusBytes: corpus, PrepareMs: prepareMs}, nil
+	return shape, nil
 }
 
 // planBase runs the read-only planner on the prepared base. Every session
@@ -591,7 +607,7 @@ func runRound(ctx context.Context, spec caseSpec, baseDir, roundDir string, roun
 		return sample{}, fmt.Errorf("run reported %d errors", result.Summary.Errors)
 	}
 	s.DBBytesAfter, s.WALBytes = fileSize(dbPath), fileSize(dbPath+"-wal")
-	s.Settles, s.Copies = int(counted.settles.Load()), int(counted.copies.Load())
+	s.Settles = int(counted.settles.Load())
 	for _, entry := range result.IndexLog {
 		s.Outcomes[entry.Outcome]++
 		if entry.ParseDuration != nil && *entry.ParseDuration > 0 {
@@ -620,8 +636,8 @@ func runRound(ctx context.Context, spec caseSpec, baseDir, roundDir string, roun
 		}
 	}
 	if result.Census != nil {
-		s.Census = result.Census.Rows
 		for _, row := range result.Census.Rows {
+			s.Census = append(s.Census, censusRow{row})
 			s.CensusLanes[row.Lane] += row.Sessions
 		}
 	}
@@ -638,14 +654,26 @@ func execSQL(ctx context.Context, db *store.Store, query string, args ...any) er
 		return err
 	}
 	defer db.Pool().Put(conn)
-	run := func() error { return sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{Args: args}) }
-	if len(args) == 0 && strings.Count(query, ";") > 1 {
-		run = func() error { return sqlitex.ExecuteScript(conn, query, nil) }
-	}
-	if err := run(); err != nil {
+	if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{Args: args}); err != nil {
 		return fmt.Errorf("prepare statement %q: %w", strings.SplitN(query, "\n", 2)[0], err)
 	}
 	return nil
+}
+
+func queryInt(ctx context.Context, db *store.Store, query string) (int64, error) {
+	conn, err := db.Pool().Take(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer db.Pool().Put(conn)
+	var value int64
+	if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error {
+		value = stmt.ColumnInt64(0)
+		return nil
+	}}); err != nil {
+		return 0, fmt.Errorf("query %q: %w", query, err)
+	}
+	return value, nil
 }
 
 func fileSize(path string) int64 {
@@ -689,10 +717,9 @@ func writeCorpus(root string, sessions, entries int) (int64, error) {
 	return total, nil
 }
 
-// stampMetadata rewrites every managed metadata file's adapter revision, and
-// its project name when one is given, then recomputes the metadata hash, as
-// an older build would have left the pair.
-func stampMetadata(output string, revision int, project string) (int, error) {
+// stampMetadata rewrites every managed metadata file's adapter revision, then
+// recomputes the metadata hash, as an older build would have left the pair.
+func stampMetadata(output string, revision int) (int, error) {
 	count := 0
 	err := filepath.WalkDir(output, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(d.Name(), defaults.MetadataSuffix) {
@@ -707,9 +734,6 @@ func stampMetadata(output string, revision int, project string) (int, error) {
 			return fmt.Errorf("decode managed metadata %s: %w", path, err)
 		}
 		meta.AdapterVersion = &revision
-		if project != "" {
-			meta.Project.Name = project
-		}
 		meta.MetadataHash = schema.ComputeMetadataHash(&meta)
 		encoded, err := json.Marshal(&meta)
 		if err != nil {

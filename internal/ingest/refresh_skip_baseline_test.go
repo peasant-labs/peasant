@@ -19,7 +19,6 @@ var refreshSkipBaselineManifest []byte
 type refreshSkipCounts struct {
 	Proofs  int64 `yaml:"proofs"`
 	Settles int64 `yaml:"settles"`
-	Copies  int64 `yaml:"copies"`
 	Builds  int64 `yaml:"builds"`
 	Parses  int64 `yaml:"parses"`
 }
@@ -72,7 +71,7 @@ func TestRefreshSkipBaselineChangesTheExecutedPath(t *testing.T) {
 				if c.ChangeContext && managedRefreshPipelineChangeMetadata(t, output, stored, managedRefreshPipelineForcedProject) != 1 {
 					t.Fatal("expected one changed metadata file")
 				}
-				counted := &proofCountingRefreshStore{countedManagedRefreshStore: &countedManagedRefreshStore{Store: db}}
+				counted := &proofCountingRefreshStore{Store: db}
 				var parses, builds atomic.Int64
 				var transcript []byte
 				result := runManagedRefreshPipelineConfigured(t, counted, empty, output, &parses, &builds, &transcript, &ingest.OSFileSystem{}, &ingest.IndexProfiler{}, ingest.DefaultAdapterRegistry,
@@ -83,7 +82,7 @@ func TestRefreshSkipBaselineChangesTheExecutedPath(t *testing.T) {
 				if row := result.Census.Rows[0]; row.Lane != ingest.RefreshLaneStoredMetadata || row.Reason != ingest.OutcomeReasonRefreshAdapterBehind {
 					t.Fatalf("decision changed: summary %+v census %+v", result.Summary, result.Census)
 				}
-				got := refreshSkipCounts{Proofs: counted.proofs.Load(), Settles: counted.settles.Load(), Copies: counted.calls.Load(), Builds: builds.Load(), Parses: parses.Load()}
+				got := refreshSkipCounts{Proofs: counted.proofs.Load(), Settles: counted.settles.Load(), Builds: builds.Load(), Parses: parses.Load()}
 				if got != mode.want {
 					t.Fatalf("executed %+v, want %+v", got, mode.want)
 				}

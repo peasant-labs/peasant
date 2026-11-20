@@ -21,6 +21,9 @@ var progressBytesYAML []byte
 //go:embed testdata/progress_bytes_invalid.yaml
 var invalidProgressBytesYAML []byte
 
+//go:embed testdata/progress_bytes_empty_estimate.yaml
+var emptyEstimateYAML []byte
+
 type progressBytesFixture struct {
 	RequiredNames []string `yaml:"requiredNames"`
 	Cases         []struct {
@@ -71,6 +74,13 @@ func TestProgressBytesFixtureRejectsMisspelledKey(t *testing.T) {
 	_, err := decodeProgressBytes(invalidProgressBytesYAML)
 	if err == nil || !strings.Contains(err.Error(), "wantEstimatte") {
 		t.Fatalf("misspelled key: got %v, want unknown-field error", err)
+	}
+}
+
+func TestProgressBytesFixtureRejectsEmptyEstimate(t *testing.T) {
+	_, err := decodeProgressBytes(emptyEstimateYAML)
+	if err == nil || !strings.Contains(err.Error(), "empty wantEstimate") {
+		t.Fatalf("empty estimate: got %v", err)
 	}
 }
 

@@ -1,0 +1,35 @@
+# How the upgrade plan renders a step's estimate band (low and high, in
+# seconds).
+#
+# labelCases: a band under a minute at its slow end reads "under a minute";
+# otherwise whole minutes, the low end rounded down (at least one) and the
+# high end rounded up; an extrapolated band says the index is larger than
+# any measured.
+#
+# planCases: the printed plan carries a step's estimate on the step's own
+# line and nothing for a step without one; the --dry-run --json plan carries
+# the same band as an estimate object on the step and omits it otherwise.
+requiredNames:
+  - under-a-minute
+  - band-in-minutes
+  - band-collapses-to-one-value
+  - low-end-below-a-minute
+  - extrapolated-band
+  - estimated-and-quick-steps
+cases:
+  - {name: under-a-minute, lowSeconds: 5, highSeconds: 40, want: "estimate: under a minute"}
+  - {name: band-in-minutes, lowSeconds: 330, highSeconds: 1210, want: "estimate: 5 to 21 minutes"}
+  - {name: band-collapses-to-one-value, lowSeconds: 120, highSeconds: 120, want: "estimate: about 2 minute(s)"}
+  - {name: low-end-below-a-minute, lowSeconds: 20, highSeconds: 75, want: "estimate: 1 to 2 minutes"}
+  - {name: extrapolated-band, lowSeconds: 434, highSeconds: 1536, extrapolated: true, want: "estimate: 7 to 26 minutes, not measured on an index this large"}
+planCases:
+  - name: estimated-and-quick-steps
+    steps:
+      - {version: 76, title: "rebuild the search index", cost: scales_with_text, lowSeconds: 330, highSeconds: 1210}
+      - {version: 77, title: "mark the stored turn counts", cost: quick}
+    wantLines:
+      - "  1. rebuild the search index (long: scales with the stored text; estimate: 5 to 21 minutes)"
+      - "  2. mark the stored turn counts (quick)"
+    wantJSONEstimates:
+      - {version: 76, lowSeconds: 330, highSeconds: 1210}
+      - {version: 77}
