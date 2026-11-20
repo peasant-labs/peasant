@@ -6,6 +6,11 @@ All notable changes to Peasant are recorded here. The format follows
 GitHub Releases, which hold the signed artifacts and checksums. A version that
 was tagged but not published links to its tag instead.
 
+## [0.21.3] - 2026-11-20
+
+- take the SQLite writer before any store write reads (#1130)
+- label an empty dry-run census as a forecast and tidy review follow-ups (#1132)
+
 ## [0.21.2] - 2026-11-20
 
 - drop the empty forecast header and tidy progress follow-ups (#1126)
