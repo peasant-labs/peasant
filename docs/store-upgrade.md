@@ -298,7 +298,9 @@ At a terminal, the upgrade runs the inline progress child in
 names the plan, the current step and what remains, and shows:
 
 - a counted bar with done/total and an estimate for a step that reports a
-  count, such as the turn-count fill or a recount;
+  count, such as the turn-count fill or a recount. The estimate is the time
+  left for the step at the rate of the last five seconds, not the step's
+  total; the step's elapsed time is on its own line;
 - a spinner, elapsed time and the write-ahead log's growth for a long step
   that cannot report a count, such as the search index rebuild or the table
   copies. No bar is drawn for it: a fraction would be a guess.
@@ -310,6 +312,31 @@ one-statement rebuild at 512-row pages and 1.22 times at 16384-row pages,
 slower in every paired run. It is therefore not used, and the step shows no
 fraction. The rebuild observes cancellation at its boundaries; a cancel that
 arrives during the statement rolls back when the statement returns.
+
+At FTS5's default in-memory postings budget (1 MiB) the one statement is
+super-linear in the indexed text: it writes a segment per megabyte of
+postings and merges those segments again and again while it runs. On
+synthetic stores of 131 MB to 2.1 GB of indexed text its time grew about as
+text^1.2. Every whole-index rebuild therefore raises the index's budget to
+`defaults.SearchRebuildHashBytes` (64 MiB) for its own run and removes the
+setting before it commits: the rebuild a harvest runs when the search index
+needs one, and the search trigger repair (76) of an upgrade. The repair is a
+shipped migration script, so the upgrade stores the budget in a write of its
+own just before the step and the step's transaction removes it. A failed step
+removes it at once; a cancelled or killed one can leave it on the store, which
+is still behind, and the next upgrade repeats the step and removes it. The
+postings, and so every search result and rank, are the same at any budget.
+On the 2.1 GB store the rebuild statement took 147 s at the widened budget
+and 692 s at the default (medians of three runs). It is still slightly
+super-linear once the postings pass the wider budget.
+
+The plan estimates the rebuild before it starts. It reads the search index's
+size from the index's structure record (two rows, no text) and divides it by
+the fastest and the slowest rebuild rate measured at the widened budget, so
+the plan line reads, for example, `long: scales with the stored text;
+estimate: 5 to 21 minutes`. The rates are in `internal/defaults/search_rebuild.go`
+with their measurement. They come from a shared test machine; a slower or
+busier machine can take longer than the band.
 
 A command that already owns the terminal with its own progress program, such
 as `peasant harvest`, prints plain lines instead of mounting a second inline
@@ -341,6 +368,12 @@ growth per session.
 `TestSandboxHarnessWideningMeasure` builds schema-77 stores of a chosen number
 of sessions rows, upgrades them, and logs step 78's time and log growth beside
 the plan's estimate of the session tables.
+`TestSandboxSearchRebuildMeasure` builds, per chosen text size, a schema-75
+store whose text is in the bodies and that carries stale search results,
+runs the upgrade on fresh copies of it and logs the search trigger repair's
+time and log growth, then times the bare rebuild statement per variant of the
+FTS5 settings in `internal/store/testdata/sandbox_search_rebuild_measure.yaml`
+and checks that each variant returns the same rows and ranks.
 None of them runs in the gate. The free-disk factors in
 `internal/defaults/store_upgrade.go` record the last runs.
 
