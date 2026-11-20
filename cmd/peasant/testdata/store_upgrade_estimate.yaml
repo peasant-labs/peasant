@@ -1,0 +1,14 @@
+# How the printed upgrade plan renders a step's estimate band (low and high,
+# in seconds). A band under a minute at its slow end reads "under a minute";
+# otherwise whole minutes, the low end rounded down (at least one) and the
+# high end rounded up.
+requiredNames:
+  - under-a-minute
+  - band-in-minutes
+  - band-collapses-to-one-value
+  - low-end-below-a-minute
+cases:
+  - {name: under-a-minute, lowSeconds: 5, highSeconds: 40, want: "estimate: under a minute"}
+  - {name: band-in-minutes, lowSeconds: 330, highSeconds: 1210, want: "estimate: 5 to 21 minutes"}
+  - {name: band-collapses-to-one-value, lowSeconds: 120, highSeconds: 120, want: "estimate: about 2 minute(s)"}
+  - {name: low-end-below-a-minute, lowSeconds: 20, highSeconds: 75, want: "estimate: 1 to 2 minutes"}

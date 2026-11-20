@@ -388,6 +388,7 @@ func searchRepairStep(conn *sqlite.Conn, step UpgradeStep) (UpgradeStep, string,
 	long := step
 	long.Title = searchRepairLongTitle
 	long.Cost = UpgradeCostScalesWithText
+	long.Estimate = searchRebuildEstimateOnConn(conn)
 	if !tableExistsOnConn(conn, "session_entries_fts") {
 		return long, searchIndexPrecheckWarning + ": the retired index table session_entries_fts is missing; continuing: the repair rebuilds the search index", nil
 	}
@@ -399,6 +400,28 @@ func searchRepairStep(conn *sqlite.Conn, step UpgradeStep) (UpgradeStep, string,
 		return long, "", nil
 	}
 	return step, "", nil
+}
+
+// searchRebuildEstimateOnConn estimates the whole search index rebuild from
+// the current index's size, which the plan reads from two rows of the
+// index (fts5IndexBytesOnConn), at the fastest and slowest rebuild rates
+// measured for it (defaults.StoreUpgradeSearchRebuildIndexBytesPerSecond*).
+// The rebuild re-tokenizes the same text, so the stale index predicts the
+// rebuilt one. An index whose size cannot be read gets no estimate; the step
+// is still planned as long.
+func searchRebuildEstimateOnConn(conn *sqlite.Conn) UpgradeEstimate {
+	basis, err := fts5IndexBytesOnConn(conn, "session_search_fts")
+	if err != nil || basis <= 0 {
+		return UpgradeEstimate{}
+	}
+	at := func(bytesPerSecond int64) time.Duration {
+		return time.Duration(float64(basis) / float64(bytesPerSecond) * float64(time.Second))
+	}
+	return UpgradeEstimate{
+		BasisBytes: basis,
+		Low:        at(defaults.StoreUpgradeSearchRebuildIndexBytesPerSecondFast),
+		High:       at(defaults.StoreUpgradeSearchRebuildIndexBytesPerSecondSlow),
+	}
 }
 
 // searchIndexRebuildNotice is the one line an upgrade prints before the
