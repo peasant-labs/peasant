@@ -23,11 +23,20 @@
 #   Wall min–max: skip 20925.720–21801.179 ms; baseline 44996.532–46106.574 ms.
 #   INDEX min–max: skip 15815.532–15992.401 ms; baseline 35329.255–36482.771 ms.
 #
+# Wall figures and spreads are informational; ValidateMeasured does not read
+# them. C1's wall ratio fell from 0.428 to 0.274 while its budget ratio stayed
+# roughly flat. Wall covers more than INDEX, and the cause is unconfirmed.
+# The prior rows were measured at different heads (0c4084f45 and c14b7259a)
+# without recorded spreads, so the change cannot be attributed to per-process
+# sampling alone.
+#
 # Measured on an AMD Ryzen 9 7950X3D (32 logical CPUs), 240 x 1000, five
 # rounds, one process per arm sample, in the Nix shell with GOTOOLCHAIN=go1.26.0.
-# C1 start/end load averages: 0.25/0.58/2.05 and 1.60/1.24/2.01.
-# C3 start/end: 1.60/1.24/2.01 and 2.30/2.97/2.67. CI, runner VM and test
-# process checks were idle before, during (30-second checks), and after each.
+# C1 start/end load averages (includes the run): 0.25/0.58/2.05 and 1.60/1.24/2.01.
+# C3 start/end (includes the run): 1.60/1.24/2.01 and 2.30/2.97/2.67.
+# CI, runner VMs and test processes were checked before, every 30 seconds
+# during, and after each case; earlier attempts were discarded when CI became
+# active. Head and base are the same commit: this is a re-measure at one head.
 #
 # A not-proven proof parses, so the stored-metadata lane has no other skip to
 # budget; the copy refresh that once filled that gap was measured slower than
