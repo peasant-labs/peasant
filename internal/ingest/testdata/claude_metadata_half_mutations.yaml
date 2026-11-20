@@ -6,3 +6,9 @@ mutations:
   - name: skip-target-normalization
   # Skip the prepend of the started_by owner the transcript derives.
   - name: skip-derived-owner-prepend
+    # The owner is derived only for an agent artifact with no recorded
+    # parent. Every agent artifact the pipeline writes records its parent:
+    # the capture refuses an agent whose parent disagrees with its owned
+    # location. So the oracle's stores cannot reach this branch, and the
+    # differential (legacy root agent rows) is the test that catches it.
+    oracleUnreachable: the derived-owner branch needs an agent artifact without a recorded parent, which no pipeline-written store holds

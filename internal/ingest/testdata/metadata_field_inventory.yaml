@@ -1,0 +1,58 @@
+# One row per leaf of schema.UnifiedMetadata (dotted JSON path), with a
+# mutation value written as JSON. The validator oracle mutates that field in
+# every stored metadata sidecar of its Claude corpus before the refresh; the
+# oracle, not this file, decides the expected result. A test reflects the
+# struct and requires exact membership, and the loader rejects a mutation
+# equal to a corpus value.
+fields:
+  - {field: schemaVersion, mutation: '11'}
+  - {field: sessionId, mutation: '"deadbeef-0000-4000-8000-000000000001"'}
+  - {field: parentUuid, mutation: '"deadbeef-0000-4000-8000-000000000002"'}
+  - {field: harness, mutation: '"codex"'}
+  - {field: model, mutation: '"claude-mutated-model"'}
+  - {field: version, mutation: '"9.9.9"'}
+  - {field: thinkingLevel, mutation: '"high"'}
+  - {field: thinkingLevelRaw, mutation: '"mutated-raw"'}
+  - {field: thinkingLevelHistory, mutation: '[{"level":"high","raw":"mutated-raw"}]'}
+  - {field: timestamp.start, mutation: '1000'}
+  - {field: timestamp.end, mutation: '2000'}
+  - {field: timestamp.ingested, mutation: '3000'}
+  - {field: source.filePath, mutation: '"/mutated/source.jsonl"'}
+  - {field: source.format, mutation: '"json"'}
+  - {field: git.branch, mutation: '"mutated-branch"'}
+  - {field: git.remote, mutation: '"https://example.invalid/mutated.git"'}
+  - {field: git.worktree, mutation: '"/mutated/worktree"'}
+  - {field: git.tracking, mutation: '"origin/mutated"'}
+  - {field: git.commits, mutation: '[{"hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","message":"mutated","authorName":"a","authorEmail":"a@example.invalid","commitTime":1,"authorTime":1}]'}
+  - {field: git.associations, mutation: '[{"id":"assoc-mutated","observedCommitHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]'}
+  - {field: project.hash, mutation: '"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"'}
+  - {field: project.filePath, mutation: '"/mutated/project"'}
+  - {field: project.name, mutation: '"mutated-project"'}
+  - {field: hostSlug, mutation: '"mutated-host"'}
+  - {field: stats.turnCount, mutation: '901'}
+  - {field: stats.inputSubmissionCount, mutation: '902'}
+  - {field: stats.conversationTurnCount, mutation: '903'}
+  - {field: stats.toolCallCount, mutation: '904'}
+  - {field: stats.subagentCount, mutation: '905'}
+  - {field: stats.durationMs, mutation: '906'}
+  - {field: stats.tokensIn, mutation: '907'}
+  - {field: stats.tokensOut, mutation: '908'}
+  - {field: stats.thoughtTokens, mutation: '909'}
+  - {field: stats.cachedReadTokens, mutation: '910'}
+  - {field: stats.cachedWriteTokens, mutation: '911'}
+  - {field: subagents, mutation: '[{"sessionId":"agent-zzz999","parentUuid":"deadbeef-0000-4000-8000-000000000003"}]'}
+  - {field: rootSessionId, mutation: '"deadbeef-0000-4000-8000-000000000004"'}
+  - {field: purpose, mutation: '"helper_review"'}
+  - {field: relationships, mutation: '[{"kind":"started_by","targetState":"target_known","targetLocalId":"deadbeef-0000-4000-8000-000000000005","evidence":"native_typed"}]'}
+  - {field: cwd, mutation: '"/mutated/cwd"'}
+  - {field: derivedAt, mutation: '12345'}
+  - {field: diagnostics.warnings, mutation: '[{"errorType":"mutated","location":"mutated","message":"mutated","remediation":"mutated"}]'}
+  - {field: diagnostics.partial, mutation: 'true'}
+  - {field: contentHash, mutation: '"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"'}
+  - {field: metadataHash, mutation: '"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"'}
+  - {field: redaction.applied, mutation: 'true'}
+  - {field: redaction.level, mutation: '"standard"'}
+  - {field: redaction.rule_set_version, mutation: '"mutated-rules"'}
+  - {field: redaction.redacted_at_ms, mutation: '5'}
+  - {field: redaction.content_hash_at_redact, mutation: '"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"'}
+  - {field: adapterVersion, mutation: '1'}

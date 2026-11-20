@@ -1,0 +1,8 @@
+requiredNames:
+  - unchanged
+  - a-relationship-is-recorded-after-the-first-parse
+  - two-relationships-already-stored
+  - owner-source-absent-at-first-parse-then-created
+  - owner-source-removed
+  - source-appears-after-validation
+  - source-disappears-after-validation

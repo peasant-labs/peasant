@@ -508,6 +508,9 @@ func TestCodexHasNoMetadataHalf(t *testing.T) {
 // the differential and the oracle must both catch.
 type claudeMetadataHalfMutation struct {
 	Name string `yaml:"name"`
+	// OracleUnreachable, when set, says why no store the pipeline writes can
+	// reach the mutated branch, so only the differential can catch it.
+	OracleUnreachable string `yaml:"oracleUnreachable"`
 }
 
 func loadClaudeMetadataHalfMutations(t *testing.T) []claudeMetadataHalfMutation {
@@ -543,19 +546,15 @@ func claudeHalfMutationHook(t *testing.T, name string) func(ingest.GenerationBui
 	}
 	switch name {
 	case "skip-target-normalization":
-		// The proof sets every known target to known_retained with retained
-		// evidence; skipping it keeps the recorded state and evidence (and the
-		// derived owner's native state).
-		return func(in ingest.GenerationBuildInput, metadata *schema.UnifiedMetadata) {
+		// The proof turns every known target into known_retained with
+		// retained_last_good evidence. Skipping it leaves a natively proven
+		// relationship as the proof received it: target_known with
+		// native_typed evidence.
+		return func(_ ingest.GenerationBuildInput, metadata *schema.UnifiedMetadata) {
 			for i, relationship := range metadata.Relationships {
-				if relationship.TargetLocalID == nil || relationship.TargetState != schema.RelationshipTargetKnownRetained {
-					continue
+				if relationship.TargetLocalID != nil && relationship.TargetState == schema.RelationshipTargetKnownRetained {
+					metadata.Relationships[i].TargetState, metadata.Relationships[i].Evidence = schema.RelationshipTargetKnown, schema.EvidenceNativeTyped
 				}
-				if recorded, ok := recordedHas(in, relationship); ok {
-					metadata.Relationships[i].TargetState, metadata.Relationships[i].Evidence = recorded.TargetState, recorded.Evidence
-					continue
-				}
-				metadata.Relationships[i].TargetState, metadata.Relationships[i].Evidence = schema.RelationshipTargetKnown, schema.EvidenceNativeTyped
 			}
 		}
 	case "skip-derived-owner-prepend":
@@ -639,4 +638,3 @@ func TestClaudeRefusalAfterTheHalfLeavesNoGeneration(t *testing.T) {
 		t.Skip("no corpus row refuses after the half")
 	}
 }
-

@@ -1,0 +1,103 @@
+# The Claude corpus and the named cases of the validator oracle
+# (TestValidatorAgreesWithTheParseSkip) and of the candidate-window race
+# variants (TestValidatedSettleCandidateWindow).
+#
+# Every case seeds a real store from the corpus with a first import, moves the
+# stored adapter revision behind the managed target (the stored-metadata
+# refresh lane), applies its change, and refreshes twice from identical seeds:
+#   fork V: the refresh asks the real validator with the real metadata half
+#           for every session;
+#   fork P: the refresh parses every session with the skips disabled, and the
+#           parse's own skip (the active generation reproduced) is observed.
+# The oracle requires, per session: proven => skip, and
+# skip and not unsupported => proven.
+#
+# The fork session's transcript continues from a parent record with no
+# transition between its own records and the parent's, so its identity proof
+# reads the parent's native source on every refresh.
+corpus:
+  - path: -workspace/22222222-2222-4222-8222-222222222222.jsonl
+    transcript: |
+      {"type":"user","uuid":"v1","sessionId":"22222222-2222-4222-8222-222222222222","cwd":"/work/project","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"parent prompt"}}
+      {"type":"assistant","uuid":"v2","parentUuid":"v1","sessionId":"22222222-2222-4222-8222-222222222222","cwd":"/work/project","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"text","text":"parent reply"}]}}
+  - path: -workspace/99d59925-36bc-424c-a789-8be54d9702ba.jsonl
+    transcript: |
+      {"type":"user","uuid":"f1","parentUuid":"v2","sessionId":"22222222-2222-4222-8222-222222222222","cwd":"/work/project","timestamp":"2026-01-01T00:00:02Z","message":{"role":"user","content":"forked prompt"}}
+      {"type":"progress","uuid":"r1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","cwd":"/work/project","timestamp":"2026-01-01T00:00:03Z","message":{"role":"user","content":""}}
+      {"type":"assistant","uuid":"a1","parentUuid":"r1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","cwd":"/work/project","timestamp":"2026-01-01T00:00:04Z","message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"text","text":"fork reply"}]}}
+  - path: -workspace/33333333-3333-4333-8333-333333333333.jsonl
+    transcript: |
+      {"type":"user","uuid":"o1","sessionId":"33333333-3333-4333-8333-333333333333","cwd":"/work/project","timestamp":"2026-01-01T00:01:00Z","message":{"role":"user","content":"owner prompt"}}
+      {"type":"assistant","uuid":"o2","parentUuid":"o1","sessionId":"33333333-3333-4333-8333-333333333333","cwd":"/work/project","timestamp":"2026-01-01T00:01:01Z","message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"text","text":"owner reply"}],"usage":{"input_tokens":30,"output_tokens":20}}}
+  - path: -workspace/33333333-3333-4333-8333-333333333333/subagents/agent-abc123.jsonl
+    transcript: |
+      {"type":"user","uuid":"s1","sessionId":"33333333-3333-4333-8333-333333333333","agentId":"abc123","isSidechain":true,"cwd":"/work/project","timestamp":"2026-01-01T00:01:02Z","message":{"role":"user","content":"agent task"}}
+      {"type":"assistant","uuid":"s2","parentUuid":"s1","sessionId":"33333333-3333-4333-8333-333333333333","agentId":"abc123","isSidechain":true,"cwd":"/work/project","timestamp":"2026-01-01T00:01:03Z","message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"text","text":"agent reply"}]}}
+
+# Named cases. change:
+#   none                     nothing changes but the adapter revision.
+#   record-context-from      the named session's recorded metadata gains a
+#                            context_from naming the parent session.
+#   record-started-by        the root session's recorded metadata gains a
+#                            started_by the adapter re-extracted (the first
+#                            parse ran without one).
+# seedWithout: corpus files absent at the first import.
+# createBeforeRefresh: corpus files written before the refresh, which then
+#   discovers from the source tree.
+# removeBeforeValidation: corpus files removed after the capture and before
+#   the validator (fork V) or the parse (fork P).
+# expect: per session, the validator's answer in fork V (proven, not-proven,
+#   unsupported, not-asked) and the parse's result in fork P (skip, install,
+#   refuse).
+cases:
+  - name: unchanged
+    change: none
+    expect:
+      22222222-2222-4222-8222-222222222222: {validator: proven, parse: skip}
+      99d59925-36bc-424c-a789-8be54d9702ba: {validator: proven, parse: skip}
+      33333333-3333-4333-8333-333333333333: {validator: proven, parse: skip}
+      agent-abc123: {validator: proven, parse: skip}
+  - name: a-relationship-is-recorded-after-the-first-parse
+    change: record-started-by
+    sessions: [33333333-3333-4333-8333-333333333333]
+    expect:
+      33333333-3333-4333-8333-333333333333: {validator: not-proven, parse: install}
+  - name: two-relationships-already-stored
+    # The subagent's recorded metadata gains a context_from beside its
+    # started_by, and a parse installs that two-relationship generation before
+    # the oracle's refresh compares against it. The stored relationship read
+    # returns no ordinal, so the parse's skip never matches two or more
+    # relationships; the validator must agree and not prove it.
+    change: record-context-from
+    sessions: [agent-abc123]
+    installFirst: true
+    expect:
+      agent-abc123: {validator: not-proven, parse: install}
+  - name: owner-source-absent-at-first-parse-then-created
+    change: none
+    seedWithout: [-workspace/22222222-2222-4222-8222-222222222222.jsonl]
+    createBeforeRefresh: [-workspace/22222222-2222-4222-8222-222222222222.jsonl]
+    expect:
+      99d59925-36bc-424c-a789-8be54d9702ba: {validator: not-asked, parse: install}
+  - name: owner-source-removed
+    change: none
+    removeBeforeValidation: [-workspace/22222222-2222-4222-8222-222222222222.jsonl]
+    expect:
+      99d59925-36bc-424c-a789-8be54d9702ba: {validator: unsupported, parse: refuse}
+
+# The race variants: a gated seam sits between the validator's answer and the
+# settle. Only fork V runs.
+windows:
+  - name: source-appears-after-validation
+    removeBeforeValidation: [-workspace/22222222-2222-4222-8222-222222222222.jsonl]
+    restoreAfterValidation: [-workspace/22222222-2222-4222-8222-222222222222.jsonl]
+    session: 99d59925-36bc-424c-a789-8be54d9702ba
+    validator: unsupported
+    settled: false
+    parsed: true
+  - name: source-disappears-after-validation
+    removeAfterValidation: [-workspace/22222222-2222-4222-8222-222222222222.jsonl]
+    session: 99d59925-36bc-424c-a789-8be54d9702ba
+    validator: proven
+    settled: true
+    parsed: false
