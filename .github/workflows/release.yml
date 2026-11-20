@@ -597,8 +597,8 @@ jobs:
           }
 
   # Post-publish macOS smoke: on final tags, install from the live tap.
-  # The tap publisher polls on its own fifteen-minute schedule and peasant holds
-  # no tap credential, so this job waits for the tap to carry the tagged version
+  # The tap publishes on its own scheduled poll (see peasant-labs/homebrew-tap
+  # publish-cask.yml) and peasant holds no tap credential, so this job waits for the tap to carry the tagged version
   # before installing. A tap that never catches up still fails the smoke rather
   # than certifying an older package as the current release.
   macos-cask-smoke:
@@ -627,7 +627,7 @@ jobs:
               exit 0
             fi
             if [ "${SECONDS}" -ge "${deadline}" ]; then
-              echo "::error::the tap did not publish peasant ${expected} within 16 minutes. The tap publisher runs every 15 minutes; a stale tap fails this smoke rather than certifying an older package as the current release."
+              echo "::error::the tap did not publish peasant ${expected} within 16 minutes. The tap publishes on a schedule; check its publish-cask workflow in peasant-labs/homebrew-tap. A stale tap fails this smoke rather than certifying an older package as the current release."
               exit 1
             fi
             echo "the tap does not carry ${expected} yet; checking again in 30s"

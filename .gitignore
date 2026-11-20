@@ -32,7 +32,6 @@ web/.vite/
 # the binary itself
 /peasant
 /schema-gen
-/release-guard
 .peasant/
 
 # goreleaser build output (release.yml / release-validate.yml produce this in CI)

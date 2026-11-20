@@ -85,8 +85,9 @@ release:
   # The release workflow supplies the exact CHANGELOG section for the tag.
   # GoReleaser's normal generated commit list follows this header.
   header: "{{ .Env.PEASANT_RELEASE_HEADER }}\n"
-  # Re-runs must recover a partial publish: keep the existing release notes and
-  # replace assets that a re-run uploads again. See docs/release-runbook.md §5.
+  # Inert: release.yml's build job runs `goreleaser release --skip=publish`, and
+  # its publish job owns publishing the GitHub Release. See
+  # docs/release-runbook.md §5.
   mode: keep-existing
   replace_existing_artifacts: true
 

@@ -49,12 +49,20 @@ flowchart TD
   L --> M[release.yml on tag]
   M --> V{Tag actor is the releaser App?}
   V -- no --> X
-  V -- yes --> N[Guard: parse-tag + verify-tag reachable from develop]
-  N --> O[Tag-time Nix vendorHash freshness gate]
-  O --> E2[e2e gate: TestSkipGateE2E PASS]
-  E2 --> RE[release-e2e gate: TestReleasePerDistro PASS]
-  RE --> P[Goreleaser build, then publish GitHub Release]
-  P --> Q[Smoke released archives]
+  V -- yes --> N[guard: parse-tag]
+  M --> VT[verify-tag: develop reaches the tag]
+  N --> O[nix-vendor-hash: tag-time freshness gate]
+  N --> E2[e2e gate: TestSkipGateE2E PASS]
+  O --> E2
+  N --> RE[release-e2e gate: TestReleasePerDistro PASS]
+  O --> RE
+  E2 --> B[build: Goreleaser --skip=publish]
+  RE --> B
+  VT --> B
+  B --> P[publish GitHub Release]
+  VT --> P
+  P --> Q[smoke, windows-smoke]
+  P --> QM[macos-cask-smoke, final tags only]
   P --> R[Package consumers]
 ```
 
@@ -83,11 +91,10 @@ repaired after the tag has already published without moving the tag. The
 release group's other jobs are in the runbook's
 [Verdict inheritance](release-runbook.md#verdict-inheritance) section.
 
-The planner computes final versions only. `release.yml` still classifies a
-`vX.Y.Z-rcN` tag as a GitHub prerelease, but no current workflow creates one.
-Both paths still require the release App actor, valid Peasant tag grammar, the
-Nix vendor-hash freshness gate, full-stack e2e, release e2e, Goreleaser, and
-smoke validation.
+No current workflow creates an rc tag (see the runbook's
+[tag namespaces](release-runbook.md#tag-namespaces)). Final and rc tags both
+require the release App actor, valid Peasant tag grammar, the Nix vendor-hash
+freshness gate, full-stack e2e, release e2e, Goreleaser, and smoke validation.
 
 An active repository ruleset permits only GitHub App ID `3988034`
 (`peasant-labs-releaser`) to create or mutate `v*` tags. `release.yml` independently
@@ -111,12 +118,20 @@ sequenceDiagram
   Queue->>Git: Land release PR
   Batch->>Tag: Tag landed release commit (App token)
   Tag->>Rel: Push v* tag
-  Rel->>Rel: Verify releaser App actor login and ID
-  Rel->>Rel: parse-tag and verify-tag
-  Rel->>Rel: make nix-vendor-hash must be clean
-  Rel->>Rel: e2e gate (TestSkipGateE2E PASS)
-  Rel->>Rel: release-e2e gate (TestReleasePerDistro PASS)
-  Rel->>Rel: Goreleaser build, then publish
+  par guard and verify-tag in parallel
+    Rel->>Rel: guard: releaser App actor login and ID, parse-tag
+  and
+    Rel->>Rel: verify-tag: develop reaches the tag
+  end
+  Rel->>Rel: nix-vendor-hash (after guard): make nix-vendor-hash must be clean
+  par e2e gates in parallel, after guard and nix-vendor-hash
+    Rel->>Rel: e2e gate (TestSkipGateE2E PASS)
+  and
+    Rel->>Rel: release-e2e gate (TestReleasePerDistro PASS)
+  end
+  Rel->>Rel: build (after all gates and verify-tag): Goreleaser --skip=publish
+  Rel->>Rel: publish GitHub Release
+  Rel->>Rel: smoke, windows-smoke; macos-cask-smoke on final tags
 ```
 
 ## Workflow Map
@@ -232,12 +247,14 @@ first-party edit to the schema module's sources no longer moves peasant's
 Web package manifests are also treated as packaging-relevant inputs because the
 release build embeds the dashboard output.
 
-The Homebrew cask is published by `peasant-labs/homebrew-tap` itself, on a
-fifteen-minute schedule from the latest final release; rc tags never reach the
-tap, and peasant holds no tap credential. `release.yml`'s `macos-cask-smoke`
-waits up to 16 minutes for the tap to carry the tagged version. AUR publication
-remains disabled until its operational checklist is complete (a dedicated
-`AUR_KEY`); Goreleaser keeps the AUR upload `skip_upload: "true"` until then. The project is licensed Apache-2.0.
+The Homebrew cask comes from the latest final release, and rc tags never reach
+the tap. The tap publishes on its own scheduled poll (see
+`peasant-labs/homebrew-tap` `publish-cask.yml`); the final-tag smoke waits up to
+16 minutes. Peasant holds no tap credential.
+
+AUR publication remains disabled until its operational checklist is complete (a
+dedicated `AUR_KEY`); Goreleaser keeps the AUR upload `skip_upload: "true"` until
+then. The project is licensed Apache-2.0.
 
 macOS binaries are not signed or notarized yet. Browser-downloaded raw tarballs
 require the manual `xattr -dr com.apple.quarantine ./peasant` step documented in the
