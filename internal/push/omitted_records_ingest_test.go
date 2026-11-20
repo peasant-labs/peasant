@@ -193,6 +193,7 @@ func TestOmittedRecordsIngestPublishesEndToEnd(t *testing.T) {
 				Parallelism: 1,
 			}
 			pipeline, err := ingest.NewPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg,
+				ingest.WithArenaSizeBytes(64<<20),
 				ingest.WithStore(db),
 				ingest.WithMetricsStore(db),
 				// The one injected value the two cases differ in. Production

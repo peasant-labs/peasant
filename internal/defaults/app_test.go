@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/testkit/executable"
 	"gopkg.in/yaml.v3"
 )
 
@@ -225,7 +226,7 @@ fi
 
 exit 89
 `
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+	if err := executable.Write(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake git: %v", err)
 	}
 	return path

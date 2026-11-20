@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/testkit/executable"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"gopkg.in/yaml.v3"
 	"mvdan.cc/sh/v3/syntax"
@@ -867,7 +868,7 @@ touch "$INSTALL_MARKER"
 
 func writeExecutable(t *testing.T, path, contents string) {
 	t.Helper()
-	if err := os.WriteFile(path, []byte(contents), 0o700); err != nil {
+	if err := executable.Write(path, []byte(contents), 0o700); err != nil {
 		t.Fatalf("release: write command stub %s: %v", path, err)
 	}
 }

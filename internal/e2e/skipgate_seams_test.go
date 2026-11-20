@@ -9,12 +9,14 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/peasant-labs/peasant/internal/testkit/executable"
 )
 
 func TestPeasantBinSeamUsesInjectedCommand(t *testing.T) {
 	fake := filepath.Join(t.TempDir(), "fake-peasant")
 	script := "#!/bin/sh\necho fake-peasant \"$@\"\n"
-	if err := os.WriteFile(fake, []byte(script), 0o700); err != nil {
+	if err := executable.Write(fake, []byte(script), 0o700); err != nil {
 		t.Fatalf("write fake peasant: %v", err)
 	}
 
@@ -32,7 +34,7 @@ func TestPeasantBinSeamUsesInjectedCommand(t *testing.T) {
 	// wrapper filename. Keep a controlled older executable behind that directory
 	// so this proves the hook cannot silently run a different installed build.
 	fallback := t.TempDir()
-	if err := os.WriteFile(filepath.Join(fallback, "peasant"), []byte("#!/bin/sh\necho wrong-installed-peasant\n"), 0o700); err != nil {
+	if err := executable.Write(filepath.Join(fallback, "peasant"), []byte("#!/bin/sh\necho wrong-installed-peasant\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	shell, err := exec.LookPath("sh")
@@ -58,7 +60,7 @@ func TestPeasantBinWrapperQuotesInjectedCommand(t *testing.T) {
 	dir := t.TempDir()
 	fake := filepath.Join(dir, "fake peasant")
 	script := "#!/bin/sh\necho quoted-peasant \"$@\"\n"
-	if err := os.WriteFile(fake, []byte(script), 0o700); err != nil {
+	if err := executable.Write(fake, []byte(script), 0o700); err != nil {
 		t.Fatalf("write fake peasant: %v", err)
 	}
 
