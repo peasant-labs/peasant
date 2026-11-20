@@ -13,7 +13,6 @@ requiredNames:
   - helper-exempt
   - cli-exempt
   - api-exempt
-  - refresh-measurement-exempt
   - profiler-measurement-exempt
 cases:
   - name: qualified-bare
@@ -115,13 +114,6 @@ cases:
       package api
       import "github.com/peasant-labs/peasant/internal/ingest"
       func f() { _, _ = ingest.NewPipeline(nil, nil, nil, cfg) }
-  - name: refresh-measurement-exempt
-    path: internal/ingest/managed_refresh_bench_test.go
-    matches: 0
-    source: |
-      package ingest_test
-      import "github.com/peasant-labs/peasant/internal/ingest"
-      func f() { _, _ = ingest.NewPipeline(nil, nil, nil, cfg, options...) }
   - name: profiler-measurement-exempt
     path: internal/ingest/import_profile_overhead_bench_test.go
     matches: 0

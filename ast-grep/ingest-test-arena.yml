@@ -21,8 +21,7 @@ rule:
           stopBy: end
 ignores:
   - "internal/ingest/test_options_helpers_test.go"
-  # Measurement harnesses measure the production staging arena on purpose; not run by make check.
-  - "internal/ingest/managed_refresh_bench_test.go"
+  # The measurement harness measures the production staging arena on purpose; not run by make check.
   - "internal/ingest/import_profile_overhead_bench_test.go"
   # These test binaries bound the arena for production-path CLI/API wiring in TestMain.
   - "cmd/peasant/*_test.go"
@@ -60,8 +59,7 @@ rule:
         regex: '^ingest\s+'
 ignores:
   - "internal/ingest/test_options_helpers_test.go"
-  # Measurement harnesses measure the production staging arena on purpose; not run by make check.
-  - "internal/ingest/managed_refresh_bench_test.go"
+  # The measurement harness measures the production staging arena on purpose; not run by make check.
   - "internal/ingest/import_profile_overhead_bench_test.go"
   # These test binaries bound the arena for production-path CLI/API wiring in TestMain.
   - "cmd/peasant/*_test.go"
