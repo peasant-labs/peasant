@@ -132,8 +132,8 @@ func (s *Store) SettleManagedGenerationUnchanged(ctx context.Context, p ManagedG
 		return result, fmt.Errorf("store: settle unchanged generation for %s: stats overflow needs diagnostic bookkeeping outside this small transaction; nothing was written; use the ordinary parse path", p.SessionID)
 	}
 	skip := unchangedSettleMutation("")
-	if p.Validated != nil && settleValidatedMutationForTest != nil {
-		skip = settleValidatedMutationForTest()
+	if p.Validated != nil && s.settleValidatedMutation != nil {
+		skip = s.settleValidatedMutation()
 	}
 	if skip != settleSkipsStatsWrite {
 		err = sqlitex.Execute(conn, sqlUpsertCapturedStats, &sqlitex.ExecOptions{Args: []any{string(stats.SessionID), nullableArg(stats.TurnCount), nullableArg64(stats.InputSubmissionCount), nullableArg(stats.ToolCallCount), nullableArg(stats.SubagentCount), nullableArg64(stats.DurationMs), nullableArg(stats.TokensIn), nullableArg(stats.TokensOut), nullableArg(stats.ThoughtTokens), nullableArg(stats.CachedReadTokens), nullableArg(stats.CachedWriteTokens), nullableStr(stats.SeedJSON), string(stats.Source), stats.UpdatedAtMs, nullableStr(stats.Overflow), nullableArg(stats.ConversationTurnCount), nullableArg(stats.ConversationTurnCount)}})
@@ -169,9 +169,3 @@ const (
 	settleSkipsStatsWrite  unchangedSettleMutation = "skipped-stats-write"
 	settleSkipsMirrorWrite unchangedSettleMutation = "skipped-mirror-write"
 )
-
-// settleValidatedMutationForTest is nil in production. A test sets it to
-// remove one write from the validated settle; only a settle that carries a
-// validated answer reads it, and no production file assigns it (a source
-// guard enforces that).
-var settleValidatedMutationForTest func() unchangedSettleMutation

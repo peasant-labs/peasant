@@ -303,6 +303,11 @@ type Store struct {
 	// caller waiting for a read slot and to hold one once taken, so the slot
 	// cap is observed through a wake source instead of a sleep.
 	refreshReadSlotSeam func(ctx context.Context, stage refreshReadSlotStage)
+	// settleValidatedMutation is nil in production. A test sets it to remove
+	// one write from this store's validated settles; only a settle that
+	// carries a validated answer reads it, and no production file assigns it
+	// (a source guard enforces that).
+	settleValidatedMutation func() unchangedSettleMutation
 }
 
 // InstallationSalt returns the salt used by ingestion to derive canonical,

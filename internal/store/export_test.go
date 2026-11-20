@@ -53,16 +53,14 @@ func (s *Store) SettleCapturedGenerationUnchangedAtForTest(ctx context.Context, 
 }
 
 // SetValidatedSettleMutationForTest removes one named write from every
-// validated settle for the rest of the test. The name is
-// skipped-stats-write or skipped-mirror-write.
+// validated settle of this store. The name is skipped-stats-write or
+// skipped-mirror-write.
 // This function is only available in test builds.
-func SetValidatedSettleMutationForTest(t testing.TB, name string) {
+func (s *Store) SetValidatedSettleMutationForTest(t testing.TB, name string) {
 	t.Helper()
 	mutation := unchangedSettleMutation(name)
 	if mutation != settleSkipsStatsWrite && mutation != settleSkipsMirrorWrite {
 		t.Fatalf("unknown validated-settle mutation %q", name)
 	}
-	previous := settleValidatedMutationForTest
-	settleValidatedMutationForTest = func() unchangedSettleMutation { return mutation }
-	t.Cleanup(func() { settleValidatedMutationForTest = previous })
+	s.settleValidatedMutation = func() unchangedSettleMutation { return mutation }
 }

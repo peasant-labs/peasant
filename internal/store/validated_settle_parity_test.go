@@ -303,7 +303,7 @@ func TestValidatedSettleWritesLikeTheProvenSettle(t *testing.T) {
 				parityForgeMetadataHash(t, db)
 			}
 			if slices.Contains(fixture.Mutations, run) {
-				store.SetValidatedSettleMutationForTest(t, run)
+				db.SetValidatedSettleMutationForTest(t, run)
 			}
 			wrapped := &paritySettleStore{Store: db}
 			runParityPipeline(t, db, wrapped, empty, output, wrapped)

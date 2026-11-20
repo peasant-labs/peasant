@@ -2,7 +2,7 @@
 # validation, and the only functions that may read each. No production file
 # may assign one (internal/testkit/hookguard).
 hooks:
-  - name: settleValidatedMutationForTest
+  - name: settleValidatedMutation
     readers: [Store.SettleManagedGenerationUnchanged]
   - name: refreshReadSlotSeam
     readers: [Store.acquireRefreshReadSlot]
