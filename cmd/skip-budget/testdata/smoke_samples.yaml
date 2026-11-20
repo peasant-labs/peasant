@@ -1,19 +1,79 @@
-# Child behaviours the new-session smoke runner must accept or refuse.
-#   child:     import imports a sessions x 10 corpus; garbage prints a line
-#              that is not a sample result.
+# Child behaviours the sample runners must accept or refuse. Every sample
+# runs in its own child process, launched with the harness flags.
+#   sample:    new-session-import drives the new-session smoke runner;
+#              case-arm drives 2 x 10 rounds of the stamp-only case, both
+#              arms.
+#   child:     import imports a sessions x 10 corpus; run runs the case-arm
+#              sample it is given; garbage prints a line that is not a
+#              sample result. Every other run-* mode runs the sample and
+#              then misreports it: one extra parse, the next round, the
+#              other arm, the parent's pid, a census reason id this build
+#              does not define (it prints an empty code), or the sample
+#              printed twice.
+#   rounds:    case-arm rounds; default 1.
+#   wantOrder: the arms the children ran, in launch order.
 #   wantError: a substring of the runner's error; empty means it succeeds.
+#              A case-arm failure must also leave no report.
 requiredNames:
   - smoke-shape
   - session-count-mismatch
   - garbage-output
+  - run-arms
+  - run-two-rounds
+  - run-count-mismatch
+  - run-wrong-round
+  - run-wrong-arm
+  - run-parent-pid
+  - run-unknown-census-reason
+  - run-trailing-sample
+  - run-garbage-output
 cases:
   - name: smoke-shape
+    sample: new-session-import
     child: import
     sessions: 2
   - name: session-count-mismatch
+    sample: new-session-import
     child: import
     sessions: 3
     wantError: want the 2 x 10 smoke shape
   - name: garbage-output
+    sample: new-session-import
     child: garbage
-    wantError: want one JSON sample result
+    wantError: want one JSON sample
+  - name: run-arms
+    sample: case-arm
+    child: run
+  - name: run-two-rounds
+    sample: case-arm
+    child: run
+    rounds: 2
+    wantOrder: [skip, baseline, baseline, skip]
+  - name: run-count-mismatch
+    sample: case-arm
+    child: run-miscount
+    wantError: skip arm executed
+  - name: run-wrong-round
+    sample: case-arm
+    child: run-wrong-round
+    wantError: reported round 2, want round 1
+  - name: run-wrong-arm
+    sample: case-arm
+    child: run-wrong-arm
+    wantError: reported arm "baseline", want arm "skip"
+  - name: run-parent-pid
+    sample: case-arm
+    child: run-parent-pid
+    wantError: want a child process other than the runner's pid
+  - name: run-unknown-census-reason
+    sample: case-arm
+    child: run-unknown-reason
+    wantError: this build defines no such code
+  - name: run-trailing-sample
+    sample: case-arm
+    child: run-two-samples
+    wantError: want one JSON sample and nothing after it
+  - name: run-garbage-output
+    sample: case-arm
+    child: garbage
+    wantError: want one JSON sample

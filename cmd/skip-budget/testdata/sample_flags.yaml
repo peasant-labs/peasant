@@ -1,0 +1,32 @@
+# The exact harness flags the parent renders for each sample kind. The
+# harness flag set must parse each list back to the same sample.
+requiredNames:
+  - new-session-import
+  - case-arm
+cases:
+  - name: new-session-import
+    flags:
+      kind: new-session-import
+      dir: /tmp/skip-budget/C4/sample-1
+    wantArgs: [-sample, new-session-import, -sample-dir, /tmp/skip-budget/C4/sample-1]
+  - name: case-arm
+    flags:
+      kind: case-arm
+      dir: /tmp/skip-budget/C1/round-2-baseline
+      base: /tmp/skip-budget/C1/base
+      case: C1
+      arm: baseline
+      round: 2
+    wantArgs:
+      - -sample
+      - case-arm
+      - -sample-dir
+      - /tmp/skip-budget/C1/round-2-baseline
+      - -sample-base
+      - /tmp/skip-budget/C1/base
+      - -sample-case
+      - C1
+      - -sample-arm
+      - baseline
+      - -sample-round
+      - "2"
