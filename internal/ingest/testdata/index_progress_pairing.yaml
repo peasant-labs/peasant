@@ -1,0 +1,14 @@
+requiredNames: [paired, missing-log, extra-log]
+cases:
+  - name: paired
+    logs: 2
+    done: 2
+    paired: true
+  - name: missing-log
+    logs: 1
+    done: 2
+    diagnostic: "streamed_outcomes=2 index_logs=1"
+  - name: extra-log
+    logs: 2
+    done: 1
+    diagnostic: "streamed_outcomes=1 index_logs=2"

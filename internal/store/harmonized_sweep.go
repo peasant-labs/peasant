@@ -98,7 +98,7 @@ func (s *Store) sweepSessionLocked(ctx context.Context, sessionID schema.Session
 		return bounded, err
 	}
 	if err := reportContentSweepSeam(contentSweepSeamFirstWrite); err != nil {
-		return result, fmt.Errorf("store: sweep session %s failed at its first delete: %w; no rows were deleted and the sweep flag remains set; free disk space and retry harvest or reclaim", sessionID, err)
+		return result, fmt.Errorf("store: sweep session %s failed at its first delete: %w; no rows were deleted and the sweep flag remains set; %s", sessionID, err, sweepRetryAdvice(err))
 	}
 
 	rows, err := s.deleteSupersededGenerationRows(ctx, sessionID, active, latestAttempt)
@@ -233,7 +233,14 @@ func (s *Store) deleteVerifiedBodies(ctx context.Context, sessionID schema.Sessi
 	defer s.pool.Put(conn)
 	var deleted int64
 	txnErr := error(nil)
-	endFn := sqlitex.Transaction(conn)
+	// The batch verifies each body before deleting it, so it reads first.
+	// IMMEDIATE takes the writer before that read: a deferred transaction's
+	// later upgrade fails with BUSY at once, without waiting on busy_timeout,
+	// when another connection writes meanwhile.
+	endFn, err := sqlitex.ImmediateTransaction(conn)
+	if err != nil {
+		return 0, fmt.Errorf("store: begin the delete of %d bodies for session %s: %w; no row was deleted and the sweep flag remains set; %s", len(digests), sessionID, err, sweepRetryAdvice(err))
+	}
 	defer endFn(&txnErr)
 	for _, digest := range digests {
 		if err := ctx.Err(); err != nil {
@@ -250,6 +257,10 @@ func (s *Store) deleteVerifiedBodies(ctx context.Context, sessionID schema.Sessi
 				txnErr = err
 				return deleted, txnErr
 			}
+		}
+		if err := reportContentSweepSeam(contentSweepSeamBodyDelete); err != nil {
+			txnErr = fmt.Errorf("store: sweep session %s interrupted before a body delete: %w; the batch rolled back and every body row is unchanged; %s", sessionID, err, sweepRetryAdvice(err))
+			return deleted, txnErr
 		}
 		if err := sqlitex.Execute(conn, `DELETE FROM session_entry_bodies WHERE session_id = ? AND body_digest = ?`, &sqlitex.ExecOptions{
 			Args: []any{string(sessionID), digest},
@@ -309,6 +320,9 @@ func (s *Store) deleteUnreferencedBlobs(ctx context.Context, sessionID schema.Se
 	defer s.pool.Put(conn)
 	var deleted int64
 	txnErr := error(nil)
+	// This batch stays deferred: its first statement is a DELETE, which takes
+	// the writer from an idle transaction and so waits on busy_timeout. Only a
+	// transaction that reads before it writes needs IMMEDIATE.
 	endFn := sqlitex.Transaction(conn)
 	defer endFn(&txnErr)
 	for _, digest := range digests {

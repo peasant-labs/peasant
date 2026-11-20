@@ -23,6 +23,11 @@ const (
 	// contentSweepSeamMidBatch is reported between the sweep's bounded delete
 	// batches.
 	contentSweepSeamMidBatch = "mid-sweep-batch"
+	// contentSweepSeamBodyDelete is reported inside a verified-body delete
+	// batch, after the batch has read and verified a body and before it
+	// deletes it: the point where a transaction that read first would need a
+	// lock upgrade.
+	contentSweepSeamBodyDelete = "before-verified-body-delete"
 )
 
 // contentSweepSeam is a nil production hook a crash-recovery test sets to stop

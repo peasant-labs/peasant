@@ -14,6 +14,8 @@ var upgradeStampEffectsYAML []byte
 //go:embed testdata/upgrade_stamp_effects.manifest.yaml
 var upgradeStampEffectsManifestYAML []byte
 
+// TestUpgradeStampEffects guards the catalog's complete effect vocabulary;
+// planner behavior for pending effects is exercised by the upgrade package.
 func TestUpgradeStampEffects(t *testing.T) {
 	var fixture struct {
 		Cases []struct {

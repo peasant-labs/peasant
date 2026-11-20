@@ -5,6 +5,14 @@ import (
 	"strings"
 )
 
+// SessionWord returns the singular or plural presentation for a session count.
+func SessionWord(count int) string {
+	if count == 1 {
+		return "session"
+	}
+	return "sessions"
+}
+
 // HumanByteSize renders a byte count the way every reader-facing note and
 // diagnostic states it.
 //

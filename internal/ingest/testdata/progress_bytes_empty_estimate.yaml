@@ -1,0 +1,4 @@
+requiredNames: [empty-estimate]
+cases:
+  - name: empty-estimate
+    wantEstimate: ""
