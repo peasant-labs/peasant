@@ -231,7 +231,7 @@ func durationPipeline(tb testing.TB, db *store.Store, source, output string, sto
 	options = append(options,
 		ingest.WithAnalyzer(metrics.NewEngineWithModels(db, db)),
 		ingest.WithClassifier(metrics.NewClassifierAnnotator(db, db)))
-	pipeline, err := ingest.NewPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg, options...)
+	pipeline, err := newTestPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg, options...)
 	if err != nil {
 		tb.Fatalf("build duration pipeline: %v", err)
 	}

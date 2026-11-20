@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/githooks"
+	"github.com/peasant-labs/peasant/internal/testkit/executable"
 )
 
 //go:embed testdata/linked_slot.yaml
@@ -432,7 +433,7 @@ func linkedSlotTargetContent(t *testing.T, shape linkTargetShape, repo, slot str
 // writeExecutable writes content at path with the mode git needs to run a hook.
 func writeExecutable(t *testing.T, path, content string) {
 	t.Helper()
-	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+	if err := executable.Write(path, []byte(content), 0o755); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
 }

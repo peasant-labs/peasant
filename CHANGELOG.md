@@ -6,6 +6,11 @@ All notable changes to Peasant are recorded here. The format follows
 GitHub Releases, which hold the signed artifacts and checksums. A version that
 was tagged but not published links to its tag instead.
 
+## [0.21.1] - 2026-11-19
+
+- create the release draft and its assets in one command (#1103)
+- annotate sessions whose duration lost a millisecond on save (#1104)
+
 ## [0.21.0] - 2026-11-18
 
 - ask a validator before re-parsing an unproven managed refresh (#1088)

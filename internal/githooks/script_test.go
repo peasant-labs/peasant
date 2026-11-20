@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/githooks"
+	"github.com/peasant-labs/peasant/internal/testkit/executable"
 	"github.com/peasant-labs/peasant/internal/testkit/testwait"
 )
 
@@ -528,7 +529,7 @@ func stubPeasant(t *testing.T, exitCode int) (binDir, logPath string) {
 	stubPath := filepath.Join(binDir, "peasant")
 	stub := "#!/bin/sh\nprintf '%s\\n' \"$@\" >> " + shellSingleQuote(logPath) + "\nexit " +
 		strconv.Itoa(exitCode) + "\n"
-	if err := os.WriteFile(stubPath, []byte(stub), 0o755); err != nil {
+	if err := executable.Write(stubPath, []byte(stub), 0o755); err != nil {
 		t.Fatalf("write peasant stub: %v", err)
 	}
 	awaitExecutable(t, stubPath)
@@ -649,7 +650,7 @@ func hookPATH(t *testing.T, binDir string) string {
 func assertShellParses(t *testing.T, name, text string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)
-	if err := os.WriteFile(path, []byte(text), 0o755); err != nil {
+	if err := executable.Write(path, []byte(text), 0o755); err != nil {
 		t.Fatalf("write %s: %v", name, err)
 	}
 	out, err := exec.Command("sh", "-n", path).CombinedOutput()

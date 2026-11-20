@@ -940,6 +940,7 @@ func applyPostPlanMutation(repo, path string, event githooks.Event, mutation lif
 		}
 		// O_TRUNC, not Remove-then-create: the slot may be occupied or empty, and
 		// replacing the bytes in place is what an unrelated tool would do.
+		// not executed: the lifecycle fingerprints this sabotaged slot.
 		if err := os.WriteFile(path, []byte(mutation.Content), mode); err != nil {
 			return "", err
 		}
@@ -964,6 +965,7 @@ func applyPostPlanMutation(repo, path string, event githooks.Event, mutation lif
 		if err != nil {
 			return "", err
 		}
+		// not executed: the lifecycle fingerprints this symlink target.
 		if err := os.WriteFile(target, []byte(script), githooks.ScriptMode); err != nil {
 			return "", err
 		}
@@ -1058,6 +1060,7 @@ func appendToFile(t *testing.T, path, text string) {
 func writeSeedFile(t *testing.T, repo, path, content string, mode fs.FileMode) {
 	t.Helper()
 	requireInsideRepo(t, repo, path)
+	// not executed: lifecycle tests inspect and fingerprint these seeded hooks.
 	if err := os.WriteFile(path, []byte(content), mode); err != nil {
 		t.Fatalf("write seed file %s: %v", path, err)
 	}

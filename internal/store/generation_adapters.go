@@ -58,33 +58,19 @@ func (s *Store) ProveCapturedGenerationUnchanged(ctx context.Context, request in
 	return s.ProveManagedGenerationUnchanged(ctx, proof)
 }
 
-func (s *Store) SettleCapturedGenerationUnchanged(ctx context.Context, request ingest.ManagedGenerationUnchangedProof) (ingest.ManagedGenerationRefreshOutcome, error) {
+func (s *Store) SettleCapturedGenerationUnchanged(ctx context.Context, request ingest.ManagedGenerationUnchangedProof) (ingest.ManagedGenerationUnchangedSettleOutcome, error) {
 	proof, found, err := s.capturedUnchangedRequest(ctx, request)
 	if err != nil {
-		return ingest.ManagedGenerationRefreshOutcome{}, err
+		return ingest.ManagedGenerationUnchangedSettleOutcome{}, err
 	}
 	if !found {
-		return ingest.ManagedGenerationRefreshOutcome{}, &ingest.StaleIndexWorkError{SessionID: request.SessionID}
+		return ingest.ManagedGenerationUnchangedSettleOutcome{}, &ingest.StaleIndexWorkError{SessionID: request.SessionID}
 	}
 	result, err := s.SettleManagedGenerationUnchanged(ctx, proof)
 	if err != nil {
-		return ingest.ManagedGenerationRefreshOutcome{}, err
+		return ingest.ManagedGenerationUnchangedSettleOutcome{}, err
 	}
-	disposition, err := ingestManagedGenerationRefreshDisposition(result.Disposition)
-	return ingest.ManagedGenerationRefreshOutcome{GenerationID: result.GenerationID, Disposition: disposition}, err
-}
-
-// ingestManagedGenerationRefreshDisposition translates the store's closed
-// disposition set into the pipeline's closed set. An unknown value is refused
-// at the adapter boundary: a result the pipeline cannot classify must never be
-// read as a successful settle.
-func ingestManagedGenerationRefreshDisposition(disposition ManagedGenerationRefreshDisposition) (ingest.ManagedGenerationRefreshDisposition, error) {
-	switch disposition {
-	case ManagedGenerationRefreshUnchanged:
-		return ingest.ManagedGenerationRefreshUnchanged, nil
-	default:
-		return "", fmt.Errorf("store: unchanged settlement reported unknown disposition %q; the active generation is unchanged; treat the session as ordinary parse work and report the unknown disposition", disposition)
-	}
+	return ingest.ManagedGenerationUnchangedSettleOutcome{GenerationID: result.GenerationID}, nil
 }
 
 func (s *Store) StageGenerationCandidates(ctx context.Context, candidates []ingest.GenerationActivation) ([]ingest.GenerationStaged, []error) {

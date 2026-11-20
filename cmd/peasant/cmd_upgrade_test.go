@@ -318,6 +318,8 @@ func TestUpgradeExplicitDowngradeOverrideFixtures(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			t.Parallel()
 			currentPath := filepath.Join(t.TempDir(), "peasant")
+			// not executed: the upgrade test only replaces or reads these bytes.
+			// ast-grep-ignore: no-unsafe-executable-write -- inert upgrade fixture.
 			if err := os.WriteFile(currentPath, []byte("old binary"), 0o755); err != nil {
 				t.Fatalf("seed current binary: %v", err)
 			}
@@ -409,6 +411,8 @@ func TestUpgradeRawInstallConfirmationFixtures(t *testing.T) {
 			t.Parallel()
 			currentPath := filepath.Join(t.TempDir(), "peasant")
 			original := []byte("old binary")
+			// not executed: the upgrade test only replaces or reads these bytes.
+			// ast-grep-ignore: no-unsafe-executable-write -- inert upgrade fixture.
 			if err := os.WriteFile(currentPath, original, 0o755); err != nil {
 				t.Fatalf("seed current binary: %v", err)
 			}
@@ -540,6 +544,8 @@ func TestUpgradeRawInstallConfirmationFixtures(t *testing.T) {
 func TestUpgradeRawInstallDownloadsVerifiesAndReplacesBinary(t *testing.T) {
 	t.Parallel()
 	currentPath := filepath.Join(t.TempDir(), "peasant")
+	// not executed: the upgrade test only replaces or reads these bytes.
+	// ast-grep-ignore: no-unsafe-executable-write -- inert upgrade fixture.
 	if err := os.WriteFile(currentPath, []byte("old binary"), 0o755); err != nil {
 		t.Fatalf("seed current binary: %v", err)
 	}
@@ -629,6 +635,8 @@ func TestUpgradeAssetNameFixtures(t *testing.T) {
 func TestUpgradeRawInstallInstallsWindowsExecutableWithoutUnpacking(t *testing.T) {
 	t.Parallel()
 	currentPath := filepath.Join(t.TempDir(), "peasant.exe")
+	// not executed: the upgrade test only replaces or reads these bytes.
+	// ast-grep-ignore: no-unsafe-executable-write -- inert upgrade fixture.
 	if err := os.WriteFile(currentPath, []byte("old binary"), 0o755); err != nil {
 		t.Fatalf("seed current binary: %v", err)
 	}
@@ -670,6 +678,8 @@ func TestUpgradeRawInstallRejectsChecksumMismatchAndPreservesBinary(t *testing.T
 	t.Parallel()
 	currentPath := filepath.Join(t.TempDir(), "peasant")
 	original := []byte("old binary")
+	// not executed: the upgrade test only replaces or reads these bytes.
+	// ast-grep-ignore: no-unsafe-executable-write -- inert upgrade fixture.
 	if err := os.WriteFile(currentPath, original, 0o755); err != nil {
 		t.Fatalf("seed current binary: %v", err)
 	}
