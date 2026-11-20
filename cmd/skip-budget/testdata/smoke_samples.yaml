@@ -1,0 +1,19 @@
+# Child behaviours the new-session smoke runner must accept or refuse.
+#   child:     import imports a sessions x 10 corpus; garbage prints a line
+#              that is not a sample result.
+#   wantError: a substring of the runner's error; empty means it succeeds.
+requiredNames:
+  - smoke-shape
+  - session-count-mismatch
+  - garbage-output
+cases:
+  - name: smoke-shape
+    child: import
+    sessions: 2
+  - name: session-count-mismatch
+    child: import
+    sessions: 3
+    wantError: want the 2 x 10 smoke shape
+  - name: garbage-output
+    child: garbage
+    wantError: want one JSON sample result

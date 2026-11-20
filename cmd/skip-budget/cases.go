@@ -23,6 +23,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/upgrade"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 )
@@ -40,10 +41,18 @@ const (
 // mutation is the change a case applies to the imported base before any round.
 type mutation int
 
+// The zero value is not a mutation, so a case that forgets to name one fails
+// to prepare instead of measuring an unchanged base.
 const (
 	mutateAdapterStamp mutation = iota + 1
 	mutateIndexer
+	// mutateNone leaves the imported base as it is. Only the new-session
+	// smoke case uses it: it times the import itself.
+	mutateNone
 )
+
+// defined reports whether m is one of the mutations above.
+func (m mutation) defined() bool { return m >= mutateAdapterStamp && m <= mutateNone }
 
 // caseSpec is what one corpus case prepares, how its two arms run, and what
 // each arm must have executed for the report to be evidence.
@@ -200,6 +209,11 @@ type caseShape struct {
 	Entries     int   `json:"entriesPerSession"`
 	CorpusBytes int64 `json:"corpusBytes"`
 	PrepareMs   int64 `json:"prepareMs"`
+	// ImportedEntries is the entry count the initial import indexed, and
+	// ActiveGenerations the sessions it left with an active managed
+	// generation.
+	ImportedEntries   int   `json:"importedEntries"`
+	ActiveGenerations int64 `json:"activeGenerations"`
 }
 
 // planEvidence is what the read-only planner says about the prepared base.
@@ -404,6 +418,9 @@ func newPipeline(db *store.Store, metricsStore ingest.MetricsStore, adapters map
 // prepareBase writes the synthetic corpus, imports it once into a managed
 // store, and applies the case's mutation. Every round copies this base.
 func prepareBase(ctx context.Context, baseDir string, sessions, entries int, m mutation) (caseShape, error) {
+	if !m.defined() {
+		return caseShape{}, fmt.Errorf("mutation %d is not defined; name the case's mutation", m)
+	}
 	source, output, dbDir := filepath.Join(baseDir, "source"), filepath.Join(baseDir, "output"), filepath.Join(baseDir, "db")
 	for _, dir := range []string{source, output, dbDir} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -432,8 +449,16 @@ func prepareBase(ctx context.Context, baseDir string, sessions, entries int, m m
 	if result.Summary.New != sessions || result.Summary.Errors != 0 {
 		return caseShape{}, fmt.Errorf("initial import summary %+v, want %d new sessions and no errors", result.Summary, sessions)
 	}
+	shape := caseShape{Sessions: sessions, Entries: entries, CorpusBytes: corpus, PrepareMs: prepareMs}
+	for _, entry := range result.IndexLog {
+		shape.ImportedEntries += entry.EntriesCount
+	}
+	if shape.ActiveGenerations, err = queryInt(ctx, db, `SELECT count(*) FROM sessions WHERE active_generation_id IS NOT NULL`); err != nil {
+		return caseShape{}, err
+	}
 	target := ingest.GenerationTargets(ingest.HarvesterVersionRegistry)[ingest.HarnessClaudeCode]
 	switch m {
+	case mutateNone:
 	case mutateAdapterStamp:
 		if err := execSQL(ctx, db, `UPDATE sessions SET adapter_version = ?`, target.AdapterVersion-1); err != nil {
 			return caseShape{}, err
@@ -455,7 +480,7 @@ func prepareBase(ctx context.Context, baseDir string, sessions, entries int, m m
 	default:
 		return caseShape{}, fmt.Errorf("mutation %d is not defined", m)
 	}
-	return caseShape{Sessions: sessions, Entries: entries, CorpusBytes: corpus, PrepareMs: prepareMs}, nil
+	return shape, nil
 }
 
 // planBase runs the read-only planner on the prepared base. Every session
@@ -582,6 +607,22 @@ func execSQL(ctx context.Context, db *store.Store, query string, args ...any) er
 		return fmt.Errorf("prepare statement %q: %w", strings.SplitN(query, "\n", 2)[0], err)
 	}
 	return nil
+}
+
+func queryInt(ctx context.Context, db *store.Store, query string) (int64, error) {
+	conn, err := db.Pool().Take(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer db.Pool().Put(conn)
+	var value int64
+	if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error {
+		value = stmt.ColumnInt64(0)
+		return nil
+	}}); err != nil {
+		return 0, fmt.Errorf("query %q: %w", query, err)
+	}
+	return value, nil
 }
 
 func fileSize(path string) int64 {
