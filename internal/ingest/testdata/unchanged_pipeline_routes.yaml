@@ -14,3 +14,6 @@ cases:
   - name: unproven-unchanged-parses
   - name: proof-error
   - name: settle-refused
+  - name: disable-refresh-skips-never-validates
+  - name: force-never-validates
+  - name: reindex-never-validates

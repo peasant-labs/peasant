@@ -12,6 +12,12 @@ cases:
     outcome: proven
     validatorCalls: 1
     settles: 1
+  - name: validated-settle-refused-parses
+    outcome: proven
+    validatorCalls: 1
+    settles: 1
+    builds: 1
+    settleRefused: true
   - name: not-proven-parses
     outcome: not-proven
     mismatch: content-hash
@@ -27,6 +33,7 @@ cases:
     mismatch: content-hash
     validatorCalls: 1
     builds: 1
+    unsupported: true
   - name: missing-validator-parses
     missing: true
     builds: 1

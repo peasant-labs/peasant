@@ -29,8 +29,8 @@ func NewValidationOutcome(raw string) (ValidationOutcome, error) {
 	return "", fmt.Errorf("ingest: validate managed generation outcome %q: unrecognized outcome; no result was accepted; use a supported validation outcome", raw)
 }
 
-// ValidationBudget bounds validation. Zero values mean unset; the current
-// implementation derives no defaults and does not run parallel validation.
+// ValidationBudget is retained for compatibility. The store ignores it and
+// bounds concurrent reader work independently of per-request settings.
 type ValidationBudget struct {
 	MaxConcurrent         int
 	ChunkSessions         int

@@ -5,3 +5,6 @@ requiredNames:
   - unproven-unchanged-parses
   - proof-error
   - settle-refused
+  - disable-refresh-skips-never-validates
+  - force-never-validates
+  - reindex-never-validates
