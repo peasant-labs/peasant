@@ -654,7 +654,8 @@ this paragraph.
   that size.
 
 Measurement harnesses use the production-sized arena: the opt-in
-import-profiler harness in `internal/ingest`, and `cmd/skip-budget`. They measure production-scale staging, not test-sized runs.
+import-profiler harness in `internal/ingest`, and `cmd/skip-budget`. They
+measure production-scale staging, not test-sized runs.
 
 A fresh process may leave the 2 GiB arena's untouched pages non-resident.
 Inside a long test binary, Go zeroes recycled heap on reuse, which makes those

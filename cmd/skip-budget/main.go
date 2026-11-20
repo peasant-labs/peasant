@@ -33,7 +33,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -71,14 +70,13 @@ func main() {
 	sessions := flag.Int("sessions", matrixSessions, "synthetic sessions per case (C4 always uses 2)")
 	entries := flag.Int("entries", matrixEntries, "entries per session (C4 always uses 10)")
 	rounds := flag.Int("rounds", 5, "rounds per case; each round runs both arms once")
-	importSample := flag.String("import-sample", "", "internal: import one new-session sample into this directory and print its wall time in ms")
+	sampleKind := flag.String("sample", "", "internal: run one sample of this kind in this process (import) and print it as JSON")
+	sampleDir := flag.String("sample-dir", "", "internal: the directory the -sample run writes into")
 	flag.Parse()
-	if *importSample != "" {
-		shape, err := prepareBase(context.Background(), *importSample, smokeSessions, smokeEntries, mutateNone)
-		if err != nil {
-			fail(1, fmt.Sprintf("import sample in %s: %v", *importSample, err))
+	if *sampleKind != "" {
+		if err := runSampleChild(context.Background(), *sampleKind, *sampleDir, smokeSessions, smokeEntries, os.Stdout); err != nil {
+			fail(1, err.Error())
 		}
-		fmt.Println(shape.PrepareMs)
 		return
 	}
 	cases := matrixCases(*root)
@@ -118,11 +116,7 @@ func main() {
 	ctx := context.Background()
 	for _, c := range selected {
 		if c == upgrade.MeasurementCaseNewSession {
-			dir, err := cleanCaseDir(*root, c)
-			if err == nil {
-				err = runSmoke(dir, opts)
-			}
-			if err != nil {
+			if err := runSmokeCase(opts); err != nil {
 				fail(1, fmt.Sprintf("%s failed: %v", c, err))
 			}
 			continue
@@ -155,34 +149,19 @@ func fail(code int, message string) {
 	os.Exit(code)
 }
 
-// smokeSessions and smokeEntries are the new-session smoke shape.
-const (
-	smokeSessions = 2
-	smokeEntries  = 10
-)
-
 // runSmoke times the new-session full step: a fresh 2 x 10 import into an
-// empty managed store, five times. Each sample runs in its own process, as a
-// harvest does, so no sample reuses a heap an earlier pipeline left behind.
-func runSmoke(dir string, opts harnessOptions) error {
-	self, err := os.Executable()
+// empty managed store, once per sample, each in its own child process and
+// directory. A harvest starts in a fresh process, so no sample may reuse a
+// heap an earlier pipeline left behind. It writes the report and returns the
+// samples.
+func runSmoke(dir string, opts harnessOptions, count int, command sampleCommand) ([]sampleResult, error) {
+	results, err := collectImportSamples(dir, count, command)
 	if err != nil {
-		return fmt.Errorf("locate the harness binary to run each sample: %w", err)
+		return nil, err
 	}
-	samples := make([]int64, 0, 5)
-	for i := range 5 {
-		sampleDir := filepath.Join(dir, fmt.Sprintf("sample-%d", i+1))
-		cmd := exec.Command(self, "-import-sample", sampleDir)
-		cmd.Stderr = os.Stderr
-		out, err := cmd.Output()
-		if err != nil {
-			return fmt.Errorf("import sample %d in %s: %w", i+1, sampleDir, err)
-		}
-		ms, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
-		if err != nil {
-			return fmt.Errorf("sample %d printed %q, want its import wall time in ms: %w", i+1, out, err)
-		}
-		samples = append(samples, ms)
+	samples := make([]int64, 0, len(results))
+	for _, r := range results {
+		samples = append(samples, r.ImportMs)
 	}
 	sorted := slices.Clone(samples)
 	slices.Sort(sorted)
@@ -191,12 +170,12 @@ func runSmoke(dir string, opts harnessOptions) error {
 		Note: "Initial new-session pipeline wall time; smoke evidence only, not a skip budget."}
 	data, err := json.MarshalIndent(r, "", "  ")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	path := filepath.Join(dir, "report.json")
 	if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
-		return fmt.Errorf("write report %s: %w", path, err)
+		return nil, fmt.Errorf("write report %s: %w", path, err)
 	}
 	fmt.Println(path)
-	return nil
+	return results, nil
 }
