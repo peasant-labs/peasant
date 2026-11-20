@@ -30,6 +30,11 @@ type halfValidatingStore struct {
 	// validation route whatever term the store's proof stopped on.
 	forceContext    bool
 	afterValidation func(sid ingest.SessionID)
+	// staleRecordedStats moves the named sessions' captured stats (duration,
+	// tokens, tool calls) away from what the metadata half derives, in the
+	// request the settle receives: recorded stats that no longer match the
+	// transcript.
+	staleRecordedStats map[ingest.SessionID]bool
 
 	mu          sync.Mutex
 	outcomes    map[ingest.SessionID]ingest.ManagedGenerationValidationResult
@@ -87,6 +92,12 @@ func (s *halfValidatingStore) SettleCapturedGenerationUnchanged(ctx context.Cont
 		s.wiring = append(s.wiring, "the pipeline settled "+string(request.SessionID)+" without the validated answer")
 	}
 	s.mu.Unlock()
+	if s.staleRecordedStats[request.SessionID] {
+		request.Metadata.Stats.DurationMs += 98_765
+		request.Metadata.Stats.TokensIn += 4_321
+		request.Metadata.Stats.TokensOut += 1_234
+		request.Metadata.Stats.ToolCallCount += 7
+	}
 	outcome, err := s.Store.SettleCapturedGenerationUnchanged(ctx, request)
 	s.mu.Lock()
 	s.settled[request.SessionID] = err

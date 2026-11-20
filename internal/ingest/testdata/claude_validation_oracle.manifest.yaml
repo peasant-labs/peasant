@@ -1,6 +1,7 @@
 requiredNames:
   - unchanged
   - a-relationship-is-recorded-after-the-first-parse
+  - candidate-stats-differ-from-recorded
   - two-relationships-already-stored
   - owner-source-absent-at-first-parse-then-created
   - owner-source-removed

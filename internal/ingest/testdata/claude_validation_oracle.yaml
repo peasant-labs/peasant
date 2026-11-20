@@ -38,6 +38,11 @@ corpus:
 #   none                     nothing changes but the adapter revision.
 #   record-context-from      the named session's recorded metadata gains a
 #                            context_from naming the parent session.
+#   record-stale-stats       the named session's captured stats (duration,
+#                            tokens, tool calls) move away from what the
+#                            transcript's metadata half derives, in the
+#                            request fork V's settle receives (the capture
+#                            itself recomputes them from the transcript).
 #   record-started-by        the root session's recorded metadata gains a
 #                            started_by the adapter re-extracted (the first
 #                            parse ran without one).
@@ -47,8 +52,12 @@ corpus:
 # removeBeforeValidation: corpus files removed after the capture and before
 #   the validator (fork V) or the parse (fork P).
 # expect: per session, the validator's answer in fork V (proven, not-proven,
-#   unsupported, not-asked) and the parse's result in fork P (skip, install,
-#   refuse).
+#   unsupported, not-asked), its mismatch when not proven, and the parse's
+#   result in fork P (skip, install, refuse).
+# mayBeNotAsked: why a session may skip in fork P without fork V's validator
+#   being asked; unset, that is a violation.
+# Every case also requires a validated settle in fork V to leave the same
+# captured stats (apart from the write's clock) as the parse's skip in fork P.
 cases:
   - name: unchanged
     change: none
@@ -61,7 +70,15 @@ cases:
     change: record-started-by
     sessions: [33333333-3333-4333-8333-333333333333]
     expect:
-      33333333-3333-4333-8333-333333333333: {validator: not-proven, parse: install}
+      33333333-3333-4333-8333-333333333333: {validator: not-proven, mismatch: metadata-context, parse: install}
+  - name: candidate-stats-differ-from-recorded
+    # The recorded stats no longer match the transcript; context is
+    # unchanged, so the validator proves it, and the validated settle must
+    # write the candidate's stats exactly as the parse's skip does.
+    change: record-stale-stats
+    sessions: [33333333-3333-4333-8333-333333333333]
+    expect:
+      33333333-3333-4333-8333-333333333333: {validator: proven, parse: skip}
   - name: two-relationships-already-stored
     # The subagent's recorded metadata gains a context_from beside its
     # started_by, and a parse installs that two-relationship generation before
@@ -72,7 +89,7 @@ cases:
     sessions: [agent-abc123]
     installFirst: true
     expect:
-      agent-abc123: {validator: not-proven, parse: install}
+      agent-abc123: {validator: not-proven, mismatch: metadata-context, parse: install}
   - name: owner-source-absent-at-first-parse-then-created
     change: none
     seedWithout: [-workspace/22222222-2222-4222-8222-222222222222.jsonl]

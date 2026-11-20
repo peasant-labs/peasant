@@ -53,11 +53,22 @@ const (
 	oracleChangeNone              oracleChange = "none"
 	oracleChangeRecordStartedBy   oracleChange = "record-started-by"
 	oracleChangeRecordContextFrom oracleChange = "record-context-from"
+	oracleChangeRecordStaleStats  oracleChange = "record-stale-stats"
 )
 
 type oracleExpectation struct {
-	Validator string      `yaml:"validator"`
-	Parse     oracleParse `yaml:"parse"`
+	Validator string `yaml:"validator"`
+	// Mismatch is the validator's mismatch when it answered not proven.
+	Mismatch ingest.UnchangedProofMismatch `yaml:"mismatch"`
+	Parse    oracleParse                  `yaml:"parse"`
+}
+
+// oracleSessionObservation is one session's result in both forks.
+type oracleSessionObservation struct {
+	oracleExpectation
+	// statsDiffer reports that the two forks left different captured stats
+	// (apart from the write's own clock).
+	statsDiffer bool
 }
 
 type oracleCase struct {
@@ -71,6 +82,10 @@ type oracleCase struct {
 	// InstallFirst parses the change in before the oracle's refresh, so the
 	// oracle compares against a generation that already carries it.
 	InstallFirst bool `yaml:"installFirst"`
+	// MayBeNotAsked, when set, is why a session of this case may skip in
+	// the parse without the validator ever being asked. Unset, a skipped
+	// session the validator never reached is a violation.
+	MayBeNotAsked string `yaml:"mayBeNotAsked"`
 
 	// inventory is set for a generated inventory case.
 	inventory *metadataInventoryRow
@@ -313,6 +328,10 @@ func seedOracleStore(t *testing.T, document oracleDocument, c oracleCase) oracle
 				TargetLocalID: &source, Evidence: schema.EvidenceNativeTyped,
 				Anchor: &schema.PublicSourceAnchor{Kind: schema.PublicSourceAnchorGeneral},
 			})
+		case c.Change == oracleChangeRecordStaleStats:
+			// Applied to the settle's captured metadata in fork V (see
+			// runOracleCase): the adapter's capture recomputes the stats from
+			// the transcript, so a sidecar edit would not survive it.
 		case c.Change == oracleChangeRecordStartedBy:
 			owner := schema.SessionID("22222222-2222-4222-8222-222222222222")
 			metadata.Relationships = append(metadata.Relationships, schema.SessionRelationship{
@@ -442,7 +461,19 @@ func oracleValidatorOutcome(store *halfValidatingStore, halves *halfRecorder, si
 }
 
 // oracleObservation is both forks' result for every session of one case.
-type oracleObservation map[string]oracleExpectation
+type oracleObservation map[string]oracleSessionObservation
+
+// oracleStats renders each session's captured stats row without the write's
+// own clock, the one column two runs at different instants always differ in.
+func oracleStats(t *testing.T, db *store.Store) map[string]string {
+	t.Helper()
+	rows := map[string]string{}
+	for _, row := range managedRefreshPipelineRows(t, db, `SELECT session_id || '|' || COALESCE(turn_count,'') || '|' || COALESCE(input_submission_count,'') || '|' || COALESCE(tool_call_count,'') || '|' || COALESCE(subagent_count,'') || '|' || COALESCE(duration_ms,'') || '|' || COALESCE(tokens_in,'') || '|' || COALESCE(tokens_out,'') || '|' || COALESCE(thought_tokens,'') || '|' || COALESCE(cached_read_tokens,'') || '|' || COALESCE(cached_write_tokens,'') || '|' || COALESCE(seed_json,'') || '|' || source || '|' || COALESCE(overflow,'') || '|' || COALESCE(conversation_turn_count,'') FROM session_captured_stats`) {
+		sid, _, _ := strings.Cut(row, "|")
+		rows[sid] = row
+	}
+	return rows
+}
 
 func runOracleCase(t *testing.T, document oracleDocument, c oracleCase) oracleObservation {
 	t.Helper()
@@ -455,6 +486,12 @@ func runOracleCase(t *testing.T, document oracleDocument, c oracleCase) oracleOb
 	v := seedOracleStore(t, document, c)
 	validating := newHalfValidatingStore(v.db)
 	validating.forceValidation = true
+	if c.Change == oracleChangeRecordStaleStats {
+		validating.staleRecordedStats = map[ingest.SessionID]bool{}
+		for _, sid := range c.Sessions {
+			validating.staleRecordedStats[ingest.SessionID(sid)] = true
+		}
+	}
 	halves := newHalfRecorder()
 	remove := func(seed oracleSeed) func() {
 		var once sync.Once
@@ -478,24 +515,41 @@ func runOracleCase(t *testing.T, document oracleDocument, c oracleCase) oracleOb
 	for sid := range oracleActiveGenerations(t, p.db) {
 		sessions[sid] = true
 	}
+	vStats, pStats := oracleStats(t, v.db), oracleStats(t, p.db)
 	for sid := range sessions {
-		observed[sid] = oracleExpectation{Validator: oracleValidatorOutcome(validating, halves, sid), Parse: oracleParseOutcome(t, p, parsed, sid)}
+		o := oracleSessionObservation{oracleExpectation: oracleExpectation{
+			Validator: oracleValidatorOutcome(validating, halves, sid), Parse: oracleParseOutcome(t, p, parsed, sid),
+		}, statsDiffer: vStats[sid] != pStats[sid]}
+		if result, asked := validating.outcome(ingest.SessionID(sid)); asked {
+			o.Mismatch = result.Mismatch
+		}
+		observed[sid] = o
 	}
 	return observed
 }
 
-// oracleViolations lists the sessions where the two implications fail.
-func oracleViolations(observed oracleObservation) []string {
+// oracleViolations lists the sessions where the two implications fail, where
+// a validated settle left other stats than the parse's skip, and where a
+// session skipped in the parse without the validator being asked (unless the
+// case says why that may happen).
+func oracleViolations(c oracleCase, observed oracleObservation) []string {
 	var violations []string
 	for sid, o := range observed {
 		proven := o.Validator == string(ingest.ValidationProven)
-		unsupported := o.Validator == string(ingest.ValidationUnsupported) || o.Validator == oracleNotAsked
+		unsupported := o.Validator == string(ingest.ValidationUnsupported)
+		notAsked := o.Validator == oracleNotAsked
 		skip := o.Parse == oracleParseSkip
 		if proven && !skip {
 			violations = append(violations, sid+": proven but the parse did not skip ("+string(o.Parse)+")")
 		}
-		if skip && !unsupported && !proven {
+		if skip && notAsked && c.MayBeNotAsked == "" {
+			violations = append(violations, sid+": the parse skipped but the validator was never asked")
+		}
+		if skip && !unsupported && !proven && !notAsked {
 			violations = append(violations, sid+": the parse skipped but the validator answered "+o.Validator)
+		}
+		if proven && skip && o.statsDiffer {
+			violations = append(violations, sid+": the validated settle left other captured stats than the parse")
 		}
 	}
 	sort.Strings(violations)
@@ -523,12 +577,13 @@ func TestValidatorAgreesWithTheParseSkip(t *testing.T) {
 			t.Parallel()
 			observed := runOracleCase(t, document, c)
 			t.Logf("observed %v", observed)
-			if violations := oracleViolations(observed); len(violations) != 0 {
+			if violations := oracleViolations(c, observed); len(violations) != 0 {
 				t.Fatalf("validator and parse skip disagree: %v (observed %+v)", violations, observed)
 			}
 			for sid, want := range c.Expect {
-				if got := observed[sid]; got != want {
-					t.Errorf("session %s: observed %+v, want %+v", sid, got, want)
+				got, ok := observed[sid]
+				if !ok || got.oracleExpectation != want {
+					t.Fatalf("session %s: observed %+v (present %t), want %+v", sid, got.oracleExpectation, ok, want)
 				}
 			}
 		})
@@ -548,7 +603,7 @@ func TestClaudeMetadataHalfMutationsFailTheOracle(t *testing.T) {
 			for _, c := range document.Cases {
 				observed := runOracleCase(t, document, c)
 				t.Logf("%s observed %v", c.Name, observed)
-				if violations := oracleViolations(observed); len(violations) != 0 {
+				if violations := oracleViolations(c, observed); len(violations) != 0 {
 					caught = append(caught, c.Name+": "+strings.Join(violations, "; "))
 				}
 			}
