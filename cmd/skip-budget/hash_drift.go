@@ -31,7 +31,7 @@ type sessionOutcome string
 
 const (
 	// outcomeSettled: the cheap proof held and the store settled.
-	outcomeSettled sessionOutcome = "settled"
+	outcomeSettled sessionOutcome = "settled:proven"
 	// outcomeValidated: the cheap proof failed on a context term, the
 	// validator proved the candidate, and the store settled.
 	outcomeValidated sessionOutcome = "validated"
