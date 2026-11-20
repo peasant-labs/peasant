@@ -1,0 +1,8 @@
+# Mutations of the Claude metadata half, applied through its test hook only.
+# Each must fail the differential and the validator oracle.
+mutations:
+  # Skip the identity proof's normalization of known targets to
+  # known_retained with retained_last_good evidence.
+  - name: skip-target-normalization
+  # Skip the prepend of the started_by owner the transcript derives.
+  - name: skip-derived-owner-prepend
