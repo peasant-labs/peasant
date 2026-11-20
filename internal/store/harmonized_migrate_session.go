@@ -851,13 +851,12 @@ func (s *Store) stageMigrateObjects(ctx context.Context, prepared *preparedHarmo
 		return txnErr
 	}
 	cfg := s.writeConfigForLane()
-	flush := func(batch []int) error {
+	flush := func(batch []int) (txnErr error) {
 		conn, err := s.pool.Take(ctx)
 		if err != nil {
 			return fmt.Errorf("take connection to stage bodies: %w", err)
 		}
 		defer s.pool.Put(conn)
-		txnErr := error(nil)
 		endFn, err := beginWrite(conn, "stage the migration bodies of session "+prepared.sessionID.String())
 		if err != nil {
 			return err
@@ -911,13 +910,12 @@ func (s *Store) stageMigrateObjects(ctx context.Context, prepared *preparedHarmo
 // newer row survives the age gate, is never clobbered, and the
 // conversion proceeds; the shadow verify consumes the captured document,
 // never the live row.
-func (s *Store) upsertMigrateStats(ctx context.Context, oracle *migrateOracle) error {
+func (s *Store) upsertMigrateStats(ctx context.Context, oracle *migrateOracle) (txnErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return fmt.Errorf("take connection for the stats upsert: %w", err)
 	}
 	defer s.pool.Put(conn)
-	txnErr := error(nil)
 	endFn, err := beginWrite(conn, "upsert the captured stats of session "+oracle.sessionID.String())
 	if err != nil {
 		return err
@@ -955,13 +953,12 @@ type migrateShadowMismatch struct {
 // projection rows and commit. A data mismatch rolls the transaction back
 // and reports the dimension; a defect mismatch rolls back and halts the
 // run naming the session and the dimension.
-func (s *Store) commitMigrateSession(ctx context.Context, oracle *migrateOracle, prepared *preparedHarmonized) (bool, *migrateShadowMismatch, error) {
+func (s *Store) commitMigrateSession(ctx context.Context, oracle *migrateOracle, prepared *preparedHarmonized) (committed bool, mismatch *migrateShadowMismatch, txnErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return false, nil, fmt.Errorf("take connection for the catalog transaction: %w", err)
 	}
 	defer s.pool.Put(conn)
-	txnErr := error(nil)
 	endFn, err := beginWrite(conn, "commit the converted session "+oracle.sessionID.String())
 	if err != nil {
 		return false, nil, err
@@ -1018,6 +1015,10 @@ func (s *Store) commitMigrateSession(ctx context.Context, oracle *migrateOracle,
 		if mismatch.Defect {
 			return false, nil, fmt.Errorf("session %s: defect mismatch at %s: %s; the catalog transaction rolled back and the run halts", oracle.sessionID, mismatch.Dimension, mismatch.Reason)
 		}
+		// A non-defect mismatch is reported separately from the returned
+		// error. Roll back before returning nil in the named error result;
+		// the deferred finalizer then sees an already-ended transaction.
+		endFn(&txnErr)
 		return false, mismatch, nil
 	}
 	if err := clearLegacySeedOnConn(conn, oracle.sessionID); err != nil {

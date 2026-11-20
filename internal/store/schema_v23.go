@@ -72,7 +72,7 @@ func buildMigrationV23() string {
 //  8. Recreate indexes
 //
 // On error, returns a wrapped error describing what failed and how to fix it.
-func applyV23DataMigration(pool *sqlitex.Pool) error {
+func applyV23DataMigration(pool *sqlitex.Pool) (txnErr error) {
 	conn, err := pool.Take(context.Background())
 	if err != nil {
 		return fmt.Errorf(
@@ -308,7 +308,6 @@ func applyV23DataMigration(pool *sqlitex.Pool) error {
 	// PRAGMA foreign_keys = OFF must be set BEFORE the transaction begins — it is
 	// a no-op inside an active transaction (SQLite docs). We re-enable it via a
 	// deferred call that runs AFTER the transaction commits/rolls back (LIFO order).
-	var txnErr error
 	if txnErr = sqlitex.ExecuteTransient(conn, "PRAGMA foreign_keys = OFF", nil); txnErr != nil {
 		return fmt.Errorf("store.applyV23DataMigration: disable FK: %w", txnErr)
 	}

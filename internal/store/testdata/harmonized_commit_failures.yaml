@@ -1,0 +1,23 @@
+cases:
+  - name: migrate-body-flush
+    operation: migrate-body-flush
+  - name: stage-batch
+    operation: stage-batch
+  - name: migrate-stats
+    operation: migrate-stats
+  - name: sweep-bodies
+    operation: sweep-bodies
+  - name: sweep-blobs
+    operation: sweep-blobs
+  - name: consolidate-search
+    operation: consolidate-search
+  - name: retire-projections
+    operation: retire-projections
+  - name: skip-bookkeeping
+    operation: skip-bookkeeping
+  - name: repair-objects
+    operation: repair-objects
+  - name: nondefect-shadow-mismatch
+    operation: nondefect-shadow-mismatch
+  - name: migrate-catalog-commit
+    operation: migrate-catalog-commit

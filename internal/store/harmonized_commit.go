@@ -289,8 +289,7 @@ func splitStageBatch(cfg ingest.WriteConfig, sessions []stagedSessionObjects) []
 // sweep leaves the flag set with the old generation active, and the next
 // harvest re-selects the session while the flagged sweep clears the
 // orphans.
-func (s *Store) stageBatchTxn(conn *sqlite.Conn, batch stageBatch) error {
-	txnErr := error(nil)
+func (s *Store) stageBatchTxn(conn *sqlite.Conn, batch stageBatch) (txnErr error) {
 	endFn, err := beginWrite(conn, fmt.Sprintf("stage a batch of %d sessions", len(batch.sessions)))
 	if err != nil {
 		return fmt.Errorf("%w; nothing was staged", err)
@@ -1414,13 +1413,12 @@ func stampHarmonizedBookkeeping(conn *sqlite.Conn, sessionID schema.SessionID, s
 // ordinary write path), then calls the same stamping functions the
 // ordinary commit uses. The generation row keeps its older adapter_version
 // column, because generation rows are immutable; the session row advances.
-func stampSkippedHarmonized(ctx context.Context, s *Store, prepared *preparedHarmonized, comparedID string, stamps skipStamps) error {
+func stampSkippedHarmonized(ctx context.Context, s *Store, prepared *preparedHarmonized, comparedID string, stamps skipStamps) (txnErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return fmt.Errorf("store: take connection for the skip bookkeeping of session %s: %w", prepared.sessionID, err)
 	}
 	defer s.pool.Put(conn)
-	txnErr := error(nil)
 	endFn, err := beginWrite(conn, "record the skip bookkeeping of session "+prepared.sessionID.String())
 	if err != nil {
 		return err
@@ -1613,13 +1611,12 @@ func activeObjectsNeedRepair(conn *sqlite.Conn, sessionID schema.SessionID, acti
 // Because a deleted entry row failed verification, the transaction sets
 // needs_rebuild, which the whole-index rebuild clears; the ordinary
 // bookkeeping runs, which clears the repair predicate.
-func repairHarmonizedObjects(ctx context.Context, s *Store, prepared *preparedHarmonized, activeID string, stamps skipStamps) error {
+func repairHarmonizedObjects(ctx context.Context, s *Store, prepared *preparedHarmonized, activeID string, stamps skipStamps) (txnErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return fmt.Errorf("store: take connection for the repair of session %s: %w", prepared.sessionID, err)
 	}
 	defer s.pool.Put(conn)
-	txnErr := error(nil)
 	endFn, err := beginWrite(conn, "repair the stored objects of session "+prepared.sessionID.String())
 	if err != nil {
 		return err

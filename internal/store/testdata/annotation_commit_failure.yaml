@@ -1,0 +1,7 @@
+cases:
+  - name: delete-annotations
+    operation: delete
+    initial_count: 1
+  - name: batch-create-annotations
+    operation: create
+    initial_count: 0

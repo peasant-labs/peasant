@@ -1,0 +1,27 @@
+package probe
+func unnamed() error {
+ var err error
+ defer endFn(&err)
+ return nil
+}
+func shadowed() (err error) {
+ {
+  var err error
+  defer endFn(&err)
+ }
+ return nil
+}
+func safe() (err error) {
+ defer endFn(&err)
+ return nil
+}
+func renamed() error {
+ var err error
+ defer finish(&err)
+ return nil
+}
+func direct() error {
+ var err error
+ defer sqlitex.Transaction(conn)(&err)
+ return nil
+}

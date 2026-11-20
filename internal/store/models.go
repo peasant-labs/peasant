@@ -39,7 +39,7 @@ LIMIT 1`
 )
 
 // SyncModels upserts model entries into the models table.
-func (s *Store) SyncModels(ctx context.Context, models []ingest.ModelInfo) error {
+func (s *Store) SyncModels(ctx context.Context, models []ingest.ModelInfo) (err error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return fmt.Errorf("store: take connection: %w", err)

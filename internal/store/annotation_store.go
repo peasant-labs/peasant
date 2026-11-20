@@ -2223,7 +2223,7 @@ func (s *Store) CountAnnotationsByAnnotator(ctx context.Context, annotatorName s
 //
 // Cleanup collects direct roots, then atomically deletes their full recursive
 // meta-annotation closure. The returned count includes direct roots only.
-func (s *Store) DeleteAnnotationsByAnnotator(ctx context.Context, annotatorName string, sessionIDs []string) (int64, error) {
+func (s *Store) DeleteAnnotationsByAnnotator(ctx context.Context, annotatorName string, sessionIDs []string) (count int64, err error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("store: DeleteAnnotationsByAnnotator %s: take connection: %w", annotatorName, err)
@@ -3014,7 +3014,7 @@ func (s *Store) GetAnnotationTypeID(ctx context.Context, typeID string) (string,
 // All parent + TPT child rows are inserted on a single pooled connection.
 // Returns the UUIDs in the same order as params, or an error if any insert fails.
 // On error, no rows are committed (savepoint rollback).
-func (s *Store) BatchCreateAnnotations(ctx context.Context, params []CreateAnnotationParams) ([]string, error) {
+func (s *Store) BatchCreateAnnotations(ctx context.Context, params []CreateAnnotationParams) (result []string, err error) {
 	if len(params) == 0 {
 		return nil, fmt.Errorf("store: BatchCreateAnnotations: params slice is empty")
 	}
