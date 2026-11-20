@@ -232,7 +232,7 @@ type PipelineConfig struct {
 	// at one decision point, managedGenerationRefreshLane, which gates both
 	// skips.
 	DisableRefreshSkips bool
-	// Validator is the optional managed-generation validator; nil skips it.
+	// Validator overrides the store's optional managed-generation validator.
 	Validator ManagedGenerationValidator
 	// Progress receives ProgressEvents from each pipeline stage.
 	// Nil means no progress reporting.
@@ -2337,9 +2337,7 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 		_, canProve := p.metricsStore.(ManagedGenerationUnchangedProver)
 		if input.managedGenerationRefresh && canProve && input.metadata != nil && input.expected != nil && p.adapterSupportsStoredExtraction(input.session.Harness) {
 			// Once the proof is attempted the session parses, unless the
-			// proof holds and the store settles it. A metadata-only copy of
-			// the stored generation measured no cheaper than the parse, so
-			// there is no intermediate path.
+			// proof holds or a context mismatch is validated and settled.
 			forceParse = true
 			proofStart := time.Now()
 			proof, proofErr := p.proveManagedGenerationUnchanged(ctx, input)
@@ -2349,8 +2347,10 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 			}
 			p.config.IndexProfiler.RecordStage(StageRefreshProof, time.Since(proofStart), proven, 1)
 			slog.Info(logPrefix+": refresh proof", "session_id", im.session.SessionID, "proven", proof.Proven, "mismatch", proof.Mismatch, "error", proofErr)
-			if proofErr == nil && !proof.Proven {
-				validation := p.validateRefresh(ctx, input)
+			var validated *ValidatedContext
+			if proofErr == nil && !proof.Proven && proof.Mismatch.IsContext() {
+				validation, context := p.validateRefresh(ctx, input, indexer)
+				validated = context
 				switch validation.Outcome {
 				case ValidationProven:
 					proof.Proven = true
@@ -2368,7 +2368,7 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 				})
 			}
 			if proofErr == nil && proof.Proven {
-				_, duration, settleErr := p.settleManagedGenerationUnchanged(ctx, input, writeLane)
+				_, duration, settleErr := p.settleManagedGenerationUnchanged(ctx, input, writeLane, validated)
 				if settleErr == nil {
 					// Preserve the historical index-log reason for report continuity.
 					reason := indexManagedRefreshReason + " (unchanged)"

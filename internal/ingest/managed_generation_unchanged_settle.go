@@ -31,19 +31,41 @@ func (p *Pipeline) proveManagedGenerationUnchanged(ctx context.Context, input *C
 // the store's proof could not. It returns unsupported for any unavailable or
 // invalid result; only a proven answer settles, and every other answer leaves
 // the proof not proven so the session parses.
-func (p *Pipeline) validateRefresh(ctx context.Context, input *CapturedIndexInput) ManagedGenerationValidationResult {
+func (p *Pipeline) validateRefresh(ctx context.Context, input *CapturedIndexInput, indexer TranscriptIndexer) (ManagedGenerationValidationResult, *ValidatedContext) {
 	fallback := ManagedGenerationValidationResult{Outcome: ValidationUnsupported}
-	if p.config.Validator == nil || input == nil || input.expected == nil || input.metadata == nil {
-		return fallback
+	start := time.Now()
+	result := fallback
+	defer func() {
+		done := 0
+		if result.Outcome == ValidationProven {
+			done = 1
+		}
+		p.config.IndexProfiler.RecordStage(StageRefreshValidate, time.Since(start), done, 1)
+		if result.Outcome == ValidationUnsupported {
+			p.config.IndexProfiler.RecordStage(StageRefreshValidateUnsupported, 0, 0, 1)
+		}
+	}()
+	validator := p.config.Validator
+	if validator == nil {
+		validator, _ = p.metricsStore.(ManagedGenerationValidator)
+	}
+	builder, ok := indexer.(GenerationMetadataBuilder)
+	if validator == nil || !ok || input == nil || input.expected == nil || input.metadata == nil {
+		return fallback, nil
 	}
 	target := p.sessionVersionTarget(input.session)
 	if target.IndexVersion == strictIndexFormat || input.expected.IndexVersion == nil ||
 		*input.expected.IndexVersion != target.IndexVersion || input.expected.ActiveGenerationID == "" || input.metadata.ContentHash == "" {
-		return fallback
+		return fallback, nil
 	}
 	proof, err := p.unchangedProofRequest(input)
 	if err != nil {
-		return fallback
+		return fallback, nil
+	}
+	candidate, err := builder.BuildGenerationMetadata(ctx, p.generationBuildInput(input))
+	if err != nil {
+		slog.Debug("ingest: refresh metadata unavailable; the session parses", "error", err)
+		return fallback, nil
 	}
 	// The validator's frozen request extends the proof request with a generation
 	// identity and budget; copy the common fields at this single boundary.
@@ -51,26 +73,27 @@ func (p *Pipeline) validateRefresh(ctx context.Context, input *CapturedIndexInpu
 		SessionID: proof.SessionID, GenerationID: proof.Expected.ActiveGenerationID,
 		Metadata: proof.Metadata, InputDigest: proof.InputDigest,
 		IndexerTarget: proof.IndexerTarget, FormatTarget: proof.FormatTarget, Expected: proof.Expected,
+		Candidate: &candidate,
 	}
-	start := time.Now()
-	result, err := p.config.Validator.ValidateManagedGenerationUnchanged(ctx, request)
-	p.config.IndexProfiler.RecordStage(StageRefreshValidate, time.Since(start), 0, 1)
+	result, err = validator.ValidateManagedGenerationUnchanged(ctx, request)
 	if err != nil {
 		slog.Debug("ingest: refresh validation failed; the session parses", "error", err)
-		return fallback
+		result = fallback
+		return fallback, nil
 	}
 	result, err = NewManagedGenerationValidationResult(result.Outcome, result.Mismatch, result.Detail)
 	if err != nil {
 		slog.Debug("ingest: invalid refresh validation; the session parses", "error", err)
-		return fallback
+		result = fallback
+		return fallback, nil
 	}
-	if result.Outcome == ValidationUnsupported {
-		p.config.IndexProfiler.RecordStage(StageRefreshValidateUnsupported, 0, 0, 1)
+	if result.Outcome == ValidationProven {
+		return result, &ValidatedContext{GenerationID: proof.Expected.ActiveGenerationID, Candidate: candidate}
 	}
-	return result
+	return result, nil
 }
 
-func (p *Pipeline) settleManagedGenerationUnchanged(ctx context.Context, input *CapturedIndexInput, lane *storeWriteLane) (ManagedGenerationUnchangedSettleOutcome, time.Duration, error) {
+func (p *Pipeline) settleManagedGenerationUnchanged(ctx context.Context, input *CapturedIndexInput, lane *storeWriteLane, validated *ValidatedContext) (ManagedGenerationUnchangedSettleOutcome, time.Duration, error) {
 	prover, ok := p.metricsStore.(ManagedGenerationUnchangedProver)
 	if !ok {
 		return ManagedGenerationUnchangedSettleOutcome{}, 0, fmt.Errorf("ingest: store cannot settle an unchanged generation; use the ordinary parse")
@@ -79,6 +102,7 @@ func (p *Pipeline) settleManagedGenerationUnchanged(ctx context.Context, input *
 	if err != nil {
 		return ManagedGenerationUnchangedSettleOutcome{}, 0, err
 	}
+	request.Validated = validated
 	start := time.Now()
 	var outcome ManagedGenerationUnchangedSettleOutcome
 	p.runStoreWrite(lane, StageIndex, func() {
