@@ -34,10 +34,14 @@ const (
 	childModeGarbage childMode = "garbage"
 )
 
-func TestMain(m *testing.M) {
+func init() { runTestChild = runChildIfAsked }
+
+// runChildIfAsked runs the child behaviour the environment selects and exits;
+// with no child mode set it returns and the tests run.
+func runChildIfAsked() {
 	switch childMode(os.Getenv(childModeEnv)) {
 	case "":
-		os.Exit(m.Run())
+		return
 	case childModeGarbage:
 		fmt.Println("not a sample result")
 		os.Exit(0)
