@@ -379,7 +379,7 @@ func TestManagedGenerationUnchangedProofPipelineRoutes(t *testing.T) {
 				t.Fatal(err)
 			}
 			counted, fs, profiler, _, _, builds, transcript := run(t, db, source, output, empty, "")
-			if counted.proofs.Load() != 1 || counted.proof.Proven || counted.proof.Mismatch != ingest.UnchangedNotProvenIndexer || counted.settles.Load() != 0 || builds.Load() != 1 || !bytes.Equal(*transcript, expected) || fs.reads.Load() != 0 {
+			if counted.proofs.Load() != 1 || counted.proof.Proven || counted.proof.Mismatch != ingest.UnchangedNotProvenIndexer || counted.validationCalls.Load() != 0 || counted.settles.Load() != 0 || builds.Load() != 1 || !bytes.Equal(*transcript, expected) || fs.reads.Load() != 0 {
 				t.Fatalf("proof %+v attempts %d settles %d builds %d stored bytes match %t native reads %d", counted.proof, counted.proofs.Load(), counted.settles.Load(), builds.Load(), bytes.Equal(*transcript, expected), fs.reads.Load())
 			}
 			assertProfile(t, profiler, 0)
@@ -435,6 +435,7 @@ func TestManagedGenerationUnchangedProofPipelineRoutes(t *testing.T) {
 			assertProfile(t, profiler, 1)
 		},
 	}
+	maps.Copy(routes, realStoreValidationRoutes())
 	var fixture struct {
 		Cases []struct {
 			Name string `yaml:"name"`

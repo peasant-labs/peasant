@@ -25,6 +25,10 @@ import (
 type halfValidatingStore struct {
 	*store.Store
 	forceValidation bool
+	// forceContext answers every cheap proof that read without error as a
+	// metadata-context mismatch, proven or not, so the pipeline takes the
+	// validation route whatever term the store's proof stopped on.
+	forceContext    bool
 	afterValidation func(sid ingest.SessionID)
 
 	mu          sync.Mutex
@@ -54,7 +58,7 @@ func (s *halfValidatingStore) ProveCapturedGenerationUnchanged(ctx context.Conte
 	s.mu.Lock()
 	s.cheapProven[request.SessionID] = err == nil && proof.Proven
 	s.mu.Unlock()
-	if err == nil && proof.Proven && s.forceValidation {
+	if err == nil && (s.forceContext || (proof.Proven && s.forceValidation)) {
 		return ingest.UnchangedProof{Mismatch: ingest.UnchangedNotProvenMetadata}, nil
 	}
 	return proof, err
