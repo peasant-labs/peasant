@@ -49,7 +49,7 @@ func TestUpgradePlanEstimatesTheSearchRebuild(t *testing.T) {
 			removeBodySentinel(t, conn)
 			// Filler text makes the index's pages, not its fixed tables,
 			// the size the estimate reads.
-			seedSearchRebuildFiller(t, conn, fixture.Filler.Rows, fixture.Filler.RowBytes, fixture.Filler.Vocabulary)
+			seedSearchRebuildFiller(t, conn, v76BodiesSession, fixture.Filler.Rows, fixture.Filler.RowBytes, fixture.Filler.Vocabulary)
 			index := dbstatBytesOnConn(t, conn, `name LIKE 'session_search_fts%'`)
 			if err := conn.Close(); err != nil {
 				t.Fatal(err)

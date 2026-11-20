@@ -1,16 +1,20 @@
-# The whole search index rebuild with its widened postings budget. Each case
-# rebuilds a store whose postings need several flushes at FTS5's default
-# budget, and compares the result with a rebuild at the default budget on a
-# copy of the same store: the same rows and ranks for every query, one
-# segment, and no stored budget left behind. The stopped cases stop the
-# search trigger repair inside its transaction and check that it rolled back.
+# Every whole search index rebuild with its widened postings budget. Each case
+# runs a real entry point on a store whose postings need several flushes at
+# FTS5's default budget, then rebuilds a copy of the result at the default
+# budget: the same rows and ranks for every query, one segment, and the index
+# configuration the store had before. A repair step stopped inside its
+# transaction must roll back with no stored budget; a clean upgrade
+# afterwards must give the same results.
 requiredNames:
   - repair-step-commits
   - repair-step-fails
   - repair-step-cancelled
   - search-index-rebuild-commits
-# Body rows of filler text added to the store before the rebuild. Words are
-# drawn from w0..w(vocabulary-1) with a fixed seed.
+  - prune-health-gate-commits
+  - prune-untrusted-delete-commits
+  - sweep-flagged-commits
+# Body rows of filler text, in a session of their own, added before the
+# rebuild. Words are drawn from w0..w(vocabulary-1) with a fixed seed.
 filler:
   rows: 600
   rowBytes: 6000
@@ -22,25 +26,21 @@ queries:
   - "w12*"
   - "NEAR(w1* w2*, 3)"
   - "(w5 OR w6) NOT w7"
-  - "bodyseedterm"
   - "mitochondria"
 cases:
-  # The search trigger repair on a store with stale results: Upgrade raises
-  # the budget, the migration's rebuild uses it, and the step removes it.
-  - name: repair-step-commits
-    entry: repair-step
-    outcome: commit
+  # The upgrade's search trigger repair on a store with stale results: the
+  # step's transaction sets the budget before the migration's script and
+  # removes it after.
+  - {name: repair-step-commits, entry: repair-step, outcome: commit}
   # The step fails inside its transaction after its rebuild.
-  - name: repair-step-fails
-    entry: repair-step
-    outcome: fail
-  # The upgrade is cancelled inside the step's transaction. The cancelled
-  # connection may keep the budget on the behind store; the next upgrade
-  # repeats the step and must leave none.
-  - name: repair-step-cancelled
-    entry: repair-step
-    outcome: cancel
+  - {name: repair-step-fails, entry: repair-step, outcome: fail}
+  # The upgrade is cancelled inside the step's transaction.
+  - {name: repair-step-cancelled, entry: repair-step, outcome: cancel}
   # The rebuild a harvest runs when the search index needs one.
-  - name: search-index-rebuild-commits
-    entry: search-index-rebuild
-    outcome: commit
+  - {name: search-index-rebuild-commits, entry: search-index-rebuild, outcome: commit}
+  # A prune whose health gate finds the index flagged and rebuilds it first.
+  - {name: prune-health-gate-commits, entry: prune-health-gate, outcome: commit}
+  # A prune whose delete cannot be trusted and rebuilds after its deletes.
+  - {name: prune-untrusted-delete-commits, entry: prune-untrusted-delete, outcome: commit}
+  # A content sweep that finds the index flagged and rebuilds it.
+  - {name: sweep-flagged-commits, entry: sweep-flagged, outcome: commit}

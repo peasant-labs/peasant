@@ -402,6 +402,13 @@ func searchRepairStep(conn *sqlite.Conn, step UpgradeStep) (UpgradeStep, string,
 	return step, "", nil
 }
 
+// rebuildsSearchIndex reports whether the step is the search trigger repair
+// planned long: the one that rebuilds the whole search index inside its
+// migration script.
+func (s UpgradeStep) rebuildsSearchIndex() bool {
+	return s.Kind == UpgradeStepSchema && s.Version == searchRepairSchemaVersion && s.Cost.Long()
+}
+
 // searchRebuildEstimateOnConn estimates the whole search index rebuild from
 // the current index's size, which the plan reads from two rows of the
 // index (fts5IndexBytesOnConn), at the fastest and slowest rebuild rates
@@ -680,7 +687,7 @@ func Upgrade(ctx context.Context, dbPath string, opts UpgradeOptions) (report Up
 		if step.Kind == UpgradeStepRecount {
 			stepErr = applyRecountStep(ctx, conn, step, progress.count, opts.afterRecountSession)
 		} else {
-			stepErr = applySchemaStep(ctx, conn, step, progress.count, opts.afterDataFill)
+			stepErr = applyUpgradeStep(ctx, conn, step.Version, step.rebuildsSearchIndex(), progress.count, opts.afterDataFill)
 		}
 		close(stopTicks)
 		<-ticksDone
@@ -709,45 +716,19 @@ func Upgrade(ctx context.Context, dbPath string, opts UpgradeOptions) (report Up
 	return report, nil
 }
 
-// applySchemaStep applies one planned schema step. The search trigger repair
-// on a store with stale results rebuilds the whole search index inside its
-// shipped migration script, which cannot change; so before that step the
-// upgrade raises the index's postings budget in a write of its own (the
-// script's rebuild reads it from the index's configuration), and the step's
-// transaction removes it again before it commits. A step that fails rolls
-// back and the budget is removed in a write of its own. A cancelled step
-// can leave the connection unable to write until it is returned, and a
-// process can be killed between the two writes: the stored budget then
-// stays on a store that is still behind, which only an upgrade opens, and
-// the next upgrade, which repeats the step, removes it. It changes no search
-// result in the meantime.
-func applySchemaStep(ctx context.Context, conn *sqlite.Conn, step UpgradeStep, report func(done, of int64), afterDataFill func(version int) error) error {
-	if step.Version != searchRepairSchemaVersion || !step.Cost.Long() {
-		return applyUpgradeStep(ctx, conn, step.Version, report, afterDataFill)
-	}
-	if err := widenSearchRebuildHashOnConn(conn); err != nil {
-		return err
-	}
-	err := applyUpgradeStep(ctx, conn, step.Version, report, func(version int) error {
-		if err := restoreSearchRebuildHashOnConn(conn); err != nil {
-			return err
-		}
-		if afterDataFill != nil {
-			return afterDataFill(version)
-		}
-		return nil
-	})
-	if err != nil && conn.AutocommitEnabled() {
-		_ = restoreSearchRebuildHashOnConn(conn)
-	}
-	return err
-}
-
 // applyUpgradeStep applies the one migration that produces version. This is
 // the only call into the migration engine: the schema is cut at the step, so
 // the engine applies exactly one migration and the caller can report it,
 // stop between steps, and attach the step's data fill to its transaction.
-func applyUpgradeStep(ctx context.Context, conn *sqlite.Conn, version int, report func(done, of int64), afterDataFill func(version int) error) error {
+//
+// searchRebuild says the step rebuilds the whole search index inside its
+// shipped script (the search trigger repair on a store with stale results).
+// The step's transaction then raises the index's postings budget before the
+// script runs, so the script's rebuild reads it from the index's
+// configuration, and removes it after the script and the data fill. Both
+// writes commit or roll back with the step, so no store, finished or not,
+// keeps the budget.
+func applyUpgradeStep(ctx context.Context, conn *sqlite.Conn, version int, searchRebuild bool, report func(done, of int64), afterDataFill func(version int) error) error {
 	cut := sqlitemigration.Schema{
 		AppID:      dbSchema.AppID,
 		Migrations: dbSchema.Migrations[:version],
@@ -760,24 +741,46 @@ func applyUpgradeStep(ctx context.Context, conn *sqlite.Conn, version int, repor
 	if version == len(dbSchema.Migrations) {
 		cut.RepeatableMigration = dbSchema.RepeatableMigration
 	}
-	return sqlitemigration.MigrateWithAfterScript(ctx, conn, cut, func(conn *sqlite.Conn, produced int32) error {
+	checkVersion := func(produced int32) error {
 		if int(produced) != version {
 			return fmt.Errorf("store: the migration engine applied schema version %d while the upgrade asked for %d; another process changed the store during the upgrade", produced, version)
 		}
-		if fill := upgradeDataFills[version]; fill != nil {
-			if err := fill(conn, report); err != nil {
+		return nil
+	}
+	hooks := sqlitemigration.ScriptHooks{
+		After: func(conn *sqlite.Conn, produced int32) error {
+			if err := checkVersion(produced); err != nil {
 				return err
 			}
-		}
-		if afterDataFill != nil {
-			if err := afterDataFill(version); err != nil {
+			if fill := upgradeDataFills[version]; fill != nil {
+				if err := fill(conn, report); err != nil {
+					return err
+				}
+			}
+			if searchRebuild {
+				if err := restoreSearchRebuildHashOnConn(conn); err != nil {
+					return err
+				}
+			}
+			if afterDataFill != nil {
+				if err := afterDataFill(version); err != nil {
+					return err
+				}
+			}
+			// A cancellation that arrived while the step ran must not commit
+			// it: the caller reports the step as rolled back.
+			return ctx.Err()
+		},
+	}
+	if searchRebuild {
+		hooks.Before = func(conn *sqlite.Conn, produced int32) error {
+			if err := checkVersion(produced); err != nil {
 				return err
 			}
+			return widenSearchRebuildHashOnConn(conn)
 		}
-		// A cancellation that arrived while the step ran must not commit
-		// it: the caller reports the step as rolled back.
-		return ctx.Err()
-	})
+	}
+	return sqlitemigration.MigrateWithScriptHooks(ctx, conn, cut, hooks)
 }
 
 // applyRecountStep runs one owed recount on the upgrade's connection. The
