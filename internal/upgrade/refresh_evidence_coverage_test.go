@@ -19,6 +19,12 @@ var refreshEvidenceFields []byte
 
 // TestRefreshEvidenceCoverage requires every decision field to be populated by
 // the planner or assigned to an honestly reported unread evidence kind.
+// Behavioural fixtures exercise decisions, but cannot expose a newly added
+// evidence field whose zero value happens not to affect those decisions. This
+// inventory guards that boundary; it scans only PlanRefresh, runs without
+// processes or shared state, and can go when the evidence type makes omitted
+// fields impossible to represent. The fixture and the planner's reported
+// unread kinds provide positive and negative controls.
 func TestRefreshEvidenceCoverage(t *testing.T) {
 	var fixture struct {
 		Fields map[string]string `yaml:"fields"`
@@ -37,7 +43,17 @@ func TestRefreshEvidenceCoverage(t *testing.T) {
 	}
 	read := map[string]bool{}
 	typ := reflect.TypeOf(ingest.RefreshEvidence{})
-	ast.Inspect(file, func(node ast.Node) bool {
+	var constructor *ast.FuncDecl
+	for _, declaration := range file.Decls {
+		if fn, ok := declaration.(*ast.FuncDecl); ok && fn.Name.Name == "PlanRefresh" {
+			constructor = fn
+			break
+		}
+	}
+	if constructor == nil {
+		t.Fatal("PlanRefresh constructor site not found")
+	}
+	ast.Inspect(constructor.Body, func(node ast.Node) bool {
 		lit, ok := node.(*ast.CompositeLit)
 		if !ok {
 			return true
