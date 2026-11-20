@@ -1,0 +1,48 @@
+# Probe sources for the store's transaction-mode guard. Each probe scans one
+# source under transaction_mode_guard_probes/ against its own reviewed list
+# (allowed, same shape as transaction_mode_guard.yaml) and must produce
+# exactly the findings in want, in sorted order; each want entry is the
+# finding's leading text. An empty want proves the scan accepts the source.
+probes:
+  - name: deferred-call-forms
+    source: deferred_calls.gosrc
+    want:
+      - "deferred_calls.gosrc Store.probeDeferredHelper begins with sqlitex.Transaction, which is not on the reviewed list"
+      - "deferred_calls.gosrc probeDeferredLiteral begins with BEGIN, which is not on the reviewed list"
+      - "deferred_calls.gosrc probeOutermostSavepoint begins with sqlitex.Save, which is not on the reviewed list"
+  - name: method-values
+    source: method_value.gosrc
+    want:
+      - "method_value.gosrc probeMethodValue begins with sqlitex.Transaction, which is not on the reviewed list"
+      - "method_value.gosrc probeSaveAsArgument begins with sqlitex.Save, which is not on the reviewed list"
+  - name: renamed-import-by-path
+    source: renamed_import.gosrc
+    want:
+      - "renamed_import.gosrc probeRenamedImport begins with sqlitex.Save, which is not on the reviewed list"
+  - name: package-level-literals
+    source: package_literals.gosrc
+    want:
+      - "package_literals.gosrc package-level beginDeferred begins with sqlitex.Transaction, which is not on the reviewed list"
+      - "package_literals.gosrc package-level sqlBatchSavepoint begins with SAVEPOINT, which is not on the reviewed list"
+      - "package_literals.gosrc package-level sqlBeginDeferred begins with BEGIN, which is not on the reviewed list"
+  - name: read-only-entry-holding-write-sql
+    source: read_only_writes.gosrc
+    allowed:
+      - file: read_only_writes.gosrc
+        function: Store.probeReadOnlyWritesLiteral
+        begin: sqlitex.Save
+        mode: read-only
+        reason: probe that claims to read but writes through a literal
+      - file: read_only_writes.gosrc
+        function: Store.probeReadOnlyWritesConst
+        begin: sqlitex.Save
+        mode: read-only
+        reason: probe that claims to read but writes through a package constant
+      - file: read_only_writes.gosrc
+        function: Store.probeReadOnlyReads
+        begin: sqlitex.Save
+        mode: read-only
+        reason: probe that only reads
+    want:
+      - "read_only_writes.gosrc Store.probeReadOnlyWritesConst is listed read-only but its body holds write SQL"
+      - "read_only_writes.gosrc Store.probeReadOnlyWritesLiteral is listed read-only but its body holds write SQL"

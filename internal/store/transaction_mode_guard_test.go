@@ -1,12 +1,13 @@
 package store
 
 import (
-	_ "embed"
+	"embed"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
+	"path"
 	"regexp"
 	"sort"
 	"strconv"
@@ -21,19 +22,37 @@ import (
 // busy_timeout, when another connection writes meanwhile, so every store
 // write begins IMMEDIATE (beginWrite). This guard parses the package's
 // production files and finds every begin that does NOT take the writer up
-// front: sqlitex.Transaction, sqlitex.Save, the sqlitex script helpers (which
-// wrap the script in a savepoint), and a literal BEGIN or SAVEPOINT. Each one
-// must be on the reviewed list in testdata/transaction_mode_guard.yaml with
-// the reason it is safe: it only reads, it runs nested inside a caller's
+// front: a reference to sqlitex.Transaction, sqlitex.Save or the sqlitex
+// script helpers (which wrap the script in a savepoint), called or passed as
+// a value, matched by import path so a renamed import is still seen; and a
+// literal BEGIN or SAVEPOINT, in a function or a package-level declaration.
+// Each one must be on the reviewed list in testdata/transaction_mode_guard.yaml
+// with the reason it is safe: it only reads, it runs nested inside a caller's
 // IMMEDIATE transaction (a savepoint inherits the outer mode), or its
-// connection is private to it. A new deferred begin, a moved one, or a stale
-// entry fails the guard.
+// connection is private to it. A read-only entry whose function holds
+// write-shaped SQL, directly or through a package constant, fails too. A new
+// deferred begin, a moved one, or a stale entry fails the guard.
+//
+// What it cannot see: a write reached through a helper the read-only function
+// calls, and a dot-import of sqlitex. Both stay review decisions.
 
 //go:embed testdata/transaction_mode_guard.yaml
 var transactionModeGuardYAML []byte
 
-// transactionModeGuardFixture names the embedded reviewed list in messages.
-const transactionModeGuardFixture = "testdata/transaction_mode_guard.yaml"
+//go:embed testdata/transaction_mode_guard_probes.yaml
+var transactionModeGuardProbesYAML []byte
+
+//go:embed testdata/transaction_mode_guard_probes
+var transactionModeGuardProbeSources embed.FS
+
+// Fixture names, for messages and for reading the probe sources.
+const (
+	transactionModeGuardFixture   = "testdata/transaction_mode_guard.yaml"
+	transactionModeGuardProbesDir = "testdata/transaction_mode_guard_probes"
+)
+
+// sqlitexImportPath is the package whose helpers begin deferred transactions.
+const sqlitexImportPath = "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 
 // deferredBeginMode is the closed set of reasons a deferred begin is safe.
 type deferredBeginMode string
@@ -56,22 +75,24 @@ var deferredBeginModes = map[deferredBeginMode]bool{
 	deferredBeginPrivate:  true,
 }
 
-// deferredBeginCalls are the sqlitex helpers that begin a deferred
+// deferredBeginHelpers are the sqlitex functions that begin a deferred
 // transaction, or a savepoint that is one when it is outermost.
-var deferredBeginCalls = map[string]bool{
-	"sqlitex.Transaction":     true,
-	"sqlitex.Save":            true,
-	"sqlitex.ExecuteScript":   true,
-	"sqlitex.ExecScript":      true,
-	"sqlitex.ExecuteScriptFS": true,
-	"sqlitex.ExecScriptFS":    true,
+var deferredBeginHelpers = map[string]bool{
+	"Transaction":     true,
+	"Save":            true,
+	"ExecuteScript":   true,
+	"ExecScript":      true,
+	"ExecuteScriptFS": true,
+	"ExecScriptFS":    true,
 }
 
 // A literal statement that begins a deferred transaction or a savepoint. An
 // explicit BEGIN IMMEDIATE or BEGIN EXCLUSIVE takes the writer and is not one.
+// A write-shaped literal is SQL that changes the database.
 var (
 	deferredBeginLiteral = regexp.MustCompile(`(?i)^BEGIN(\s+DEFERRED)?(\s+TRANSACTION)?\s*;?$`)
 	savepointLiteral     = regexp.MustCompile(`(?i)^SAVEPOINT(\s+\w+)?\s*;?$`)
+	writeSQLLiteral      = regexp.MustCompile(`(?i)^(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER)\b`)
 )
 
 type deferredBegin struct {
@@ -90,6 +111,38 @@ type deferredBeginEntry struct {
 	Reason        string            `yaml:"reason"`
 }
 
+// guardScope names a function or a package-level declaration in a file.
+type guardScope struct {
+	File     string
+	Function string
+}
+
+// guardScan is what the scan found: every deferred begin with how often it
+// occurs, and the write-shaped SQL each function body holds.
+type guardScan struct {
+	begins map[deferredBegin]int
+	writes map[guardScope][]string
+}
+
+func decodeDeferredBeginAllowList(entries []deferredBeginEntry, source string) (map[deferredBegin]deferredBeginEntry, error) {
+	allowed := make(map[deferredBegin]deferredBeginEntry, len(entries))
+	for _, entry := range entries {
+		located := entry.File != "" && entry.Function != ""
+		explained := entry.Begin != "" && strings.TrimSpace(entry.Reason) != ""
+		if !located || !explained {
+			return nil, fmt.Errorf("%s entry %+v needs file, function, begin and reason", source, entry)
+		}
+		if !deferredBeginModes[entry.Mode] {
+			return nil, fmt.Errorf("%s entry %s names mode %q outside read-only, nested and private-connection", source, entry.deferredBegin, entry.Mode)
+		}
+		if _, dup := allowed[entry.deferredBegin]; dup {
+			return nil, fmt.Errorf("%s lists %s twice", source, entry.deferredBegin)
+		}
+		allowed[entry.deferredBegin] = entry
+	}
+	return allowed, nil
+}
+
 func loadDeferredBeginAllowList(t *testing.T) map[deferredBegin]deferredBeginEntry {
 	t.Helper()
 	var fixture struct {
@@ -100,20 +153,9 @@ func loadDeferredBeginAllowList(t *testing.T) map[deferredBegin]deferredBeginEnt
 	if err := decoder.Decode(&fixture); err != nil {
 		t.Fatalf("decode %s: %v", transactionModeGuardFixture, err)
 	}
-	allowed := make(map[deferredBegin]deferredBeginEntry, len(fixture.DeferredBegins))
-	for _, entry := range fixture.DeferredBegins {
-		located := entry.File != "" && entry.Function != ""
-		explained := entry.Begin != "" && strings.TrimSpace(entry.Reason) != ""
-		if !located || !explained {
-			t.Fatalf("%s entry %+v needs file, function, begin and reason", transactionModeGuardFixture, entry)
-		}
-		if !deferredBeginModes[entry.Mode] {
-			t.Fatalf("%s entry %s names mode %q outside read-only, nested and private-connection", transactionModeGuardFixture, entry.deferredBegin, entry.Mode)
-		}
-		if _, dup := allowed[entry.deferredBegin]; dup {
-			t.Fatalf("%s lists %s twice", transactionModeGuardFixture, entry.deferredBegin)
-		}
-		allowed[entry.deferredBegin] = entry
+	allowed, err := decodeDeferredBeginAllowList(fixture.DeferredBegins, transactionModeGuardFixture)
+	if err != nil {
+		t.Fatal(err)
 	}
 	return allowed
 }
@@ -134,54 +176,135 @@ func storeFuncName(decl *ast.FuncDecl) string {
 	return decl.Name.Name
 }
 
-// scanDeferredBegins parses the named Go source and returns every deferred
-// begin it holds, with how many times each occurs.
-func scanDeferredBegins(fset *token.FileSet, file string, src any) (map[deferredBegin]int, error) {
-	parsed, err := parser.ParseFile(fset, file, src, 0)
-	if err != nil {
-		return nil, err
-	}
-	found := make(map[deferredBegin]int)
-	for _, decl := range parsed.Decls {
-		function, ok := decl.(*ast.FuncDecl)
-		if !ok || function.Body == nil {
+// sqlitexNames returns the names a file refers to the sqlitex package by.
+func sqlitexNames(file *ast.File) map[string]bool {
+	names := make(map[string]bool)
+	for _, spec := range file.Imports {
+		importPath, err := strconv.Unquote(spec.Path.Value)
+		if err != nil || importPath != sqlitexImportPath {
 			continue
 		}
-		name := storeFuncName(function)
-		ast.Inspect(function.Body, func(node ast.Node) bool {
-			switch node := node.(type) {
-			case *ast.CallExpr:
-				selector, ok := node.Fun.(*ast.SelectorExpr)
+		name := path.Base(importPath)
+		if spec.Name != nil {
+			name = spec.Name.Name
+		}
+		names[name] = true
+	}
+	return names
+}
+
+func stringLiteral(node ast.Node) (string, bool) {
+	lit, ok := node.(*ast.BasicLit)
+	if !ok || lit.Kind != token.STRING {
+		return "", false
+	}
+	value, err := strconv.Unquote(lit.Value)
+	if err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(value), true
+}
+
+// packageStrings returns the package-level string constants and variables
+// declared with a single literal, by name.
+func packageStrings(files []*ast.File) map[string]string {
+	values := make(map[string]string)
+	for _, file := range files {
+		for _, decl := range file.Decls {
+			gen, ok := decl.(*ast.GenDecl)
+			if !ok {
+				continue
+			}
+			for _, spec := range gen.Specs {
+				value, ok := spec.(*ast.ValueSpec)
 				if !ok {
-					return true
+					continue
 				}
-				pkg, ok := selector.X.(*ast.Ident)
-				if !ok {
-					return true
-				}
-				if symbol := pkg.Name + "." + selector.Sel.Name; deferredBeginCalls[symbol] {
-					found[deferredBegin{File: file, Function: name, Begin: symbol}]++
-				}
-			case *ast.BasicLit:
-				if node.Kind != token.STRING {
-					return true
-				}
-				value, err := strconv.Unquote(node.Value)
-				if err != nil {
-					return true
-				}
-				value = strings.TrimSpace(value)
-				switch {
-				case deferredBeginLiteral.MatchString(value):
-					found[deferredBegin{File: file, Function: name, Begin: "BEGIN"}]++
-				case savepointLiteral.MatchString(value):
-					found[deferredBegin{File: file, Function: name, Begin: "SAVEPOINT"}]++
+				for i, name := range value.Names {
+					if i < len(value.Values) {
+						if text, ok := stringLiteral(value.Values[i]); ok {
+							values[name.Name] = text
+						}
+					}
 				}
 			}
-			return true
-		})
+		}
 	}
-	return found, nil
+	return values
+}
+
+// scanGuardSources parses the named sources as one package and returns every
+// deferred begin and every function's write-shaped SQL.
+func scanGuardSources(names []string, read func(string) ([]byte, error)) (guardScan, error) {
+	fset := token.NewFileSet()
+	parsed := make([]*ast.File, 0, len(names))
+	for _, name := range names {
+		src, err := read(name)
+		if err != nil {
+			return guardScan{}, err
+		}
+		file, err := parser.ParseFile(fset, name, src, 0)
+		if err != nil {
+			return guardScan{}, err
+		}
+		parsed = append(parsed, file)
+	}
+	strs := packageStrings(parsed)
+	scan := guardScan{begins: make(map[deferredBegin]int), writes: make(map[guardScope][]string)}
+	for i, file := range parsed {
+		name := names[i]
+		aliases := sqlitexNames(file)
+		inspect := func(scope guardScope, root ast.Node, collectWrites bool) {
+			ast.Inspect(root, func(node ast.Node) bool {
+				switch node := node.(type) {
+				case *ast.SelectorExpr:
+					// A selector in or out of call position: a call, a method
+					// value, or an argument. An identifier the parser resolved
+					// to a local object is not the import.
+					pkg, ok := node.X.(*ast.Ident)
+					imported := ok && pkg.Obj == nil && aliases[pkg.Name]
+					if imported && deferredBeginHelpers[node.Sel.Name] {
+						scan.begins[deferredBegin{File: scope.File, Function: scope.Function, Begin: "sqlitex." + node.Sel.Name}]++
+					}
+				case *ast.BasicLit:
+					value, ok := stringLiteral(node)
+					if !ok {
+						return true
+					}
+					switch {
+					case deferredBeginLiteral.MatchString(value):
+						scan.begins[deferredBegin{File: scope.File, Function: scope.Function, Begin: "BEGIN"}]++
+					case savepointLiteral.MatchString(value):
+						scan.begins[deferredBegin{File: scope.File, Function: scope.Function, Begin: "SAVEPOINT"}]++
+					case collectWrites && writeSQLLiteral.MatchString(value):
+						scan.writes[scope] = append(scan.writes[scope], value)
+					}
+				case *ast.Ident:
+					if value, ok := strs[node.Name]; collectWrites && ok && writeSQLLiteral.MatchString(value) {
+						scan.writes[scope] = append(scan.writes[scope], node.Name)
+					}
+				}
+				return true
+			})
+		}
+		for _, decl := range file.Decls {
+			switch decl := decl.(type) {
+			case *ast.FuncDecl:
+				if decl.Body != nil {
+					inspect(guardScope{File: name, Function: storeFuncName(decl)}, decl.Body, true)
+				}
+			case *ast.GenDecl:
+				for _, spec := range decl.Specs {
+					value, ok := spec.(*ast.ValueSpec)
+					if !ok || len(value.Names) == 0 {
+						continue
+					}
+					inspect(guardScope{File: name, Function: "package-level " + value.Names[0].Name}, value, false)
+				}
+			}
+		}
+	}
+	return scan, nil
 }
 
 func storeProductionFiles(t *testing.T) []string {
@@ -205,13 +328,13 @@ func storeProductionFiles(t *testing.T) []string {
 	return files
 }
 
-// unreviewedDeferredBegins compares what the scan found with the reviewed
-// list and returns one finding per difference: a begin missing from the
-// list, a function holding a listed begin more than once, and a listed begin
-// the code no longer has.
-func unreviewedDeferredBegins(found map[deferredBegin]int, allowed map[deferredBegin]deferredBeginEntry) []string {
+// unreviewedDeferredBegins compares the scan with the reviewed list and
+// returns one finding per difference: a begin missing from the list, a scope
+// holding a listed begin more than once, a listed begin the code no longer
+// has, and a read-only entry whose function holds write-shaped SQL.
+func unreviewedDeferredBegins(scan guardScan, allowed map[deferredBegin]deferredBeginEntry) []string {
 	var findings []string
-	for site, count := range found {
+	for site, count := range scan.begins {
 		if _, ok := allowed[site]; !ok {
 			findings = append(findings, fmt.Sprintf("%s, which is not on the reviewed list: begin a transaction that may write with beginWrite (IMMEDIATE); if it truly only reads, or only runs nested inside an IMMEDIATE transaction, add it to %s with the reason", site, transactionModeGuardFixture))
 			continue
@@ -220,9 +343,13 @@ func unreviewedDeferredBegins(found map[deferredBegin]int, allowed map[deferredB
 			findings = append(findings, fmt.Sprintf("%s %d times; the reviewed list covers one begin per function, so split the function or review each begin", site, count))
 		}
 	}
-	for site := range allowed {
-		if found[site] == 0 {
+	for site, entry := range allowed {
+		if scan.begins[site] == 0 {
 			findings = append(findings, fmt.Sprintf("the reviewed list names %s, which the code no longer has: remove the stale entry", site))
+			continue
+		}
+		if writes := scan.writes[guardScope{File: site.File, Function: site.Function}]; entry.Mode == deferredBeginReadOnly && len(writes) > 0 {
+			findings = append(findings, fmt.Sprintf("%s %s is listed read-only but its body holds write SQL %q: begin it with beginWrite and remove the entry", site.File, site.Function, writes))
 		}
 	}
 	sort.Strings(findings)
@@ -233,73 +360,58 @@ func unreviewedDeferredBegins(found map[deferredBegin]int, allowed map[deferredB
 // production code is a reviewed read-only, nested or private-connection one.
 func TestStoreWritesBeginImmediate(t *testing.T) {
 	allowed := loadDeferredBeginAllowList(t)
-	fset := token.NewFileSet()
-	found := make(map[deferredBegin]int)
-	for _, file := range storeProductionFiles(t) {
-		sites, err := scanDeferredBegins(fset, file, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for site, count := range sites {
-			found[site] += count
-		}
+	scan, err := scanGuardSources(storeProductionFiles(t), os.ReadFile)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if findings := unreviewedDeferredBegins(found, allowed); len(findings) > 0 {
+	if findings := unreviewedDeferredBegins(scan, allowed); len(findings) > 0 {
 		t.Fatalf("store transaction modes differ from the reviewed list:\n%s", strings.Join(findings, "\n"))
 	}
 }
 
-// TestTransactionModeGuardRefusesDeferredWrite feeds the guard a deferred
-// transaction that reads and then writes, in each spelling the scan knows,
-// and proves the guard reports it while it accepts the IMMEDIATE forms.
-func TestTransactionModeGuardRefusesDeferredWrite(t *testing.T) {
-	const probe = `package store
-
-func (s *Store) probeDeferredHelper(conn *sqlite.Conn) (err error) {
-	defer sqlitex.Transaction(conn)(&err)
-	return readThenWrite(conn)
-}
-
-func probeDeferredLiteral(conn *sqlite.Conn) error {
-	if err := sqlitex.ExecuteTransient(conn, "BEGIN", nil); err != nil {
-		return err
+// TestTransactionModeGuardProbes runs the guard over each probe source with
+// the probe's own reviewed list and requires exactly the probe's findings:
+// deferred begins in every spelling the scan knows, a renamed import matched
+// by its path, package-level literals, and read-only entries holding write
+// SQL, while the IMMEDIATE forms and a local lookalike pass.
+func TestTransactionModeGuardProbes(t *testing.T) {
+	var fixture struct {
+		Probes []struct {
+			Name    string               `yaml:"name"`
+			Source  string               `yaml:"source"`
+			Allowed []deferredBeginEntry `yaml:"allowed"`
+			Want    []string             `yaml:"want"`
+		} `yaml:"probes"`
 	}
-	return readThenWrite(conn)
-}
-
-func probeOutermostSavepoint(conn *sqlite.Conn) (err error) {
-	defer sqlitex.Save(conn)(&err)
-	return readThenWrite(conn)
-}
-
-func probeImmediate(conn *sqlite.Conn) (err error) {
-	end, err := beginWrite(conn, "write the probe")
-	if err != nil {
-		return err
+	decoder := yaml.NewDecoder(strings.NewReader(string(transactionModeGuardProbesYAML)))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&fixture); err != nil {
+		t.Fatalf("decode the transaction-mode guard probes: %v", err)
 	}
-	defer end(&err)
-	if err := sqlitex.ExecuteTransient(conn, "BEGIN IMMEDIATE", nil); err != nil {
-		return err
+	if len(fixture.Probes) == 0 {
+		t.Fatal("the transaction-mode guard probe fixture names no probes")
 	}
-	return readThenWrite(conn)
-}
-`
-	found, err := scanDeferredBegins(token.NewFileSet(), "probe.go", probe)
-	if err != nil {
-		t.Fatal(err)
-	}
-	findings := unreviewedDeferredBegins(found, map[deferredBegin]deferredBeginEntry{})
-	want := []string{
-		"probe.go Store.probeDeferredHelper begins with sqlitex.Transaction",
-		"probe.go probeDeferredLiteral begins with BEGIN",
-		"probe.go probeOutermostSavepoint begins with sqlitex.Save",
-	}
-	if len(findings) != len(want) {
-		t.Fatalf("guard findings for the probe = %q, want one for each of %q", findings, want)
-	}
-	for i, prefix := range want {
-		if !strings.HasPrefix(findings[i], prefix+", which is not on the reviewed list") {
-			t.Fatalf("guard finding %d = %q, want it to report %q", i, findings[i], prefix)
-		}
+	for _, probe := range fixture.Probes {
+		t.Run(probe.Name, func(t *testing.T) {
+			allowed, err := decodeDeferredBeginAllowList(probe.Allowed, probe.Name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			scan, err := scanGuardSources([]string{probe.Source}, func(name string) ([]byte, error) {
+				return transactionModeGuardProbeSources.ReadFile(transactionModeGuardProbesDir + "/" + name)
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			findings := unreviewedDeferredBegins(scan, allowed)
+			if len(findings) != len(probe.Want) {
+				t.Fatalf("guard findings for %s = %q, want %d starting %q", probe.Source, findings, len(probe.Want), probe.Want)
+			}
+			for i, want := range probe.Want {
+				if !strings.HasPrefix(findings[i], want) {
+					t.Fatalf("guard finding %d for %s = %q, want it to start %q", i, probe.Source, findings[i], want)
+				}
+			}
+		})
 	}
 }
