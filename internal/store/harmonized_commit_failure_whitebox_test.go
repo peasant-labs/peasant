@@ -24,8 +24,9 @@ var harmonizedCommitFailureRequired []byte
 func TestHarmonizedCommitFailuresWhitebox(t *testing.T) {
 	var fixture struct {
 		Cases []struct {
-			Name      string `yaml:"name"`
-			Operation string `yaml:"operation"`
+			Name        string `yaml:"name"`
+			Operation   string `yaml:"operation"`
+			CommitError string `yaml:"commit_error"`
 		} `yaml:"cases"`
 	}
 	var manifest struct {
@@ -42,6 +43,12 @@ func TestHarmonizedCommitFailuresWhitebox(t *testing.T) {
 	for _, c := range fixture.Cases {
 		if c.Name == "" || seen[c.Name] {
 			t.Fatalf("empty or duplicate fixture name %q", c.Name)
+		}
+		switch c.Operation {
+		case "migrate-stats", "skip-bookkeeping", "repair-objects", "migrate-catalog-commit":
+			if c.CommitError == "" {
+				t.Fatalf("case %q requires an operation-specific commit error", c.Name)
+			}
 		}
 		seen[c.Name] = true
 		names = append(names, c.Name)
@@ -65,7 +72,7 @@ func TestHarmonizedCommitFailuresWhitebox(t *testing.T) {
 				return
 			}
 			if c.Operation == "nondefect-shadow-mismatch" || c.Operation == "migrate-catalog-commit" {
-				testMigrationCatalogRollback(t, c.Operation == "migrate-catalog-commit")
+				testMigrationCatalogRollback(t, c.Operation == "migrate-catalog-commit", c.CommitError)
 				return
 			}
 			ctx := context.Background()
@@ -189,6 +196,9 @@ func TestHarmonizedCommitFailuresWhitebox(t *testing.T) {
 			if denied != 1 || opErr == nil || !strings.Contains(opErr.Error(), "authoriz") {
 				t.Fatalf("COMMIT denials = %d, error = %v; want one denied COMMIT returned", denied, opErr)
 			}
+			if c.CommitError != "" && !strings.Contains(opErr.Error(), c.CommitError) {
+				t.Errorf("commit error = %v; want operation %q", opErr, c.CommitError)
+			}
 			conn, err = s.pool.Take(ctx)
 			if err != nil {
 				t.Fatal(err)
@@ -264,7 +274,7 @@ func testMigrationBodyFlushFailure(t *testing.T) {
 
 // A data mismatch is returned without an error, but must still undo the
 // catalog writes made before verification and retain the legacy generation.
-func testMigrationCatalogRollback(t *testing.T, denyCommit bool) {
+func testMigrationCatalogRollback(t *testing.T, denyCommit bool, commitError string) {
 	ctx := context.Background()
 	s, root := openGenerationStore(t)
 	sid := migrateCaseSessionID(t, "commit-shadow-rollback", 0)
@@ -298,8 +308,11 @@ func testMigrationCatalogRollback(t *testing.T, denyCommit bool) {
 	}
 	committed, mismatch, err := s.commitMigrateSession(ctx, oracle, prepared)
 	if denyCommit {
-		if denied != 1 || err == nil || !strings.Contains(err.Error(), "authoriz") || mismatch != nil {
+		if denied != 1 || err == nil || !strings.Contains(err.Error(), "authoriz") || committed || mismatch != nil {
 			t.Fatalf("commit = %v, mismatch = %+v, error = %v, denied = %d; want denied COMMIT", committed, mismatch, err, denied)
+		}
+		if commitError == "" || !strings.Contains(err.Error(), commitError) {
+			t.Errorf("commit error = %v; want operation %q", err, commitError)
 		}
 	} else if err != nil || committed || mismatch == nil || mismatch.Defect {
 		t.Fatalf("commit = %v, mismatch = %+v, error = %v; want non-defect mismatch and nil error", committed, mismatch, err)

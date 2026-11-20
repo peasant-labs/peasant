@@ -2234,6 +2234,12 @@ func (s *Store) DeleteAnnotationsByAnnotator(ctx context.Context, annotatorName 
 	if err != nil {
 		return 0, err
 	}
+	// Run after the transaction finalizer, so rolled-back deletes report no count.
+	defer func() {
+		if err != nil {
+			count = 0
+		}
+	}()
 	defer endFn(&err)
 
 	// Step 1: Collect annotation IDs matching the filter.
@@ -3029,6 +3035,12 @@ func (s *Store) BatchCreateAnnotations(ctx context.Context, params []CreateAnnot
 	if err != nil {
 		return nil, err
 	}
+	// Run after the transaction finalizer, so rolled-back inserts return no IDs.
+	defer func() {
+		if err != nil {
+			result = nil
+		}
+	}()
 	defer endFn(&err)
 
 	ids := make([]string, len(params))

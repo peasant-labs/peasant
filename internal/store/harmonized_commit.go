@@ -1423,6 +1423,12 @@ func stampSkippedHarmonized(ctx context.Context, s *Store, prepared *preparedHar
 	if err != nil {
 		return err
 	}
+	committing := false
+	defer func() {
+		if committing && txnErr != nil {
+			txnErr = fmt.Errorf("store: commit skip bookkeeping for session %s: %w", prepared.sessionID, txnErr)
+		}
+	}()
 	defer endFn(&txnErr)
 	active, err := readActiveGenerationOnConn(conn, prepared.sessionID)
 	if err != nil {
@@ -1441,6 +1447,7 @@ func stampSkippedHarmonized(ctx context.Context, s *Store, prepared *preparedHar
 	if txnErr = stampHarmonizedBookkeeping(conn, prepared.sessionID, stamps, hash); txnErr != nil {
 		return txnErr
 	}
+	committing = true
 	return nil
 }
 
@@ -1621,6 +1628,12 @@ func repairHarmonizedObjects(ctx context.Context, s *Store, prepared *preparedHa
 	if err != nil {
 		return err
 	}
+	committing := false
+	defer func() {
+		if committing && txnErr != nil {
+			txnErr = fmt.Errorf("store: commit repaired session objects for %s: %w", prepared.sessionID, txnErr)
+		}
+	}()
 	defer endFn(&txnErr)
 	if err := sqlitex.Execute(conn, `PRAGMA defer_foreign_keys = ON`, nil); err != nil {
 		txnErr = fmt.Errorf("store: defer foreign keys for the repair of session %s: %w", prepared.sessionID, err)
@@ -1682,6 +1695,7 @@ func repairHarmonizedObjects(ctx context.Context, s *Store, prepared *preparedHa
 	if txnErr = stampHarmonizedBookkeeping(conn, prepared.sessionID, stamps, hash); txnErr != nil {
 		return txnErr
 	}
+	committing = true
 	return nil
 }
 

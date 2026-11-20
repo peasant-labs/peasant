@@ -1,0 +1,28 @@
+package probe
+func unsafe() error {
+ var e error
+ defer func() { endFn(&e) }() // want
+ return nil
+}
+func shadowed() (e error) {
+ {
+  var e error
+  defer func() { endFn(&e) }() // want
+ }
+ return nil
+}
+func unresolved() (e error) {
+ defer func() { endFn(&missing) }() // want
+ return nil
+}
+func safe() (e error) {
+ defer func() { endFn(&e) }()
+ return nil
+}
+func closure() (e error) {
+ func() {
+  var e error
+  defer endFn(&e) // want
+ }()
+ return nil
+}

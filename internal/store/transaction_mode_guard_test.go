@@ -234,6 +234,8 @@ type guardScope struct {
 type guardScan struct {
 	begins map[deferredBegin]int
 	writes map[guardScope][]string
+	fset   *token.FileSet
+	files  []*ast.File
 }
 
 func decodeDeferredBeginAllowList(entries []deferredBeginEntry, source string) (map[deferredBegin]deferredBeginEntry, error) {
@@ -362,7 +364,7 @@ func scanGuardSources(names []string, read func(string) ([]byte, error)) (guardS
 		parsed = append(parsed, file)
 	}
 	strs := packageStrings(parsed)
-	scan := guardScan{begins: make(map[deferredBegin]int), writes: make(map[guardScope][]string)}
+	scan := guardScan{begins: make(map[deferredBegin]int), writes: make(map[guardScope][]string), fset: fset, files: parsed}
 	for i, file := range parsed {
 		name := names[i]
 		aliases := sqlitexNames(file)

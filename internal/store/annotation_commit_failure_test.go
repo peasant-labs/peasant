@@ -3,12 +3,15 @@ package store_test
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"gopkg.in/yaml.v3"
 )
 
@@ -24,6 +27,42 @@ var annotationCommitFailureYAML []byte
 
 //go:embed testdata/annotation_commit_failure.manifest.yaml
 var annotationCommitFailureManifestYAML []byte
+
+// authorizeCommitFailure verifies that the two checked-out connections exhaust
+// the pool before installing the authorizer on both of them.
+func authorizeCommitFailure(t *testing.T, pool *sqlitex.Pool, auth sqlite.AuthorizeFunc) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	var held []*sqlite.Conn
+	defer func() {
+		for _, conn := range held {
+			pool.Put(conn)
+		}
+	}()
+	for range 2 {
+		conn, err := pool.Take(ctx)
+		if err != nil {
+			t.Fatalf("take connection from expected two-connection pool: %v", err)
+		}
+		held = append(held, conn)
+	}
+	probeCtx, probeCancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer probeCancel()
+	extra, err := pool.Take(probeCtx)
+	if extra != nil {
+		held = append(held, extra)
+		t.Fatal("expected a two-connection pool, but a third connection was available")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("checking pool exhaustion: got %v, want deadline exceeded", err)
+	}
+	for _, conn := range held {
+		if err := conn.SetAuthorizer(auth); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
 
 func TestAnnotationCommitFailures(t *testing.T) {
 	var fixture struct {
@@ -53,11 +92,7 @@ func TestAnnotationCommitFailures(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			// Pool connections are all checked out together, so whichever one the
-			// production method takes will reject only COMMIT, permitting rollback.
 			pool := s.PoolForTest()
-			a := takeConn(t, pool)
-			b := takeConn(t, pool)
 			denied := 0
 			auth := sqlite.AuthorizeFunc(func(action sqlite.Action) sqlite.AuthResult {
 				if action.Type() == sqlite.OpTransaction && action.Operation() == "COMMIT" {
@@ -66,18 +101,21 @@ func TestAnnotationCommitFailures(t *testing.T) {
 				}
 				return sqlite.AuthResultOK
 			})
-			for _, c := range []*sqlite.Conn{a, b} {
-				if err := c.SetAuthorizer(auth); err != nil {
-					t.Fatal(err)
-				}
-				pool.Put(c)
-			}
+			authorizeCommitFailure(t, pool, auth)
 			var err error
 			switch tc.Operation {
 			case annotationDelete:
-				_, err = s.DeleteAnnotationsByAnnotator(ctx, pruneAnnotatorName, nil)
+				var count int64
+				count, err = s.DeleteAnnotationsByAnnotator(ctx, pruneAnnotatorName, nil)
+				if count != 0 {
+					t.Errorf("delete count on commit failure = %d, want 0", count)
+				}
 			case annotationCreate:
-				_, err = s.BatchCreateAnnotations(ctx, []store.CreateAnnotationParams{p})
+				var result []string
+				result, err = s.BatchCreateAnnotations(ctx, []store.CreateAnnotationParams{p})
+				if result != nil {
+					t.Errorf("batch result on commit failure = %v, want nil", result)
+				}
 			default:
 				t.Fatalf("unknown operation %q", tc.Operation)
 			}

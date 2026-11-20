@@ -920,6 +920,12 @@ func (s *Store) upsertMigrateStats(ctx context.Context, oracle *migrateOracle) (
 	if err != nil {
 		return err
 	}
+	committing := false
+	defer func() {
+		if committing && txnErr != nil {
+			txnErr = fmt.Errorf("store: commit migrated session stats for %s: %w", oracle.sessionID, txnErr)
+		}
+	}()
 	defer endFn(&txnErr)
 	stats := oracle.statsRaw
 	// The retained document's turn numbers are in whatever unit its producer
@@ -934,6 +940,7 @@ func (s *Store) upsertMigrateStats(ctx context.Context, oracle *migrateOracle) (
 		txnErr = fmt.Errorf("upsert the captured stats: %w", err)
 		return txnErr
 	}
+	committing = true
 	return nil
 }
 
@@ -963,6 +970,12 @@ func (s *Store) commitMigrateSession(ctx context.Context, oracle *migrateOracle,
 	if err != nil {
 		return false, nil, err
 	}
+	defer func() {
+		if committed && txnErr != nil {
+			committed = false
+			txnErr = fmt.Errorf("store: commit migrated session %s: %w", oracle.sessionID, txnErr)
+		}
+	}()
 	defer endFn(&txnErr)
 	if err := deleteMigrateSharedOldRows(conn, oracle); err != nil {
 		txnErr = err
@@ -1018,6 +1031,7 @@ func (s *Store) commitMigrateSession(ctx context.Context, oracle *migrateOracle,
 		// A non-defect mismatch is reported separately from the returned
 		// error. Roll back before returning nil in the named error result;
 		// the deferred finalizer then sees an already-ended transaction.
+		// sqlitex's finalizer returns early when autocommit is already on.
 		endFn(&txnErr)
 		return false, mismatch, nil
 	}

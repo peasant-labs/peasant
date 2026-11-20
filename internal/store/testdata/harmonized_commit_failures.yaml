@@ -5,6 +5,7 @@ cases:
     operation: stage-batch
   - name: migrate-stats
     operation: migrate-stats
+    commit_error: commit migrated session stats
   - name: sweep-bodies
     operation: sweep-bodies
   - name: sweep-blobs
@@ -15,9 +16,12 @@ cases:
     operation: retire-projections
   - name: skip-bookkeeping
     operation: skip-bookkeeping
+    commit_error: commit skip bookkeeping
   - name: repair-objects
     operation: repair-objects
+    commit_error: commit repaired session objects
   - name: nondefect-shadow-mismatch
     operation: nondefect-shadow-mismatch
   - name: migrate-catalog-commit
     operation: migrate-catalog-commit
+    commit_error: commit migrated session

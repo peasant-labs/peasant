@@ -27,8 +27,6 @@ func TestSyncModelsCommitFailure(t *testing.T) {
 	ctx := context.Background()
 	s := openTestStore(t)
 	pool := s.PoolForTest()
-	a := takeConn(t, pool)
-	b := takeConn(t, pool)
 	denied := 0
 	auth := sqlite.AuthorizeFunc(func(action sqlite.Action) sqlite.AuthResult {
 		if action.Type() == sqlite.OpTransaction && action.Operation() == "COMMIT" {
@@ -37,12 +35,7 @@ func TestSyncModelsCommitFailure(t *testing.T) {
 		}
 		return sqlite.AuthResultOK
 	})
-	for _, c := range []*sqlite.Conn{a, b} {
-		if err := c.SetAuthorizer(auth); err != nil {
-			t.Fatal(err)
-		}
-		pool.Put(c)
-	}
+	authorizeCommitFailure(t, pool, auth)
 	err := s.SyncModels(ctx, []ingest.ModelInfo{{ModelID: f.ModelID, ProviderKey: f.ProviderKey, DisplayName: f.DisplayName, LastSynced: f.LastSynced}})
 	if denied != 1 {
 		t.Fatalf("COMMIT denials = %d, want 1; error: %v", denied, err)
