@@ -43,6 +43,17 @@ probes:
         begin: sqlitex.Save
         mode: read-only
         reason: probe that only reads
+      - file: read_only_writes.gosrc
+        function: Store.probeReadOnlyWritesThroughCTE
+        begin: sqlitex.Save
+        mode: read-only
+        reason: probe that claims to read but deletes through a CTE behind leading comments
+      - file: read_only_writes.gosrc
+        function: Store.probeReadOnlyReadsThroughCTE
+        begin: sqlitex.Save
+        mode: read-only
+        reason: probe that only reads through a CTE behind a leading comment
     want:
       - "read_only_writes.gosrc Store.probeReadOnlyWritesConst is listed read-only but its body holds write SQL"
       - "read_only_writes.gosrc Store.probeReadOnlyWritesLiteral is listed read-only but its body holds write SQL"
+      - "read_only_writes.gosrc Store.probeReadOnlyWritesThroughCTE is listed read-only but its body holds write SQL"

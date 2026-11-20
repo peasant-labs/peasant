@@ -20,3 +20,15 @@ func (s *Store) probeReadOnlyReads(conn *sqlite.Conn) (err error) {
 	defer sqlitex.Save(conn)(&err)
 	return sqlitex.ExecuteTransient(conn, sqlReadProbe, nil)
 }
+
+func (s *Store) probeReadOnlyWritesThroughCTE(conn *sqlite.Conn) (err error) {
+	defer sqlitex.Save(conn)(&err)
+	return sqlitex.ExecuteTransient(conn, `-- stale rows first
+/* bounded */ WITH stale AS (SELECT session_id FROM sessions) DELETE FROM sessions WHERE session_id IN stale`, nil)
+}
+
+func (s *Store) probeReadOnlyReadsThroughCTE(conn *sqlite.Conn) (err error) {
+	defer sqlitex.Save(conn)(&err)
+	return sqlitex.ExecuteTransient(conn, `-- recent rows
+WITH recent AS (SELECT session_id FROM sessions) SELECT * FROM recent`, nil)
+}

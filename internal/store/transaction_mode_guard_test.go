@@ -8,7 +8,6 @@ import (
 	"go/token"
 	"os"
 	"path"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -86,14 +85,127 @@ var deferredBeginHelpers = map[string]bool{
 	"ExecScriptFS":    true,
 }
 
-// A literal statement that begins a deferred transaction or a savepoint. An
-// explicit BEGIN IMMEDIATE or BEGIN EXCLUSIVE takes the writer and is not one.
-// A write-shaped literal is SQL that changes the database.
-var (
-	deferredBeginLiteral = regexp.MustCompile(`(?i)^BEGIN(\s+DEFERRED)?(\s+TRANSACTION)?\s*;?$`)
-	savepointLiteral     = regexp.MustCompile(`(?i)^SAVEPOINT(\s+\w+)?\s*;?$`)
-	writeSQLLiteral      = regexp.MustCompile(`(?i)^(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER)\b`)
+// sqlKeyword is the closed set of SQL keywords the guard reads statements by.
+type sqlKeyword string
+
+const (
+	sqlKeywordBegin       sqlKeyword = "BEGIN"
+	sqlKeywordDeferred    sqlKeyword = "DEFERRED"
+	sqlKeywordTransaction sqlKeyword = "TRANSACTION"
+	sqlKeywordSavepoint   sqlKeyword = "SAVEPOINT"
+	sqlKeywordWith        sqlKeyword = "WITH"
+	sqlKeywordInsert      sqlKeyword = "INSERT"
+	sqlKeywordUpdate      sqlKeyword = "UPDATE"
+	sqlKeywordDelete      sqlKeyword = "DELETE"
+	sqlKeywordReplace     sqlKeyword = "REPLACE"
+	sqlKeywordCreate      sqlKeyword = "CREATE"
+	sqlKeywordDrop        sqlKeyword = "DROP"
+	sqlKeywordAlter       sqlKeyword = "ALTER"
 )
+
+// sqlWriteKeywords lead a statement that changes the database.
+var sqlWriteKeywords = map[sqlKeyword]bool{
+	sqlKeywordInsert: true, sqlKeywordUpdate: true, sqlKeywordDelete: true, sqlKeywordReplace: true,
+	sqlKeywordCreate: true, sqlKeywordDrop: true, sqlKeywordAlter: true,
+}
+
+// sqlCTEWriteKeywords are the statements a WITH clause can lead into that
+// change the database.
+var sqlCTEWriteKeywords = map[sqlKeyword]bool{
+	sqlKeywordInsert: true, sqlKeywordUpdate: true, sqlKeywordDelete: true,
+}
+
+// isDeferredBeginLiteral reports whether a literal statement begins a
+// deferred transaction: BEGIN, optionally DEFERRED, optionally TRANSACTION.
+// An explicit BEGIN IMMEDIATE or BEGIN EXCLUSIVE takes the writer and is not
+// one.
+func isDeferredBeginLiteral(value string) bool {
+	words := sqlWords(value)
+	if len(words) == 0 || words[0] != sqlKeywordBegin {
+		return false
+	}
+	i := 1
+	if i < len(words) && words[i] == sqlKeywordDeferred {
+		i++
+	}
+	if i < len(words) && words[i] == sqlKeywordTransaction {
+		i++
+	}
+	return i == len(words)
+}
+
+// isSavepointLiteral reports whether a literal statement opens a savepoint,
+// which begins a deferred transaction when it is outermost.
+func isSavepointLiteral(value string) bool {
+	words := sqlWords(value)
+	return len(words) >= 1 && len(words) <= 2 && words[0] == sqlKeywordSavepoint
+}
+
+// isWriteSQLLiteral reports whether a literal is write-shaped SQL: after any
+// leading comments, it starts with a write keyword, or it starts with a WITH
+// clause whose text holds an INSERT, UPDATE or DELETE. It is a shape check,
+// not a parser: a CTE that only names one of those words in a string or an
+// identifier counts as a write, which errs toward review.
+func isWriteSQLLiteral(value string) bool {
+	words := sqlWords(stripLeadingSQLComments(value))
+	if len(words) == 0 {
+		return false
+	}
+	if sqlWriteKeywords[words[0]] {
+		return true
+	}
+	if words[0] != sqlKeywordWith {
+		return false
+	}
+	for _, word := range words[1:] {
+		if sqlCTEWriteKeywords[word] {
+			return true
+		}
+	}
+	return false
+}
+
+// stripLeadingSQLComments drops the -- line comments and /* */ block
+// comments before a statement's first keyword.
+func stripLeadingSQLComments(value string) string {
+	for {
+		value = strings.TrimSpace(value)
+		switch {
+		case strings.HasPrefix(value, "--"):
+			end := strings.IndexByte(value, '\n')
+			if end < 0 {
+				return ""
+			}
+			value = value[end+1:]
+		case strings.HasPrefix(value, "/*"):
+			end := strings.Index(value, "*/")
+			if end < 0 {
+				return ""
+			}
+			value = value[end+2:]
+		default:
+			return value
+		}
+	}
+}
+
+// sqlWords splits SQL text into upper-cased identifier words, dropping
+// punctuation, so keywords compare without case and without a trailing ";".
+func sqlWords(value string) []sqlKeyword {
+	fields := strings.FieldsFunc(strings.ToUpper(value), func(r rune) bool { return !isSQLWordRune(r) })
+	words := make([]sqlKeyword, len(fields))
+	for i, field := range fields {
+		words[i] = sqlKeyword(field)
+	}
+	return words
+}
+
+// isSQLWordRune reports whether r can be part of an upper-cased SQL word.
+func isSQLWordRune(r rune) bool {
+	letter := r >= 'A' && r <= 'Z'
+	digit := r >= '0' && r <= '9'
+	return letter || digit || r == '_'
+}
 
 type deferredBegin struct {
 	File     string `yaml:"file"`
@@ -272,15 +384,15 @@ func scanGuardSources(names []string, read func(string) ([]byte, error)) (guardS
 						return true
 					}
 					switch {
-					case deferredBeginLiteral.MatchString(value):
+					case isDeferredBeginLiteral(value):
 						scan.begins[deferredBegin{File: scope.File, Function: scope.Function, Begin: "BEGIN"}]++
-					case savepointLiteral.MatchString(value):
+					case isSavepointLiteral(value):
 						scan.begins[deferredBegin{File: scope.File, Function: scope.Function, Begin: "SAVEPOINT"}]++
-					case collectWrites && writeSQLLiteral.MatchString(value):
+					case collectWrites && isWriteSQLLiteral(value):
 						scan.writes[scope] = append(scan.writes[scope], value)
 					}
 				case *ast.Ident:
-					if value, ok := strs[node.Name]; collectWrites && ok && writeSQLLiteral.MatchString(value) {
+					if value, ok := strs[node.Name]; collectWrites && ok && isWriteSQLLiteral(value) {
 						scan.writes[scope] = append(scan.writes[scope], node.Name)
 					}
 				}
