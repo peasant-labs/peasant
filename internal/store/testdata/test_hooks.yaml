@@ -1,0 +1,8 @@
+# The store's nil-default test hooks touched by the managed-generation context
+# validation, and the only functions that may read each. No production file
+# may assign one (internal/testkit/hookguard).
+hooks:
+  - name: settleValidatedMutationForTest
+    readers: [Store.SettleManagedGenerationUnchanged]
+  - name: refreshReadSlotSeam
+    readers: [Store.acquireRefreshReadSlot]
