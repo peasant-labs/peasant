@@ -1,0 +1,48 @@
+# The search index rebuild measurement (sandbox only; build tag
+# upgrade_measure). Each variant changes one setting on a copy of the store
+# before the one-statement rebuild; the queries must return the same rows and
+# ranks after every variant as after the baseline, or the variant changed
+# results and is not a candidate.
+requiredVariants:
+  - baseline
+  - hashsize-16m
+  - hashsize-64m
+  - cache-1g
+variants:
+  # The rebuild statement at FTS5's default budget (1 MiB), as migration 76
+  # ran it before the upgrade widened the budget, on a connection with the
+  # store's per-connection settings.
+  - name: baseline
+  # FTS5 flushes its in-memory postings to a new level-0 segment each time
+  # they pass the hash size (1 MiB by default), and automerge folds those
+  # segments together while the rebuild runs. A larger hash writes fewer,
+  # larger segments, so each posting is merged fewer times.
+  - name: hashsize-16m
+    setup:
+      - "INSERT INTO session_search_fts(session_search_fts, rank) VALUES('hashsize', 16777216)"
+  - name: hashsize-64m
+    setup:
+      - "INSERT INTO session_search_fts(session_search_fts, rank) VALUES('hashsize', 67108864)"
+  # A page cache large enough to hold the index's hot interior and the
+  # segments being merged.
+  - name: cache-1g
+    setup:
+      - "PRAGMA cache_size = -1048576"
+# Queries whose rows and bm25 ranks must be identical after every variant.
+# The synthetic text draws words w0..w49999 uniformly.
+requiredQueries:
+  - common-term
+  - rare-term
+  - two-term-and
+  - near
+  - prefix
+  - column-filter
+  - or-not
+queries:
+  - {name: common-term, match: "w1"}
+  - {name: rare-term, match: "w49999"}
+  - {name: two-term-and, match: "w123 w4567"}
+  - {name: near, match: "NEAR(w10* w20*, 5)"}
+  - {name: prefix, match: "w4999*"}
+  - {name: column-filter, match: "content_preview : w77"}
+  - {name: or-not, match: "(w5 OR w6) NOT w7"}

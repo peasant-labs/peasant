@@ -58,7 +58,7 @@ func buildChainDatabase(dbPath string) error {
 		return fmt.Errorf("store: check capture formats on the scratch database: %w", err)
 	}
 	for version := 1; version <= len(dbSchema.Migrations); version++ {
-		if err := applyUpgradeStep(context.Background(), conn, version, nil, nil); err != nil {
+		if err := applyUpgradeStep(context.Background(), conn, version, false, nil, nil); err != nil {
 			pool.Put(conn)
 			return fmt.Errorf("store: run the migration chain on the scratch database: %w", err)
 		}

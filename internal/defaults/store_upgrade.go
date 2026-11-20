@@ -94,12 +94,21 @@ const (
 	StoreUpgradeSessionTablesRebuildDiskFactor = 2.0
 
 	// StoreUpgradeSearchRebuildDiskFactor is for a step that builds or
-	// rebuilds a search index without copying a table. Not measured in the
-	// sandbox run. Derivation: a fresh build of the search index measured
-	// about 0.39 times the indexed text bytes (the store's own search
-	// estimate uses the same figure), and the database size is an upper
-	// bound on the text it holds.
-	StoreUpgradeSearchRebuildDiskFactor = 0.39
+	// rebuilds a search index without copying a table. Its basis is the
+	// whole database. Measured (2026-11-19, TestSandboxSearchRebuildMeasure,
+	// three runs per point, every run of a point gave the same log size):
+	// the search trigger repair (76) on synthetic stores whose text is in the
+	// bodies grew the write-ahead log by 0.378 of a 1.94 GB database (1.05 GB
+	// of text) and 0.379 of a 3.87 GB database (2.10 GB of text) with the
+	// rebuild's widened postings budget (SearchRebuildHashBytes), against
+	// 0.334 and 0.333 for the same statement at FTS5's default budget: the
+	// wider budget writes about 1.13 times the index instead of 1.0 times.
+	// 0.50 is the measured 0.379 plus 0.12. The database holds the text, the
+	// index and every other table, so a store with more non-text data asks
+	// for more than it needs; a store that is almost all index text could
+	// come closer to the factor. The earlier, unmeasured 0.39 (a fresh index
+	// build at 0.39 of the text) left 0.011 above the measured log.
+	StoreUpgradeSearchRebuildDiskFactor = 0.50
 
 	// StoreUpgradeRowsStepDiskFactor is for a step whose cost scales with
 	// the row count and that never rewrites stored text: a table rebuild of

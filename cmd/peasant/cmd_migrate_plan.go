@@ -5,6 +5,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/upgrade"
@@ -16,6 +17,15 @@ type schemaPlanStep struct {
 	Title   string `json:"title"`
 	Cost    string `json:"cost"`
 	Counts  string `json:"counts"`
+	// Estimate is the step's expected duration band, as the printed plan
+	// shows it; omitted for a step without one.
+	Estimate *schemaPlanEstimate `json:"estimate,omitempty"`
+}
+
+type schemaPlanEstimate struct {
+	LowSeconds   int64 `json:"low_seconds"`
+	HighSeconds  int64 `json:"high_seconds"`
+	Extrapolated bool  `json:"extrapolated"`
 }
 
 type schemaPlanDisk struct {
@@ -36,13 +46,21 @@ type schemaPlanJSON struct {
 func schemaUpgradeJSON(plan store.UpgradePlan) schemaPlanJSON {
 	steps := make([]schemaPlanStep, 0, len(plan.Steps))
 	for _, step := range plan.Steps {
-		steps = append(steps, schemaPlanStep{
+		row := schemaPlanStep{
 			Version: step.Version,
 			Kind:    step.Kind.String(),
 			Title:   step.Title,
 			Cost:    step.Cost.String(),
 			Counts:  step.Counts.String(),
-		})
+		}
+		if step.Estimate.Known() {
+			row.Estimate = &schemaPlanEstimate{
+				LowSeconds:   int64(step.Estimate.Low / time.Second),
+				HighSeconds:  int64((step.Estimate.High + time.Second - 1) / time.Second),
+				Extrapolated: step.Estimate.Extrapolated,
+			}
+		}
+		steps = append(steps, row)
 	}
 	return schemaPlanJSON{
 		DBPath: plan.DBPath, From: plan.From, To: plan.To, Steps: steps,
