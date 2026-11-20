@@ -150,6 +150,7 @@ func OpenReadOnlyWithOptions(path string, opts ...OpenOption) (*Store, error) {
 		indexConversions:    conversions,
 		generationArtifacts: artifacts,
 		sessionLocker:       locker,
+		poolSize:            1,
 	}, nil
 }
 

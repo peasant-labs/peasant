@@ -292,6 +292,17 @@ type Store struct {
 	// attachments is the one file-and-row store for this database. Put, GC, and
 	// prune share its lock. It is constructed in Open and never replaced.
 	attachments *attachments.Store
+	// poolSize is the connection count of pool; the read-slot cap of the
+	// context validator is derived from it.
+	poolSize int
+	// refreshReadSlots is the semaphore of the read-only refresh work (see
+	// acquireRefreshReadSlot), made on first use.
+	refreshReadSlotsOnce sync.Once
+	refreshReadSlots     chan struct{}
+	// refreshReadSlotSeam is a nil production hook a test sets to observe a
+	// caller waiting for a read slot and to hold one once taken, so the slot
+	// cap is observed through a wake source instead of a sleep.
+	refreshReadSlotSeam func(ctx context.Context, stage refreshReadSlotStage)
 }
 
 // InstallationSalt returns the salt used by ingestion to derive canonical,
@@ -577,7 +588,7 @@ func newStoreOnPool(pool *sqlitex.Pool, dbPath string, o openOptions, formats ma
 		return nil, fmt.Errorf("store: load installation salt: %w", err)
 	}
 
-	opened := &Store{pool: pool, salt: s, indexFormats: formats, indexConversions: conversions, generationArtifacts: o.generationArtifacts, sessionLocker: o.sessionLocker, attachmentDir: AttachmentDir(dbPath)}
+	opened := &Store{pool: pool, salt: s, indexFormats: formats, indexConversions: conversions, generationArtifacts: o.generationArtifacts, sessionLocker: o.sessionLocker, attachmentDir: AttachmentDir(dbPath), poolSize: resolvePoolSize(o.poolSize)}
 	opened.attachments = attachments.New(opened.attachmentDir, attachmentRows{opened}, attachments.Hooks{})
 	opened.writeConfig = resolveStoreWriteConfig(o.writeConfig)
 	return opened, nil
