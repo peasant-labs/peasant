@@ -28,17 +28,8 @@
   gap: var(--sp-2);
   flex-wrap: wrap;
 }
-/* A narrow foot cannot hold back, the count and up to three buttons on one
-   line: back and the count keep the first line, and the answers take a second
-   full-width line of their own, right-aligned, in the same order. */
-@media (max-width: 40rem) {
-  .wizard-host .swz-foot:has(.ks-foot-answers) {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-  .wizard-host .swz-foot-end:has(.ks-foot-answers) {
-    grid-column: 1 / -1;
-  }
-}
+/* How a narrow foot lays the answers out is part of the frame, so it lives with
+   the wizard host in app/globals.css. */
 
 /* One stop. */
 .ks-stop {
@@ -463,7 +454,6 @@
 }
 
 .ks-counts-mobile { display: none; }
-.ks-wizard .swz-body { padding-block: var(--sp-3); }
 @media (max-width: 767px) {
   .ks-stop:has(.ks-tree) > .ks-title,
   .ks-field:has(.ks-tree) > .ks-help:first-child {
@@ -471,7 +461,6 @@
     overflow: hidden; clip-path: inset(50%); white-space: nowrap;
   }
   .wizard-page:has(.ks-wizard) { padding-inline: var(--sp-2); }
-  .ks-wizard .swz-body:has(.ks-tree) { padding-inline: var(--sp-2); }
   .ks-tree > .st { border: 0; }
   .ks-counts-desktop { display: none; }
   .ks-counts-mobile { display: inline; white-space: nowrap; }
