@@ -414,8 +414,10 @@ database.
 
 The migration dry run also reports a read-only session-work census from the
 stored refresh evidence. It counts sessions by refresh lane and reason, and
-counts unknown evidence by name; it does not list session identities. Counts
-are not a duration estimate. The census is approximate even on a current
+counts unknown evidence by name; it does not list session identities. Each
+unknown count is per evidence kind, not per session: one session can contribute
+to multiple kinds, such as both missing adapter and index proof on a pre-v55
+store. Counts are not a duration estimate. The census is approximate even on a current
 schema: it does not read capture recovery, publication capture or binding,
 content pending, source comparison or state, latest attempt, stored pair, or
 permanent refusal evidence. An unknown harness remains undecided and contributes

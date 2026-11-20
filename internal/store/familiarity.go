@@ -93,7 +93,11 @@ func (s *Store) UpsertSessionFiles(ctx context.Context, sessionID string, files 
 	}
 	defer s.pool.Put(conn)
 
-	defer sqlitex.Transaction(conn)(&err)
+	endFn, err := beginWrite(conn, "upsert the files of session "+sessionID)
+	if err != nil {
+		return err
+	}
+	defer endFn(&err)
 
 	for _, f := range files {
 		err = sqlitex.ExecuteTransient(conn, sqlUpsertSessionFile, &sqlitex.ExecOptions{

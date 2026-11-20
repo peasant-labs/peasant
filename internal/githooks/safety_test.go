@@ -98,6 +98,8 @@ func TestLifecycle_SymlinkedSlotIsForeign(t *testing.T) {
 				targetDir = t.TempDir()
 			}
 			target := filepath.Join(targetDir, "shared-hook.sh")
+			// not executed: lifecycle checks the symlink target and refuses it.
+			// ast-grep-ignore: no-unsafe-executable-write -- foreign target fixture.
 			if err := os.WriteFile(target, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 				t.Fatal(err)
 			}

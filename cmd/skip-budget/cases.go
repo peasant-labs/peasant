@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -23,6 +24,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/upgrade"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
 )
@@ -37,13 +39,31 @@ const (
 	armBaseline arm = "baseline"
 )
 
+var allArms = []arm{armSkip, armBaseline}
+
+func newArm(raw string) (arm, error) {
+	a := arm(raw)
+	if !slices.Contains(allArms, a) {
+		return "", fmt.Errorf("arm %q is not one of %v", raw, allArms)
+	}
+	return a, nil
+}
+
 // mutation is the change a case applies to the imported base before any round.
 type mutation int
 
+// The zero value is not a mutation, so a case that forgets to name one fails
+// to prepare instead of measuring an unchanged base.
 const (
 	mutateAdapterStamp mutation = iota + 1
 	mutateIndexer
+	// mutateNone leaves the imported base as it is. Only the new-session
+	// smoke case uses it: it times the import itself.
+	mutateNone
 )
+
+// defined reports whether m is one of the mutations above.
+func (m mutation) defined() bool { return m >= mutateAdapterStamp && m <= mutateNone }
 
 // caseSpec is what one corpus case prepares, how its two arms run, and what
 // each arm must have executed for the report to be evidence.
@@ -162,6 +182,8 @@ type executed struct {
 
 // sample is one timed pipeline run over a fresh copy of the prepared base.
 type sample struct {
+	// PID is the child process that ran the sample.
+	PID          int     `json:"pid"`
 	Round        int     `json:"round"`
 	Arm          arm     `json:"arm"`
 	WallMs       float64 `json:"wallMs"`
@@ -175,12 +197,45 @@ type sample struct {
 	UndeclaredDecisions int                         `json:"undeclaredDecisions"`
 	ParsedBytes         int64                       `json:"parsedBytes"`
 	Outcomes            map[ingest.IndexOutcome]int `json:"outcomes"`
-	Census              []ingest.RefreshCensusRow   `json:"census"`
+	Census              []censusRow                 `json:"census"`
 	CensusLanes         map[ingest.RefreshLane]int  `json:"censusLanes"`
 	WriteLane           *ingest.WriteLaneStats      `json:"writeLane,omitempty"`
 	DBBytes             int64                       `json:"dbBytesBefore"`
 	DBBytesAfter        int64                       `json:"dbBytesAfter"`
 	WALBytes            int64                       `json:"walBytesAfter"`
+}
+
+// censusRow is one census row as a sample carries it from the child to the
+// parent. It writes the row as the census does, reason as its stable code,
+// and reads that form back through the reason's validating constructor.
+//
+// The decoder lives here rather than as RefreshCensusRow.UnmarshalJSON:
+// the census is an output the pipeline writes into reports and never reads
+// back, and this build-tagged harness is the only reader. A production
+// decoder would be a new trust boundary in internal/ingest that nothing
+// shipped exercises.
+type censusRow struct {
+	ingest.RefreshCensusRow
+}
+
+func (r *censusRow) UnmarshalJSON(data []byte) error {
+	var wire struct {
+		Reason      string             `json:"reason"`
+		Lane        ingest.RefreshLane `json:"lane"`
+		Sessions    int                `json:"sessions"`
+		SourceBytes int64              `json:"source_bytes"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&wire); err != nil {
+		return fmt.Errorf("decode census row: %w", err)
+	}
+	reason, err := ingest.NewOutcomeReason(wire.Reason)
+	if err != nil {
+		return fmt.Errorf("decode census row on lane %s: %w", wire.Lane, err)
+	}
+	r.RefreshCensusRow = ingest.RefreshCensusRow{Reason: reason, Lane: wire.Lane, Sessions: wire.Sessions, SourceBytes: wire.SourceBytes}
+	return nil
 }
 
 // armSummary is the order statistics of one arm's samples.
@@ -200,6 +255,11 @@ type caseShape struct {
 	Entries     int   `json:"entriesPerSession"`
 	CorpusBytes int64 `json:"corpusBytes"`
 	PrepareMs   int64 `json:"prepareMs"`
+	// ImportedEntries is the entry count the initial import indexed, and
+	// ActiveGenerations the sessions it left with an active managed
+	// generation.
+	ImportedEntries   int   `json:"importedEntries"`
+	ActiveGenerations int64 `json:"activeGenerations"`
 }
 
 // planEvidence is what the read-only planner says about the prepared base.
@@ -244,7 +304,11 @@ const (
 	matrixEntries  = 1000
 )
 
-func runCase(ctx context.Context, spec caseSpec, opts harnessOptions) (string, error) {
+// runCase prepares the case's base once, then runs each arm sample in its own
+// child process through command, alternating the arm order by round. A sample
+// that did not execute what the case expects fails the case before any
+// report is written.
+func runCase(ctx context.Context, spec caseSpec, opts harnessOptions, command sampleCommand) (string, error) {
 	dir, err := cleanCaseDir(opts.root, spec.id)
 	if err != nil {
 		return "", err
@@ -271,7 +335,8 @@ func runCase(ctx context.Context, spec caseSpec, opts harnessOptions) (string, e
 			order = []arm{armBaseline, armSkip}
 		}
 		for _, a := range order {
-			s, err := runRound(ctx, spec, baseDir, filepath.Join(dir, fmt.Sprintf("round-%d-%s", round, a)), round, a)
+			s, err := collectRunSample(sampleFlags{Kind: string(sampleKindRun), Dir: filepath.Join(dir, fmt.Sprintf("round-%d-%s", round, a)),
+				Base: baseDir, Case: string(spec.id), Arm: string(a), Round: round}, command)
 			if err != nil {
 				return "", fmt.Errorf("%s round %d %s arm: %w", spec.id, round, a, err)
 			}
@@ -296,7 +361,7 @@ func runCase(ctx context.Context, spec caseSpec, opts harnessOptions) (string, e
 		report.NotProvenRate = float64(proofs-proven) / float64(proofs)
 	}
 	report.Notes = append(report.Notes,
-		"Each round copies the prepared base outside the timed region and times one pipeline run; arms alternate order by round.",
+		"Each sample runs in its own child process on a fresh heap: it copies the prepared base outside the timed region and times one pipeline run; arms alternate order by round.",
 		"Settle counts come from a store wrapper that counts calls; parses are index-log attempts with a measured parse duration.",
 		"INDEX includes settlement; no separate settle duration is persisted.")
 	if report.Smoke {
@@ -366,7 +431,7 @@ type countingStore struct {
 
 var _ ingest.ManagedGenerationUnchangedProver = (*countingStore)(nil)
 
-func (s *countingStore) SettleCapturedGenerationUnchanged(ctx context.Context, request ingest.ManagedGenerationUnchangedProof) (ingest.ManagedGenerationRefreshOutcome, error) {
+func (s *countingStore) SettleCapturedGenerationUnchanged(ctx context.Context, request ingest.ManagedGenerationUnchangedProof) (ingest.ManagedGenerationUnchangedSettleOutcome, error) {
 	s.settles.Add(1)
 	return s.Store.SettleCapturedGenerationUnchanged(ctx, request)
 }
@@ -404,6 +469,9 @@ func newPipeline(db *store.Store, metricsStore ingest.MetricsStore, adapters map
 // prepareBase writes the synthetic corpus, imports it once into a managed
 // store, and applies the case's mutation. Every round copies this base.
 func prepareBase(ctx context.Context, baseDir string, sessions, entries int, m mutation) (caseShape, error) {
+	if !m.defined() {
+		return caseShape{}, fmt.Errorf("mutation %d is not defined; name the case's mutation", m)
+	}
 	source, output, dbDir := filepath.Join(baseDir, "source"), filepath.Join(baseDir, "output"), filepath.Join(baseDir, "db")
 	for _, dir := range []string{source, output, dbDir} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -432,8 +500,16 @@ func prepareBase(ctx context.Context, baseDir string, sessions, entries int, m m
 	if result.Summary.New != sessions || result.Summary.Errors != 0 {
 		return caseShape{}, fmt.Errorf("initial import summary %+v, want %d new sessions and no errors", result.Summary, sessions)
 	}
+	shape := caseShape{Sessions: sessions, Entries: entries, CorpusBytes: corpus, PrepareMs: prepareMs}
+	for _, entry := range result.IndexLog {
+		shape.ImportedEntries += entry.EntriesCount
+	}
+	if shape.ActiveGenerations, err = queryInt(ctx, db, `SELECT count(*) FROM sessions WHERE active_generation_id IS NOT NULL`); err != nil {
+		return caseShape{}, err
+	}
 	target := ingest.GenerationTargets(ingest.HarvesterVersionRegistry)[ingest.HarnessClaudeCode]
 	switch m {
+	case mutateNone:
 	case mutateAdapterStamp:
 		if err := execSQL(ctx, db, `UPDATE sessions SET adapter_version = ?`, target.AdapterVersion-1); err != nil {
 			return caseShape{}, err
@@ -455,7 +531,7 @@ func prepareBase(ctx context.Context, baseDir string, sessions, entries int, m m
 	default:
 		return caseShape{}, fmt.Errorf("mutation %d is not defined", m)
 	}
-	return caseShape{Sessions: sessions, Entries: entries, CorpusBytes: corpus, PrepareMs: prepareMs}, nil
+	return shape, nil
 }
 
 // planBase runs the read-only planner on the prepared base. Every session
@@ -560,8 +636,8 @@ func runRound(ctx context.Context, spec caseSpec, baseDir, roundDir string, roun
 		}
 	}
 	if result.Census != nil {
-		s.Census = result.Census.Rows
 		for _, row := range result.Census.Rows {
+			s.Census = append(s.Census, censusRow{row})
 			s.CensusLanes[row.Lane] += row.Sessions
 		}
 	}
@@ -582,6 +658,22 @@ func execSQL(ctx context.Context, db *store.Store, query string, args ...any) er
 		return fmt.Errorf("prepare statement %q: %w", strings.SplitN(query, "\n", 2)[0], err)
 	}
 	return nil
+}
+
+func queryInt(ctx context.Context, db *store.Store, query string) (int64, error) {
+	conn, err := db.Pool().Take(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer db.Pool().Put(conn)
+	var value int64
+	if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error {
+		value = stmt.ColumnInt64(0)
+		return nil
+	}}); err != nil {
+		return 0, fmt.Errorf("query %q: %w", query, err)
+	}
+	return value, nil
 }
 
 func fileSize(path string) int64 {

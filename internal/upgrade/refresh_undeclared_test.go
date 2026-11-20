@@ -106,18 +106,16 @@ func TestPlanRefreshUndeclaredProducer(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(plan.Sessions) != 1 || plan.Estimate.Sessions != 1 {
-				t.Fatalf("sessions = %+v", plan.Sessions)
+			if plan.Estimate.Sessions != 1 {
+				t.Fatalf("sessions = %d", plan.Estimate.Sessions)
 			}
-			session := plan.Sessions[0]
 			unknown := slices.Contains(plan.Unknown, RefreshUnknown{"session", "harness"})
-			if unknown != c.Want.UnknownHarness || session.Decided != c.Want.Decided {
-				t.Fatalf("decided %v unknown harness %v, want %v and %v: %+v", session.Decided, unknown, c.Want.Decided, c.Want.UnknownHarness, plan)
+			if unknown != c.Want.UnknownHarness || (plan.Estimate.Undecided == 0) != c.Want.Decided {
+				t.Fatalf("unknown harness %v, want %v: %+v", unknown, c.Want.UnknownHarness, plan)
 			}
 			if !c.Want.Decided {
 				// An unknown harness is in no lane and forces no step.
-				planned := session.FullStep != nil ||
-					plan.Estimate.Undecided != 1 ||
+				planned := plan.Estimate.Undecided != 1 ||
 					len(plan.Estimate.ByLane) != 0 ||
 					len(plan.Estimate.FullStep) != 0
 				if planned {
@@ -133,24 +131,26 @@ func TestPlanRefreshUndeclaredProducer(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			mismatch := session.Decision.Lane != lane ||
-				session.Decision.Reason != reason ||
-				plan.Estimate.ByLane[lane] != 1 ||
+			mismatch := plan.Estimate.ByLane[lane] != 1 ||
+				plan.Estimate.ByReason[reason] != 1 ||
 				plan.Estimate.Undecided != 0
 			if mismatch {
-				t.Fatalf("decided %+v, want %s/%s: %+v", session.Decision, lane, reason, plan.Estimate)
+				t.Fatalf("want %s/%s: %+v", lane, reason, plan.Estimate)
 			}
 			if c.Want.FullStep == "" {
-				if session.FullStep != nil || session.Decision.AdapterUndeclared || len(plan.Estimate.FullStep) != 0 {
-					t.Fatalf("named an undeclared producer: %+v %+v", session.Decision, session.FullStep)
+				if len(plan.Estimate.FullStep) != 0 {
+					t.Fatalf("named an undeclared producer: %+v", plan.Estimate.FullStep)
 				}
 				return
 			}
-			if session.FullStep == nil || !session.Decision.AdapterUndeclared {
-				t.Fatalf("no full step named: %+v", session)
+			found := false
+			for producer, count := range plan.Estimate.FullStep {
+				if producer.String() == c.Want.FullStep && count == 1 {
+					found = true
+				}
 			}
-			if session.FullStep.String() != c.Want.FullStep || plan.Estimate.FullStep[*session.FullStep] != 1 {
-				t.Fatalf("full step = %+v census %+v, want %s", session.FullStep, plan.Estimate.FullStep, c.Want.FullStep)
+			if !found || len(plan.Estimate.FullStep) != 1 {
+				t.Fatalf("full step census %+v, want %s", plan.Estimate.FullStep, c.Want.FullStep)
 			}
 		})
 	}

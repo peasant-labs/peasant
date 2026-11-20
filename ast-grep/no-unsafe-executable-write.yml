@@ -1,0 +1,20 @@
+id: no-unsafe-executable-write
+language: Go
+severity: error
+message: Use executable.Write for files that will be executed.
+note: >
+  This rule checks octal, hexadecimal, and binary literal modes. Decimal modes,
+  digit separators, variable modes, wrapper helpers, and other writing APIs are
+  not detected. Suppress only files never executed.
+rule:
+  pattern: os.WriteFile($PATH, $DATA, $MODE)
+constraints:
+  MODE:
+    regex: '^(?:(?:0o|0)[0-7]*[1357][0-7]{0,2}|0[xX][0-9a-fA-F]*(?:[4567cdefCDEF][0-9a-fA-F]|[135789abcdefABCDEF])|0[bB][01]*(?:1[01]{6}|1[01]{3}|1))$'
+files:
+  - "**/*_test.go"
+  - "internal/e2e/**/*.go"
+ignores:
+  - "internal/testkit/executable/**"
+  - "vendor/**"
+  - "third_party/**"

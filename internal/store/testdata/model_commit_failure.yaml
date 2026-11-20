@@ -1,0 +1,4 @@
+model_id: commit-failure-model
+provider_key: commit-failure-provider
+display_name: Commit Failure Model
+last_synced: '2026-01-01'

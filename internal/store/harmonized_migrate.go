@@ -909,7 +909,7 @@ func (s *Store) clearIndexedInputHash(ctx context.Context, sessionID schema.Sess
 // store, so Open never hands this phase one to consolidate (only tests that
 // rebuild the retired index reach the consolidating branch). It stays until
 // the explicit upgrade removes it.
-func (s *Store) migrateConsolidateSearch(ctx context.Context) (bool, error) {
+func (s *Store) migrateConsolidateSearch(ctx context.Context) (consolidated bool, txnErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return false, fmt.Errorf("store: take connection for search consolidation: %w; the index is unchanged", err)
@@ -918,8 +918,10 @@ func (s *Store) migrateConsolidateSearch(ctx context.Context) (bool, error) {
 	if !tableExistsOnConn(conn, "session_entries_fts") {
 		return false, nil
 	}
-	txnErr := error(nil)
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, "consolidate the search index")
+	if err != nil {
+		return false, fmt.Errorf("%w; the index is unchanged", err)
+	}
 	defer endFn(&txnErr)
 	for _, trigger := range []string{"session_entries_ai", "session_entries_ad", "session_entries_au"} {
 		if err := sqlitex.ExecuteTransient(conn, `DROP TRIGGER IF EXISTS `+trigger, nil); err != nil {

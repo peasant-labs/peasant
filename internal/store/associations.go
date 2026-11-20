@@ -115,7 +115,10 @@ func (s *Store) lookupOrCreateSessionCommitAssociation(ctx context.Context, requ
 	}
 	defer s.pool.Put(conn)
 
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, "record the commit association of session "+request.SessionID.String())
+	if err != nil {
+		return sessionCommitAssociation{}, err
+	}
 	defer endFn(&err)
 	return lookupOrCreateSessionCommitAssociation(conn, request)
 }

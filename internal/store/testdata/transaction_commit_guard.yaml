@@ -1,0 +1,10 @@
+exceptions:
+  - file: entries_writer.go
+    function: IndexSessionEntryBatch
+    reason: An earlier deferred function converts the final transaction error into failures for every affected batch result.
+  - file: annotation_store.go
+    function: applyClassifierAnnotations
+    reason: The conditional deferred finalizer protects panic cleanup; normal execution explicitly finalizes and propagates txnErr into affected results before returning.
+  - file: annotation_store.go
+    function: applyClassifierAnnotationBatches
+    reason: The conditional deferred finalizer protects panic cleanup; normal execution explicitly finalizes and propagates txnErr into affected batch results before returning.

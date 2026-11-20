@@ -93,6 +93,17 @@ func TestMeasurementCasesAreOneClosedSet(t *testing.T) {
 		}
 		specs = append(specs, id)
 	}
+	// A measured case changes its base before the arms run; only the
+	// new-session smoke import leaves it unchanged, and the zero value is
+	// never a mutation.
+	for id, spec := range caseSpecs() {
+		if !spec.mutation.defined() || spec.mutation == mutateNone {
+			t.Errorf("measured case %s prepares with mutation %d, want a defined mutation other than none", id, spec.mutation)
+		}
+	}
+	if mutation(0).defined() {
+		t.Error("the zero mutation is defined; a case that forgets its mutation would measure an unchanged base")
+	}
 	if got, want := sorted(specs), sorted(byKind[caseKindMeasured]); !slices.Equal(got, want) {
 		t.Errorf("harness caseSpecs cover %v, want the measured cases %v", got, want)
 	}

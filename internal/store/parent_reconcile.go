@@ -271,7 +271,10 @@ func (s *Store) ReconcileParentCache(ctx context.Context, updates []ingest.Paren
 	}
 	defer s.pool.Put(conn)
 
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, fmt.Sprintf("reconcile the parent cache of %d sessions", len(updates)))
+	if err != nil {
+		return fmt.Errorf("%w; no cache update in this reconciliation was committed; retry harvest", err)
+	}
 	defer endFn(&err)
 
 	// effective is the parent cache as this transaction will leave it; exists
