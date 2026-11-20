@@ -1,6 +1,6 @@
 cases:
-  - {name: legacy-claude, input: claude, output: claude-code, renamed: true, unknown: false}
-  - {name: legacy-gemini, input: gemini, output: gemini-cli, renamed: true, unknown: true}
-  - {name: canonical, input: claude-code, output: claude-code, renamed: false, unknown: false}
-  - {name: unrecognized, input: unknown-harness, output: unknown-harness, renamed: false, unknown: true}
+  - {name: legacy-claude, input: claude, unknown: false}
+  - {name: legacy-gemini, input: gemini, unknown: true}
+  - {name: canonical, input: claude-code, unknown: false}
+  - {name: unrecognized, input: unknown-harness, unknown: true}
 requiredNames: [legacy-claude, legacy-gemini, canonical, unrecognized]

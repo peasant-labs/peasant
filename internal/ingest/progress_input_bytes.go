@@ -18,7 +18,7 @@ func indexProgressLogsPaired(logger *slog.Logger, logs, done int) bool {
 }
 
 type inputPayloadSizer interface {
-	PayloadSize(context.Context, DiscoveredSession) (int64, error)
+	payloadSize(context.Context, DiscoveredSession) (int64, error)
 }
 
 var _ inputPayloadSizer = (*OpenCodeAdapter)(nil)
@@ -55,7 +55,7 @@ func (p *Pipeline) extractInputBytes(ctx context.Context, entry DiffEntry) int64
 		if !ok {
 			return 0
 		}
-		size, err := adapter.PayloadSize(ctx, session)
+		size, err := adapter.payloadSize(ctx, session)
 		if err != nil {
 			return 0
 		}
@@ -78,30 +78,4 @@ func (p *Pipeline) regularFileBytes(path string) int64 {
 		return 0
 	}
 	return info.Size()
-}
-
-// PayloadSize measures SQLite payloads without materializing their rows.
-func (a *OpenCodeAdapter) PayloadSize(ctx context.Context, session DiscoveredSession) (int64, error) {
-	var size OpenCodePayloadSize
-	err := a.withOpenCodeSQLiteSource(ctx, session.SourcePath.String(), func(source OpenCodeSQLiteSource) error {
-		switch session.TranscriptOrigin {
-		case TranscriptOriginOpenCodeLegacySQLite:
-			id, err := NewOpenCodeLegacySessionID(string(session.SessionID))
-			if err != nil {
-				return err
-			}
-			size, err = source.LegacySessionPayloadSize(ctx, id)
-			return err
-		case TranscriptOriginOpenCodeCurrentSQLite:
-			id, err := NewOpenCodeCurrentSessionID(string(session.SessionID))
-			if err != nil {
-				return err
-			}
-			size, err = source.CurrentSessionPayloadSize(ctx, id)
-			return err
-		default:
-			return nil
-		}
-	})
-	return size.Bytes, err
 }
