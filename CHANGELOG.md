@@ -6,6 +6,11 @@ All notable changes to Peasant are recorded here. The format follows
 GitHub Releases, which hold the signed artifacts and checksums. A version that
 was tagged but not published links to its tag instead.
 
+## [0.22.0] - 2026-11-20
+
+- return a failed commit instead of reporting success (#1134)
+- rebuild the search index with a wider postings budget and estimate it in the upgrade plan (#1136)
+
 ## [0.21.3] - 2026-11-20
 
 - take the SQLite writer before any store write reads (#1130)
