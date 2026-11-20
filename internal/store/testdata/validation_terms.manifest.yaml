@@ -21,3 +21,5 @@ requiredNames:
   - validated-settle-refuses-another-generation
   - validated-settle-refuses-a-moved-generation
   - validated-settle-never-skips-a-state-term
+  - validated-settle-writes-the-candidate-stats
+  - validated-settle-refuses-a-carried-candidate-the-store-no-longer-matches

@@ -111,6 +111,13 @@ func (s *Store) SettleManagedGenerationUnchanged(ctx context.Context, p ManagedG
 			Detail: "the stored parse counts are incomplete; re-parse the source to restore authoritative counts",
 		}
 	}
+	// A parse writes the builder's stats: its metadata half's non-strict
+	// stats with the projection's strict counts. A validated settle carries
+	// that half, so it writes the half's stats; the stored strict counts are
+	// the projection's for these bytes, as on a proven settle.
+	if p.Validated != nil {
+		p.Metadata.Stats = p.Validated.Candidate.Metadata.Stats
+	}
 	p.Metadata.Stats.TurnCount = *stored.TurnCount
 	p.Metadata.Stats.InputSubmissionCount = stored.InputSubmissionCount
 	conversation := int64(*stored.ConversationTurnCount)

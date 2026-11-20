@@ -16,12 +16,18 @@
 #                forged to another non-zero value with the immutability
 #                trigger lifted and restored exactly.
 # candidate:     stored (the generation's own metadata), none (nil candidate),
-#                content-hash-differs.
+#                content-hash-differs, stats-differ (the stored candidate with
+#                non-strict stats and a strict count unlike the recorded ones).
 # setup:         stats-overflow-diagnostic stores only a stats-overflow
 #                diagnostic row on the active generation.
 # between:       a change made after validation and before the settle:
 #                insert-commit adds a context row to the active generation;
-#                activate-another installs a different generation.
+#                activate-another installs a different generation;
+#                insert-relationship adds a relationship row the carried
+#                candidate does not hold.
+# settleRederived: after the refusal, settle again carrying a candidate
+#                re-derived from the changed context; it must settle, so the
+#                refusal came from the carried candidate.
 # outcome:       proven | not-proven | unsupported | settled | refused.
 cases:
   - name: cheap-order-unchanged
@@ -49,4 +55,6 @@ cases:
   - {name: validated-settle-rechecks-context-under-the-lock, kind: settle, mutation: forged-metadata-trigger-restored, candidate: stored, validatedGeneration: active, between: insert-commit, outcome: refused}
   - {name: validated-settle-refuses-another-generation, kind: settle, mutation: forged-metadata-trigger-restored, candidate: stored, validatedGeneration: other, outcome: refused}
   - {name: validated-settle-refuses-a-moved-generation, kind: settle, mutation: forged-metadata-trigger-restored, candidate: stored, validatedGeneration: active, between: activate-another, outcome: refused}
+  - {name: validated-settle-writes-the-candidate-stats, kind: settle, mutation: forged-metadata-trigger-restored, candidate: stats-differ, validatedGeneration: active, outcome: settled}
+  - {name: validated-settle-refuses-a-carried-candidate-the-store-no-longer-matches, kind: settle, mutation: forged-metadata-trigger-restored, candidate: stored, validatedGeneration: active, between: insert-relationship, settleRederived: true, outcome: refused}
   - {name: validated-settle-never-skips-a-state-term, kind: settle, mutation: latest-attempt, candidate: stored, validatedGeneration: active, skipValidation: true, outcome: refused}

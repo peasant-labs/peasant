@@ -15,6 +15,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/testkit/testwait"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
 
@@ -44,11 +45,17 @@ const (
 	validationCandidateStored       validationCaseCandidate = "stored"
 	validationCandidateNone         validationCaseCandidate = "none"
 	validationCandidateContentDiffs validationCaseCandidate = "content-hash-differs"
+	// validationCandidateStatsDiffer is the stored candidate whose non-strict
+	// stats (and a strict count) differ from the recorded metadata's.
+	validationCandidateStatsDiffer validationCaseCandidate = "stats-differ"
 
 	validationSetupStatsOverflow validationCaseSetup = "stats-overflow-diagnostic"
 
 	validationBetweenInsertCommit    validationCaseBetween = "insert-commit"
 	validationBetweenActivateAnother validationCaseBetween = "activate-another"
+	// validationBetweenInsertRelationship adds a relationship row to the
+	// active generation, which the carried candidate does not hold.
+	validationBetweenInsertRelationship validationCaseBetween = "insert-relationship"
 
 	validationValidatedActive validationCaseValidated = "active"
 	validationValidatedOther  validationCaseValidated = "other"
@@ -70,8 +77,12 @@ type validationTermsCase struct {
 	Between             validationCaseBetween   `yaml:"between"`
 	ValidatedGeneration validationCaseValidated `yaml:"validatedGeneration"`
 	SkipValidation      bool                    `yaml:"skipValidation"`
-	Outcome             string                  `yaml:"outcome"`
-	Mismatch            string                  `yaml:"mismatch"`
+	// SettleRederived, after the refusal, settles again carrying a candidate
+	// re-derived from the changed stored context, which must settle: the
+	// settle answers from the candidate it carries.
+	SettleRederived bool   `yaml:"settleRederived"`
+	Outcome         string `yaml:"outcome"`
+	Mismatch        string `yaml:"mismatch"`
 }
 
 func loadValidationTermsCases(t *testing.T) []validationTermsCase {
@@ -291,6 +302,9 @@ func prepareValidationCase(t *testing.T, c validationTermsCase) (*Store, Managed
 	case validationCandidateContentDiffs:
 		candidate.Metadata.ContentHash = strings.Repeat("c", 64)
 		return s, p, &candidate
+	case validationCandidateStatsDiffer:
+		candidate.Metadata.Stats = candidateStatsThatDiffer(p.Metadata.Stats)
+		return s, p, &candidate
 	default:
 		t.Fatalf("unknown candidate %q", c.Candidate)
 	}
@@ -366,6 +380,8 @@ func runValidatedSettleCase(t *testing.T, c validationTermsCase) {
 	case "":
 	case validationBetweenInsertCommit:
 		execTestSQL(t, s, `INSERT INTO session_generation_commits(session_id,generation_id,ordinal,hash,message,author_name,author_email,commit_time,author_time) VALUES(?,?,0,?,'synthetic','a','a@example.invalid',1,1)`, string(p.SessionID), p.GenerationID, strings.Repeat("e", 40))
+	case validationBetweenInsertRelationship:
+		execTestSQL(t, s, `INSERT INTO session_relationship_evidence(session_id,generation_id,ordinal,kind,target_state,target_local_id,evidence) VALUES(?,?,0,'started_by','target_known_retained',?,'retained_last_good')`, string(p.SessionID), p.GenerationID, rederivedOwner)
 	case validationBetweenActivateAnother:
 		next, blobs := buildTestGeneration(t, p.SessionID, "unchanged_next", "another body", "another input", "another output")
 		next.Generation.Metadata.ContentHash = strings.Repeat("b", 64)
@@ -393,6 +409,7 @@ func runValidatedSettleCase(t *testing.T, c validationTermsCase) {
 		if err != nil || stats.UpdatedAtMs != 777 || statsBefore.UpdatedAtMs == 777 {
 			t.Fatalf("the validated settle did not write the stats row: %+v, %v", stats, err)
 		}
+		assertSettledStats(t, stats, statsBefore, validated.Candidate.Metadata.Stats)
 		state, err := s.ReadIndexState(context.Background(), p.SessionID)
 		if err != nil || state == nil || state.ActiveGenerationID != p.GenerationID {
 			t.Fatalf("index state after the validated settle = %+v, %v", state, err)
@@ -405,6 +422,18 @@ func runValidatedSettleCase(t *testing.T, c validationTermsCase) {
 		}
 		if after := dumpStoreRows(t, s); !slices.Equal(before, after) {
 			t.Fatal("a refused validated settle changed a stored row")
+		}
+		if c.SettleRederived {
+			owner := schema.SessionID(rederivedOwner)
+			rederived := *validated
+			rederived.Candidate.Metadata.Relationships = []schema.SessionRelationship{{
+				Kind: schema.SessionRelationshipStartedBy, TargetState: schema.RelationshipTargetKnownRetained,
+				TargetLocalID: &owner, Evidence: schema.EvidenceRetainedLastGood,
+			}}
+			p.Validated = &rederived
+			if result, err := s.SettleManagedGenerationUnchanged(context.Background(), p); err != nil || result.GenerationID != p.GenerationID {
+				t.Fatalf("a settle carrying the candidate re-derived from the changed context = %+v, %v; want it settled, so the refusal above came from the carried candidate", result, err)
+			}
 		}
 	default:
 		t.Fatalf("unknown settle outcome %q", c.Outcome)
@@ -587,4 +616,39 @@ func TestRefreshReadSlotCap(t *testing.T) {
 func unchangedProofSetupWithPool(t *testing.T, poolSize int) (*Store, ManagedGenerationUnchangedProof) {
 	t.Helper()
 	return unchangedProofSetupWith(t, WithPoolSize(poolSize), WithWALAutocheckpointDisabled())
+}
+
+// rederivedOwner is the started_by target a relationship row names when it
+// lands after validation.
+const rederivedOwner = "e5e5e5e5-e5e5-45e5-85e5-e5e5e5e5e5e5"
+
+// candidateStatsThatDiffer is a candidate's stats whose non-strict fields and
+// one strict count differ from recorded.
+func candidateStatsThatDiffer(recorded schema.SessionStats) schema.SessionStats {
+	stats := recorded
+	stats.DurationMs = recorded.DurationMs + 98_765
+	stats.TokensIn = recorded.TokensIn + 4_321
+	stats.TokensOut = recorded.TokensOut + 1_234
+	stats.ToolCallCount = recorded.ToolCallCount + 77
+	stats.TurnCount = recorded.TurnCount + 999
+	return stats
+}
+
+// assertSettledStats requires the settle to have written a parse's stats: the
+// carried candidate's non-strict stats and the stored strict counts.
+func assertSettledStats(t *testing.T, got, before CapturedStats, candidate schema.SessionStats) {
+	t.Helper()
+	value := func(p *int) int {
+		if p == nil {
+			return -1
+		}
+		return *p
+	}
+	if got.DurationMs == nil || *got.DurationMs != candidate.DurationMs || value(got.TokensIn) != candidate.TokensIn ||
+		value(got.TokensOut) != candidate.TokensOut || value(got.ToolCallCount) != candidate.ToolCallCount {
+		t.Fatalf("settled stats %+v, want the candidate's non-strict stats %+v", got, candidate)
+	}
+	if value(got.TurnCount) != value(before.TurnCount) || value(got.ConversationTurnCount) != value(before.ConversationTurnCount) {
+		t.Fatalf("settled strict counts turn %d conversation %d, want the stored %d and %d", value(got.TurnCount), value(got.ConversationTurnCount), value(before.TurnCount), value(before.ConversationTurnCount))
+	}
 }
