@@ -1532,11 +1532,17 @@ func (t *Tree) clampWindow() {
 	}
 	// The margin above is expressed in ROWS, which stops being the same thing
 	// as lines as soon as a row can render two of them. This correction is
-	// load-bearing, not defensive: once the viewport is tall enough that the
-	// margin stops growing, the row-based window admits height-treeScrollMargin
-	// rows, and at two lines each that is wider than the viewport - so the
-	// cursor's own line falls off the bottom. Measuring the same window in
-	// lines puts it back.
+	// load-bearing, not defensive: the row-based clamp sizes a window of height
+	// ROWS, and when enough of those rows render two lines the window's LINE
+	// count exceeds height even though its ROW count does not, which pushes the
+	// cursor's own line off the bottom. Measuring the rows from offset through
+	// the cursor in lines walks the offset forward until the cursor's line fits.
+	//
+	// Worked example: height 13, margin 5, cursor on row 8 of an 11-row forest
+	// whose rows 1 to 10 each render two lines. The row clamp sets
+	// offset = 8 - 13 + 5 + 1 = 1. Rows 1 to 8 are 16 lines, so offset becomes
+	// 2; rows 2 to 8 are 14 lines, so offset becomes 3; rows 3 to 8 are 12
+	// lines, which fit, and the loop stops at offset 3.
 	for t.offset < t.cursor && treeLinesBetween(rows, t.offset, t.cursor+1) > t.height {
 		t.offset++
 	}
@@ -1571,6 +1577,11 @@ func (t Tree) View() string {
 	overflow := t.Overflow()
 	plan := make([]treeRenderLine, 0, t.height)
 	for i := t.offset; i < len(rows) && len(plan) < t.height; i++ {
+		// Bottom-edge rule: a row's own line always renders, and its count
+		// line is appended only while there is room. The row is the selectable
+		// thing, so when only one line is left the row wins and its count line
+		// waits for the next scroll; holding the pair together would leave a
+		// blank line and hide a selectable row.
 		plan = append(plan, treeRenderLine{row: rows[i], index: i})
 		if childCountLabel(rows[i].node) != "" && len(plan) < t.height {
 			plan = append(plan, treeRenderLine{row: rows[i], index: i, continuation: true})
