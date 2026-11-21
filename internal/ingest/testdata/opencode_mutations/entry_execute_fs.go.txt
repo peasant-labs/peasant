@@ -1,0 +1,9 @@
+package ingest
+import (
+	"testing/fstest"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+)
+func bypass(conn *sqlite.Conn) error {
+	return sqlitex.ExecuteFS(conn, fstest.MapFS{"query.sql": {Data: []byte("SELECT * FROM event")}}, "query.sql", nil)
+}

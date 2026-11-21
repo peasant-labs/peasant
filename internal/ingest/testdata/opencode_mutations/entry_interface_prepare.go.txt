@@ -1,0 +1,7 @@
+package ingest
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+type transientPreparer interface { PrepareTransient(string) (*sqlite.Stmt, int, error) }
+func bypass(conn *sqlite.Conn) {
+	var preparer transientPreparer = conn
+	_, _, _ = preparer.PrepareTransient("SELECT * FROM event")
+}

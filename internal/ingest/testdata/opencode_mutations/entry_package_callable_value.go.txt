@@ -1,0 +1,3 @@
+package ingest
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+var escapedOpenCodeExecute = sqlitex.Execute

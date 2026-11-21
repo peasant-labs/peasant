@@ -1,0 +1,8 @@
+package ingest
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+type databaseSerializer interface { Serialize(string) ([]byte, error) }
+func bypass(conn *sqlite.Conn) error {
+	var serializer databaseSerializer = conn
+	_, err := serializer.Serialize("main")
+	return err
+}

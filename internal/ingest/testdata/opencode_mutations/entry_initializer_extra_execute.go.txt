@@ -1,0 +1,12 @@
+package ingest
+import (
+	"context"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+)
+type zombiezenOpenCodeSQLiteSource struct { conn *sqlite.Conn }
+func (s *zombiezenOpenCodeSQLiteSource) initialize(context.Context) error {
+	if err := sqlitex.ExecuteTransient(s.conn, "PRAGMA query_only=ON", nil); err != nil { return err }
+	if err := sqlitex.ExecuteTransient(s.conn, "PRAGMA query_only", nil); err != nil { return err }
+	return sqlitex.ExecuteTransient(s.conn, "SELECT id FROM event", nil)
+}

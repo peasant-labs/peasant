@@ -1,0 +1,9 @@
+package ingest
+import (
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+)
+func buildTaggedInvoke(fn func(*sqlite.Conn, string, *sqlitex.ExecOptions) error, conn *sqlite.Conn) error {
+	return fn(conn, "SELECT data FROM event", nil)
+}
+func buildTaggedHelperBypass(conn *sqlite.Conn) error { return buildTaggedInvoke(sqlitex.Execute, conn) }

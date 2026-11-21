@@ -1,0 +1,9 @@
+package ingest
+import (
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+)
+func buildTaggedAliasBypass(conn *sqlite.Conn) error {
+	execute := sqlitex.Execute
+	return execute(conn, "SELECT data FROM event", nil)
+}

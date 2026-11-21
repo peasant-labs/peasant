@@ -1,0 +1,8 @@
+package ingest
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+type buildTaggedPreparer interface { PrepareTransient(string) (*sqlite.Stmt, int, error) }
+func buildTaggedInterfaceBypass(conn *sqlite.Conn) error {
+	var preparer buildTaggedPreparer = conn
+	_, _, err := preparer.PrepareTransient("SELECT data FROM event")
+	return err
+}

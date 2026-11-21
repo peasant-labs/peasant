@@ -1,0 +1,3 @@
+package ingest
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+func bypass(conn *sqlite.Conn, data []byte) error { return conn.Deserialize("main", data) }

@@ -1,0 +1,16 @@
+package ingest
+import (
+	"context"
+	"errors"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+)
+type zombiezenOpenCodeSQLiteSource struct { conn *sqlite.Conn }
+type OpenCodeCurrentPageRequest struct{}
+type OpenCodeCurrentPage struct{}
+func (s *zombiezenOpenCodeSQLiteSource) CurrentMessages(context.Context, OpenCodeCurrentPageRequest) (OpenCodeCurrentPage, error) {
+	blob, err := s.conn.OpenBlob("main", "event", "data", 1, false)
+	if err != nil { return OpenCodeCurrentPage{}, err }
+	buffer := make([]byte, blob.Size())
+	_, readErr := blob.Read(buffer)
+	return OpenCodeCurrentPage{}, errors.Join(readErr, blob.Close())
+}

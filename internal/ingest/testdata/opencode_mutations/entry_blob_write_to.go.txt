@@ -1,0 +1,6 @@
+package ingest
+import (
+	"bytes"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+)
+func bypass(blob *sqlite.Blob) error { var output bytes.Buffer; _, err := blob.WriteTo(&output); return err }

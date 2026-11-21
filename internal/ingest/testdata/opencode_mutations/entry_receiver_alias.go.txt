@@ -1,0 +1,6 @@
+package ingest
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+func bypass(conn *sqlite.Conn) {
+	receiver := conn
+	_ = receiver.Prep("SELECT * FROM event")
+}

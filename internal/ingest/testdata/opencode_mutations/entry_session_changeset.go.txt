@@ -1,0 +1,6 @@
+package ingest
+import (
+	"bytes"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+)
+func bypass(session *sqlite.Session) error { var output bytes.Buffer; return session.WriteChangeset(&output) }
