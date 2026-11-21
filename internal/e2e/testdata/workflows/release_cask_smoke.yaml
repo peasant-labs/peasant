@@ -17,6 +17,7 @@ render:
     - --pattern checksums.txt
     - homebrew-tap/scripts/render-cask.sh
     - homebrew-tap/templates/peasant.rb.tmpl
+    - grep -F "version \"${TAG#v}\""
 install:
   step: Install the rendered cask from a throwaway tap
   run_contains:

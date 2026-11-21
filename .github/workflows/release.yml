@@ -599,7 +599,11 @@ jobs:
   # Post-publish macOS smoke: on final tags, install the cask users get, rendered
   # here from the tap's own template and this release's checksums. The tap's
   # scheduled publisher is best-effort and peasant holds no tap credential, so
-  # this job never waits on it; the tap's own audit job verifies publication.
+  # this job never waits on it. The tap's publisher renders and audits the cask
+  # before it pushes; this smoke does not check that the tap has published, so a
+  # stale tap shows only as a failed or missing publish-cask run in the tap. The
+  # checkout tracks the tap's main unpinned on purpose, so the smoke renders with
+  # the template the tap publishes from.
   macos-cask-smoke:
     name: macos cask smoke (final only)
     needs: publish

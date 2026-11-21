@@ -83,7 +83,7 @@ func TestReleaseCaskSmokeRendersFromTheTapTemplate(t *testing.T) {
 		}
 		for _, forbidden := range fixture.ForbiddenInJob {
 			if strings.Contains(run.Value, forbidden) {
-				t.Fatalf("release.yml: cask smoke must not depend on the live tap; a step contains %q", forbidden)
+				t.Fatalf("release.yml: cask smoke must not read, sleep or poll on the live tap; a step contains %q", forbidden)
 			}
 		}
 	}

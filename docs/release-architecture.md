@@ -249,10 +249,12 @@ release build embeds the dashboard output.
 
 The Homebrew cask comes from the latest final release, and rc tags never reach
 the tap. The tap publishes on its own schedule (see `peasant-labs/homebrew-tap`
-`publish-cask.yml`), and the tap's audit job checks that publication. The
-final-tag smoke does not wait for it: it renders the cask from the tap's
-template and this release's `checksums.txt` and installs it from a throwaway
-tap. Peasant holds no tap credential.
+`publish-cask.yml`). The final-tag smoke does not wait for it: it renders the
+cask from the tap's template and this release's `checksums.txt` and installs it
+from a throwaway tap. The tap's publisher renders and audits the cask before it
+pushes; this smoke does not check that the tap has published, so a stale tap
+shows only as a failed or missing `publish-cask` run in the tap. Peasant holds no
+tap credential.
 
 AUR publication remains disabled until its operational checklist is complete (a
 dedicated `AUR_KEY`); Goreleaser keeps the AUR upload `skip_upload: "true"` until

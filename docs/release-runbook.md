@@ -37,10 +37,12 @@ Before a rerun, delete a leftover draft by its id with
 `gh api -X DELETE repos/peasant-labs/peasant/releases/<id>`, never with
 `gh release delete <tag>`; no new tag is needed. The publisher does not
 publish to the Homebrew tap or AUR. The tap publishes on its own schedule
-(see `peasant-labs/homebrew-tap` `publish-cask.yml`), and the tap's audit job
-checks that publication. The final-tag smoke does not wait for it: it renders
-the cask from the tap's template and this release's `checksums.txt` and
-installs it from a throwaway tap.
+(see `peasant-labs/homebrew-tap` `publish-cask.yml`). The final-tag smoke does
+not wait for it: it renders the cask from the tap's template and this release's
+`checksums.txt` and installs it from a throwaway tap. The tap's publisher renders
+and audits the cask before it pushes; this smoke does not check that the tap has
+published, so a stale tap shows only as a failed or missing `publish-cask` run in
+the tap.
 
 The vendor-hash workflow computes a change without an App credential and, if
 needed, opens or updates `chore(nix): update vendor hash` on
