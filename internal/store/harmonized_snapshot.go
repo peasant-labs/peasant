@@ -503,7 +503,6 @@ func harmonizedPartitionsOnConn(conn *sqlite.Conn, sessionID schema.SessionID, g
 	return harmonizedPartitionsModeOnConn(conn, sessionID, generationID, false)
 }
 
-//
 // The sections, the mapping and the native metadata are parsed rows, read
 // under the id the resolver names; generationID still names the generation in
 // errors.
