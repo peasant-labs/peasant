@@ -36,9 +36,11 @@ so compare the asset list with the expected set in
 Before a rerun, delete a leftover draft by its id with
 `gh api -X DELETE repos/peasant-labs/peasant/releases/<id>`, never with
 `gh release delete <tag>`; no new tag is needed. The publisher does not
-publish to the Homebrew tap or AUR. The tap publishes on its own scheduled
-poll (see `peasant-labs/homebrew-tap` `publish-cask.yml`); the final-tag smoke
-waits up to 16 minutes.
+publish to the Homebrew tap or AUR. The tap publishes on its own schedule
+(see `peasant-labs/homebrew-tap` `publish-cask.yml`), and the tap's audit job
+checks that publication. The final-tag smoke does not wait for it: it renders
+the cask from the tap's template and this release's `checksums.txt` and
+installs it from a throwaway tap.
 
 The vendor-hash workflow computes a change without an App credential and, if
 needed, opens or updates `chore(nix): update vendor hash` on
@@ -372,8 +374,9 @@ In order:
      stops it. There is no `ldd` on Windows, so a runner carrying no Go toolchain and no
      MinGW runtime stands in for the static-linkage check; that is weaker, which is why
      this job starts the server rather than only reading `version`.
-   - **macos-cask-smoke** job (final tags): waits for the tap to carry the tagged
-     version, then installs the cask and asserts its version.
+   - **macos-cask-smoke** job (final tags): renders the cask from the tap's
+     template and this release's `checksums.txt`, installs it from a throwaway
+     tap, and asserts its version.
 5. Verify the Release on the Releases page. It holds 15 assets, the set `build`
    stages (v0.22.0 matches):
    - 4 `.tar.gz`, 1 Windows `.zip`, 1 bare Windows `.exe`;

@@ -1,0 +1,32 @@
+# Contract for release.yml's final-tag macOS cask smoke.
+#
+# The smoke installs the cask users get without waiting on the tap: it renders
+# the cask from the tap's own template and this release's checksums.txt, then
+# installs it from a throwaway local tap. The tap's scheduled publisher is
+# best-effort and peasant holds no tap credential, so nothing in the job may
+# read the live tap's published cask or poll for it.
+job: macos-cask-smoke
+checkout:
+  step: Check out the tap (read-only)
+  repository: peasant-labs/homebrew-tap
+  persist_credentials: "false"
+render:
+  step: Render the cask from the tap template and this release's checksums
+  run_contains:
+    - gh release download "$TAG"
+    - --pattern checksums.txt
+    - homebrew-tap/scripts/render-cask.sh
+    - homebrew-tap/templates/peasant.rb.tmpl
+install:
+  step: Install the rendered cask from a throwaway tap
+  run_contains:
+    - tap="peasant-labs/cask-smoke"
+    - brew tap-new "$tap"
+    - brew trust --cask "$tap/peasant"
+    - brew install --cask "$tap/peasant"
+assert_step: Assert version matches the tag
+forbidden_in_job:
+  - repos/peasant-labs/homebrew-tap/contents
+  - brew tap peasant-labs/tap
+  - peasant-labs/tap/peasant
+  - sleep
