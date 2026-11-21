@@ -90,6 +90,23 @@ function requireIds(list: string, rows: SessionRow[], required: string[]): void 
 
 const fixture = loadFixture();
 const response = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => '' });
+const refusal = (status: number, body: { error: string; code: string }) => ({
+  ok: false,
+  status,
+  json: async () => body,
+  text: async () => JSON.stringify(body),
+});
+
+// The served by-id route refuses a request that names no identifiers
+// (internal/api.handleSessionSummariesByID, proven by
+// TestMountedLinkedSessionsRejectAnEmptyIdentifierSet). The mock answers with
+// the same status, code and wording, so a surface that calls the route with an
+// empty list fails here exactly as it would against the real server.
+const sessionSummariesRoute = '/api/v1/session-summaries';
+const emptyIdentifierRefusal = {
+  error: `Session summaries could not be resolved because the request named no session identifiers in internal/api.handleSessionSummariesByID, which ran while a linked evidence set was being opened. Nothing was returned, because an empty link is a caller mistake rather than an empty machine. Send GET ${sessionSummariesRoute}?ids=<comma-separated session ids> with at least one identifier, then retry.`,
+  code: 'session_summaries_ids_required',
+};
 
 /**
  * Route the mounted surface's fetches by EXACT path, never by containment.
@@ -117,8 +134,9 @@ function installFetch(): ReturnType<typeof vi.fn> {
           preview: row.preview,
           syncStatus: 'new' as const,
         }))));
-      case '/api/v1/session-summaries': {
-        const ids = new Set((requested.searchParams.get('ids') ?? '').split(',').filter(Boolean));
+      case sessionSummariesRoute: {
+        const ids = new Set((requested.searchParams.get('ids') ?? '').split(',').map((id) => id.trim()).filter(Boolean));
+        if (ids.size === 0) return refusal(400, emptyIdentifierRefusal);
         const all = [...fixture.discoveryOnly, ...fixture.linkedOnly];
         return response({ sessions: all.filter((row) => ids.has(row.id)) });
       }
@@ -174,5 +192,29 @@ describe('mounted Share link resolution', () => {
       expect(await screen.findByRole('checkbox', { name: `select session ${row.id}` })).toBeInTheDocument();
     }
     expect(screen.queryByRole('checkbox', { name: `select session ${fixture.linkedSessionId}` })).not.toBeInTheDocument();
+  });
+
+  it('stands in for the served refusal of an empty identifier list, and the unlinked surface never asks for one', async () => {
+    const fetchMock = installFetch();
+
+    // The mock refuses ?ids= the way the server does: 400, the shared code, and
+    // wording that names the route and says no identifiers were named.
+    for (const empty of ['', ',', ' , ']) {
+      const refused = await fetch(`http://mounted.test${sessionSummariesRoute}?ids=${encodeURIComponent(empty)}`);
+      expect(refused.ok).toBe(false);
+      expect(refused.status).toBe(400);
+      const body = await refused.json() as { error: string; code: string };
+      expect(body.code).toBe('session_summaries_ids_required');
+      expect(body.error).toContain('named no session identifiers');
+      expect(body.error).toContain(sessionSummariesRoute);
+    }
+    fetchMock.mockClear();
+
+    render(<PublishProvider><ShareWizardClient /></PublishProvider>);
+    for (const row of fixture.discoveryOnly) {
+      expect(await screen.findByRole('checkbox', { name: `select session ${row.id}` })).toBeInTheDocument();
+    }
+    const byIdCalls = fetchMock.mock.calls.filter(([input]) => new URL(String(input), 'http://mounted.test').pathname === sessionSummariesRoute);
+    expect(byIdCalls).toEqual([]);
   });
 });
