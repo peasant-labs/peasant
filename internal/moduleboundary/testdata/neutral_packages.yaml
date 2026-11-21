@@ -5,6 +5,11 @@ cases:
   - {name: api-not-import-internal-tui, directory: internal/api, forbidden: github.com/peasant-labs/peasant/internal/tui}
   - {name: discovery-not-import-internal-tui, directory: internal/discovery, forbidden: github.com/peasant-labs/peasant/internal/tui}
   - {name: one-declaration-of-each-neutral-type}
+  - {name: clicommand-not-import-githooks, directory: internal/clicommand, forbidden: github.com/peasant-labs/peasant/internal/githooks}
+  - {name: clicommand-not-import-push, directory: internal/clicommand, forbidden: github.com/peasant-labs/peasant/internal/push}
+  - {name: clicommand-not-import-store, directory: internal/clicommand, forbidden: github.com/peasant-labs/peasant/internal/store}
+  - {name: push-not-import-githooks, directory: internal/push, forbidden: github.com/peasant-labs/peasant/internal/githooks}
+  - {name: store-not-import-githooks, directory: internal/store, forbidden: github.com/peasant-labs/peasant/internal/githooks}
 neutralTypes: [ProjectIdentity, PreparedSessionListing, SessionListing, SessionSource, SessionSourceOrigin, Forest, Node, Stop, Field, Draft, Residual, StopKind, FieldKind, ModelScope, FlowKey, NextStep]
 retiredTypes: [NextStepKind]
 guardedDirectories: [internal/tui/settings, internal/tui/kickstart, internal/tui/ftue, internal/discovery]

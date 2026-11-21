@@ -10,16 +10,16 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/peasant-labs/peasant/internal/githooks"
+	"github.com/peasant-labs/peasant/internal/clicommand"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/perf"
 	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/schema"
 )
 
-// shellQuote delegates to the hook command renderer so every command Peasant
+// shellQuote delegates to the shared command renderer so every command Peasant
 // prints for a user to paste follows the same quoting rules.
-func shellQuote(value string) string { return githooks.ShellQuote(value) }
+func shellQuote(value string) string { return clicommand.ShellQuote(value) }
 
 // AnnotationPushSummary is the aggregate outcome of a single annotation push run.
 type AnnotationPushSummary struct {

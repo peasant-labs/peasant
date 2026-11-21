@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/clicommand"
 	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/testkit/executable"
 	"github.com/peasant-labs/peasant/internal/testkit/testwait"
@@ -149,7 +150,7 @@ func TestScript_ByHandLineCarriesTheBoundPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manual := githooks.ManualCommand(root, binding)
+	manual := clicommand.ManualPush(root, binding.Command())
 	if want := "cd " + shellSingleQuote(root) + " && " + manual; !strings.Contains(script, want) {
 		t.Fatalf("the hook's run-it-by-hand line must be %q; got:\n%s", want, script)
 	}

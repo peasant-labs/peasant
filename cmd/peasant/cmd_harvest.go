@@ -19,9 +19,9 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/animation"
+	"github.com/peasant-labs/peasant/internal/clicommand"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
-	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/selectionfilter"
@@ -438,7 +438,7 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 		}
 		pipelineCfg.Scope = &scope
 		pipelineCfg.Command = harvestCommandName(mode)
-		pipelineCfg.CommandPrefix = githooks.CommandPrefix(hookBinding(cmd))
+		pipelineCfg.CommandPrefix = clicommand.Prefix(commandBinding(cmd))
 		// A named harness filters the scope by name, so a stored session under
 		// another harness is a stated miss instead of a disabled source.
 		if flags.sourceHarness != "" {
