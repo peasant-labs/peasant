@@ -178,23 +178,7 @@ func (p *StoreDataProvider) SessionSummariesByID(ctx context.Context, ids []stri
 	if err != nil {
 		return nil, fmt.Errorf("store adapter: session summaries by id: %w", err)
 	}
-	byID := make(map[string]store.SessionRow, len(rows))
-	for i := range rows {
-		byID[rows[i].SessionID] = rows[i]
-	}
-	requested := make([]store.SessionRow, 0, len(ids))
-	seen := make(map[string]struct{}, len(ids))
-	for _, id := range ids {
-		if _, duplicate := seen[id]; duplicate {
-			continue
-		}
-		seen[id] = struct{}{}
-		row, ok := byID[id]
-		if !ok {
-			continue
-		}
-		requested = append(requested, row)
-	}
+	requested := ResolveByID(rows, ids, func(row store.SessionRow) string { return row.SessionID })
 	return p.summariesFromRows(ctx, requested)
 }
 
