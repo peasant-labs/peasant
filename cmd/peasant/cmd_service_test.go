@@ -447,6 +447,57 @@ func TestServiceStatus(t *testing.T) {
 	}
 }
 
+type serviceSourceFlagCase struct {
+	Name          string   `yaml:"name"`
+	Args          []string `yaml:"args"`
+	HarvestTail   []string `yaml:"harvest_tail"`
+	ErrorContains string   `yaml:"error_contains"`
+}
+
+// TestServiceInstallSourceFlags pins the harvest command line the timer runs
+// for each --source-harness/--source-path combination, and the refusals.
+func TestServiceInstallSourceFlags(t *testing.T) {
+	t.Parallel()
+	data, err := os.ReadFile("testdata/service_source_flags.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f struct {
+		Cases []serviceSourceFlagCase `yaml:"cases"`
+	}
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&f); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Cases) == 0 {
+		t.Fatal("no cases in service_source_flags.yaml")
+	}
+	for _, tc := range f.Cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			t.Parallel()
+			h := newServiceHarness(t, "home")
+			out, err := h.run(t, append([]string{"install", "--dry-run"}, tc.Args...)...)
+			if _, statErr := os.Stat(h.unitDir); !errors.Is(statErr, os.ErrNotExist) {
+				t.Errorf("dry run created %s", h.unitDir)
+			}
+			if tc.ErrorContains != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.ErrorContains) {
+					t.Fatalf("err = %v, want it to contain %q\n%s", err, tc.ErrorContains, out)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("install --dry-run: %v\n%s", err, out)
+			}
+			want := append([]string{h.exe, "harvest", "--data-dir", h.dir, "--config-dir", h.dir, "--state-dir", h.dir}, tc.HarvestTail...)
+			if got := splitSystemdExec(t, execStartOf(out)); strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+				t.Errorf("ExecStart args = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 func TestServiceRefusals(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -460,8 +511,6 @@ func TestServiceRefusals(t *testing.T) {
 		{"negative delay", nil, []string{"install", "--randomized-delay", "-1m"}, "must not be negative"},
 		{"interval and calendar", nil, []string{"install", "--interval", "1h", "--on-calendar", "daily"}, "mutually exclusive"},
 		{"multi-line calendar", nil, []string{"install", "--on-calendar", "daily\nExecStart=/bin/sh"}, "one line"},
-		{"source path without harness", nil, []string{"install", "--source-path", "/x"}, "--source-path requires --source-harness"},
-		{"unknown harness", nil, []string{"install", "--source-harness", "nope", "--source-path", "/x"}, "nope"},
 		{"not linux install", func(h *serviceHarness) { h.deps.goos = "darwin" }, []string{"install", "--dry-run"}, "Linux only (this is darwin)"},
 		{"not linux status", func(h *serviceHarness) { h.deps.goos = "windows" }, []string{"status"}, "Linux only"},
 		{"no systemctl", func(h *serviceHarness) { h.ctl.fail = errSystemctlMissing }, []string{"install"}, "systemctl not found on PATH"},

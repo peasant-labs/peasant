@@ -21,8 +21,8 @@ peasant service install [flags]
       --no-redact                   Do not run 'peasant redact --all' after each harvest
       --on-calendar string          Run on a systemd calendar expression instead of an interval (e.g. 'hourly', '*-*-* 09:00')
       --randomized-delay duration   Random delay added to each run (0 disables) (default 5m0s)
-      --source-harness string       Pass --source-harness to harvest (requires --source-path)
-      --source-path string          Pass --source-path to harvest (requires --source-harness)
+      --source-harness string       Pass --source-harness to harvest: each run harvests only this harness, from its configured or default path unless --source-path is given
+      --source-path string          Pass --source-path to harvest, replacing the configured path of --source-harness (requires --source-harness)
 ```
 
 ### Options inherited from parent commands
