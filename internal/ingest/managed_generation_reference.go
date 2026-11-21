@@ -174,7 +174,8 @@ func (p *Pipeline) parseInputContextFields(h Harness) []string {
 // old generation active until that parse commits.
 func (p *Pipeline) referenceManagedGeneration(ctx context.Context, input *CapturedIndexInput, lane *storeWriteLane, candidate *GenerationMetadataCandidate) (installed bool, writeDuration time.Duration) {
 	referencer, ok := p.metricsStore.(ManagedGenerationReferencer)
-	if !ok || candidate == nil || p.config.Force || p.config.Reindex || p.config.DisableRefreshSkips {
+	rebuild := p.config.Force || p.config.Reindex || p.config.DisableRefreshSkips
+	if !ok || candidate == nil || rebuild {
 		return false, 0
 	}
 	start := time.Now()

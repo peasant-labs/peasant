@@ -208,8 +208,9 @@ func managedReferenceRoutes() map[string]func(*testing.T) {
 			if planned, _, installed, _ := observed.counts(); planned != 1 || installed != 1 {
 				t.Fatalf("plans %d installs %d, want one each", planned, installed)
 			}
-			if parses := routeParses(result); parses != 0 || len(result.IndexLog) != 1 || result.IndexLog[0].Outcome != ingest.IndexOutcomeSkipped ||
-				result.IndexLog[0].Reason == nil || *result.IndexLog[0].Reason != ingest.IndexManagedReferenceReasonForTest {
+			oneSkip := len(result.IndexLog) == 1 && result.IndexLog[0].Outcome == ingest.IndexOutcomeSkipped
+			referenceReason := oneSkip && result.IndexLog[0].Reason != nil && *result.IndexLog[0].Reason == ingest.IndexManagedReferenceReasonForTest
+			if parses := routeParses(result); parses != 0 || !referenceReason {
 				t.Fatalf("parses %d, index log %+v; want no parse and one skipped row with the reference reason", parses, result.IndexLog)
 			}
 			if total, done := routeStage(profiler, ingest.StageRefreshReference); total != 1 || done != 1 {

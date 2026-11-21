@@ -92,7 +92,8 @@ func loadGenerationReferenceFixture(t *testing.T) generationReferenceFixture {
 	decodeStrictYAML(t, generationReferenceYAML, &fixture, "generation reference fixture")
 	var names []string
 	for _, c := range fixture.Cases {
-		stated := c.Given != "" && c.When != "" && c.Then != "" && c.Kind != ""
+		stated := c.Given != "" && c.When != "" && c.Then != ""
+		stated = stated && c.Kind != ""
 		if c.Name == "" || slices.Contains(names, c.Name) || !stated {
 			t.Fatalf("reference case %q is unnamed, duplicated, or misses its given, when, then or kind", c.Name)
 		}

@@ -201,7 +201,8 @@ func (s *Store) planReferenceOnConn(conn *sqlite.Conn, request ingest.ManagedGen
 	if err != nil && !errors.Is(err, ErrNoCapturedStats) {
 		return nil, fmt.Errorf("store: read the parse counts of session %s to plan a reference: %w; nothing was written; the session parses", sid, err)
 	}
-	if err != nil || stats.TurnCount == nil || stats.ConversationTurnCount == nil || stats.InputSubmissionCount == nil {
+	countsStored := err == nil && stats.TurnCount != nil && stats.ConversationTurnCount != nil
+	if !countsStored || stats.InputSubmissionCount == nil {
 		return refuse(ingest.ReferenceRefusalStatsIncomplete, "the stored turn, conversation-turn or input-submission count is missing")
 	}
 	owner, err := rowsGenerationIDOnConn(conn, sid, source)

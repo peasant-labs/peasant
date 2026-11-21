@@ -30,7 +30,11 @@ func withContextValue(t *testing.T, recorded schema.UnifiedMetadata, field, valu
 	}
 	var typed any = value
 	if parent, ok := strings.CutPrefix(value, contextRelationshipPrefix); ok {
-		typed = []any{map[string]any{"kind": string(schema.SessionRelationshipStartedBy), "targetState": string(schema.RelationshipTargetKnown), "targetLocalId": parent, "evidence": string(schema.EvidenceExistingAdapter)}}
+		target := schema.SessionID(parent)
+		typed = []schema.SessionRelationship{{
+			Kind: schema.SessionRelationshipStartedBy, TargetState: schema.RelationshipTargetKnown,
+			TargetLocalID: &target, Evidence: schema.EvidenceExistingAdapter,
+		}}
 	}
 	steps := strings.Split(field, ".")
 	object := document

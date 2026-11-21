@@ -333,10 +333,13 @@ func assertSkipBreakdown(t *testing.T, id upgrade.MeasurementCase, report caseRe
 		t.Fatalf("breakdown %+v, want only %s sessions", report.Breakdown, want)
 	}
 	row := report.Breakdown[0]
-	if row.Outcome != want || row.Sessions != smokeSessions*rounds || row.MedianValidateMs <= 0 || row.MedianParseMs != 0 {
+	everySession := row.Outcome == want && row.Sessions == smokeSessions*rounds
+	timedWithoutParse := row.MedianValidateMs > 0 && row.MedianParseMs == 0
+	if !everySession || !timedWithoutParse {
 		t.Fatalf("breakdown row %+v, want %d %s sessions with a validation time and no parse", row, smokeSessions*rounds, want)
 	}
-	if want == outcomeReferenced && (row.MedianReferenceMs <= 0 || report.Skip.MedianReferenceMs <= 0 || report.Baseline.MedianReferenceMs != 0) {
+	referenceTimed := row.MedianReferenceMs > 0 && report.Skip.MedianReferenceMs > 0
+	if want == outcomeReferenced && (!referenceTimed || report.Baseline.MedianReferenceMs != 0) {
 		t.Fatalf("reference ms row %v skip %v baseline %v, want skip-arm times and none in the baseline", row.MedianReferenceMs, report.Skip.MedianReferenceMs, report.Baseline.MedianReferenceMs)
 	}
 	if report.Skip.MedianValidateMs <= 0 || report.Baseline.MedianValidateMs != 0 {
