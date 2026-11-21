@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -38,7 +39,7 @@ var readerEntrypointsManifestYAML []byte
 // harness and entry point.
 const readerEntrypointGoldensDir = "testdata/reader_entrypoints"
 
-// The golden generator runs when UPDATE_READER_ENTRYPOINT_GOLDENS=1. It writes
+// The golden generator runs when UPDATE_READER_ENTRYPOINT_GOLDENS is true (1). It writes
 // to READER_ENTRYPOINT_GOLDENS_OUT when that is set (an absolute path, so a
 // generator run in an older worktree can write into a newer one), and to the
 // committed directory otherwise.
@@ -170,7 +171,7 @@ func loadReaderEntrypoints(t *testing.T) (readerEntrypointCorpus, readerEntrypoi
 // change that alters them fails here.
 func TestReaderEntrypointGoldens(t *testing.T) {
 	corpus, manifest := loadReaderEntrypoints(t)
-	update := os.Getenv(readerEntrypointUpdateEnv) == "1"
+	update, _ := strconv.ParseBool(os.Getenv(readerEntrypointUpdateEnv))
 	out := readerEntrypointGoldensDir
 	if dir := os.Getenv(readerEntrypointOutEnv); dir != "" {
 		out = dir
