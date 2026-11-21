@@ -67,6 +67,11 @@ func sqlRowsGeneration(sessionExpr, generationExpr string) string {
 		` AND g.generation_id = ` + generationExpr + `), ` + generationExpr + `)`
 }
 
+// sqlActiveRowsOfM is the predicate a reader of a parse table aliased m,
+// joined to sessions s, uses to select the parsed rows the session's active
+// generation reads.
+var sqlActiveRowsOfM = "m.generation_id = " + sqlRowsGeneration("s.session_id", "s.active_generation_id")
+
 // generationKeepSet is what a sweep or reclaim must keep for one session: the
 // two roots (the active read authority and the latest attempt) and the
 // generations whose parsed rows they read. An empty field keeps nothing.
