@@ -91,13 +91,35 @@ type BudgetProvenance struct {
 	Samples int    `yaml:"samples" json:"samples"`
 }
 
+// CostSpread is the min–max range of one cost over a report's samples, in the
+// same unit as the median it brackets.
+type CostSpread struct {
+	Min float64 `yaml:"min" json:"min"`
+	Max float64 `yaml:"max" json:"max"`
+}
+
+// brackets reports whether the spread is finite and 0 < min <= median <= max.
+func (s CostSpread) brackets(median float64) bool {
+	finite := !math.IsNaN(s.Min) && !math.IsInf(s.Min, 0) &&
+		!math.IsNaN(s.Max) && !math.IsInf(s.Max, 0)
+	positive := s.Min > 0
+	ordered := s.Min <= median && median <= s.Max
+	return finite && positive && ordered
+}
+
 // SkipBudget records median costs in the same unit, or nil until measured.
+// Each cost may carry its min–max spread. A recorded spread must bracket its
+// median, and the worst case the spreads imply must still beat the avoided
+// work.
 type SkipBudget struct {
-	Path       SkipPath         `yaml:",inline" json:"path"`
-	Proof      *float64         `yaml:"proof" json:"proof"`
-	Settle     *float64         `yaml:"settle" json:"settle"`
-	Avoided    *float64         `yaml:"avoided" json:"avoided"`
-	Provenance BudgetProvenance `yaml:"provenance" json:"provenance"`
+	Path          SkipPath         `yaml:",inline" json:"path"`
+	Proof         *float64         `yaml:"proof" json:"proof"`
+	ProofSpread   *CostSpread      `yaml:"proofSpread,omitempty" json:"proofSpread,omitempty"`
+	Settle        *float64         `yaml:"settle" json:"settle"`
+	SettleSpread  *CostSpread      `yaml:"settleSpread,omitempty" json:"settleSpread,omitempty"`
+	Avoided       *float64         `yaml:"avoided" json:"avoided"`
+	AvoidedSpread *CostSpread      `yaml:"avoidedSpread,omitempty" json:"avoidedSpread,omitempty"`
+	Provenance    BudgetProvenance `yaml:"provenance" json:"provenance"`
 	// Cases names the measurement cases whose reports supply the costs.
 	Cases []MeasurementCase `yaml:"cases" json:"cases"`
 }
@@ -125,6 +147,44 @@ func (b SkipBudget) ValidateMeasured() error {
 	}
 	if (proof+settle)/avoided >= 1 {
 		return fmt.Errorf("skip budget %v: proof and settlement cost at least as much as avoided work; do not ship this skip", b.Path)
+	}
+	return b.validateSpreads(proof, settle, avoided)
+}
+
+// validateSpreads checks each recorded spread against its median and refuses
+// a skip whose worst case, (proof max + settle max) / avoided min, does not
+// beat the avoided work, so a lane cannot pass on a lucky median. A cost
+// without a spread contributes its median to the worst case.
+func (b SkipBudget) validateSpreads(proof, settle, avoided float64) error {
+	costs := []struct {
+		name   string
+		median float64
+		spread *CostSpread
+	}{
+		{"proof", proof, b.ProofSpread},
+		{"settle", settle, b.SettleSpread},
+		{"avoided", avoided, b.AvoidedSpread},
+	}
+	for _, c := range costs {
+		if c.spread == nil {
+			continue
+		}
+		if !c.spread.brackets(c.median) {
+			return fmt.Errorf("skip budget %v: %s spread %v–%v does not bracket its median %v; record finite spreads with 0 < min <= median <= max", b.Path, c.name, c.spread.Min, c.spread.Max, c.median)
+		}
+	}
+	worstProof, worstSettle, leastAvoided := proof, settle, avoided
+	if b.ProofSpread != nil {
+		worstProof = b.ProofSpread.Max
+	}
+	if b.SettleSpread != nil {
+		worstSettle = b.SettleSpread.Max
+	}
+	if b.AvoidedSpread != nil {
+		leastAvoided = b.AvoidedSpread.Min
+	}
+	if (worstProof+worstSettle)/leastAvoided >= 1 {
+		return fmt.Errorf("skip budget %v: worst-case proof and settlement cost at least as much as the least avoided work; the median win is not robust, so do not ship this skip", b.Path)
 	}
 	return nil
 }

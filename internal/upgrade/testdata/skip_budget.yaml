@@ -1,7 +1,9 @@
 # Measured budgets, one row per planned skip, each from its own 240 x 1000
 # harness report (5 rounds). Every row must pass the measured-budget validator.
 #
-# Field mapping, all in milliseconds and all medians over the report's rounds:
+# Field mapping, all in milliseconds; each cost is the median over the
+# report's rounds and its optional <cost>Spread is the min–max over the same
+# rounds:
 #   proof   = skip arm medianProofMs: the stored refresh_proof stage.
 #   settle  = skip arm medianIndexStageMs: the INDEX stage of the skip arm. The
 #             stored profile has no separate settle stage, so INDEX (which
@@ -11,21 +13,14 @@
 #             keeps the ratio conservative.
 #   avoided = baseline arm medianIndexStageMs: the INDEX stage of the work the
 #             skip replaces.
-# The ratio the validator checks is (proof + settle) / avoided.
+# The validator checks (proof + settle) / avoided below 1 on the medians. Where
+# spreads are recorded it also checks 0 < min <= median <= max for each, and
+# the worst case (proof max + settle max) / avoided min below 1. A cost without
+# a spread contributes its median to the worst case.
 #
-# proven-settle (C1, stamp-only adapter bump): (98.077 + 1161.793) / 15322.876
-#   = 0.082. Wall medians: 5500.570 ms against 20068.291 ms (ratio 0.274).
-#   Wall min–max: skip 5329.447–6099.094 ms; baseline 19901.781–20529.832 ms.
-#   INDEX min–max: skip 1121.664–1333.833 ms; baseline 15249.097–15644.007 ms.
-#   Skip proof min–max: 62.006–153.575 ms.
-# stored-index (C3, indexer bump): 15895.061 / 35430.329 = 0.449. The lane has
-#   no proof. Wall medians: 21568.407 ms against 45752.144 ms (ratio 0.471).
-#   Wall min–max: skip 20925.720–21801.179 ms; baseline 44996.532–46106.574 ms.
-#   INDEX min–max: skip 15815.532–15992.401 ms; baseline 35329.255–36482.771 ms.
-#
-# Wall figures and spreads are informational; ValidateMeasured does not read
-# them. C1's wall ratio fell from 0.428 to 0.274 while its budget ratio stayed
-# roughly flat. Wall covers more than INDEX, and the cause is unconfirmed.
+# Wall figures, beside each row, are informational; ValidateMeasured does not
+# read them. C1's wall ratio fell from 0.428 to 0.274 while its budget ratio
+# stayed roughly flat. Wall covers more than INDEX, and the cause is unconfirmed.
 # The prior rows were measured at different heads (0c4084f45 and c14b7259a)
 # without recorded spreads, so the change cannot be attributed to per-process
 # sampling alone.
@@ -46,26 +41,36 @@ requiredNames:
   - proven-settle
   - stored-index
 budgets:
+  # Wall (informational): skip median 5500.570, min–max 5329.447–6099.094;
+  # baseline median 20068.291, min–max 19901.781–20529.832 (ratio 0.274).
   - name: proven-settle
     lane: stored-metadata
     disposition: proven
     cases: [C1]
     proof: 98.077
+    proofSpread: {min: 62.006, max: 153.575}
     settle: 1161.793
+    settleSpread: {min: 1121.664, max: 1333.833}
     avoided: 15322.876
+    avoidedSpread: {min: 15249.097, max: 15644.007}
     provenance:
       head: 2fb31a933d110ca668b16550bb288e7bb0da0c47
       base: 2fb31a933
       command: 'nix develop --command env GOTOOLCHAIN=go1.26.0 go run -tags skipbudget ./cmd/skip-budget -case C1 -base 2fb31a933 -root /tmp/opencode/skip-remeasure -sessions 240 -entries 1000 -rounds 5'
       date: '2026-11-20T05:20:03Z'
       samples: 5
+  # The lane has no proof, so proof carries no spread.
+  # Wall (informational): skip median 21568.407, min–max 20925.720–21801.179;
+  # baseline median 45752.144, min–max 44996.532–46106.574 (ratio 0.471).
   - name: stored-index
     lane: stored-index
     disposition: index
     cases: [C3]
     proof: 0
     settle: 15895.061
+    settleSpread: {min: 15815.532, max: 15992.401}
     avoided: 35430.329
+    avoidedSpread: {min: 35329.255, max: 36482.771}
     provenance:
       head: 2fb31a933d110ca668b16550bb288e7bb0da0c47
       base: 2fb31a933
@@ -111,6 +116,64 @@ cases:
     proof: 1
     settle: 1
     avoided: .inf
+    valid: false
+  - name: bracketing-spreads
+    proof: 1
+    proofSpread: {min: 0.5, max: 1.5}
+    settle: 1
+    settleSpread: {min: 1, max: 1}
+    avoided: 6
+    avoidedSpread: {min: 5, max: 7}
+    valid: true
+  - name: partial-spreads
+    proof: 0
+    settle: 1
+    settleSpread: {min: 0.5, max: 2}
+    avoided: 3
+    valid: true
+  - name: spread-min-above-median
+    proof: 1
+    proofSpread: {min: 1.5, max: 2}
+    settle: 1
+    avoided: 6
+    valid: false
+  - name: spread-median-above-max
+    proof: 1
+    settle: 1
+    settleSpread: {min: 0.5, max: 0.9}
+    avoided: 6
+    valid: false
+  - name: spread-zero-min
+    proof: 1
+    settle: 1
+    avoided: 6
+    avoidedSpread: {min: 0, max: 7}
+    valid: false
+  - name: spread-negative-min
+    proof: 1
+    proofSpread: {min: -1, max: 2}
+    settle: 1
+    avoided: 6
+    valid: false
+  - name: spread-infinite-max
+    proof: 1
+    settle: 1
+    settleSpread: {min: 0.5, max: .inf}
+    avoided: 6
+    valid: false
+  - name: worst-case-break-even
+    proof: 1
+    proofSpread: {min: 0.5, max: 2}
+    settle: 1
+    settleSpread: {min: 0.5, max: 2}
+    avoided: 6
+    avoidedSpread: {min: 4, max: 7}
+    valid: false
+  - name: worst-case-losing
+    proof: 1
+    settle: 1
+    settleSpread: {min: 0.5, max: 4}
+    avoided: 3
     valid: false
 missingProvenance:
   - head
