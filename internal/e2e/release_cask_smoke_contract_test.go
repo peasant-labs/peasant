@@ -9,6 +9,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const releaseCaskSmokeFixturePath = "testdata/workflows/release_cask_smoke.yaml"
+
 //go:embed testdata/workflows/release_cask_smoke.yaml
 var releaseCaskSmokeBytes []byte
 
@@ -34,7 +36,7 @@ func loadReleaseCaskSmokeFixture(t *testing.T) releaseCaskSmokeFixture {
 	t.Helper()
 	var fixture releaseCaskSmokeFixture
 	if err := yaml.Unmarshal(releaseCaskSmokeBytes, &fixture); err != nil {
-		t.Fatalf("parse testdata/workflows/release_cask_smoke.yaml: %v", err)
+		t.Fatalf("parse %s: %v", releaseCaskSmokeFixturePath, err)
 	}
 	if strings.TrimSpace(fixture.Job) == "" ||
 		strings.TrimSpace(fixture.Checkout.Step) == "" ||
