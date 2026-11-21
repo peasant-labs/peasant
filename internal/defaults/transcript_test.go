@@ -12,6 +12,12 @@ func TestPushTranscriptDocumentCapAliasesContractDocumentCap(t *testing.T) {
 	}
 }
 
+func TestPullServedBlobCapAliasesPushTranscriptDocumentCap(t *testing.T) {
+	if PullServedBlobCapBytes != PushTranscriptDocumentCapBytes {
+		t.Fatalf("pull served blob cap=%d, want the push transcript document cap %d", PullServedBlobCapBytes, PushTranscriptDocumentCapBytes)
+	}
+}
+
 func TestPushMetadataDocumentCapAliasesContractDocumentCap(t *testing.T) {
 	if PushMetadataDocumentCapBytes != SessionDetailDocumentCapBytes {
 		t.Fatalf("push metadata document cap=%d, want the contract document cap %d", PushMetadataDocumentCapBytes, SessionDetailDocumentCapBytes)
