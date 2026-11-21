@@ -114,7 +114,8 @@ export async function acquireLifecycle(directory, { termMs = 1500, killMs = 2000
     identity,
     launch(command, args, options = {}) {
       if (stopping || gate.child.exitCode !== null || gate.child.signalCode !== null) throw new Error('Journey ownership is stopping or its flock keeper exited; no new child may start');
-      const child = start(command, args, { ...options, detached: true, env: { ...process.env, ...options.env, PEASANT_OBSERVATIONS_OWNER: owner } });
+      // A caller's env is the whole environment, so a variable a server sandbox dropped stays dropped.
+      const child = start(command, args, { ...options, detached: true, env: { ...(options.env ?? process.env), PEASANT_OBSERVATIONS_OWNER: owner } });
       children.push(child); return child;
     },
     cleanup() {

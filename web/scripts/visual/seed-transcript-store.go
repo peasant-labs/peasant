@@ -1,8 +1,9 @@
 //go:build ignore
 
-// Seed a synthetic multi-segment transcript into a throwaway data directory
-// so the mounted capture can open the production route. No real transcript
-// text, session id, or personal path is used.
+// Seed a synthetic multi-segment transcript into the data directory named by
+// the one argument (the capture's server sandbox data directory) so the
+// mounted capture can open the production route. No real transcript text,
+// session id, or personal path is used.
 package main
 
 import (
@@ -43,10 +44,10 @@ var (
 )
 
 func main() {
-	root, err := os.MkdirTemp("", "peasant-transcript-segments-")
-	if err != nil {
-		fail(err)
+	if len(os.Args) != 2 || !filepath.IsAbs(os.Args[1]) {
+		fail(fmt.Errorf("no store was written because the arguments are %q, not one absolute data directory; pass the data directory of the capture's server sandbox", os.Args[1:]))
 	}
+	root := os.Args[1]
 	dbPath := string(defaults.ResolveDBFilePathWith(root))
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 		fail(err)

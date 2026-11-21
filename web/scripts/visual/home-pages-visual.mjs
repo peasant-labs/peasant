@@ -4,12 +4,13 @@
  */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, resolve, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import YAML from 'yaml';
-import { seedConfiguredSandbox } from '../journey/lib/configured-sandbox.mjs';
+import { ownedServerSandbox } from './lib/owned-server-sandbox.mjs';
+import { startOwnedServer } from './lib/owned-server-start.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const binary = join(repo, 'peasant');
@@ -60,26 +61,14 @@ assert.ok(chunk, 'Rebuild this branch: exported Home marker is absent');
 const bytes = readFileSync(binary);
 assert.ok(bytes.includes(Buffer.from('data-home-bounded')), 'Rebuild the CLI: embedded Home marker is absent');
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
-const home = mkdtempSync('/tmp/opencode/home-browser-');
-const env = { ...process.env, HOME: home, XDG_CONFIG_HOME: join(home, 'config'), XDG_DATA_HOME: join(home, 'data'), XDG_STATE_HOME: join(home, 'state'), XDG_CACHE_HOME: join(home, 'cache') };
-// Home is a page of an installed dashboard. A computer with no configuration file is sent to setup instead.
-seedConfiguredSandbox(env);
-const server = spawn(binary, ['web', 'start', '--port', String(port), '--foreground', '--no-browser', '--mock-data-store=web'], { cwd: repo, env, stdio: ['ignore', 'ignore', 'pipe'] });
-let stderr = '';
-server.stderr.on('data', data => { stderr += data; });
+const sandbox = ownedServerSandbox('home-pages-visual');
+const server = await startOwnedServer({ port, portVariable: 'PEASANT_ROOT_PORT', start: () => spawn(binary, ['web', 'start', '--port', String(port), '--foreground', '--no-browser', ...sandbox.args, '--mock-data-store=web'], { cwd: repo, env: sandbox.env, stdio: ['ignore', 'ignore', 'pipe'] }) });
 const stopped = new Promise(resolve => server.once('exit', resolve));
 const timeout = AbortSignal.timeout(90_000);
 timeout.addEventListener('abort', () => server.kill('SIGKILL'), { once: true });
 let browser;
 const evidence = [];
 try {
-  let healthy = false;
-  for (let attempt = 0; attempt < 80; attempt++) {
-    if (server.exitCode !== null) throw new Error(`Sandbox server exited: ${stderr}`);
-    if ((await fetch(`${origin}/api/v1/health`).catch(() => null))?.ok) { healthy = true; break; }
-    await new Promise(done => setTimeout(done, 100));
-  }
-  assert.ok(healthy, `Sandbox server did not start: ${stderr}`);
   browser = await chromium.launch({ executablePath: process.env.CHROME_PATH, headless: true });
   mkdirSync(out, { recursive: true });
   function row(id, childCount = 0, recorded = undefined) {
@@ -212,5 +201,4 @@ try {
   const kill = setTimeout(() => server.kill('SIGKILL'), 3000);
   await stopped;
   clearTimeout(kill);
-  rmSync(home, { recursive: true, force: true });
 }

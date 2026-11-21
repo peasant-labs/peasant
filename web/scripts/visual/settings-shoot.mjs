@@ -20,8 +20,10 @@
    the advanced section and fails if the page then scrolls sideways.
 
    Every write and install is real. Before each theme the world's hooks are reset, so both themes
-   show the same states. The temp root lives under os.tmpdir(), not under a user's home or checkout,
-   so no personal path reaches a capture; it is removed at the end (KEEP=1 keeps it).
+   show the same states. The world is the server's own sandbox (ownedServerSandbox): its HOME,
+   configuration, data, state and cache directories all lie under one root in os.tmpdir(), not under
+   a user's home or checkout, so no personal path reaches a capture; the root is removed when the
+   script exits.
 
    Build provenance is checked before the browser starts: the settings copy marker must be in a
    web/out chunk no older than the page's sources, in peasant (no older than that chunk), and in
@@ -31,16 +33,18 @@
      CHROME_PATH=/path/to/chrome node scripts/visual/settings-shoot.mjs [out-dir]
 
    Env: CHROME_PATH (required), PEASANT_BIN (default ../peasant), PEASANT_SETTINGS_PORT
-   (default 8795), PUPPETEER_CORE, KEEP. */
+   (default 8795), PUPPETEER_CORE. */
 import { spawn, execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import http from 'node:http'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { applyDeterminism } from './determinism.mjs'
 import { SMOKE_THEMES } from './smoke-surfaces.mjs'
+import { ownedServerSandbox } from './lib/owned-server-sandbox.mjs'
+import { startOwnedServer } from './lib/owned-server-start.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const WEB = join(HERE, '../..')
@@ -86,11 +90,9 @@ const binarySha = createHash('sha256').update(binary).digest('hex')
 console.log(`[settings-shoot] provenance chunk=${relative(REPO, markerChunk)} binary sha256=${binarySha.slice(0, 16)}…`)
 
 /* ---- the world ---- */
-const ROOT = mkdtempSync(join(tmpdir(), 'peasant-settings-'))
-const HOME = join(ROOT, 'home')
-const CONFIG = join(ROOT, 'config')
-const env = { ...process.env, HOME, XDG_CONFIG_HOME: CONFIG, XDG_DATA_HOME: join(ROOT, 'data'), XDG_STATE_HOME: join(ROOT, 'state'), GIT_CONFIG_NOSYSTEM: '1' }
-const git = (dir, ...args) => execFileSync('git', ['-C', dir, ...args], { env, stdio: 'pipe' })
+const sandbox = ownedServerSandbox('settings-shoot', {}, { ...process.env, GIT_CONFIG_NOSYSTEM: '1' })
+const HOME = sandbox.env.HOME
+const git = (dir, ...args) => execFileSync('git', ['-C', dir, ...args], { env: sandbox.env, stdio: 'pipe' })
 const repoPath = (name) => join(HOME, 'work/acme', name)
 
 for (const name of REPOS) {
@@ -124,7 +126,7 @@ const village = http.createServer((req, res) => {
 await new Promise((resolve) => village.listen(0, 'localhost', resolve))
 const villageURL = `http://localhost:${village.address().port}`
 
-const peasantConfig = join(CONFIG, 'peasant')
+const peasantConfig = join(sandbox.configDir, 'peasant')
 mkdirSync(peasantConfig, { recursive: true })
 writeFileSync(join(peasantConfig, 'config.yaml'), `version: 1
 redaction:
@@ -164,17 +166,13 @@ function resetHooks() {
 }
 
 /* ---- the server ---- */
-const server = spawn(BIN, ['web', 'start', '--port', PORT, '--foreground', '--no-browser'], { cwd: ROOT, env, stdio: ['ignore', 'ignore', 'pipe'] })
+let server
 let serverLog = ''
-let serverDown = false
-server.stderr.on('data', (data) => { serverLog += data.toString() })
-server.on('exit', () => { serverDown = true })
 let browser
 const teardown = async () => {
   try { if (browser) await browser.close() } catch {}
-  try { if (!serverDown) server.kill('SIGTERM') } catch {}
+  try { if (server && server.exitCode === null && server.signalCode === null) server.kill('SIGTERM') } catch {}
   village.close()
-  if (process.env.KEEP !== '1') rmSync(ROOT, { recursive: true, force: true })
 }
 const abort = async (what, fix) => {
   await teardown()
@@ -182,12 +180,9 @@ const abort = async (what, fix) => {
 }
 
 try {
-  let healthy = false
-  for (let attempt = 0; attempt < 60 && !healthy && !serverDown; attempt++) {
-    healthy = (await fetch(`${ORIGIN}/api/v1/health`).catch(() => null))?.status === 200
-    if (!healthy) await pause(250)
-  }
-  if (!healthy) await abort(`peasant did not answer on ${ORIGIN}: ${serverLog.trim().slice(-400)}`, `free port ${PORT} or set PEASANT_SETTINGS_PORT.`)
+  server = await startOwnedServer({ port: PORT, portVariable: 'PEASANT_SETTINGS_PORT', start: () => spawn(BIN, ['web', 'start', '--port', PORT, '--foreground', '--no-browser', ...sandbox.args], { cwd: sandbox.root, env: sandbox.env, stdio: ['ignore', 'ignore', 'pipe'] }) })
+    .catch((error) => abort(`peasant did not start on ${ORIGIN}: ${error.message}`, `free port ${PORT} or set PEASANT_SETTINGS_PORT.`))
+  server.stderr.on('data', (data) => { serverLog = (serverLog + data).slice(-4000) })
 
   const servedChunk = `/${relative(join(WEB, 'out'), markerChunk).split('\\').join('/')}`
   const served = await fetch(`${ORIGIN}${servedChunk}`).catch(() => null)
@@ -202,7 +197,7 @@ try {
     if (status.status === 'running') continue
     recorded = (await (await fetch(`${ORIGIN}/api/v1/sessions`)).json()).sessions?.length ?? 0
   }
-  if (recorded < REPOS.length) await abort(`ingest recorded ${recorded} of ${REPOS.length} sessions.`, 'check the server log with KEEP=1.')
+  if (recorded < REPOS.length) await abort(`ingest recorded ${recorded} of ${REPOS.length} sessions. The server wrote: ${serverLog.trim().slice(-400)}`, 'fix what the server log reports and rerun.')
 
   mkdirSync(OUT, { recursive: true })
   const puppeteer = (await import(process.env.PUPPETEER_CORE || 'puppeteer-core')).default
