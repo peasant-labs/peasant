@@ -1618,17 +1618,26 @@ func (t Tree) renderChildCountLine(styles theme.Styles, row treeRow, edge string
 	node := row.node
 	label := childCountLabel(node)
 	lead := treeRowLead(styles, false, edge)
-	// Start where the parent's LABEL starts, then one indent level further, so
-	// the count sits under the title rather than under the tree glyphs.
+	// Start where the parent's LABEL starts (treeLabelColumn, shared with
+	// renderRow), then one indent level further, so the count sits under the
+	// title rather than under the tree glyphs.
 	expand := expandGlyph(node, t.visibleExpansion(node))
 	box := stateBox(styles, node.State)
 	indent := spaces(row.depth * treeIndentStep)
-	labelColumn := lipgloss.Width(indent+expand+" "+box+" ") + treeIndentStep
+	labelColumn := treeLabelColumn(indent, expand, box) + treeIndentStep
 	budget := t.width - lipgloss.Width(noCursorGlyph)
 	if budget < 1 {
 		return styles.Base.Render(truncateLine(treeRowLeadPlain(false, edge)+spaces(labelColumn)+label, t.width))
 	}
 	return lead + fitLine(styles.Muted, spaces(labelColumn)+label, budget)
+}
+
+// treeLabelColumn is the display column, measured after the cursor lead, where
+// a row's label starts: the indent, the expand glyph, and the tri-state box with
+// their separating spaces. It is the one definition of that column, so renderRow
+// and renderChildCountLine cannot drift apart when the row prefix changes.
+func treeLabelColumn(indent, expand, box string) int {
+	return lipgloss.Width(indent + expand + " " + box + " ")
 }
 
 // minFallback renders one truncation-safe line when the region is below the
@@ -1665,8 +1674,7 @@ func (t Tree) renderRow(styles theme.Styles, row treeRow, active bool, edge stri
 	box := stateBox(styles, node.State)
 	annotation := rowAnnotation(node)
 
-	prefixPlain := noCursorGlyph + indent + expand + " " + box + " "
-	prefixWidth := lipgloss.Width(prefixPlain)
+	prefixWidth := lipgloss.Width(noCursorGlyph) + treeLabelColumn(indent, expand, box)
 	labelBudget := t.width - prefixWidth
 	if labelBudget < 1 {
 		// Narrow region: styled segments would not fit, so hard-truncate the
