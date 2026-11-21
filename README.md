@@ -82,7 +82,7 @@ privacy boundaries, and recovery behavior.
 | `peasant service install` / `status` / `uninstall` | Run `peasant harvest` on a schedule with a systemd user timer (Linux; see [scheduled harvest](#scheduled-harvest-peasant-service)) |
 | `peasant village push` | Push ingested transcripts + annotations to the Peasant village (incremental — server-manifest skip-gate + retraction; see [flags](#peasant-village-push-flags)) |
 | `peasant village auto` | Publish this repository's sessions on every `git push`, redacted and private, to the collectives you published to last: saves an auto-publish rule in `hooks.yaml` (see [the network reference](docs/NETWORK.md#6-hook-triggered-push)) and installs the pre-push hook here |
-| `peasant login` / `peasant logout` | Authenticate with / disconnect from the village |
+| `peasant village login` / `peasant village logout` | Authenticate with / disconnect from the village (reference: [login](docs/cli/peasant_village_login.md), [logout](docs/cli/peasant_village_logout.md), [auth model](docs/auth.md)) |
 | `peasant models sync` | Fetch and sync model reference data from models.dev |
 | `peasant sessions context` | Print grep-C-style turns around a session turn (terminal-rendered) |
 | `peasant sessions list` | List ingested sessions |

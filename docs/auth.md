@@ -17,11 +17,11 @@
 
 | Concern | Mechanism | Source |
 |---------|-----------|--------|
-| Login | **loopback OAuth** browser flow: peasant starts a local callback server on an ephemeral port, opens the browser to `…/api/v1/auth/cli/login?port=&state=`, waits for the redirect with credentials | `internal/auth/login.go` (`Login`) |
-| Stored credentials | `credentials.json` in the config dir, written **`0600`** (`PrivateFilePerm`) | `internal/auth/credentials.go` (`SaveCredentials`) |
+| Login | `peasant village login` ([reference](cli/peasant_village_login.md)) runs a **loopback OAuth** browser flow: peasant starts a local callback server on an ephemeral port, opens the browser to `…/api/v1/auth/cli/login?port=&state=`, waits for the redirect with credentials | `internal/auth/login.go` (`Login`) |
+| Stored credentials | `credentials.json` in the config dir (`$XDG_CONFIG_HOME/peasant/`, by default `~/.config/peasant/`), written **`0600`** (`PrivateFilePerm`) | `internal/auth/credentials.go` (`SaveCredentials`) |
 | Credential fields | `api_key`, `key_id`, `user_id`, `username`, `village_url`, `linked_at` | `auth.Credentials` |
 | Validity | `IsValid()` = all of api_key/key_id/user_id/username present | `credentials.go` |
-| Logout / key revocation | `Logout` sends `DELETE /api/v1/auth/api-keys/{key_id}` (Bearer apiKey) to the village, then **always** clears local `credentials.json` — even if remote revocation fails | `internal/auth/logout.go`; village `RevokeAPIKey` (`handler/auth.go`) |
+| Logout / key revocation | `peasant village logout` ([reference](cli/peasant_village_logout.md)) calls `Logout`, which sends `DELETE /api/v1/auth/api-keys/{key_id}` (Bearer apiKey) to the village, then **always** clears local `credentials.json` — even if remote revocation fails | `internal/auth/logout.go`; village `RevokeAPIKey` (`handler/auth.go`) |
 
 The CLI never persists a long-lived OAuth token — the browser flow exchanges to a
 village-minted **API key** that is the only credential stored on disk.
