@@ -34,11 +34,11 @@ const sqlSessionIsNative = `(s.active_generation_id IS NOT NULL AND EXISTS (
 
 // sqlSessionNativeEntries renders the FROM and WHERE of the active generation's
 // partition-0 body rows, aliased e.
-const sqlSessionNativeEntries = `session_generation_entries ge
+var sqlSessionNativeEntries = `session_generation_entries ge
   JOIN session_entry_bodies e
     ON e.session_id = ge.session_id AND e.body_digest = ge.body_digest
  WHERE ge.session_id = s.session_id
-   AND ge.generation_id = s.active_generation_id
+   AND ge.generation_id = ` + sqlRowsGeneration("s.session_id", "s.active_generation_id") + `
    AND ge.partition_id = 0`
 
 // sessionEntryExistsSQL renders whether an entry of the session satisfies a

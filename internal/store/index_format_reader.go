@@ -11,11 +11,13 @@ import (
 
 const indexFormatReadBatchSize = 256
 
-const sqlIndexFormatState = `SELECT s.session_id, s.index_format_version,
+func indexFormatStateSQL(conn *sqlite.Conn) string {
+	return `SELECT s.session_id, s.index_format_version,
 (EXISTS (SELECT 1 FROM session_entries e WHERE e.session_id = s.session_id)
  OR EXISTS (SELECT 1 FROM session_generation_entries m
-   WHERE m.session_id = s.session_id AND m.generation_id = s.active_generation_id AND m.partition_id = 0))
+   WHERE m.session_id = s.session_id AND ` + activeRowsOfM(conn) + ` AND m.partition_id = 0))
 FROM sessions s`
+}
 
 // ValidateIndexFormatsOnConn checks only the requested session IDs in the
 // caller's active snapshot. Nil and empty IDs mean no sessions, never all.
@@ -45,7 +47,7 @@ func (s *Store) ValidateAllIndexFormatsOnConn(conn *sqlite.Conn) error {
 	if err := requireIndexReadSnapshot(conn); err != nil {
 		return err
 	}
-	return s.validateIndexFormatQueryOnConn(conn, sqlIndexFormatState+" ORDER BY s.session_id", nil)
+	return s.validateIndexFormatQueryOnConn(conn, indexFormatStateSQL(conn)+" ORDER BY s.session_id", nil)
 }
 
 func requireIndexReadSnapshot(conn *sqlite.Conn) error {
@@ -71,7 +73,7 @@ func (s *Store) validateIndexFormatIDsOnConn(conn *sqlite.Conn, ids []string) er
 			args = append(args, id)
 		}
 		marks := strings.TrimSuffix(strings.Repeat("?,", len(args)), ",")
-		query := sqlIndexFormatState + " WHERE s.session_id IN (" + marks + ") ORDER BY s.session_id"
+		query := indexFormatStateSQL(conn) + " WHERE s.session_id IN (" + marks + ") ORDER BY s.session_id"
 		if err := s.validateIndexFormatQueryOnConn(conn, query, args); err != nil {
 			return err
 		}

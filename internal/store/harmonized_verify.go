@@ -151,10 +151,14 @@ func (s *Store) verifyContentSession(ctx context.Context, sessionID schema.Sessi
 	if !harmonized {
 		return nil, nil
 	}
-	if damage := verifyContentBodiesOnConn(conn, sessionID, active); damage != nil {
+	rowsGenID, err := rowsGenerationIDOnConn(conn, sessionID, active)
+	if err != nil {
+		return nil, fmt.Errorf("store: resolve the parsed rows of active generation %s while verifying session %s: %w", active, sessionID, err)
+	}
+	if damage := verifyContentBodiesOnConn(conn, sessionID, rowsGenID); damage != nil {
 		return damage, nil
 	}
-	if damage := verifyContentBlobsOnConn(conn, sessionID, active); damage != nil {
+	if damage := verifyContentBlobsOnConn(conn, sessionID, rowsGenID); damage != nil {
 		return damage, nil
 	}
 	capture, found, err := readCapture(conn, ingest.SessionID(sessionID))

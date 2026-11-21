@@ -42,7 +42,7 @@ WHERE session_search_fts MATCH ?
       AND EXISTS (
         SELECT 1 FROM sessions s2
         JOIN session_generations g ON g.session_id = s2.session_id AND g.generation_id = s2.active_generation_id
-        JOIN session_generation_entries m ON m.session_id = b.session_id AND m.generation_id = g.generation_id AND m.partition_id = 0 AND m.body_digest = b.body_digest
+        JOIN session_generation_entries m ON m.session_id = b.session_id AND m.generation_id = COALESCE(g.mapping_set_id, g.generation_id) AND m.partition_id = 0 AND m.body_digest = b.body_digest
         WHERE s2.session_id = b.session_id
       )
       AND NOT (
@@ -54,7 +54,7 @@ WHERE session_search_fts MATCH ?
           FROM session_generation_entries pm
           JOIN session_entry_bodies pb ON pb.session_id = pm.session_id AND pb.body_digest = pm.body_digest
           WHERE pm.session_id = b.session_id
-            AND pm.generation_id = (SELECT active_generation_id FROM sessions WHERE session_id = b.session_id)
+            AND pm.generation_id = (SELECT COALESCE(g2.mapping_set_id, s3.active_generation_id) FROM sessions s3 LEFT JOIN session_generations g2 ON g2.session_id = s3.session_id AND g2.generation_id = s3.active_generation_id WHERE s3.session_id = b.session_id)
             AND pm.partition_id = 0
             AND pm.entry_index = b.parent_index
         )

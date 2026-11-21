@@ -193,7 +193,8 @@ const (
 SELECT ?1, ?2, ?3, ?4
  WHERE EXISTS (SELECT 1 FROM sessions s
                  JOIN session_generation_entries m
-                   ON m.session_id = s.session_id AND m.generation_id = s.active_generation_id
+                   ON m.session_id = s.session_id
+                  AND m.generation_id = COALESCE((SELECT g.mapping_set_id FROM session_generations g WHERE g.session_id = s.session_id AND g.generation_id = s.active_generation_id), s.active_generation_id)
                   AND m.partition_id = 0 AND m.entry_index = ?3
                 WHERE s.session_id = ?2)
     OR EXISTS (SELECT 1 FROM session_entries e
