@@ -44,11 +44,11 @@ var referenceInputHash = strings.Repeat("d", 64)
 
 // The kinds of install case.
 const (
-	referenceKindInstall      = "install"
-	referenceKindRowDeltas    = "row-deltas"
-	referenceKindRelationship = "relationship"
-	referenceKindParseParity  = "parse-parity"
-	referenceKindLaterParse   = "later-parse"
+	referenceKindInstall        = "install"
+	referenceKindRowDeltas      = "row-deltas"
+	referenceKindRelationship   = "relationship"
+	referenceKindParseParity    = "parse-parity"
+	referenceKindLaterParse     = "later-parse"
 	referenceKindCrash          = "crash"
 	referenceKindMoved          = "moved"
 	referenceKindAnnotatedParse = "annotated-parse"
