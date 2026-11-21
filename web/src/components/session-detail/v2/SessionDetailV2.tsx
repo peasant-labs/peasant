@@ -171,8 +171,9 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     setFilters(next);
   }, [filters]);
   // Host element for the mounted viewer; the per-session reading state replays
-  // the inner scroller offset against it on the way back.
-  const transcriptHostRef = useRef<HTMLDivElement | null>(null);
+  // the inner scroller offset against it on the way back. Held as state so the
+  // reading state attaches when the host mounts after a loading skeleton.
+  const [transcriptHost, setTranscriptHost] = useState<HTMLDivElement | null>(null);
   const { data: detail, channelFault: detailFault, connectionFault, refresh: refreshDetail } = useChannel<SessionDetailWire>(
     subscribe.sessionDetail(sessionId),
   );
@@ -510,7 +511,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     setActiveTurn,
     search,
     setSearch,
-  } = useTranscriptReadingState(sessionId, transcriptHostRef, Boolean(detail && vm), requestedTurn == null);
+  } = useTranscriptReadingState(sessionId, transcriptHost, Boolean(detail && vm), requestedTurn == null);
 
   const { theme } = useTheme();
 
@@ -714,7 +715,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     <>
       {/* The shared viewport shell budgets the sidebar and offline notice. */}
       <div
-        ref={transcriptHostRef}
+        ref={setTranscriptHost}
         data-tour="transcript-view"
         className={[
           'flex h-full min-h-0 flex-col',

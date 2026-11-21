@@ -10,6 +10,7 @@ import { PublishProvider } from '@/contexts/PublishContext';
 import { SessionDetailV2 } from './SessionDetailV2';
 import { FaultCause, FaultOperation, FaultRemedy, TranscriptWindowEvidence, WebFault } from '@/lib/faults';
 import type { TranscriptSegmentState } from './lib/useTranscriptSegments';
+import { readTranscriptReadingState } from './lib/transcriptReadingState';
 
 const PROJECT_HASH = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' as ProjectHash;
 const SESSION_ID = 'sess-segment-host';
@@ -357,6 +358,26 @@ describe('SessionDetailV2 segmented transcript', () => {
     const view = render(<PublishProvider><SessionDetailV2 sessionId={SESSION_ID} projectHash={PROJECT_HASH} projectName="alpha-project" routeQuery={routeQuery} /></PublishProvider>);
     await waitFor(() => expect(view.getByText('retained earlier conversation')).toBeInTheDocument());
     await waitFor(() => expect(reads).toContain('segment:0'));
+  });
+
+  it('records the reading position of a transcript whose segments load after the skeleton', async () => {
+    const plan = cases.find((row) => row.name === 'mount-segment-zero');
+    if (!plan) throw new Error('mount-segment-zero fixture is missing');
+    window.sessionStorage.clear();
+    activeCase = plan;
+    revision = plan.revision;
+    channelData = detail(plan);
+    vi.stubGlobal('fetch', vi.fn(answer));
+    const view = render(<TestDetail turn={null} />);
+    expect(view.getByLabelText('Loading transcript')).toBeInTheDocument();
+    await waitFor(() => expect(view.container.querySelector('.txn-stream')).not.toBeNull());
+    const stream = view.container.querySelector<HTMLElement>('.txn-stream');
+    if (!stream) throw new Error('transcript stream did not mount');
+    await act(async () => { await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve())); });
+    stream.scrollTop = 432;
+    fireEvent.scroll(stream);
+    await waitFor(() => expect(readTranscriptReadingState(SESSION_ID)?.scrollTop).toBe(432));
+    window.sessionStorage.clear();
   });
 
   it('renders local image parts from a segment without resolving omitted parts', async () => {
