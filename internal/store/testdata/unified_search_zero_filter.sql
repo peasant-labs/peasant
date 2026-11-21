@@ -29,7 +29,7 @@ WHERE session_search_fts MATCH ?
       AND NOT (
         e.depth > 0
         AND e.content_preview IS NOT NULL
-        AND e.content_preview = (
+        AND e.content_preview IS (
           SELECT pe.content_preview FROM session_entries pe
           WHERE pe.session_id = e.session_id AND pe.entry_index = e.parent_index
         )
@@ -49,7 +49,7 @@ WHERE session_search_fts MATCH ?
         b.depth > 0
         AND b.content_preview IS NOT NULL
         AND b.parent_index IS NOT NULL
-        AND b.content_preview = (
+        AND b.content_preview IS (
           SELECT pb.content_preview
           FROM session_generation_entries pm
           JOIN session_entry_bodies pb ON pb.session_id = pm.session_id AND pb.body_digest = pm.body_digest

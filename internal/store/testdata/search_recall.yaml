@@ -90,3 +90,46 @@ cases:
     wantCount: 1
     wantFirstBodyID: 1125899906842624
     wantCeilingRefused: true
+  # Claude Code nests each tool call and tool result one level under a
+  # wrapper entry whose own text is NULL. The nested-duplicate filter must
+  # compare with IS, or the NULL parent text hides the nested entry (#844).
+  # Each term appears in exactly one entry, and each case runs against
+  # generation bodies, mirror rows, and mirror rows under the retired index.
+  - name: claude-tool-call-term-found
+    query: TestWidgetTotal
+    wantCount: 1
+    wantEntryIndexes: [2]
+    representations: &allRepresentations [generation, mirror, legacyIndex]
+    claudeTranscript: |
+      {"type":"user","uuid":"u1","sessionId":"{{sid}}","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"please run the widget tests"}}
+      {"type":"assistant","uuid":"a1","parentUuid":"u1","sessionId":"{{sid}}","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"go test -run TestWidgetTotal ./widget"}}]}}
+      {"type":"user","uuid":"u2","parentUuid":"a1","sessionId":"{{sid}}","timestamp":"2026-01-01T00:00:02Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"ok widget 0.01s"}]}}
+  - name: claude-tool-result-term-found
+    query: FIXME
+    wantCount: 1
+    wantEntryIndexes: [4]
+    representations: *allRepresentations
+    claudeTranscript: |
+      {"type":"user","uuid":"u1","sessionId":"{{sid}}","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"list the open notes in widget.go"}}
+      {"type":"assistant","uuid":"a1","parentUuid":"u1","sessionId":"{{sid}}","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"tool_use","id":"toolu_1","name":"Grep","input":{"pattern":"TODO","path":"widget.go"}}]}}
+      {"type":"user","uuid":"u2","parentUuid":"a1","sessionId":"{{sid}}","timestamp":"2026-01-01T00:00:02Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"widget.go:12: FIXME handle the empty basket"}]}}
+  - name: claude-subagent-tool-result-term-found
+    query: panic
+    wantCount: 1
+    wantEntryIndexes: [4]
+    representations: *allRepresentations
+    claudeTranscript: |
+      {"type":"user","uuid":"s1","sessionId":"{{sid}}","agentId":"agent844","isSidechain":true,"timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"find why the widget build fails"}}
+      {"type":"assistant","uuid":"s2","parentUuid":"s1","sessionId":"{{sid}}","agentId":"agent844","isSidechain":true,"timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"tool_use","id":"toolu_9","name":"Bash","input":{"command":"go build ./widget"}}]}}
+      {"type":"user","uuid":"s3","parentUuid":"s2","sessionId":"{{sid}}","agentId":"agent844","isSidechain":true,"timestamp":"2026-01-01T00:00:02Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_9","content":"runtime: panic in widget init"}]}}
+  # A nested entry whose text equals its parent's text is a duplicate and
+  # stays filtered: only the parent is returned.
+  - name: claude-nested-duplicate-child-filtered
+    query: duplicatedwidgetnote
+    wantCount: 1
+    wantEntryIndexes: [1]
+    representations: *allRepresentations
+    claudeTranscript: |
+      {"type":"user","uuid":"u1","sessionId":"{{sid}}","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"summarize the widget"}}
+      {"type":"assistant","uuid":"a1","parentUuid":"u1","sessionId":"{{sid}}","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"text","text":"the duplicatedwidgetnote summary"},{"type":"tool_use","id":"toolu_1","name":"Read","input":{"file_path":"widget.go"}}]}}
+      {"type":"user","uuid":"u2","parentUuid":"a1","sessionId":"{{sid}}","timestamp":"2026-01-01T00:00:02Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"package widget"}]}}

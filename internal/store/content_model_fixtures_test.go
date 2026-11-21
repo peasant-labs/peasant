@@ -158,7 +158,24 @@ type searchRecallCase struct {
 	WantFirstBodyID         *int64 `yaml:"wantFirstBodyID,omitempty"`
 	WantCeilingRefused      bool   `yaml:"wantCeilingRefused,omitempty"`
 	FallbackDualSource      bool   `yaml:"fallbackDualSource,omitempty"`
+	// ClaudeTranscript is Claude Code JSONL the production capture path
+	// turns into entries; {{sid}} stands for the case's session id.
+	ClaudeTranscript string `yaml:"claudeTranscript,omitempty"`
+	// Representations lists the stores the captured entries are written
+	// to, one subtest each, so every search template sees the same rows.
+	Representations []searchRecallRepresentation `yaml:"representations,omitempty"`
 }
+
+// searchRecallRepresentation names where a recall case writes its entries:
+// generation bodies, mirror rows under the consolidated index, or mirror
+// rows under the retired legacy index.
+type searchRecallRepresentation string
+
+const (
+	recallRepresentationGeneration  searchRecallRepresentation = "generation"
+	recallRepresentationMirror      searchRecallRepresentation = "mirror"
+	recallRepresentationLegacyIndex searchRecallRepresentation = "legacyIndex"
+)
 
 type searchRecallFixtures struct {
 	Cases []searchRecallCase `yaml:"cases"`
@@ -182,6 +199,16 @@ func loadSearchRecallFixtures(t *testing.T) []searchRecallCase {
 	for _, c := range fixtures.Cases {
 		if strings.TrimSpace(c.Name) == "" {
 			t.Fatal("search_recall.yaml: a case has a blank name")
+		}
+		for _, representation := range c.Representations {
+			switch representation {
+			case recallRepresentationGeneration, recallRepresentationMirror, recallRepresentationLegacyIndex:
+			default:
+				t.Fatalf("search_recall.yaml: %s: unknown representation %q", c.Name, representation)
+			}
+		}
+		if (c.ClaudeTranscript == "") != (len(c.Representations) == 0) {
+			t.Fatalf("search_recall.yaml: %s: claudeTranscript and representations go together", c.Name)
 		}
 		actual = append(actual, c.Name)
 	}
