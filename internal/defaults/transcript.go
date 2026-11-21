@@ -79,6 +79,15 @@ const PushTranscriptDocumentCapBytes int = SessionDetailDocumentCapBytes
 // stated once above rather than repeating the value.
 const PushMetadataDocumentCapBytes int = SessionDetailDocumentCapBytes
 
+// PushRedactionInputCapBytes is the largest entries or transcript content
+// document the publication redaction seams materialize. Each seam holds the
+// document several times over (raw, decoded, re-encoded and read back), so it
+// stays below the contract document cap as a memory guard. Because it is also
+// below ServedDetailDocumentBudgetBytes, a session peasant commits can exceed
+// it; publication refuses that session before redaction as too large to
+// publish, naming its size and this cap.
+const PushRedactionInputCapBytes int = 64 << 20
+
 // ServedDetailDocumentMarginBytes is the headroom peasant keeps below the
 // contract cap for transcript-envelope overhead and redaction growth.
 // Publication checks redacted output against the same contract document cap.

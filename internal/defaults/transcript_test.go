@@ -17,3 +17,20 @@ func TestPushMetadataDocumentCapAliasesContractDocumentCap(t *testing.T) {
 		t.Fatalf("push metadata document cap=%d, want the contract document cap %d", PushMetadataDocumentCapBytes, SessionDetailDocumentCapBytes)
 	}
 }
+
+// The redaction input cap is a memory guard below the publication caps. A
+// session between it and the served detail budget is committed locally and
+// refused at publication with an explicit too-large reason, so the guard must
+// stay strictly below both, or the refusal could never fire for a committed
+// session and the reason would be dead.
+func TestPushRedactionInputCapIsBelowThePublicationCaps(t *testing.T) {
+	if PushRedactionInputCapBytes <= 0 {
+		t.Fatalf("push redaction input cap=%d, want a positive cap", PushRedactionInputCapBytes)
+	}
+	if PushRedactionInputCapBytes >= ServedDetailDocumentBudgetBytes {
+		t.Fatalf("push redaction input cap=%d, want below the served detail budget %d", PushRedactionInputCapBytes, ServedDetailDocumentBudgetBytes)
+	}
+	if PushRedactionInputCapBytes >= PushTranscriptDocumentCapBytes {
+		t.Fatalf("push redaction input cap=%d, want below the push transcript document cap %d", PushRedactionInputCapBytes, PushTranscriptDocumentCapBytes)
+	}
+}

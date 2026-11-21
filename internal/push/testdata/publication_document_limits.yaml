@@ -1,13 +1,16 @@
 # The production transcript publication caps as literal data. A revert of the
 # 128 MiB output cap, a widened 64 MiB input seam, or a removed scan fails these
-# checks; nothing here materializes a 128 MiB document.
+# checks; nothing here materializes a 128 MiB document. The input cap is
+# defaults.PushRedactionInputCapBytes, shared by the transcript content and the
+# transcript entries seams; over it a session is not ready, too large to publish.
 policy:
   outputCapBytes: 134217728
   belowCapBytes: 134217727
   aboveCapBytes: 134217729
   inputCapBytes: 67108864
   outputRefusal: 'raw JSON validation failed at schema.ScanRawJSONDocument: document exceeds 134217728 bytes; decoding would exceed the caller boundary; reduce the document'
-  inputRefusal: 'raw JSON validation failed at schema.ScanRawJSONDocument: document exceeds 67108864 bytes; decoding would exceed the caller boundary; reduce the document'
+  inputRefusal: 'the transcript content document is too large to publish (64.0 MiB > 64.0 MiB cap): the document is 67108865 bytes and publication redaction materializes at most 67108864; nothing uploaded and nothing local changed; re-indexing cannot shrink it, so leave the session out of the push'
+  inputReason: too_large_to_publish
 
 # Small limits injected through the unexported transcript marshaler seam. The
 # same production path runs with these, so every mechanics case is a few KiB.
@@ -29,12 +32,44 @@ cases:
     accepted: false
     redactorCalled: true
     error: "raw JSON validation failed at schema.ScanRawJSONDocument: document exceeds 4096 bytes; decoding would exceed the caller boundary; reduce the document"
+  - name: input_redaction_seam_accepts_one_byte_below_input_limit
+    inputBytes: 2047
+    redactedBytes: 4095
+    accepted: true
+    redactorCalled: true
+  - name: input_redaction_seam_accepts_at_input_limit
+    inputBytes: 2048
+    redactedBytes: 4095
+    accepted: true
+    redactorCalled: true
   - name: input_redaction_seam_still_refuses_above_input_limit
     inputBytes: 2049
     redactedBytes: 4095
     accepted: false
     redactorCalled: false
-    error: "raw JSON validation failed at schema.ScanRawJSONDocument: document exceeds 2048 bytes; decoding would exceed the caller boundary; reduce the document"
+    reason: too_large_to_publish
+    error: "the transcript content document is too large to publish (0.0 MiB > 0.0 MiB cap): the document is 2049 bytes and publication redaction materializes at most 2048; nothing uploaded and nothing local changed; re-indexing cannot shrink it, so leave the session out of the push"
+
+# The transcript entries seam, driven through the entries redaction with the same
+# injected input limit. inputBytes is the marshalled entry list.
+entryCases:
+  - name: entries_one_byte_below_input_limit
+    inputBytes: 2047
+    redactedBytes: 2047
+    accepted: true
+    redactorCalled: true
+  - name: entries_at_input_limit
+    inputBytes: 2048
+    redactedBytes: 2048
+    accepted: true
+    redactorCalled: true
+  - name: entries_one_byte_above_input_limit
+    inputBytes: 2049
+    redactedBytes: 2049
+    accepted: false
+    redactorCalled: false
+    reason: too_large_to_publish
+    error: "the transcript entries document is too large to publish (0.0 MiB > 0.0 MiB cap): the document is 2049 bytes and publication redaction materializes at most 2048; nothing uploaded and nothing local changed; re-indexing cannot shrink it, so leave the session out of the push"
 
 # Exactly one real-size case for this document family, run only by the non-race
 # materialization test. The literal cap+1 target and the exact refusal string

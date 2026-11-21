@@ -213,12 +213,19 @@ func BuildTranscriptContentFromDetail(detail *schema.SessionDetailPayload, emit 
 // It fails closed: redact.RedactJSONDocBytes
 // returns its input UNCHANGED when the round trip fails, so routing through it
 // alone would hand back the unredacted originals with no error and no way for a
-// caller to tell. redactJSONDocument repeats the round trip keeping the errors,
+// caller to tell. redactJSONDocumentWithInputCap repeats the round trip keeping the errors,
 // and both outward seams use it.
 //
 // A nil redactor leaves the entries as recorded, the same explicit-choice
 // convention marshalTranscriptContent uses; every production push builds one.
-func RedactEntries(redactor redact.JSONRedactor, entries []schema.SessionEntry) (_ []schema.SessionEntry, err error) {
+func RedactEntries(redactor redact.JSONRedactor, entries []schema.SessionEntry) ([]schema.SessionEntry, error) {
+	return redactEntriesWithInputCap(redactor, entries, defaults.PushRedactionInputCapBytes)
+}
+
+// redactEntriesWithInputCap is RedactEntries with the redaction input cap of the
+// marshalled entry list injected. The production wrapper passes
+// defaults.PushRedactionInputCapBytes.
+func redactEntriesWithInputCap(redactor redact.JSONRedactor, entries []schema.SessionEntry, inputCapBytes int) (_ []schema.SessionEntry, err error) {
 	if len(entries) == 0 {
 		return entries, nil
 	}
@@ -340,7 +347,7 @@ func RedactEntries(redactor redact.JSONRedactor, entries []schema.SessionEntry) 
 				"check whether this session's indexed entries are readable",
 			len(entries), err)
 	}
-	redactedRaw, err := redactJSONDocument(redactor, raw, "transcript entries")
+	redactedRaw, err := redactJSONDocumentWithInputCap(redactor, raw, "transcript entries", inputCapBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -422,12 +429,7 @@ func restoreObservedModelExtra(extra *string, value string) (*string, error) {
 	return &result, nil
 }
 
-// transcriptInputRedactionCapBytes is the materialization seam shared by the
-// transcript content and entry redaction inputs. The metadata part carries its
-// own larger input cap (defaults.PushMetadataDocumentCapBytes).
-const transcriptInputRedactionCapBytes = 64 << 20
-
-// redactJSONDocument redacts a marshalled document and PROVES it did.
+// redactJSONDocumentWithInputCap redacts a marshalled document and PROVES it did.
 //
 // redact.RedactJSONDocBytes fails OPEN: if the decode or the re-marshal fails it
 // returns its INPUT UNCHANGED, with no error. For a viewer that is survivable.
@@ -441,16 +443,15 @@ const transcriptInputRedactionCapBytes = 64 << 20
 // transcript content part. One implementation, so a fail-open cannot be closed
 // on one path and left open on another - which is what had happened, with an
 // earlier comment claiming two seams while the third and largest one called the
-// fail-open primitive directly. The entries and transcript seams use the shared
-// input cap; the metadata seam passes its own larger cap through
-// redactJSONDocumentWithInputCap.
-func redactJSONDocument(redactor redact.JSONRedactor, document []byte, what string) ([]byte, error) {
-	return redactJSONDocumentWithInputCap(redactor, document, what, transcriptInputRedactionCapBytes)
-}
-
-// Metadata uses its own input cap; transcript and entry materialization retain
-// their smaller input boundary. All paths share the same fail-closed redaction.
+// fail-open primitive directly. The entries and transcript seams pass
+// defaults.PushRedactionInputCapBytes; the metadata seam passes its own larger
+// cap. A document over the input cap is refused as too large to publish before
+// it is decoded, so the session reports a not-ready reason instead of a scan
+// failure.
 func redactJSONDocumentWithInputCap(redactor redact.JSONRedactor, document []byte, what string, maxDocumentBytes int) ([]byte, error) {
+	if len(document) > maxDocumentBytes {
+		return nil, tooLargeToPublish(what, len(document), maxDocumentBytes)
+	}
 	if err := schema.ScanRawJSONDocument(document, schema.RawJSONPathPolicy{MaxDocumentBytes: maxDocumentBytes, MaxDocumentDepth: 64}); err != nil {
 		return nil, err
 	}
@@ -460,7 +461,7 @@ func redactJSONDocumentWithInputCap(redactor redact.JSONRedactor, document []byt
 	if err := decoder.Decode(&decoded); err != nil {
 		return nil, fmt.Errorf(
 			"redact the %s for publication: it could not be decoded for redaction: %w. This ran in "+
-				"internal/push.redactJSONDocument, after the document was assembled and before anything was uploaded, so "+
+				"internal/push.redactJSONDocumentWithInputCap, after the document was assembled and before anything was uploaded, so "+
 				"nothing was published and nothing local changed. Publishing it unredacted is not an option: it carries "+
 				"the session's own recorded text, and peasant online does not scan this part for secrets. Retry the push; if "+
 				"it recurs the document is malformed and the session should be re-ingested",
@@ -470,7 +471,7 @@ func redactJSONDocumentWithInputCap(redactor redact.JSONRedactor, document []byt
 	if err != nil {
 		return nil, fmt.Errorf(
 			"redact the %s for publication: the redacted document could not be re-encoded: %w. This ran in "+
-				"internal/push.redactJSONDocument, between redaction and upload, so nothing was published. It means a "+
+				"internal/push.redactJSONDocumentWithInputCap, between redaction and upload, so nothing was published. It means a "+
 				"redaction rule produced a value that is not representable on the wire, and the UNREDACTED document "+
 				"would otherwise have been sent in its place. Report this with the session id printed above; retrying "+
 				"will fail the same way until the rule is corrected",
@@ -482,7 +483,7 @@ func redactJSONDocumentWithInputCap(redactor redact.JSONRedactor, document []byt
 // marshalTranscriptContent builds and serializes the structured push body at the
 // negotiated emit contract version, REDACTED at the level the push applies.
 //
-// The redaction runs through the shared fail-closed redactJSONDocument helper.
+// The redaction runs through the shared fail-closed redactJSONDocumentWithInputCap helper.
 // It invokes the same RedactJSON rules as `peasant redact` while retaining
 // decode and encode failures instead of returning the original bytes. The two
 // entrypoints therefore share rule behavior without copying the unsafe
@@ -527,13 +528,13 @@ func transcriptDocumentPolicy(limitBytes int) schema.RawJSONPathPolicy {
 }
 
 func marshalBuiltTranscriptContent(content schema.TranscriptContent, redactor redact.JSONRedactor) ([]byte, error) {
-	return marshalBuiltTranscriptContentWithPolicy(content, redactor, transcriptInputRedactionCapBytes, defaults.PushTranscriptDocumentCapBytes)
+	return marshalBuiltTranscriptContentWithPolicy(content, redactor, defaults.PushRedactionInputCapBytes, defaults.PushTranscriptDocumentCapBytes)
 }
 
 // marshalBuiltTranscriptContentWithPolicy is the shared transcript publication
 // path with its two caller-owned limits injected: the redaction input
 // materialization cap and the output raw-document cap. The production wrapper
-// passes the transcript/entry input cap and defaults.PushTranscriptDocumentCapBytes,
+// passes defaults.PushRedactionInputCapBytes and defaults.PushTranscriptDocumentCapBytes,
 // so this seam changes no production boundary.
 func marshalBuiltTranscriptContentWithPolicy(content schema.TranscriptContent, redactor redact.JSONRedactor, inputLimitBytes, outputLimitBytes int) (_ []byte, err error) {
 	// Embedded JSON is text on the public wire. Redact its decoded string

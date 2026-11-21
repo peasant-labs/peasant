@@ -315,13 +315,14 @@ const (
 	ReasonTranscriptIsPublic  PlanReason = "transcript_is_public"
 	ReasonNoMetrics           PlanReason = "no_metrics"
 	ReasonNoModelReply        PlanReason = "no_model_reply"
+	ReasonTooLargeToPublish   PlanReason = "too_large_to_publish"
 )
 
 // AllPlanReasons is the closed set of plan reasons.
 var AllPlanReasons = []PlanReason{
 	ReasonNotInStore, ReasonOutsideRepository, ReasonHarnessMismatch, ReasonBranchSelectionExcl, ReasonNeedsIngest,
 	ReasonCohortNotReady, ReasonLatestAttemptKept, ReasonUnchangedContent, ReasonTranscriptIsPublic, ReasonNoMetrics,
-	ReasonNoModelReply,
+	ReasonNoModelReply, ReasonTooLargeToPublish,
 }
 
 // NewPlanReason parses a reason, refusing any value outside the set.
@@ -526,6 +527,9 @@ func explainOne(id string, in planInputs, rows map[string]ingest.PushSessionRow,
 				case push.NotReadyNoModelReply:
 					entry.Reason = ReasonNoModelReply
 					entry.Detail = "the session never reached a model: it holds no assistant reply, only setup or local commands, so its source names no model; peasant online requires one and re-indexing cannot add it; leave the session out of the push"
+				case push.NotReadyTooLargeToPublish:
+					entry.Reason = ReasonTooLargeToPublish
+					entry.Detail = sr.Error.Error()
 				default:
 					entry.Reason = ReasonNeedsIngest
 					// --force: a plain harvest skips a source it has

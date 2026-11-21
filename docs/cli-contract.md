@@ -243,11 +243,15 @@ Verdicts: `will_publish`, `will_update`, `unchanged`, `held`, `excluded`,
 `not_ready`, `unknown_session`, `failed`. Reasons: `not_in_store`,
 `outside_repository`, `harness_mismatch`, `branch_selection_excluded`,
 `needs_ingest`, `cohort_not_ready`, `latest_attempt_kept`,
-`unchanged_content`, `transcript_is_public`, `no_metrics`, `no_model_reply`.
+`unchanged_content`, `transcript_is_public`, `no_metrics`, `no_model_reply`,
+`too_large_to_publish`.
 Both sets are closed. `needs_ingest` names the forced harvest that re-indexes
 the session; `no_model_reply` is a session that never reached a model (it
 holds no assistant reply, only setup or local commands), so its source names
 no model, which peasant online requires, and no harvest can clear it.
+`too_large_to_publish` is a session whose transcript entries or content
+document is larger than the 64 MiB publication redaction input cap; its detail
+names the document's size and the cap, and no harvest can clear it.
 
 With a plan, the counts are the tally of the plan and nothing else. Every
 entry, each subagent session included, adds one to exactly one count, so the

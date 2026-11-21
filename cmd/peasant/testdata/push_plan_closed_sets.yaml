@@ -22,4 +22,5 @@ reasons:
   - transcript_is_public
   - no_metrics
   - no_model_reply
+  - too_large_to_publish
 rejected: ["x", "", "WILL_PUBLISH", "Unchanged"]

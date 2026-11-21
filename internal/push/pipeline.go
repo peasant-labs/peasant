@@ -1262,7 +1262,7 @@ func (p *Pipeline) pushSession(
 	// reaching this line are the ones step 3b already redacted.
 	//
 	// Content IS redacted on the way out now, at the effective level, through the
-	// shared fail-closed redactJSONDocument helper. It invokes the same RedactJSON
+	// shared fail-closed redactJSONDocumentWithInputCap helper. It invokes the same RedactJSON
 	// rules as `peasant redact` while preserving decode and encode errors instead
 	// of passing the original document through. Redacting the serialized document
 	// here a second time is a no-op on the entry text and covers the rest of the
