@@ -244,6 +244,22 @@ func TestStore_Migrations_ApplyV1(t *testing.T) {
 		t.Error("expected CHECK constraint to reject invalid model_harness, but insert succeeded")
 	}
 
+	// Verify session_generations carries the nullable mapping-set column (V82)
+	// with no default: NULL means the generation owns its parsed rows.
+	var mappingSetColumns int
+	err = sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM pragma_table_info('session_generations') WHERE name = 'mapping_set_id' AND type = 'TEXT' AND "notnull" = 0 AND dflt_value IS NULL AND pk = 0;`, &sqlitex.ExecOptions{
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			mappingSetColumns = int(stmt.ColumnInt64(0))
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("read session_generations columns: %v", err)
+	}
+	if mappingSetColumns != 1 {
+		t.Error("session_generations has no nullable TEXT mapping_set_id column without a default")
+	}
+
 	// Verify user_version was set by the migration framework.
 	var userVersion int
 	err = sqlitex.ExecuteTransient(conn, `PRAGMA user_version;`, &sqlitex.ExecOptions{

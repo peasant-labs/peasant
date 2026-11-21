@@ -177,7 +177,7 @@ func TestReaderEntrypointGoldens(t *testing.T) {
 	}
 	for _, h := range corpus.Harnesses {
 		t.Run(h.Harness, func(t *testing.T) {
-			observed, applied := captureReaderEntrypoints(t, corpus, h)
+			observed, applied := readReaderEntrypoints(t, corpus, seedReaderEntrypointStore(t, corpus, h))
 			var stated []string
 			for _, n := range manifest.Normalize {
 				if n.Harness == h.Harness {
@@ -330,9 +330,39 @@ func readerRecordedMetadata(t *testing.T, corpus readerEntrypointCorpus, h reade
 	return metadata
 }
 
-// captureReaderEntrypoints writes the corpus session for one harness through
-// the production builder and activation, then returns each entry point's bytes.
-func captureReaderEntrypoints(t *testing.T, corpus readerEntrypointCorpus, h readerEntrypointHarness) (map[string][]byte, []string) {
+// readerEntrypointStore is one harness's corpus session written to its own
+// store. Root holds the database and the managed artifact tree, so a test can
+// close the store, change the file and open it again.
+type readerEntrypointStore struct {
+	db      *store.Store
+	root    string
+	sid     schema.SessionID
+	harness schema.Harness
+	managed bool
+}
+
+func (s readerEntrypointStore) path() string { return filepath.Join(s.root, "peasant.db") }
+
+// openReaderEntrypointStore opens the corpus store with the production
+// managed-generation options.
+func openReaderEntrypointStore(t *testing.T, root string) *store.Store {
+	t.Helper()
+	options, err := store.ManagedGenerationOptions(filepath.Join(root, "managed"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.Open(filepath.Join(root, "peasant.db"), append(options, store.WithPoolSize(4))...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return db
+}
+
+// seedReaderEntrypointStore writes the corpus session for one harness through
+// the production builder and activation (or, for a harness with no managed
+// generation, the production entry batch).
+func seedReaderEntrypointStore(t *testing.T, corpus readerEntrypointCorpus, h readerEntrypointHarness) readerEntrypointStore {
 	t.Helper()
 	ctx := t.Context()
 	var harness schema.Harness
@@ -344,15 +374,8 @@ func captureReaderEntrypoints(t *testing.T, corpus readerEntrypointCorpus, h rea
 		t.Fatal(err)
 	}
 	root := t.TempDir()
-	options, err := store.ManagedGenerationOptions(filepath.Join(root, "managed"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	db, err := store.Open(filepath.Join(root, "peasant.db"), append(options, store.WithPoolSize(4))...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	db := openReaderEntrypointStore(t, root)
+	seeded := readerEntrypointStore{db: db, root: root, sid: sid, harness: harness}
 
 	fs := testutil.NewMemFS()
 	transcriptBytes := []byte(h.Source)
@@ -379,8 +402,9 @@ func captureReaderEntrypoints(t *testing.T, corpus readerEntrypointCorpus, h rea
 	builder, managed := indexer.(ingest.GenerationBuilder)
 	if !managed {
 		writeUnmanagedReaderSession(t, db, indexer, session, transcriptBytes, corpus.ClockMs, revisions[sid], target)
-		return readUnmanagedEntrypoints(t, db, sid), nil
+		return seeded
 	}
+	seeded.managed = true
 	input := ingest.GenerationBuildInput{
 		Session:            session,
 		GenerationID:       corpus.GenerationID,
@@ -419,7 +443,19 @@ func captureReaderEntrypoints(t *testing.T, corpus readerEntrypointCorpus, h rea
 	}); err != nil {
 		t.Fatalf("activate the corpus generation: %v", err)
 	}
+	return seeded
+}
+
+// readReaderEntrypoints returns each entry point's bytes for the corpus
+// session, and the normalizations it applied.
+func readReaderEntrypoints(t *testing.T, corpus readerEntrypointCorpus, s readerEntrypointStore) (map[string][]byte, []string) {
+	t.Helper()
+	ctx := t.Context()
+	db, sid, harness := s.db, s.sid, s.harness
 	observed := readUnmanagedEntrypoints(t, db, sid)
+	if !s.managed {
+		return observed, nil
+	}
 	view, err := db.ReadActiveHarmonizedViewForTest(ctx, sid)
 	if err != nil {
 		t.Fatal(err)

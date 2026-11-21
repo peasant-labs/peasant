@@ -235,13 +235,14 @@ the conversation turns. A session with no stored entries, or whose entries
 cannot be read, keeps both stored values and is logged. The recount walks the
 sessions with the same code as the step 74 fill. 0.17.0 ran this recount when
 it opened the store; a 0.17.0 store whose open was killed part way is at
-schema 77 with the marker, and its plan is the recount, then 78 through 81.
+schema 77 with the marker, and its plan is the recount, then 78 through 82.
 
-A 0.16.2 store (schema 76) with sessions plans six steps: 77 (quick), the
+A 0.16.2 store (schema 76) with sessions plans seven steps: 77 (quick), the
 turn count recount (scales with rows, counted in sessions), 78 (scales with
 rows: it copies the session tables to widen their harness CHECK), 79 and 80
-(quick), and 81 (quick for an empty source-fault ledger; row-scaled otherwise).
-A 0.17.0 store whose recount finished plans 78 through 81.
+(quick), 81 (quick for an empty source-fault ledger; row-scaled otherwise),
+and 82 (quick: one nullable column on the generation catalog).
+A 0.17.0 store whose recount finished plans 78 through 82.
 
 Step 78 is long on every store, whatever its size: it copies the `sessions`
 and `daily_summary_harness` tables to widen their harness CHECK, and its time

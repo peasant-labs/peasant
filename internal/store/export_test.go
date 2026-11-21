@@ -107,3 +107,39 @@ func (s *Store) ReadActiveHarmonizedViewForTest(ctx context.Context, sessionID s
 	}
 	return out, nil
 }
+
+// MappingSetSchemaVersionForTest is the schema that adds the generation
+// mapping-set column.
+// This constant is only available in test builds.
+const MappingSetSchemaVersionForTest = mappingSetSchemaVersion
+
+// BuildBehindStoreForTest creates a store at schema from through the real
+// migration chain, then runs seed on its raw connection.
+// This function is only available in test builds.
+func BuildBehindStoreForTest(t *testing.T, path string, from int, seed func(*sqlite.Conn)) {
+	t.Helper()
+	buildBehindStore(t, path, from, seed)
+}
+
+// NewerSchemaErrorForTest is the refusal Open returns for a store a newer
+// build upgraded.
+// This function is only available in test builds.
+func NewerSchemaErrorForTest(dbPath string, version int) error {
+	return newerSchemaError(dbPath, version)
+}
+
+// BuildChainReferenceForTest builds a store through every migration the way
+// the baseline generator does.
+// This function is only available in test builds.
+func BuildChainReferenceForTest(t *testing.T, path string) {
+	t.Helper()
+	buildChainReference(t, path)
+}
+
+// DumpDatabaseForTest is the schema and seed-row dump the fresh-versus-
+// migrated comparison uses.
+// This function is only available in test builds.
+func DumpDatabaseForTest(t *testing.T, path string) []byte {
+	t.Helper()
+	return dumpDatabase(t, path)
+}
