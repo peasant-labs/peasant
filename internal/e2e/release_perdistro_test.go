@@ -220,9 +220,12 @@ func installOpenSUSERPM(t *testing.T, container, artifact string) {
 
 func installTarBinary(t *testing.T, container, artifact string) {
 	t.Helper()
-	runPodman(t, "exec", "-i", container, "sh", "-c",
-		`tmp=$(mktemp -d) && tar -xzf "$1" -C "$tmp" && install -Dm755 "$tmp/peasant" /usr/bin/peasant`,
-		"sh", artifact)
+	tmp := strings.TrimSpace(runPodman(t, "exec", "-i", container, "mktemp", "-d"))
+	if tmp == "" {
+		t.Fatalf("release-e2e: mktemp -d in container %s printed no directory\nwhat: no extraction directory for the tarball\nwhere: internal/e2e/release_perdistro_test.go installTarBinary\nmeans: the tarball cannot be installed or tested on this distro\nfix: check that the distro image provides mktemp", container)
+	}
+	runPodman(t, "exec", "-i", container, "tar", "-xzf", artifact, "-C", tmp)
+	runPodman(t, "exec", "-i", container, "install", "-Dm755", tmp+"/peasant", "/usr/bin/peasant")
 }
 
 func runPodman(t *testing.T, args ...string) string {

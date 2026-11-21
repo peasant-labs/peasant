@@ -104,6 +104,11 @@ const FONTS = [
 ]
 const RESPONSIVE_FIXTURE_PATH = join(HERE, '..', '..', 'src', 'test', 'testdata', 'shell_responsive.yaml')
 const REQUIRED_WIDTHS = ['desktop', 'tablet', 'compact_tablet', 'mobile_wide', 'mobile_narrow', 'reflow']
+const RESPONSIVE_ROOT_KEYS = Object.freeze(['cases'])
+const ConsoleLevel = Object.freeze({ Error: 'error' })
+const CssDisplay = Object.freeze({ None: 'none' })
+const CssVisibility = Object.freeze({ Hidden: 'hidden' })
+const DomTag = Object.freeze({ Body: 'body', Main: 'main' })
 
 const gateError = ({ what, why, where, means, fix }) => new Error([
   `what: ${what}`, `why: ${why}`, `where: ${where}`, `means: ${means}`, `fix: ${fix}`,
@@ -124,7 +129,7 @@ const loadResponsiveCases = () => {
   } catch (cause) {
     throw fixtureError(`the fixture could not be read or parsed: ${cause instanceof Error ? cause.message : String(cause)}`, 'restore a valid fixture')
   }
-  if (!fixture || typeof fixture !== 'object' || Array.isArray(fixture) || Object.keys(fixture).join() !== 'cases' || !Array.isArray(fixture.cases)) {
+  if (!fixture || typeof fixture !== 'object' || Array.isArray(fixture) || Object.keys(fixture).join() !== RESPONSIVE_ROOT_KEYS.join() || !Array.isArray(fixture.cases)) {
     throw fixtureError('the root must be a mapping with exactly one `cases` list', 'define `cases:` as a list of { name, width } rows')
   }
   const names = new Set()
@@ -174,7 +179,7 @@ const formatConsoleDiagnostic = (m) => {
 const watchDiagnostics = (page) => {
   const diagnostics = []
   page.on('console', (m) => {
-    if (m.type() === 'error' && !isKnownBenignConsoleMessage(m.text(), consoleLocationUrl(m))) diagnostics.push(formatConsoleDiagnostic(m))
+    if (m.type() === ConsoleLevel.Error && !isKnownBenignConsoleMessage(m.text(), consoleLocationUrl(m))) diagnostics.push(formatConsoleDiagnostic(m))
   })
   page.on('pageerror', (e) => diagnostics.push('pageerr: ' + (e.stack || e.message)))
   return diagnostics
@@ -235,17 +240,17 @@ const assertBodyReady = async (page, selector, where, timeoutMs = 15000) => {
   const start = Date.now()
   let last = null
   while (Date.now() - start < timeoutMs) {
-    last = await page.evaluate((sel, minWidth, minHeight) => {
+    last = await page.evaluate((sel, minWidth, minHeight, displayNone, visibilityHidden) => {
       const el = document.querySelector(sel)
       if (!el) return { ok: false, reason: `${sel} did not mount` }
       const rect = el.getBoundingClientRect()
       const style = getComputedStyle(el)
       const text = (el.textContent || '').replace(/\s+/g, ' ').trim()
       const signals = el.querySelectorAll('a, button, canvas, svg, img, [role], [aria-label]').length
-      const ok = style.display !== 'none' && style.visibility !== 'hidden' && rect.width >= minWidth && rect.height >= minHeight &&
+      const ok = style.display !== displayNone && style.visibility !== visibilityHidden && rect.width >= minWidth && rect.height >= minHeight &&
         rect.bottom > 96 && rect.top < window.innerHeight - 80 && (text.length >= 20 || signals >= 3)
       return { ok, reason: ok ? '' : `size=${Math.round(rect.width)}x${Math.round(rect.height)} top=${Math.round(rect.top)} text=${text.length} signals=${signals}` }
-    }, selector, MIN_BODY_WIDTH, MIN_BODY_HEIGHT)
+    }, selector, MIN_BODY_WIDTH, MIN_BODY_HEIGHT, CssDisplay.None, CssVisibility.Hidden)
     if (last.ok) return
     await pause(200)
   }
@@ -343,11 +348,11 @@ const assertResponsive = async (browser) => {
 // of its own (not a wrapper around the page), is not a control, and has no focusable ancestor other
 // than <main> (a chart's `<g tabindex>` would take the click itself and hide what <main> does). A
 // click there must leave focus on <body>, so the next Tab or keyboard scroll starts from there.
-const plainPoint = (page, scope) => page.evaluate((sel) => {
+const plainPoint = (page, scope) => page.evaluate((sel, displayNone) => {
   const box = sel ? document.querySelector(sel)?.getBoundingClientRect() : { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight }
   if (!box) return null
   const bar = document.querySelector('.asb-bar')
-  const barBox = bar && getComputedStyle(bar).display !== 'none' ? bar.getBoundingClientRect() : null
+  const barBox = bar && getComputedStyle(bar).display !== displayNone ? bar.getBoundingClientRect() : null
   const top = Math.max(box.top, barBox ? barBox.bottom : 0) + 8
   for (let y = top + (box.bottom - top) / 2; y > top; y -= 24) {
     for (let x = box.left + 16; x < box.right - 16; x += 40) {
@@ -366,7 +371,7 @@ const plainPoint = (page, scope) => page.evaluate((sel) => {
     }
   }
   return null
-}, scope)
+}, scope, CssDisplay.None)
 
 // <main> must never become the focus by a click (review: a resting tabindex on <main> sent Tab back
 // to the top of the page and keyboard scrolling to the document instead of the pane clicked). On a
@@ -391,10 +396,10 @@ const assertKeyboardFromClick = async (browser) => {
   await pause(250)
   const after = await page.evaluate(() => ({ scrollY: window.scrollY, active: document.activeElement?.tagName.toLowerCase(), label: (document.activeElement?.getAttribute('aria-label') || document.activeElement?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 40) }))
   const tabFailures = []
-  if (before.active !== 'body') tabFailures.push(`a click on plain text focused ${before.active}, not <body>`)
-  if (after.active === 'main') tabFailures.push('Tab after the click focused <main>')
+  if (before.active !== DomTag.Body) tabFailures.push(`a click on plain text focused ${before.active}, not <body>`)
+  if (after.active === DomTag.Main) tabFailures.push('Tab after the click focused <main>')
   if (before.mainTabindex !== null) tabFailures.push(`<main> carries tabindex="${before.mainTabindex}" after a click`)
-  if (after.active === 'body') tabFailures.push('Tab after the click focused nothing')
+  if (after.active === DomTag.Body) tabFailures.push('Tab after the click focused nothing')
   if (after.scrollY < before.scrollY - 150) tabFailures.push(`Tab after a click at ${Math.round(before.scrollY)}px jumped the page to ${Math.round(after.scrollY)}px`)
   if (tabFailures.length) throw new Error(`keyboard focus after a click on /analytics/: ${tabFailures.join('; ')} (clicked ${text.tag} "${text.text}" at ${text.x},${text.y})`)
   console.log(`OK peasant-app keyboard: click on ${text.tag} "${text.text}" at ${Math.round(before.scrollY)}px then Tab focused ${after.active} "${after.label}" at ${Math.round(after.scrollY)}px (no jump, <main> not focused)`)
@@ -413,7 +418,7 @@ const assertKeyboardFromClick = async (browser) => {
   await page.keyboard.press('PageDown')
   await pause(400)
   const paneAfter = await page.evaluate((sel) => ({ scrollTop: document.querySelector(sel).scrollTop, pageY: window.scrollY, active: document.activeElement?.tagName.toLowerCase() }), PANE)
-  if (paneBefore.active === 'main' || paneAfter.scrollTop <= paneBefore.scrollTop) {
+  if (paneBefore.active === DomTag.Main || paneAfter.scrollTop <= paneBefore.scrollTop) {
     throw new Error(`PageDown after a click inside ${PANE} on /share/ did not scroll it: scrollTop ${paneBefore.scrollTop} → ${paneAfter.scrollTop}, page ${paneAfter.pageY}px, focus ${paneBefore.active} (clicked ${inPane.tag} at ${inPane.x},${inPane.y})`)
   }
   console.log(`OK peasant-app keyboard: click inside ${PANE} then PageDown scrolled it ${Math.round(paneBefore.scrollTop)} → ${Math.round(paneAfter.scrollTop)}px (focus ${paneBefore.active}, not <main>)`)

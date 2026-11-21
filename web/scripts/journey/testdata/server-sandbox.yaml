@@ -4,16 +4,20 @@ requiredNames:
   - server-sandbox-owns-every-directory
   - server-sandbox-keeps-a-named-config-dir-and-still-owns-the-data
   - server-sandbox-uses-a-data-dir-only-when-the-caller-names-it
+  - server-sandbox-uses-a-home-only-when-the-caller-names-it
   - server-sandbox-treats-an-empty-name-as-not-named
   - server-sandbox-never-keeps-an-inherited-directory
   - server-sandbox-drops-inherited-database-paths
   - server-sandbox-refuses-a-relative-root
   - server-sandbox-refuses-a-relative-config-dir
   - server-sandbox-refuses-a-relative-data-dir
+  - server-sandbox-refuses-a-relative-home
   - owned-server-sandbox-is-removed-when-the-script-exits
   - owned-server-sandbox-is-removed-when-the-script-ends-normally
   - owned-server-sandbox-is-removed-when-the-script-throws
   - owned-server-sandbox-keeps-a-named-directory
+  - owned-server-sandbox-keeps-a-named-home
+  - owned-server-sandbox-keeps-the-root-when-asked
   - owned-server-sandbox-starts-as-an-installed-dashboard
   - owned-server-sandbox-leaves-a-named-config-file-as-found
   - owned-server-sandbox-writes-no-config-file-into-a-named-dir
@@ -23,10 +27,18 @@ requiredNames:
   - named-directory-stays-absolute
   - named-directory-unset-or-empty-names-nothing
   - owned-server-start-refuses-an-occupied-port
+  - owned-server-start-refuses-an-occupied-picked-port
   - owned-server-start-ends-the-wait-when-the-server-exits
   - owned-server-start-returns-the-server-that-answers
   - owned-server-start-refuses-an-answer-from-a-server-that-then-exits
   - owned-server-start-stops-a-server-that-never-answers
+  - owned-server-stop-returns-when-the-child-exits-on-term
+  - owned-server-stop-kills-a-child-that-ignores-term
+  - owned-server-stop-returns-an-already-exited-child
+  - owned-server-stop-returns-a-child-that-never-spawned
+  - owned-server-stop-does-not-count-a-kill-error-as-exit
+  - owned-server-stop-returns-when-a-kill-error-precedes-a-late-exit
+  - owned-server-stop-reports-a-kill-error-and-keeps-a-live-child
   - every-script-that-starts-the-binary-is-sandboxed-or-exempt
 cases:
   # mode layout: `named` are the directories the caller names itself ($ROOT and $OTHER are
@@ -45,9 +57,15 @@ cases:
     mode: layout
     named: {configDir: $OTHER/their-config, dataDir: $OTHER/their-data}
     expect: {configDir: $OTHER/their-config, dataDir: $OTHER/their-data, stateDir: state, home: home, cache: cache}
+  - name: server-sandbox-uses-a-home-only-when-the-caller-names-it
+    mode: layout
+    named: {home: $OTHER/their-home}
+    inherited: {HOME: /home/someone, PATH: /usr/bin}
+    kept: {PATH: /usr/bin}
+    expect: {configDir: config, dataDir: data, stateDir: state, home: $OTHER/their-home, cache: cache}
   - name: server-sandbox-treats-an-empty-name-as-not-named
     mode: layout
-    named: {configDir: "", dataDir: ""}
+    named: {configDir: "", dataDir: "", home: ""}
     expect: {configDir: config, dataDir: data, stateDir: state, home: home, cache: cache}
   - name: server-sandbox-never-keeps-an-inherited-directory
     mode: layout
@@ -66,6 +84,7 @@ cases:
   - {name: server-sandbox-refuses-a-relative-root, mode: refused-layout, root: sandbox, named: {}, error: "its root is \"sandbox\", not an absolute path"}
   - {name: server-sandbox-refuses-a-relative-config-dir, mode: refused-layout, root: $ROOT, named: {configDir: config}, error: "the configuration directory the caller named is \"config\", not an absolute path"}
   - {name: server-sandbox-refuses-a-relative-data-dir, mode: refused-layout, root: $ROOT, named: {dataDir: ./data}, error: "the data directory the caller named is \"./data\", not an absolute path"}
+  - {name: server-sandbox-refuses-a-relative-home, mode: refused-layout, root: $ROOT, named: {home: home}, error: "the home directory the caller named is \"home\", not an absolute path"}
   # mode owned: a real script process makes its sandbox, writes into it as a server would, and
   # leaves in each way listed in `ends` (a number is process.exit with that status). The root is
   # in the temporary directory, named for the script, and gone once the process has exited.
@@ -82,6 +101,13 @@ cases:
     script: offline-gate
     named: {configDir: $OTHER/their-config, dataDir: $OTHER/their-data}
     ends: [0, 3]
+  - name: owned-server-sandbox-keeps-a-named-home
+    mode: owned
+    script: run-kickstart
+    named: {home: $OTHER/their-home}
+    ends: [0, uncaught-error]
+  # `keep` asks the script to remove its own root instead of the helper doing it at exit.
+  - {name: owned-server-sandbox-keeps-the-root-when-asked, mode: owned, script: share-geometry, ends: [0], keep: true}
   - {name: owned-server-sandbox-starts-as-an-installed-dashboard, mode: owned, script: full-app-smoke, ends: [last-line, 3], config: seed}
   - name: owned-server-sandbox-leaves-a-named-config-file-as-found
     mode: owned
@@ -113,6 +139,8 @@ cases:
   # `server` is what the script's own start does: answers (the health route), exits (with
   # `status`), silent (runs and never listens), or answers-elsewhere (another process answers
   # after the pre-check while the started process exits). `started` says whether start was called.
+# `pickedPort` is a script that picks a free port itself on every run and has no port variable;
+# `errorOmits` must not appear in the refusal.
   - name: owned-server-start-refuses-an-occupied-port
     mode: start
     occupied: true
@@ -120,6 +148,15 @@ cases:
     started: false
     error: something already answers
     errorNames: [PEASANT_EXAMPLE_PORT, "ss -ltnp"]
+  - name: owned-server-start-refuses-an-occupied-picked-port
+    mode: start
+    occupied: true
+    server: answers
+    pickedPort: true
+    started: false
+    error: something already answers
+    errorNames: ["picked this port as free", "ss -ltnp"]
+    errorOmits: [PEASANT_EXAMPLE_PORT, undefined]
   - name: owned-server-start-ends-the-wait-when-the-server-exits
     mode: start
     occupied: false
@@ -150,10 +187,24 @@ cases:
     started: true
     stopped: true
     error: did not answer
+# mode stop: a child the script started is stopped within explicit deadlines. `child` is the
+# lifecycle child's mode (waits exits on SIGTERM, ignores-term ignores it until SIGKILL, missing
+# never spawns); `before` is what has already happened to it; `signal` is the signal that ended it.
+  - {name: owned-server-stop-returns-when-the-child-exits-on-term, mode: stop, child: waits, exitAfterMs: 60000, termMs: 3000, killMs: 2000, signal: SIGTERM}
+  - {name: owned-server-stop-kills-a-child-that-ignores-term, mode: stop, child: ignores-term, termMs: 150, killMs: 2000, signal: SIGKILL}
+  - {name: owned-server-stop-returns-an-already-exited-child, mode: stop, child: waits, exitAfterMs: 0, before: exited}
+  - {name: owned-server-stop-returns-a-child-that-never-spawned, mode: stop, child: missing}
+# A kill that fails emits ChildProcess `error` while the child is alive; only an actual exit may
+# count. `calls` records the signals the stop sent, and `error` is the text its refusal must carry.
+  - {name: owned-server-stop-does-not-count-a-kill-error-as-exit, mode: stop, child: ignores-term, termMs: 150, killMs: 2000, killError: term, calls: [SIGTERM, SIGKILL], signal: SIGKILL}
+  - {name: owned-server-stop-returns-when-a-kill-error-precedes-a-late-exit, mode: stop, child: waits, exitAfterMs: 100, termMs: 2000, killError: term, calls: [SIGTERM]}
+  - {name: owned-server-stop-reports-a-kill-error-and-keeps-a-live-child, mode: stop, child: ignores-term, termMs: 100, killMs: 100, killError: both, calls: [SIGTERM, SIGKILL], error: EPERM}
 # Every script under web/scripts that starts `peasant web start`. A required script makes its
 # sandbox with ownedServerSandbox, starts through startOwnedServer, and passes both
-# `...sandbox.args` and `env: sandbox.env` on the spawn. An exempt script isolates its server in
-# its own way, stated here; a new script that starts the binary is in neither list and fails.
+# `...sandbox.args` and `env: sandbox.env` on the spawn (or on the `launch` of the lifetime a
+# journey owns its processes through). An exempt script isolates its server in its own way, stated
+# here with the reason it cannot use the helper; a new script that starts the binary is in neither
+# list and fails.
 scripts:
   required:
     - scripts/visual/shell-nav-default-gate.mjs
@@ -163,11 +214,11 @@ scripts:
     - scripts/visual/publish-states-shoot.mjs
     - scripts/visual/share-geometry.mjs
     - scripts/visual/grouped-list-visual.mjs
-  exempt:
-    - {path: scripts/visual/home-pages-visual.mjs, reason: "sets HOME and the config, data, state and cache XDG variables to one temp root of its own"}
-    - {path: scripts/visual/root-page-visual.mjs, reason: "sets HOME and the config, data, state and cache XDG variables to one temp root per server"}
-    - {path: scripts/visual/settings-shoot.mjs, reason: "builds a temp HOME with git repositories and sets the config, data and state XDG variables under it; the cache variable is inherited"}
-    - {path: scripts/visual/transcript-segments-shoot.mjs, reason: "passes --data-dir, --config-dir and --state-dir of a seeded temp store; HOME and the cache variable are inherited"}
-    - {path: scripts/journey/api-binary.test.mjs, reason: "sets HOME and the config, data and state XDG variables under its owned lifecycle root; the cache variable is inherited"}
-    - {path: scripts/journey/run-collective-observations.mjs, reason: "sets HOME and the config, data and state XDG variables under its owned lifecycle root; the cache variable is inherited"}
-    - {path: scripts/journey/run-kickstart.mjs, reason: "sets HOME and the config, data and state XDG variables under one temp root per theme, with no config.yaml on purpose so the binary starts unconfigured; the cache variable is inherited"}
+    - scripts/visual/home-pages-visual.mjs
+    - scripts/visual/root-page-visual.mjs
+    - scripts/visual/settings-shoot.mjs
+    - scripts/visual/transcript-segments-shoot.mjs
+    - scripts/journey/api-binary.test.mjs
+    - scripts/journey/run-collective-observations.mjs
+    - scripts/journey/run-kickstart.mjs
+  exempt: []

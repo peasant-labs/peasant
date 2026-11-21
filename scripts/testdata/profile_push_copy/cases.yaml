@@ -1,35 +1,50 @@
+# setup is performed by the test below the case root before the script runs; child is what the
+# profiled command does (this test binary, re-executed). See profile_push_copy_steps_test.go for the ops.
 - name: reviewer-traversal-dry-clean
-  setup: mkdir anchor victim; printf untouched > victim/sentinel
+  setup:
+    - {op: mkdir, path: anchor}
+    - {op: mkdir, path: victim}
+    - {op: write, path: victim/sentinel, content: untouched}
   args: [--dry-run, --clean, --work, '{root}/anchor/../victim', --profile-output, '{root}/profile', --summary-output, '{root}/summary']
   status: 1
   output: FATAL
   exactFiles: {victim/sentinel: untouched}
   absent: [summary, profile]
 - name: symlinked-ancestor-dry-clean
-  setup: mkdir victim; printf untouched > victim/sentinel; ln -s "$ROOT/victim" anchor
+  setup:
+    - {op: mkdir, path: victim}
+    - {op: write, path: victim/sentinel, content: untouched}
+    - {op: symlink, path: anchor, to: victim}
   args: [--dry-run, --clean, --work, '{root}/anchor/work', --profile-output, '{root}/profile', --summary-output, '{root}/summary']
   status: 1
   output: FATAL
   exactFiles: {victim/sentinel: untouched}
   absent: [summary, victim/work]
 - name: existing-empty-work
-  setup: mkdir work
+  setup:
+    - {op: mkdir, path: work}
   args: [--clean, --work, '{root}/work', --profile-output, '{root}/profile', --summary-output, '{root}/summary']
-  command: printf ran > "$ROOT/ran"
+  child:
+    - {op: write, path: ran, content: ran}
   status: 1
   output: FATAL
   emptyDirs: [work]
   absent: [summary, ran]
 - name: existing-nonempty-work
-  setup: mkdir work; printf untouched > work/sentinel
+  setup:
+    - {op: mkdir, path: work}
+    - {op: write, path: work/sentinel, content: untouched}
   args: [--work, '{root}/work', --profile-output, '{root}/profile', --summary-output, '{root}/summary']
-  command: printf ran > "$ROOT/ran"
+  child:
+    - {op: write, path: ran, content: ran}
   status: 1
   output: FATAL
   exactFiles: {work/sentinel: untouched}
   absent: [summary, ran]
 - name: existing-work-dry-clean
-  setup: mkdir work; printf untouched > work/sentinel
+  setup:
+    - {op: mkdir, path: work}
+    - {op: write, path: work/sentinel, content: untouched}
   args: [--dry-run, --clean, --work, '{root}/work', --profile-output, '{root}/profile', --summary-output, '{root}/summary']
   status: 1
   output: FATAL
@@ -48,31 +63,42 @@
   files: {summary: 'timing gate: structural assertions only'}
   absent: [work, profile]
 - name: traversal-real-clean
-  setup: mkdir anchor victim; printf untouched > victim/sentinel
+  setup:
+    - {op: mkdir, path: anchor}
+    - {op: mkdir, path: victim}
+    - {op: write, path: victim/sentinel, content: untouched}
   args: [--clean, --work, '{root}/anchor/../victim', --profile-output, '{root}/profile', --summary-output, '{root}/summary']
-  command: printf ran > "$ROOT/ran"
+  child:
+    - {op: write, path: ran, content: ran}
   status: 1
   output: FATAL
   exactFiles: {victim/sentinel: untouched}
   absent: [summary, profile, ran]
 - name: symlinked-ancestor-real-clean
-  setup: mkdir victim; printf untouched > victim/sentinel; ln -s "$ROOT/victim" anchor
+  setup:
+    - {op: mkdir, path: victim}
+    - {op: write, path: victim/sentinel, content: untouched}
+    - {op: symlink, path: anchor, to: victim}
   args: [--clean, --work, '{root}/anchor/work', --profile-output, '{root}/profile', --summary-output, '{root}/summary']
-  command: printf ran > "$ROOT/ran"
+  child:
+    - {op: write, path: ran, content: ran}
   status: 1
   output: FATAL
   exactFiles: {victim/sentinel: untouched}
   absent: [summary, victim/work, ran]
 - name: dangling-work-symlink
-  setup: ln -s "$ROOT/victim" work
+  setup:
+    - {op: symlink, path: work, to: victim}
   args: [--clean, --work, '{root}/work', --profile-output, '{root}/profile', --summary-output, '{root}/summary']
-  command: printf ran > "$ROOT/ran"
+  child:
+    - {op: write, path: ran, content: ran}
   status: 1
   output: FATAL
   absent: [summary, victim, ran]
 - name: missing-work-parent
   args: [--clean, --work, '{root}/missing/work', --profile-output, '{root}/profile', --summary-output, '{root}/summary']
-  command: printf ran > "$ROOT/ran"
+  child:
+    - {op: write, path: ran, content: ran}
   status: 1
   output: parent does not exist
   absent: [summary, missing, ran]
@@ -93,28 +119,34 @@
   absent: [work, summary]
 - name: success-retains-private-work
   args: [--work, '{root}/work', --profile-output, '{root}/profile', --trace-output, '{root}/trace', --summary-output, '{root}/summary']
-  command: |
-    test "$1" = 'argument with spaces'
-    test "$PROFILE_WORK" = "$ROOT/work"
-    test "$PROFILE_SUMMARY" = "$ROOT/summary"
-    test -d "$PROFILE_WORK/data-home" && test -d "$PROFILE_WORK/config-home" && test -d "$PROFILE_WORK/state-home"
-    printf payload > "$PROFILE_WORK/data-home/payload"
-    printf '{}' > "$PROFILE_JSON"
-    printf '{}' > "$PROFILE_TRACE"
+  child:
+    - {op: expectArg, value: argument with spaces}
+    - {op: expectSamePath, path: '{work}', to: work}
+    - {op: expectSamePath, path: '{summary}', to: summary}
+    - {op: expectDir, path: '{work}/data-home'}
+    - {op: expectDir, path: '{work}/config-home'}
+    - {op: expectDir, path: '{work}/state-home'}
+    - {op: write, path: '{work}/data-home/payload', content: payload}
+    - {op: write, path: '{profile}', content: '{}'}
+    - {op: write, path: '{trace}', content: '{}'}
   status: 0
   output: 'profile status: 0'
   files: {work/data-home/payload: payload, profile: '{}', trace: '{}', summary: 'profile trace exists: yes'}
   privateDir: work
 - name: failure-retains-private-work
   args: [--work, '{root}/work', --profile-output, '{root}/profile', --summary-output, '{root}/summary']
-  command: printf payload > "$PROFILE_WORK/data-home/payload"; exit 37
+  child:
+    - {op: write, path: '{work}/data-home/payload', content: payload}
+    - {op: exit, status: 37}
   status: 37
   output: 'profile status: 37'
   files: {work/data-home/payload: payload, summary: 'profile status: 37'}
   privateDir: work
 - name: success-cleans-owned-contents
   args: [--clean, --work, '{root}/work', --profile-output, '{root}/profile', --summary-output, '{root}/summary']
-  command: printf payload > "$PROFILE_WORK/.hidden"; ln -s "$ROOT/sentinel" "$PROFILE_WORK/link"
+  child:
+    - {op: write, path: '{work}/.hidden', content: payload}
+    - {op: symlink, path: '{work}/link', to: sentinel}
   status: 0
   output: 'profile status: 0'
   files: {summary: 'profile status: 0'}
@@ -122,82 +154,113 @@
   privateDir: work
 - name: failure-cleans-owned-contents
   args: [--clean, --work, '{root}/work', --profile-output, '{root}/profile', --summary-output, '{root}/summary']
-  command: printf payload > "$PROFILE_WORK/data-home/payload"; exit 42
+  child:
+    - {op: write, path: '{work}/data-home/payload', content: payload}
+    - {op: exit, status: 42}
   status: 42
   output: 'profile status: 42'
   files: {summary: 'profile status: 42'}
   emptyDirs: [work]
 - name: replaced-directory-refuses-cleanup
   args: [--clean, --work, '{root}/work', --profile-output, '{root}/profile', --summary-output, '{root}/summary']
-  command: mv "$PROFILE_WORK" "$ROOT/original"; mkdir "$PROFILE_WORK"; printf untouched > "$PROFILE_WORK/sentinel"; exit 23
+  child:
+    - {op: rename, path: '{work}', to: original}
+    - {op: mkdir, path: '{work}'}
+    - {op: write, path: '{work}/sentinel', content: untouched}
+    - {op: exit, status: 23}
   status: 23
   output: cleanup refused
   exactFiles: {work/sentinel: untouched}
   files: {summary: 'profile status: 23'}
   emptyDirs: [original/data-home]
 - name: replaced-symlink-refuses-cleanup
-  setup: mkdir victim; printf untouched > victim/sentinel
+  setup:
+    - {op: mkdir, path: victim}
+    - {op: write, path: victim/sentinel, content: untouched}
   args: [--clean, --work, '{root}/work', --profile-output, '{root}/profile', --summary-output, '{root}/summary']
-  command: mv "$PROFILE_WORK" "$ROOT/original"; ln -s "$ROOT/victim" "$PROFILE_WORK"
+  child:
+    - {op: rename, path: '{work}', to: original}
+    - {op: symlink, path: '{work}', to: victim}
   status: 0
   output: cleanup refused
   exactFiles: {victim/sentinel: untouched}
   emptyDirs: [original/data-home]
 - name: deleted-recreated-work-refuses-cleanup
   args: [--clean, --work, '{root}/work', --profile-output, '{root}/profile', --summary-output, '{root}/summary']
-  command: rm -rf "$PROFILE_WORK"; mkdir "$PROFILE_WORK"; printf untouched > "$PROFILE_WORK/sentinel"
+  child:
+    - {op: removeAll, path: '{work}'}
+    - {op: mkdir, path: '{work}'}
+    - {op: write, path: '{work}/sentinel', content: untouched}
   status: 0
   output: cleanup refused
   exactFiles: {work/sentinel: untouched}
 - name: replaced-ancestor-refuses-cleanup
-  setup: mkdir parent
+  setup:
+    - {op: mkdir, path: parent}
   args: [--clean, --work, '{root}/parent/work', --profile-output, '{root}/profile', --summary-output, '{root}/summary']
-  command: mv "$ROOT/parent" "$ROOT/original"; ln -s "$ROOT/original" "$ROOT/parent"; printf untouched > "$ROOT/original/work/sentinel"
+  child:
+    - {op: rename, path: parent, to: original}
+    - {op: symlink, path: parent, to: original}
+    - {op: write, path: original/work/sentinel, content: untouched}
   status: 0
   output: cleanup refused
   exactFiles: {original/work/sentinel: untouched}
 - name: replaced-physical-ancestor-refuses-cleanup
-  setup: mkdir parent
+  setup:
+    - {op: mkdir, path: parent}
   args: [--clean, --work, '{root}/parent/work', --profile-output, '{root}/profile', --summary-output, '{root}/summary']
-  command: mv "$ROOT/parent" "$ROOT/original"; mkdir "$ROOT/parent"; mv "$ROOT/original/work" "$ROOT/parent/work"; printf untouched > "$PROFILE_WORK/sentinel"
+  child:
+    - {op: rename, path: parent, to: original}
+    - {op: mkdir, path: parent}
+    - {op: rename, path: original/work, to: parent/work}
+    - {op: write, path: '{work}/sentinel', content: untouched}
   status: 0
   output: cleanup refused
   exactFiles: {parent/work/sentinel: untouched}
 - name: output-traversal
-  setup: mkdir anchor
+  setup:
+    - {op: mkdir, path: anchor}
   args: [--dry-run, --clean, --work, '{root}/work', --profile-output, '{root}/profile', --summary-output, '{root}/anchor/../sentinel']
   status: 1
   output: FATAL
   absent: [work, summary]
 - name: output-symlink-ancestor
-  setup: mkdir victim; ln -s "$ROOT/victim" alias
+  setup:
+    - {op: mkdir, path: victim}
+    - {op: symlink, path: alias, to: victim}
   args: [--dry-run, --work, '{root}/work', --profile-output, '{root}/profile', --summary-output, '{root}/alias/summary']
   status: 1
   output: FATAL
   absent: [work, victim/summary]
 - name: output-symlink-file
-  setup: ln -s "$ROOT/sentinel" summary
+  setup:
+    - {op: symlink, path: summary, to: sentinel}
   args: [--dry-run, --work, '{root}/work', --profile-output, '{root}/profile', --summary-output, '{root}/summary']
   status: 1
   output: FATAL
   absent: [work]
 - name: output-hardlink-file
-  setup: ln "$ROOT/sentinel" summary
+  setup:
+    - {op: hardlink, path: summary, to: sentinel}
   args: [--dry-run, --work, '{root}/work', --profile-output, '{root}/profile', --summary-output, '{root}/summary']
   status: 1
   output: FATAL
   absent: [work]
 - name: existing-profile-refused
-  setup: ln "$ROOT/sentinel" profile
+  setup:
+    - {op: hardlink, path: profile, to: sentinel}
   args: [--work, '{root}/work', --profile-output, '{root}/profile', --summary-output, '{root}/summary']
-  command: printf overwritten > "$PROFILE_JSON"
+  child:
+    - {op: write, path: '{profile}', content: overwritten}
   status: 1
   output: FATAL
   absent: [work, summary]
 - name: existing-trace-refused
-  setup: ln -s "$ROOT/sentinel" trace
+  setup:
+    - {op: symlink, path: trace, to: sentinel}
   args: [--work, '{root}/work', --profile-output, '{root}/profile', --trace-output, '{root}/trace', --summary-output, '{root}/summary']
-  command: printf overwritten > "$PROFILE_TRACE"
+  child:
+    - {op: write, path: '{trace}', content: overwritten}
   status: 1
   output: FATAL
   absent: [work, summary]
@@ -212,16 +275,20 @@
   output: FATAL
   absent: [work, profile, summary]
 - name: profile-output-traversal
-  setup: mkdir anchor
+  setup:
+    - {op: mkdir, path: anchor}
   args: [--work, '{root}/work', --profile-output, '{root}/anchor/../sentinel', --summary-output, '{root}/summary']
-  command: printf overwritten > "$PROFILE_JSON"
+  child:
+    - {op: write, path: '{profile}', content: overwritten}
   status: 1
   output: FATAL
   absent: [work, summary]
 - name: trace-output-traversal
-  setup: mkdir anchor
+  setup:
+    - {op: mkdir, path: anchor}
   args: [--work, '{root}/work', --profile-output, '{root}/profile', --trace-output, '{root}/anchor/../sentinel', --summary-output, '{root}/summary']
-  command: printf overwritten > "$PROFILE_TRACE"
+  child:
+    - {op: write, path: '{trace}', content: overwritten}
   status: 1
   output: FATAL
   absent: [work, summary]
@@ -237,14 +304,18 @@
   absent: [work, summary]
 - name: summary-replaced-by-child
   args: [--clean, --work, '{root}/work', --profile-output, '{root}/profile', --summary-output, '{root}/summary']
-  command: mv "$PROFILE_SUMMARY" "$ROOT/original-summary"; ln -s "$ROOT/sentinel" "$PROFILE_SUMMARY"; exit 19
+  child:
+    - {op: rename, path: '{summary}', to: original-summary}
+    - {op: symlink, path: '{summary}', to: sentinel}
+    - {op: exit, status: 19}
   status: 19
   output: 'profile status: 19'
   files: {original-summary: 'profile status: 19'}
   emptyDirs: [work]
 - name: child-summary-content-retained
   args: [--clean, --work, '{root}/work', --profile-output, '{root}/profile', --summary-output, '{root}/summary']
-  command: printf 'child summary\n' > "$PROFILE_SUMMARY"
+  child:
+    - {op: write, path: '{summary}', content: "child summary\n"}
   status: 0
   output: 'profile status: 0'
   files:

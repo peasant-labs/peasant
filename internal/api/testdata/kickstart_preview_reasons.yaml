@@ -1,0 +1,14 @@
+cut:
+  - {source: source_budget, wire: source_budget}
+  - {source: serialized_budget, wire: serialized_budget}
+  - {source: turn_budget, wire: turn_budget}
+  - {source: oversized_record, wire: oversized_record}
+  - {source: origin_not_resumable, wire: origin_not_resumable}
+close:
+  - {source: source_changed, wire: source_changed}
+  - {source: late_result, wire: late_result}
+  - {source: unavailable, wire: unavailable}
+  - {source: no_turns, wire: no_turns}
+  - {source: unreadable, wire: unreadable}
+  - {source: closed, wire: unavailable}
+  - {source: busy, wire: out_of_order}

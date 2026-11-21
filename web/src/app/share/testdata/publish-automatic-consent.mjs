@@ -1,6 +1,10 @@
 import { parseDocument } from 'yaml';
 import { createPublishWorld } from './publish-popup-states.mjs';
 
+const RequestMethod = Object.freeze({ Get: 'GET', Put: 'PUT', Post: 'POST' });
+const IntentOutcome = Object.freeze({ Error: 'error' });
+const SetupOutcome = Object.freeze({ Malformed: 'malformed', Installed: 'installed', Blocked: 'blocked', Failed: 'failed' });
+
 const REQUIRED_AUTOMATIC_NAMES = [
   'manual-publish-does-not-create-a-rule',
   'server-effective-keep-local-overrides-saved-intent',
@@ -61,17 +65,17 @@ export function createAutomaticConsentWorld(fixture, automaticFixture, entry, { 
     let installed = false;
     world.respond = (request) => {
       const path = new URL(request.url, 'http://peasant.local').pathname;
-      if (path === '/api/v1/settings' && request.method === 'GET') {
+      if (path === '/api/v1/settings' && request.method === RequestMethod.Get) {
         settingsReads += 1;
-        if (entry.intent === 'error' && settingsReads === 1) return { status: 503, json: { error: 'settings read unavailable' } };
+        if (entry.intent === IntentOutcome.Error && settingsReads === 1) return { status: 503, json: { error: 'settings read unavailable' } };
         return { status: 200, json: { settings: [{ key: 'push.autoPublishIntent', kind: 'boolean', value: entry.value, effective: entry.intent === true, editable: true, inPeasantConfig: true, description: 'offer automatic publishing' }], autoPublish: [] } };
       }
       if (path.startsWith('/api/v1/settings/auto-publish/')) {
         mutations.push({ method: request.method, path, body: request.body });
         order.push(request.method);
-        if (request.method === 'PUT') {
+        if (request.method === RequestMethod.Put) {
           if (entry.setup === 'save-error') return { status: 503, json: { error: 'rule save unavailable' } };
-          if (entry.setup === 'malformed') return { status: 200, json: { id: path.split('/').at(-1) } };
+          if (entry.setup === SetupOutcome.Malformed) return { status: 200, json: { id: path.split('/').at(-1) } };
           return { status: 200, json: {
             id: entry.setup === 'wrong-id' ? 'another-manual-rule' : path.split('/').at(-1), kind: 'folder', match: automaticFixture.repository,
             events: entry.setup === 'wrong-paused' ? [] : [entry.setup === 'wrong-event' ? 'post-commit' : 'pre-push'],
@@ -79,10 +83,10 @@ export function createAutomaticConsentWorld(fixture, automaticFixture, entry, { 
             repositories: [{ path: automaticFixture.repository, hooks: entry.setup === 'wrong-paused' ? [] : [{ event: entry.setup === 'wrong-event' ? 'post-commit' : 'pre-push', status: 'absent' }] }],
           } };
         }
-        if (request.method === 'POST') {
+        if (request.method === RequestMethod.Post) {
           if (entry.setup === 'install-error') return { status: 503, json: { error: 'install request unavailable' } };
-          installed = entry.setup === 'installed';
-          const hook = entry.setup === 'blocked' || entry.setup === 'failed'
+          installed = entry.setup === SetupOutcome.Installed;
+          const hook = entry.setup === SetupOutcome.Blocked || entry.setup === SetupOutcome.Failed
             ? { event: 'pre-push', status: entry.setup, remedy: { message: entry.expect } }
             : { event: 'pre-push', status: 'installed' };
           return { status: 200, json: { path: automaticFixture.repository, hooks: [hook] } };

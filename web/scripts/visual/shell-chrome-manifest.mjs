@@ -363,28 +363,35 @@ export function loadNoticePinnedQuery(fixturePath = APP_SHELL_GEOMETRY_FIXTURE) 
 
 /**
  * Checks that the page body clears the chrome above it. On a wide screen nothing sits above the
- * page (the sidebar is a column beside it); on a narrow one the sidebar's top bar does. The offline
- * notice, while it shows, sits in the page flow directly under that: pinned there (position:sticky)
- * where the screen has room — `pinnedQuery`, the notice-pinned variant (loadNoticePinnedQuery) —
- * and scrolling with the page anywhere else (never fixed, never sticky). <main> starts right after
- * the chrome and the notice, with no top padding of its own. The root's scroll-padding-top keeps
- * focused elements clear of what stays on screen: the pinned notice where it is pinned, the top bar
- * (fairtrade's --nav-h) elsewhere. <main> is not focusable at rest (no tabindex): a click in the page
- * must never make it the focus. Returns every failure and the measured fields. Self-contained for
- * page.evaluate.
+ * page (the sidebar is a column beside it); on a narrow one the sidebar's top bar does. <main> is
+ * fairtrade's page column (AppSidebarLayout's `.asb-main`) and starts right under that chrome, with
+ * no top padding of its own. Its first child is fairtrade's notice slot (`.asb-notice`), where the
+ * page notices mount, and the page body follows the slot inside <main>. So the offline notice,
+ * while it shows, is the top of <main>, not something above it: what must clear the notice is the
+ * page body. The body starts exactly where the slot ends, the slot holds the notice and nothing
+ * else (the page notices never stack), and no part of the body starts higher up, so nothing in the
+ * page lies under the notice. The notice is pinned (position:sticky) at the chrome's bottom where
+ * the screen has room — `pinnedQuery`, the notice-pinned variant (loadNoticePinnedQuery) — and on
+ * screen there however far the page is scrolled; anywhere else it scrolls with the page (never
+ * fixed, never sticky). The root's scroll-padding-top keeps focused elements clear of what stays on
+ * screen: the pinned notice where it is pinned, the top bar (fairtrade's --nav-h) elsewhere. <main>
+ * is not focusable at rest (no tabindex): a click in the page must never make it the focus. Returns
+ * every failure and the measured fields; `chrome` is the chrome plus the notice, where the page
+ * body must start. Self-contained for page.evaluate.
  * @param {string} pinnedQuery
- * @returns {{ failures: string[], chrome: number, header: number, notice: number, mainTop: number, scrollPaddingTop: number,
- *   noticeShown: boolean, pinnedViewport: boolean, noticePinned: boolean, noticeTop: number | null, documentTop: number | null }}
+ * @returns {{ failures: string[], chrome: number, header: number, notice: number, mainTop: number, bodyTop: number | null,
+ *   scrollPaddingTop: number, noticeShown: boolean, pinnedViewport: boolean, noticePinned: boolean, noticeTop: number | null,
+ *   documentTop: number | null }}
  */
 export function chromeClearance(pinnedQuery) {
   const failures = []
   const chrome = document.querySelector('.asb')
   const main = document.querySelector('main')
   if (typeof pinnedQuery !== 'string' || !pinnedQuery.startsWith('(')) {
-    return { failures: [`chromeClearance needs the notice-pinned media query, got ${JSON.stringify(pinnedQuery)}`], chrome: 0, header: 0, notice: 0, mainTop: 0, scrollPaddingTop: 0, noticeShown: false, pinnedViewport: false, noticePinned: false, noticeTop: null, documentTop: null }
+    return { failures: [`chromeClearance needs the notice-pinned media query, got ${JSON.stringify(pinnedQuery)}`], chrome: 0, header: 0, notice: 0, mainTop: 0, bodyTop: null, scrollPaddingTop: 0, noticeShown: false, pinnedViewport: false, noticePinned: false, noticeTop: null, documentTop: null }
   }
   const pinnedViewport = window.matchMedia(pinnedQuery).matches
-  const empty = { chrome: 0, header: 0, notice: 0, mainTop: 0, scrollPaddingTop: 0, noticeShown: false, pinnedViewport, noticePinned: false, noticeTop: null, documentTop: null }
+  const empty = { chrome: 0, header: 0, notice: 0, mainTop: 0, bodyTop: null, scrollPaddingTop: 0, noticeShown: false, pinnedViewport, noticePinned: false, noticeTop: null, documentTop: null }
   if (!chrome || !main) return { failures: ['the sidebar or <main> is not mounted'], ...empty }
   const bar = chrome.querySelector('.asb-bar')
   const barShown = !!bar && getComputedStyle(bar).display !== 'none'
@@ -415,9 +422,29 @@ export function chromeClearance(pinnedQuery) {
     if (noticePinned && Math.abs(box.top - headerHeight) > 1) failures.push(`the pinned notice sits ${box.top}px down the screen, not at the ${headerHeight}px chrome bottom`)
     if (!noticePinned && Math.abs(documentTop - headerHeight) > 1) failures.push(`the notice starts ${documentTop}px down the page, not at the ${headerHeight}px chrome bottom`)
   }
+  // <main> is the page column: it starts at the chrome's bottom whether or not the notice shows.
   const mainTop = main.getBoundingClientRect().top + window.scrollY
+  if (Math.abs(mainTop - headerHeight) > 1) failures.push(`<main> starts ${mainTop}px down the page, not at the ${headerHeight}px chrome bottom`)
+  // fairtrade's notice slot leads <main>; the notice must be in it, so it is the top of the column.
+  const slot = main.firstElementChild?.classList.contains('asb-notice') ? main.firstElementChild : null
+  if (notice && (!slot || !slot.contains(notice))) failures.push('the offline notice is not in the notice slot at the top of <main>, so the page body need not start under it')
+  // The slot is static in the page flow, so its box marks where the notice sits in the flow even
+  // while the notice itself is pinned to the screen further down a scrolled page.
+  const slotBox = slot ? slot.getBoundingClientRect() : null
+  if (notice && slotBox && Math.abs(slotBox.height - noticeHeight) > 1) failures.push(`the notice slot is ${slotBox.height}px tall around a ${noticeHeight}px notice, so something stacks with the notice above the page`)
+  // The page body: every element in <main>'s flow after the slot (an absolute or fixed box is not in
+  // the flow and is placed by its own rule).
+  const body = [...main.children].filter((el) => el !== slot && !['absolute', 'fixed'].includes(getComputedStyle(el).position))
   const expected = headerHeight + noticeHeight
-  if (Math.abs(mainTop - expected) > 1) failures.push(`<main> starts ${mainTop}px down the page, but the chrome${notice ? ' plus the notice' : ''} is ${expected}px`)
+  const where = slotBox ? slotBox.bottom + window.scrollY : headerHeight
+  const bodyTop = body.length ? body[0].getBoundingClientRect().top + window.scrollY : null
+  if (bodyTop === null) failures.push('<main> holds no page body after the notice slot')
+  else if (Math.abs(bodyTop - where) > 1) failures.push(`the page body starts ${bodyTop}px down the page, but the notice slot ends at ${where}px`)
+  if (notice && bodyTop !== null && Math.abs(bodyTop - expected) > 1) failures.push(`the page body starts ${bodyTop}px down the page, but the chrome plus the notice is ${expected}px`)
+  for (const el of body) {
+    const top = el.getBoundingClientRect().top + window.scrollY
+    if (top < where - 1) failures.push(`<${el.tagName.toLowerCase()} class="${el.className}"> in the page body starts ${top}px down the page, above the ${where}px the notice slot ends at, so it lies under the notice`)
+  }
   const mainPadding = Number.parseFloat(getComputedStyle(main).paddingTop)
   if (mainPadding > 0.5) failures.push(`<main> pads its top by ${mainPadding}px; nothing fixed sits over it`)
   // What stays on screen while the page scrolls: the pinned notice where pinned, the top bar elsewhere.
@@ -430,5 +457,5 @@ export function chromeClearance(pinnedQuery) {
   if (main.hasAttribute('tabindex') && document.activeElement !== main) {
     failures.push(`<main> carries tabindex="${main.getAttribute('tabindex')}" at rest, so a click in the page would focus it`)
   }
-  return { failures, chrome: expected, header: headerHeight, notice: noticeHeight, mainTop, scrollPaddingTop, noticeShown: !!notice, pinnedViewport, noticePinned, noticeTop, documentTop }
+  return { failures, chrome: expected, header: headerHeight, notice: noticeHeight, mainTop, bodyTop, scrollPaddingTop, noticeShown: !!notice, pinnedViewport, noticePinned, noticeTop, documentTop }
 }

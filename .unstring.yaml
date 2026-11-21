@@ -12,3 +12,7 @@ exempt:
       - web/src/lib/session-detail/mock-redactions.ts
       - web/src/lib/share/redaction-policy.generated.ts
     reason: generated code, not hand-edited
+exclude:
+  - paths:
+      - third_party
+    reason: vendored, patched copy of the upstream zombiezen SQLite driver (see third_party/zombiezen-sqlite/PEASANT.md); upstream code is not owned by Peasant and is not linted

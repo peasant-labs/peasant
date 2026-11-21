@@ -1006,7 +1006,7 @@ type codexContextOverride struct {
 // developer's configuration, never a person; harness_authored_configuration is
 // the harness itself.
 func (c *codexBlockClassifier) envelopeContext(node CodexCapturedNode, metadata codexEnvelopeMetadata, ownership schema.ContentOwnership) (codexContextOverride, bool) {
-	roleContext := node.NativeRole == "developer" || node.NativeRole == "system"
+	roleContext := node.NativeRole == string(codexRoleDeveloper) || node.NativeRole == string(codexRoleSystem)
 	harnessConfig := metadata.HasHarnessAuthored && metadata.HarnessAuthoredConfiguration
 	clientConfig := metadata.HasClientAuthored && metadata.ClientAuthored
 	if !roleContext && !harnessConfig && !clientConfig {
@@ -1155,7 +1155,7 @@ func (c *codexBlockClassifier) resolveDelivery(node CodexCapturedNode, payload c
 func (c *codexBlockClassifier) classifyEmptyMessage(node CodexCapturedNode, payload codexItemPayload, metadata codexEnvelopeMetadata, ownership schema.ContentOwnership) {
 	origin, actor, delivery := schema.ContentOriginUnknown, schema.ActorOriginUnknown, schema.DeliveryOriginUnknown
 	role, entryType := codexPresentation(node.NativeRole, origin)
-	if payload.Role == "developer" || payload.Role == "system" || metadata.HasHarnessAuthored && metadata.HarnessAuthoredConfiguration || metadata.HasClientAuthored && metadata.ClientAuthored {
+	if payload.Role == string(codexRoleDeveloper) || payload.Role == string(codexRoleSystem) || metadata.HasHarnessAuthored && metadata.HarnessAuthoredConfiguration || metadata.HasClientAuthored && metadata.ClientAuthored {
 		origin = schema.ContentOriginHarnessContext
 		actor = schema.ActorOriginHarness
 		delivery = schema.DeliveryOriginSystemLifecycle

@@ -1,0 +1,88 @@
+generated:
+  pairs: 6000
+  answerBytes: 512
+  oversizedBytes: 5242880
+requiredNames:
+  - open-sends-first-segment-unasked
+  - more-sends-exactly-one-segment
+  - short-segment-sent-without-waiting-for-a-read
+  - seq-is-monotone
+  - open-replaces-the-existing-capture
+  - close-frees-the-capture
+  - second-connection-never-receives-the-firsts-frames
+  - unreadable-source-errors-and-logs-carry-no-source-or-path
+  - idle-expiry-frees-the-capture
+  - setup-session-end-closes-the-capture
+  - oversized-turn-stays-within-frame-cap
+  - socket-disconnect-frees-capture
+  - rescan-frees-capture
+  - capacity-refusal-at-two-live-captures
+  - final-frame-without-segment-when-last-already-sent
+  - final-frame-repeats-sent-refs-unchanged
+  - preview-close-carries-no-source-or-path
+  - preview-cut-carries-no-source-or-path
+  - gated-read-close-discards-late-result
+  - gated-read-replacement-orders-frames
+  - gated-read-rescan-discards-late-result
+  - refused-open-keeps-existing-preview
+  - two-opens-race-for-last-slot
+  - source-changed-closes-with-reason
+  - late-result-cuts-with-read-again
+  - truncate-half-between-loads-closes-source-changed
+  - truncate-quarter-between-loads-closes-source-changed
+  - every-more-gets-exactly-one-reply
+  - preview-logs-open-segments-close-and-free
+  - socket-disconnect-logs-capture-freed
+  - idle-expiry-logs-capture-freed
+cases:
+  - name: open-sends-first-segment-unasked
+    transcript: |
+      {"type":"user","uuid":"u1","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"synthetic preview content"}}
+      {"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"synthetic response"}]}}
+  - {name: more-sends-exactly-one-segment, long: true, operation: load-next}
+  - {name: short-segment-sent-without-waiting-for-a-read, long: true, operation: short}
+  - {name: seq-is-monotone, long: true, operation: load-next}
+  - {name: open-replaces-the-existing-capture, long: true, operation: reopen}
+  - {name: close-frees-the-capture, long: true, operation: close-preview}
+  - {name: second-connection-never-receives-the-firsts-frames, long: true, operation: isolation}
+  - {name: unreadable-source-errors-and-logs-carry-no-source-or-path, operation: missing-source}
+  - {name: idle-expiry-frees-the-capture, long: true, operation: expire}
+  - {name: setup-session-end-closes-the-capture, long: true, operation: end-setup}
+  - {name: oversized-turn-stays-within-frame-cap, operation: bounded-turn}
+  - {name: socket-disconnect-frees-capture, long: true, operation: disconnect}
+  - {name: rescan-frees-capture, long: true, operation: rescan}
+  - {name: capacity-refusal-at-two-live-captures, operation: busy-capacity}
+  - {name: final-frame-without-segment-when-last-already-sent, long: true, operation: finish-without-segment}
+  - {name: final-frame-repeats-sent-refs-unchanged, long: true, operation: finish-without-segment}
+  - {name: preview-close-carries-no-source-or-path, long: true, operation: close-preview}
+  - {name: preview-cut-carries-no-source-or-path, long: true, operation: finish-without-segment}
+  - {name: gated-read-close-discards-late-result, long: true, operation: gated-close}
+  - {name: gated-read-replacement-orders-frames, long: true, operation: gated-reopen}
+  - {name: gated-read-rescan-discards-late-result, long: true, operation: gated-rescan}
+  - {name: refused-open-keeps-existing-preview, long: true, operation: refuse-reopen}
+  - {name: two-opens-race-for-last-slot, operation: capacity-race}
+  - {name: source-changed-closes-with-reason, long: true, operation: alter-source}
+  # A call shown with its answer is answered again by a later record: the
+  # shown turn is stale, so the capture closes as a late result with a read
+  # again offer, in words that do not claim the file changed.
+  - name: late-result-cuts-with-read-again
+    operation: late-result
+    transcript: |
+      {"type":"user","uuid":"u1","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"run it."}}
+      {"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"call_twice","name":"Bash","input":{"command":"true"}}]}}
+      {"type":"user","uuid":"r1","parentUuid":"a1","timestamp":"2026-01-01T00:00:02Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_twice","content":"first answer"}]}}
+      {"type":"assistant","uuid":"a2","parentUuid":"r1","timestamp":"2026-01-01T00:00:03Z","message":{"role":"assistant","content":[{"type":"text","text":"done {{PAD}}"}]}}
+      {"type":"user","uuid":"u2","parentUuid":"a2","timestamp":"2026-01-01T00:00:04Z","message":{"role":"user","content":"next {{PAD}}"}}
+      {"type":"user","uuid":"r2","parentUuid":"u2","timestamp":"2026-01-01T00:00:05Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_twice","content":"second answer"}]}}
+      {"type":"assistant","uuid":"a3","parentUuid":"r2","timestamp":"2026-01-01T00:00:06Z","message":{"role":"assistant","content":[{"type":"text","text":"that is all."}]}}
+  # Truncation between loads, at half and a quarter of the file (the points
+  # the acceptance run used). The load after it is answered once, by a
+  # source-changed close in sequence, and nothing else follows.
+  - {name: truncate-half-between-loads-closes-source-changed, long: true, operation: truncate-between-loads, fraction: 0.5, logs: [opened, sent, closed, freed], freedReason: source_changed}
+  - {name: truncate-quarter-between-loads-closes-source-changed, long: true, operation: truncate-between-loads, fraction: 0.25, logs: [opened, sent, closed, freed], freedReason: source_changed}
+  # Every load until the capture ends is answered by exactly one frame, and
+  # the end frees the capture.
+  - {name: every-more-gets-exactly-one-reply, long: true, operation: every-more-answered, logs: [opened, sent, ended, freed], freedReason: complete}
+  - {name: preview-logs-open-segments-close-and-free, long: true, operation: close-preview, logs: [opened, sent, closed, freed], freedReason: closed_by_client}
+  - {name: socket-disconnect-logs-capture-freed, long: true, operation: disconnect, logs: [opened, sent, freed], freedReason: disconnect}
+  - {name: idle-expiry-logs-capture-freed, long: true, operation: expire, logs: [opened, sent, closed, freed], freedReason: idle}

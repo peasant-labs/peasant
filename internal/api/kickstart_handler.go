@@ -140,7 +140,10 @@ func (h *kickstartHandler) handleTree(w http.ResponseWriter, r *http.Request) {
 }
 
 // handlePreview answers GET /api/v1/kickstart/sessions/{id}/tree/{nodeId}/preview.
+// Preview lines may contain local transcript text. Do not store any answer,
+// including an error, in an HTTP cache.
 func (h *kickstartHandler) handlePreview(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set(defaults.HeaderCacheControl, defaults.CacheControlNoStore)
 	if !h.available(w) {
 		return
 	}

@@ -83,9 +83,15 @@ func observationCredentialScope(snapshot auth.CredentialSnapshot) (string, strin
 func (s *Store) withObservationTransaction(ctx context.Context, snapshot auth.CredentialSnapshot, write bool, action func(*sqlite.Conn) error) error {
 	return snapshot.WithCurrent(ctx, func() (err error) {
 		if write {
+			caller, hold := ctx, s.writeConfig.WithDefaults(1).HoldTarget
 			var cancel context.CancelFunc
-			ctx, cancel = context.WithTimeout(ctx, s.writeConfig.WithDefaults(1).HoldTarget)
+			ctx, cancel = context.WithTimeout(ctx, hold)
 			defer cancel()
+			held := ctx
+			// Registered first so it runs last: it sees the error after the
+			// commit or rollback and the connection's return to the pool, so
+			// the budget it reports is the one that had run out by then.
+			defer func() { err = nameExpiredObservationHold(err, caller, held, hold) }()
 		}
 		conn, err := s.pool.Take(ctx)
 		if err != nil {
@@ -104,6 +110,27 @@ func (s *Store) withObservationTransaction(ctx context.Context, snapshot auth.Cr
 		err = action(conn)
 		return err
 	})
+}
+
+// nameExpiredObservationHold names the expired writer hold budget beside
+// SQLite's interrupt. SQLite reports only "interrupted", so without this a
+// failed observation write says nothing about its timing. It reports what this
+// defer observes — an interrupt error, a live caller, and a budget that had run
+// out by the time the step ended — and does not claim the budget caused the
+// interrupt: another interrupt can land first, and the commit, rollback or pool
+// return that run before this defer can cross the deadline. The SQLite error
+// stays wrapped, so callers classify the failure as before.
+func nameExpiredObservationHold(err error, caller, held context.Context, hold time.Duration) error {
+	if err == nil || sqlite.ErrCode(err) != sqlite.ResultInterrupt {
+		// Only an interrupt carries the timing this note adds.
+		return err
+	}
+	if caller.Err() != nil || !errors.Is(held.Err(), context.DeadlineExceeded) {
+		// The caller gave up, or the budget was still live at the end: the
+		// failure keeps the text it already carries.
+		return err
+	}
+	return fmt.Errorf("collective observation write: SQLite interrupted this step (%w) and its %s writer hold budget had run out by the time the step ended; the budget bounds how long another process waits for the single writer, so it is the first thing to check, though this error alone cannot say which interrupt fired; nothing from this step was installed; retry the explicit action once the machine is responsive", err, hold)
 }
 
 // BeginCollectiveObservation allocates a durable ordering sequence under the

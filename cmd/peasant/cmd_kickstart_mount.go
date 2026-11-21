@@ -432,9 +432,11 @@ func kickstartPreviewWithRoot(
 			return session.Turns, true, nil
 		}
 	}
-	// The reader materializes a SQLite-discovered session through the same
-	// adapter dependencies the discovery path uses, so the preview reads one
-	// session's rows rather than the whole provider database.
+	// The reader opens one shared source preview capture per session, under
+	// the terminal's own capture options, and materializes a SQLite-discovered
+	// session through the same adapter dependencies the discovery path uses, so
+	// the preview reads one session's rows rather than the whole provider
+	// database.
 	sourceTurns := kickstart.NewSourceTurns(&ingest.OSFileSystem{}, sessions,
 		kickstart.WithSourceTurnsGitResolver(&ingest.ExecGitResolver{}),
 		kickstart.WithSourceTurnsSalt(salt.Salt{}))
@@ -484,6 +486,10 @@ func kickstartPreviewWithRoot(
 	}
 	opts := []kickstart.ListingPreviewOption{
 		kickstart.WithSessionPreviewNotice(notice),
+		// Why a harness preview ended before its session did - the source
+		// cap, an oversized record, a changed transcript - or that the session
+		// grew. A session the store answered has no capture, so it says nothing.
+		kickstart.WithSessionPreviewEndNotice(sourceTurns.EndNotice),
 		kickstart.WithSessionFirstTurns(firstTurns),
 		// The scrolled continuation. A session the store already answered has no
 		// harness read behind it, so it reports nothing more and the pane offers

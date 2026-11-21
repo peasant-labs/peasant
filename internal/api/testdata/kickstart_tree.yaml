@@ -19,6 +19,7 @@ requiredNames:
   - rescan-keeps-ids-and-drops-vanished-non-silently
   - rescan-never-widens
   - preview-of-an-unreadable-transcript-reports-the-reason
+  - preview-unavailable-is-not-stored
   - scan-progress-ticks-are-coalesced
   - partial-scan-notice-is-its-own-field
 cases:
@@ -30,6 +31,7 @@ cases:
         save: {full: id}
       - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
       - call: GET /api/v1/kickstart/sessions/{full}/tree
+        headers: {Cache-Control: []}
         keys: [nodes]
         len: {nodes: 9}
         json:
@@ -172,29 +174,20 @@ cases:
         body: {scope: full}
         save: {full: id}
       - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
-      # a session with a transcript: typed lines, bounded, closed by a notice
+      # Session content is carried only over the connection-owned preview.
       - call: GET /api/v1/kickstart/sessions/{full}/tree/11111111-1111-4111-8111-111111111111/preview
+        headers: {Cache-Control: [no-store]}
         keys: [lines]
         lenMax: {lines: 200}
         json:
-          lines.0.kind: label
-          lines.0.text: fix the gate
-          lines.1.kind: spacer
-          lines.2.kind: label
-          lines.2.text: user
-          lines.3.kind: text
-          lines.3.text: please refactor the ingest pipeline so a failed write leaves nothing behind.
-          # the bound is 200 lines, the closing notice included
-          lines.199.kind: text
-          lines.199.text: "preview shortened here. the full session ingests normally."
+          lines.0.kind: text
+          lines.0.text: "open this session in the local preview to read its transcript"
         noReset: true
-      # a session discovery found no transcript for is described, not refused
+      # A session without a source also stays off the HTTP content path.
       - call: GET /api/v1/kickstart/sessions/{full}/tree/22222222-2222-4222-8222-222222222222/preview
         json:
-          lines.0.kind: label
-          lines.0.text: add tests
-          lines.1.kind: text
-          lines.1.text: "no transcript preview is available for this session; it still ingests normally."
+          lines.0.kind: text
+          lines.0.text: "open this session in the local preview to read its transcript"
       # a project row and a branch row are described from the forest's own
       # metadata, in the words the terminal pane uses; their ids carry slashes,
       # so the page percent-encodes them
@@ -234,13 +227,16 @@ cases:
       - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
       - call: GET /api/v1/kickstart/sessions/{full}/tree/not-a-row/preview
         status: 404
+        headers: {Cache-Control: [no-store]}
         json: {code: kickstart_preview_row_not_found}
-        contains: {error: "not-a-row"}
+        contains: {error: "Reload the tree"}
       - call: GET /api/v1/kickstart/sessions/nope/tree/11111111-1111-4111-8111-111111111111/preview
         status: 404
+        headers: {Cache-Control: [no-store]}
         json: {code: kickstart_session_not_found}
       - call: GET /api/v1/kickstart/sessions/nope/tree
         status: 404
+        headers: {Cache-Control: []}
 
   - name: tree-absent-from-session-view-and-scan-event
     world: {listings: two-projects}
@@ -436,9 +432,17 @@ cases:
         save: {full: id}
       - await: {kind: session, session: "{full}", json: {view.scan.state: done}}
       - call: GET /api/v1/kickstart/sessions/{full}/tree/11111111-1111-4111-8111-111111111111/preview
-        status: 500
-        json: {code: kickstart_preview_unreadable}
-        contains: {error: "still ingests normally"}
+        headers: {Cache-Control: [no-store]}
+        keys: [lines]
+        json: {lines.0.text: "open this session in the local preview to read its transcript"}
+
+  - name: preview-unavailable-is-not-stored
+    world: {unconfigured: true}
+    steps:
+      - call: GET /api/v1/kickstart/sessions/nope/tree/not-a-row/preview
+        status: 503
+        headers: {Cache-Control: [no-store]}
+        json: {code: kickstart_unavailable}
 
   - name: scan-progress-ticks-are-coalesced
     world: {listings: two-projects, scanPush: 1h}

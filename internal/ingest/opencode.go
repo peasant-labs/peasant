@@ -389,13 +389,12 @@ func (a *OpenCodeAdapter) readOpenCodeLegacyJSONSource(path string, root Resolve
 	return source, true
 }
 
-// closeDeferredOpenCodeSource closes a source that stayed open for the whole
-// Discover. It derives the close context from context.Background rather than the
-// caller context, so an already-cancelled discovery context cannot make Close
-// take its cancellation branch and skip releasing the single connection. That
-// skip would leak the connection in the long-lived web process. The close stays
-// bounded by the source query timeout, so a genuinely stuck cleanup still ends.
-// The caller context is intentionally not passed through.
+// closeDeferredOpenCodeSource closes a source after its caller's work. It derives
+// the close context from context.Background rather than the caller context, so
+// an already-cancelled request cannot make Close skip releasing the connection.
+// The deadline bounds the wait for the source permit; SQLite's synchronous
+// connection-close call itself is not preemptible by this context. The caller
+// context is intentionally not passed through.
 func closeDeferredOpenCodeSource(callerCtx context.Context, source OpenCodeSQLiteSource, bound time.Duration) error {
 	_ = callerCtx
 	if bound <= 0 {
@@ -452,7 +451,10 @@ func (a *OpenCodeAdapter) withOpenCodeMaterializationSource(ctx context.Context,
 	} else {
 		fnErr = fn(source)
 	}
-	closeErr := source.Close(ctx)
+	if ctxErr := ctx.Err(); ctxErr != nil && !errors.Is(fnErr, ctxErr) {
+		fnErr = errors.Join(fnErr, ctxErr)
+	}
+	closeErr := closeDeferredOpenCodeSource(ctx, source, options.queryTimeout)
 	return errors.Join(fnErr, closeErr)
 }
 

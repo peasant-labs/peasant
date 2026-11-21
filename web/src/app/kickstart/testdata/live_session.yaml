@@ -29,8 +29,10 @@ cases:
   - name: second-tab-answer-without-reload
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 2, stale: false}}
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - expectControl: {role: radio, name: "keep local, do not publish", checked: true}
       # Another tab answered; the server pushes the whole view.
@@ -44,15 +46,17 @@ cases:
   - name: stale-patch-shows-overwritten-notice
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      # The village question is answered no first; the page keeps the view it drew.
       "PATCH /api/v1/kickstart/sessions/ses-full":
-        body:
-          revision: 2
-          stale: true
-          overwritten:
-            - {key: publication-preference, previous: keep-local, revision: 1}
-          view: {$model: second-tab-answer}
+        - {body: {revision: 2, stale: false}}
+        - body:
+            revision: 2
+            stale: true
+            overwritten:
+              - {key: publication-preference, previous: keep-local, revision: 1}
+            view: {$model: second-tab-answer}
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - choose: plan to publish later
       - expectBody: {route: "PATCH /api/v1/kickstart/sessions/ses-full", subset: {revision: 1, values: {publication-preference: share-later}}}
@@ -84,7 +88,7 @@ cases:
           - nothing was published and no hook was installed
           - importing
       - expectControl: {role: button, name: continue, present: false}
-      - expectControl: {role: button, name: back, disabled: true}
+      - expectControl: {role: button, name: prev, disabled: true}
       # Import progress arrives on the same topic, with no reload.
       - push: {kind: ingest, sessionId: ses-full, revision: 4, ingest: {state: idle, new: 12, updated: 3}}
       - expectText: [import finished]
@@ -107,6 +111,8 @@ cases:
     fakeTimers: true
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 2, stale: false}}
       "GET /api/v1/kickstart/sessions/ses-full": {body: {$model: second-tab-answer}}
     steps:
       - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-full", count: 0}
@@ -116,7 +122,7 @@ cases:
       # one read of the snapshot.
       - socket: open
       - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-full", count: 1}
-      - click: continue
+      - click: "no"
       - click: continue
       - expectControl: {role: radio, name: plan to publish later, checked: true}
       - expectNoReload: true
@@ -124,10 +130,12 @@ cases:
   - name: forest-loads-on-mount-and-on-scan-done
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: scanning}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "GET /api/v1/kickstart/sessions/ses-full/tree": [{body: {$tree: empty}}, {body: {$tree: forest}}]
     steps:
       - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-full/tree", count: 1}
-      - click: continue
+      - click: "no"
       - expectText: [reading projects, no sessions found]
       # The scan ends: the forest is read again, once, with no reload.
       - push: {kind: scan, sessionId: ses-full, revision: 3, scan: {state: done, done: 4, total: 4}}
@@ -167,9 +175,11 @@ cases:
   - name: scan-running-progress
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: scanning}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "GET /api/v1/kickstart/sessions/ses-full/tree": {body: {$tree: empty}}
     steps:
-      - click: continue
+      - click: "no"
       - expectText: [reading projects]
       - expectControl: {role: progressbar, name: scan progress, valueNow: 25}
       - push: {kind: scan, sessionId: ses-full, revision: 3, scan: {state: running, phase: reading sessions, done: 3, total: 4}}
@@ -179,10 +189,12 @@ cases:
   - name: scan-error-offers-a-rescan
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: scan-failed}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "GET /api/v1/kickstart/sessions/ses-full/tree": {body: {$tree: empty}}
       "POST /api/v1/kickstart/sessions/ses-full/scan": {body: {state: running, phase: reading projects, done: 0, total: 4}}
     steps:
-      - click: continue
+      - click: "no"
       - expectText: [the scan did not finish, the projects folder could not be read]
       - click: scan again
       - expectCalls: {route: "POST /api/v1/kickstart/sessions/ses-full/scan", count: 1}
@@ -192,9 +204,10 @@ cases:
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
       "GET /api/v1/kickstart/sessions/ses-full/tree": [{body: {$tree: forest}}, {body: {$tree: forest-two-selected}}]
-      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 2, stale: false, view: {$model: selected-two}}}
+      # The village question is answered no first; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": [{body: {revision: 2, stale: false}}, {body: {revision: 2, stale: false, view: {$model: selected-two}}}]
     steps:
-      - click: continue
+      - click: "no"
       - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-full/tree", count: 1}
       - expectControl: {role: checkbox, name: add a CSV export, checked: false}
       # The toggle sends the ids the tree reports; node states are the server's,
@@ -208,9 +221,11 @@ cases:
   - name: another-tabs-selection-rereads-the-forest
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 2, stale: false}}
       "GET /api/v1/kickstart/sessions/ses-full/tree": [{body: {$tree: forest}}, {body: {$tree: forest-two-selected}}]
     steps:
-      - click: continue
+      - click: "no"
       - expectControl: {role: checkbox, name: add a CSV export, checked: false}
       - push: {kind: answers, model: selected-two}
       - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-full/tree", count: 2}

@@ -51,7 +51,7 @@
       # Vendor hash for buildGoModule. Recompute when go.mod/go.sum changes:
       # set this to nixpkgs.lib.fakeHash, run `nix build`, copy the reported `got:`
       # hash back here.
-      vendorHash = "sha256-tBQ6k+T6Vchh03LBzCRwIZH5cDeYgriLVFnRtWurBZ4=";
+      vendorHash = "sha256-yNMvBl0XNx6IIjNc1FmtuKpimpgThZmICbqhIciBBq0=";
 
       # Extra CLI tools available in the dev shell
       devTools = pkgs: with pkgs; [
@@ -196,13 +196,38 @@
               # This checkPhase is a packaging sanity gate (including Peasant's
               # CGO=0 public-module redaction seam), not a substitute
               # for the full suite.
+              #
+              # -timeout=20m: Go's default per-package timeout is 10 minutes, and
+              # the release runner (2 vCPU arm64, so `go test` runs 2 packages
+              # and 2 parallel tests at a time) has run internal/api past it.
+              # The SQLite-backed packages are bound by disk sync, so their time
+              # varies several-fold between runner VMs of the same class: across
+              # two runs of one commit internal/api took 377s and >600s, and
+              # internal/store 118s and 429s. 20 minutes allows more time than
+              # Go's 10-minute default, but the run recorded as >600s was not
+              # observed completing, so it is unknown whether 20 minutes is
+              # enough for it. It is no guarantee of a Go-level failure either:
+              # the job's 30-minute wall limit also covers setup and the other
+              # packages, so a package can start too late for -timeout to fire
+              # first, and the job can be killed without a goroutine dump. When
+              # the timeout does fire first, the dump names the hung test.
+              #
+              # -skip TestStopWebLeavesSameNamedExecutableAtAnotherPathAlone:
+              # the test copies the test binary and executes the copy while
+              # other parallel tests fork, so the exec can fail with ETXTBSY
+              # ("text file busy", golang/go#22315). That is a test-harness race,
+              # not a packaging defect, and it fails this gate at random. The
+              # test still runs in `make check` and CI. Remove this skip when
+              # peasant-labs/peasant#967 makes the copy-then-exec step retry.
               preCheck = ''
                 export HOME=$(mktemp -d)
                 export GIT_CONFIG_NOSYSTEM=1
               '';
               checkPhase = ''
                 runHook preCheck
-                go test $(go list ./... | grep -vE '/internal/(e2e|ingest)$')
+                go test -timeout=20m \
+                  -skip '^TestStopWebLeavesSameNamedExecutableAtAnotherPathAlone$' \
+                  $(go list ./... | grep -vE '/internal/(e2e|ingest)$')
                 ${extraCheckPhase}
                 runHook postCheck
               '';

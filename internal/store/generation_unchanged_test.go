@@ -156,14 +156,11 @@ func TestManagedGenerationUnchangedSettle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var dbPath string
-	if err = sqlitex.Execute(conn, `PRAGMA database_list`, &sqlitex.ExecOptions{ResultFunc: func(st *sqlite.Stmt) error {
-		if st.ColumnText(1) == "main" {
-			dbPath = st.ColumnText(2)
-		}
-		return nil
-	}}); err != nil || dbPath == "" {
-		t.Fatalf("database path = %q, error = %v", dbPath, err)
+	// The connection's own main database file, read the way the migration
+	// disk probe reads it.
+	dbPath := dbMainFileOnConn(conn)
+	if dbPath == "" {
+		t.Fatal("database path is empty: PRAGMA database_list named no main database file")
 	}
 	// Temporary triggers count actual affected rows, not table-size deltas.
 	if err = sqlitex.Execute(conn, `CREATE TEMP TABLE observed_writes (table_name TEXT NOT NULL)`, nil); err != nil {

@@ -144,8 +144,9 @@ func runOpenCommitRefreshCase(t *testing.T, testCase openCommitRefreshCase) {
 	}
 
 	var added string
+	const noPostRecordAction = "none"
 	switch testCase.AfterRecord {
-	case "none":
+	case noPostRecordAction:
 	case "add-commit":
 		added = world.addWindowCommit(t)
 	case "hide-git":

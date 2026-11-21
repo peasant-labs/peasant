@@ -261,6 +261,10 @@ func assertRecallHits(t *testing.T, c searchRecallCase, hits []UnifiedSearchHit)
 	}
 }
 
+const recallFixtureInput = "input"
+const recallFixtureOutput = "output"
+const recallFixturePreview = "preview"
+
 func recallToolField(t *testing.T, c searchRecallCase, field string) {
 	t.Helper()
 	s, _ := openGenerationStore(t)
@@ -271,9 +275,9 @@ func recallToolField(t *testing.T, c searchRecallCase, field string) {
 	e1 := withToolInput(recallEntry(sid, 1, recallRef(prefix, 1)), "neutral tool input")
 	e2 := withToolOutput(recallEntry(sid, 2, recallRef(prefix, 2)), "neutral tool output")
 	switch field {
-	case "input":
+	case recallFixtureInput:
 		e1.ToolInput = &c.Query
-	case "output":
+	case recallFixtureOutput:
 		e2.ToolOutput = &c.Query
 	}
 	activateRecallEntries(t, s, sid, "gen-"+prefix, []schema.SessionEntry{e0, e1, e2}, nil)
@@ -305,9 +309,9 @@ func recallBeyond2000(t *testing.T, c searchRecallCase, field string) {
 	e1 := withToolInput(recallEntry(sid, 1, recallRef(prefix, 1)), "neutral input")
 	e2 := withToolOutput(recallEntry(sid, 2, recallRef(prefix, 2)), "neutral output")
 	switch field {
-	case "preview":
+	case recallFixturePreview:
 		e0.ContentPreview = &long
-	case "output":
+	case recallFixtureOutput:
 		e2.ToolOutput = &long
 	}
 	activateRecallEntries(t, s, sid, "gen-"+prefix, []schema.SessionEntry{e0, e1, e2}, nil)
@@ -442,9 +446,9 @@ func recallNonNative(t *testing.T, c searchRecallCase, field string) {
 	e0 := withPreview(recallEntry(sid, 0, recallRef("nonnative", 0)), "neutral head")
 	e1 := withToolInput(recallEntry(sid, 1, recallRef("nonnative", 1)), "neutral input")
 	switch field {
-	case "preview":
+	case recallFixturePreview:
 		e0.ContentPreview = &c.Query
-	case "input":
+	case recallFixtureInput:
 		e1.ToolInput = &c.Query
 	}
 	entries = []schema.SessionEntry{e0, e1}

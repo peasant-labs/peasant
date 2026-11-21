@@ -13,7 +13,7 @@ import {
 } from '@/lib/adapters/changes';
 import type { ReviewListPayload } from '@peasant-labs/schema';
 import { mapHref, returnLocation as makeReturnLocation, type ProjectHash, type ReturnLocation } from '@/lib/navigation/projectRoutes';
-import { useProjectIdentity } from '@/lib/navigation/useProjectIdentity';
+import { ProjectIdentityPhase, useProjectIdentity } from '@/lib/navigation/useProjectIdentity';
 import { ProjectIdentityProblem } from '@/components/ProjectIdentityProblem';
 import { discoveryErrorMessage } from '@/lib/selectionGuidance';
 import { resolveTimelineNavigation } from './timelineNavigation';
@@ -59,7 +59,7 @@ export function ReviewSurface({
   const router = useRouter();
   const identity = useProjectIdentity(projectHash ?? projectName ?? null);
   const requestedIdentity = projectHash ?? projectName ?? null;
-  const readyIdentity = identity.state.phase === 'ready' && identity.state.requestedIdentity === requestedIdentity
+  const readyIdentity = identity.state.phase === ProjectIdentityPhase.Ready && identity.state.requestedIdentity === requestedIdentity
     ? identity.state
     : null;
   const effectiveHash = readyIdentity?.projectHash ?? null;
@@ -148,10 +148,10 @@ export function ReviewSurface({
   // Keep this after all hooks so retry/error rendering never changes hook order,
   // and before list/detail rendering so downstream REST state cannot hide a 404
   // or transient identity failure.
-  if (requestedIdentity && identity.state.phase === 'resolving') {
+  if (requestedIdentity && identity.state.phase === ProjectIdentityPhase.Resolving) {
     return <ReviewState label="resolving project…" />;
   }
-  if (requestedIdentity && (identity.state.phase === 'missing' || identity.state.phase === 'error')) {
+  if (requestedIdentity && (identity.state.phase === ProjectIdentityPhase.Missing || identity.state.phase === ProjectIdentityPhase.Error)) {
     return <ProjectIdentityProblem state={identity.state} onRetry={identity.retry} />;
   }
 

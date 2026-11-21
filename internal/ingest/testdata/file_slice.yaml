@@ -24,6 +24,8 @@ required_cases:
   - a-single-line-longer-than-the-whole-budget-arrives-in-one-slice
   - a-file-inside-its-budget-is-one-slice-with-nothing-more
   - a-file-with-no-trailing-newline-still-ends-cleanly
+  - a-file-truncated-to-half-after-a-slice-is-refused
+  - a-file-truncated-to-a-quarter-after-a-slice-is-refused
 
 cases:
   - name: a-file-of-even-lines-slices-into-whole-lines
@@ -64,3 +66,23 @@ cases:
     max_slices: 40
     expect_multiple_slices: true
     no_trailing_newline: true
+
+  # The file shrinks after the first slice, to half and to a quarter of its
+  # size: the next slice lies inside the extent the first measured, so it
+  # comes back short. It is refused with ErrTranscriptShrank instead of being
+  # read as an endless run of empty slices that still promise more.
+  - name: a-file-truncated-to-half-after-a-slice-is-refused
+    line_bytes: 40
+    line_count: 100
+    budget_bytes: 512
+    max_slices: 40
+    expect_multiple_slices: true
+    truncate_after_first: 0.5
+
+  - name: a-file-truncated-to-a-quarter-after-a-slice-is-refused
+    line_bytes: 40
+    line_count: 100
+    budget_bytes: 512
+    max_slices: 40
+    expect_multiple_slices: true
+    truncate_after_first: 0.25

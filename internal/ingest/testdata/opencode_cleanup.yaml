@@ -1,0 +1,40 @@
+required_cases:
+  - ordinary-materialization-cancelled
+  - snapshot-materialization-cancelled
+  - ordinary-materialization-success
+  - snapshot-materialization-success
+  - preview-slice-cancelled
+  - preview-slice-success
+cases:
+  - name: ordinary-materialization-cancelled
+    fixture: semantic-parity-current
+    session_id: ses_3cd91f52effeXd3QAJ54jOyzv5
+    snapshot: false
+    cancel: true
+  - name: snapshot-materialization-cancelled
+    fixture: semantic-parity-current
+    session_id: ses_3cd91f52effeXd3QAJ54jOyzv5
+    snapshot: true
+    cancel: true
+  - name: ordinary-materialization-success
+    fixture: semantic-parity-current
+    session_id: ses_3cd91f52effeXd3QAJ54jOyzv5
+    snapshot: false
+    cancel: false
+  - name: snapshot-materialization-success
+    fixture: semantic-parity-current
+    session_id: ses_3cd91f52effeXd3QAJ54jOyzv5
+    snapshot: true
+    cancel: false
+  - name: preview-slice-cancelled
+    fixture: semantic-parity-current
+    session_id: ses_3cd91f52effeXd3QAJ54jOyzv5
+    preview_slice: true
+    budget: 4096
+    cancel: true
+  - name: preview-slice-success
+    fixture: semantic-parity-current
+    session_id: ses_3cd91f52effeXd3QAJ54jOyzv5
+    preview_slice: true
+    budget: 4096
+    cancel: false

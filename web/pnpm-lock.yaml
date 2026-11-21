@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@peasant-labs/fairtrade':
-        specifier: 0.0.71
-        version: 0.0.71(@types/react@19.2.17)(@xyflow/react@12.11.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(immer@11.1.8)(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react-dom@19.2.7(react@19.2.7))(react-is@18.3.1)(react@19.2.7)(redux@5.0.1)(supports-color@7.2.0)
+        specifier: 0.2.1
+        version: 0.2.1(@types/react@19.2.17)(@xyflow/react@12.11.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(immer@11.1.8)(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react-dom@19.2.7(react@19.2.7))(react-is@18.3.1)(react@19.2.7)(redux@5.0.1)(supports-color@7.2.0)
       '@peasant-labs/schema':
         specifier: 0.58.1
         version: 0.58.1
@@ -88,8 +88,8 @@ importers:
         specifier: 9.39.1
         version: 9.39.1(jiti@2.7.0)(supports-color@7.2.0)
       eslint-plugin-unstring:
-        specifier: 0.3.0
-        version: 0.3.0(eslint@9.39.1(jiti@2.7.0)(supports-color@7.2.0))(typescript@5.9.3)
+        specifier: 0.4.0
+        version: 0.4.0(eslint@9.39.1(jiti@2.7.0)(supports-color@7.2.0))(typescript@5.9.3)
       jsdom:
         specifier: ^26.0.0
         version: 26.1.0(supports-color@7.2.0)
@@ -710,8 +710,8 @@ packages:
     resolution: {integrity: sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg==}
     engines: {node: '>= 8'}
 
-  '@peasant-labs/fairtrade@0.0.71':
-    resolution: {integrity: sha512-HcML9TwCvEvK3QTdIRI+h0ZvaYwhbKkun2LhkJW48SYTmgyV744V5DxeNKiJtB/KZcVLBvTLpK30SxCrZdsHlg==}
+  '@peasant-labs/fairtrade@0.2.1':
+    resolution: {integrity: sha512-a71Ss0V+pUmUBf2+ajKwErjHnrnIjwS8psjEc9pygCk3dbQR/RzgzmOw3LTlyL4IP6ZZQ50M4vxKYtmS2c14bw==}
     engines: {node: '>=26'}
     peerDependencies:
       '@xyflow/react': ^12.0.0
@@ -720,10 +720,6 @@ packages:
     peerDependenciesMeta:
       '@xyflow/react':
         optional: true
-
-  '@peasant-labs/schema@0.54.0':
-    resolution: {integrity: sha512-dqFEuUV87NX4FcKrGwKZozuA9FV3fCWfJoXx+PIIDd1N8fdjx2bgfcOdwG92QnGKaBSt7ls9LiI16kJ6PmLeSg==}
-    engines: {node: '>=26'}
 
   '@peasant-labs/schema@0.58.1':
     resolution: {integrity: sha512-CeZMr3D8Wk7ZNVR9P5WhO/OOnwBlj85zlBKhn+w9S9UAuPPs/mfXJBT72jj4FjpdWbmQtYGYRhJQdNUsEW/wcw==}
@@ -1809,8 +1805,8 @@ packages:
     resolution: {integrity: sha512-/veY75JbMK4j1yjvuUxuVsiS/hr/4iHs9FTT6cgTexxdE0Ly/glccBAkloH/DofkjRbZU3bnoj38mOmhkZ0lHw==}
     engines: {node: '>=12'}
 
-  eslint-plugin-unstring@0.3.0:
-    resolution: {integrity: sha512-F7GfGsLRDjQF2IXNtB6K3x5Xir+TTTpRK+Nre7QpOg9T7Xs4zLQJPr4DnuHEHc9cRmZ97RRNhakVIxXET5DaBw==}
+  eslint-plugin-unstring@0.4.0:
+    resolution: {integrity: sha512-dq/jI+2UZu5PFzq+YWYVKP7d7B6F4YCx8MSr9A03j5uo4SgzXlDAOkgFQayYhdj8xK9h7RYlIapnvrB3G131Rw==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
     peerDependencies:
       eslint: '>=9'
@@ -3540,9 +3536,9 @@ snapshots:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.20.3
 
-  '@peasant-labs/fairtrade@0.0.71(@types/react@19.2.17)(@xyflow/react@12.11.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(immer@11.1.8)(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react-dom@19.2.7(react@19.2.7))(react-is@18.3.1)(react@19.2.7)(redux@5.0.1)(supports-color@7.2.0)':
+  '@peasant-labs/fairtrade@0.2.1(@types/react@19.2.17)(@xyflow/react@12.11.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(immer@11.1.8)(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react-dom@19.2.7(react@19.2.7))(react-is@18.3.1)(react@19.2.7)(redux@5.0.1)(supports-color@7.2.0)':
     dependencies:
-      '@peasant-labs/schema': 0.54.0
+      '@peasant-labs/schema': 0.58.1
       '@shikijs/core': 4.6.0
       '@shikijs/engine-javascript': 4.6.0
       '@shikijs/langs': 4.6.0
@@ -3562,11 +3558,6 @@ snapshots:
       - react-is
       - redux
       - supports-color
-
-  '@peasant-labs/schema@0.54.0':
-    dependencies:
-      yaml: 2.9.0
-      zod: 4.4.3
 
   '@peasant-labs/schema@0.58.1':
     dependencies:
@@ -4671,7 +4662,7 @@ snapshots:
 
   escape-string-regexp@5.0.0: {}
 
-  eslint-plugin-unstring@0.3.0(eslint@9.39.1(jiti@2.7.0)(supports-color@7.2.0))(typescript@5.9.3):
+  eslint-plugin-unstring@0.4.0(eslint@9.39.1(jiti@2.7.0)(supports-color@7.2.0))(typescript@5.9.3):
     dependencies:
       eslint: 9.39.1(jiti@2.7.0)(supports-color@7.2.0)
       typescript: 5.9.3
@@ -4837,7 +4828,7 @@ snapshots:
 
   hast-util-to-html@9.0.6:
     dependencies:
-      '@types/hast': 3.0.4
+      '@types/hast': 3.0.5
       '@types/unist': 3.0.3
       ccount: 2.0.1
       comma-separated-tokens: 2.0.3
@@ -4871,7 +4862,7 @@ snapshots:
 
   hast-util-whitespace@3.0.0:
     dependencies:
-      '@types/hast': 3.0.4
+      '@types/hast': 3.0.5
 
   html-encoding-sniffer@4.0.0:
     dependencies:
@@ -5182,7 +5173,7 @@ snapshots:
   mdast-util-mdx-expression@2.0.1(supports-color@7.2.0):
     dependencies:
       '@types/estree-jsx': 1.0.5
-      '@types/hast': 3.0.4
+      '@types/hast': 3.0.5
       '@types/mdast': 4.0.4
       devlop: 1.1.0
       mdast-util-from-markdown: 2.0.3(supports-color@7.2.0)
@@ -5193,7 +5184,7 @@ snapshots:
   mdast-util-mdx-jsx@3.2.0(supports-color@7.2.0):
     dependencies:
       '@types/estree-jsx': 1.0.5
-      '@types/hast': 3.0.4
+      '@types/hast': 3.0.5
       '@types/mdast': 4.0.4
       '@types/unist': 3.0.3
       ccount: 2.0.1
@@ -5210,7 +5201,7 @@ snapshots:
   mdast-util-mdxjs-esm@2.0.1(supports-color@7.2.0):
     dependencies:
       '@types/estree-jsx': 1.0.5
-      '@types/hast': 3.0.4
+      '@types/hast': 3.0.5
       '@types/mdast': 4.0.4
       devlop: 1.1.0
       mdast-util-from-markdown: 2.0.3(supports-color@7.2.0)

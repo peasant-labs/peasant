@@ -2,19 +2,18 @@ package api
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/discovery"
 	"github.com/peasant-labs/peasant/internal/onboarding"
 	"github.com/peasant-labs/schema"
 )
 
 // The preview of a forest row is a bounded list of typed lines. A project or a
-// branch row describes the repository from the forest's own metadata. A session
-// row shows the first page of its transcript, read in place from the harness
-// source, so a session that was never imported previews like one that was.
+// branch row describes the repository from the forest's own metadata. Session
+// transcripts are served by the socket capture, not this HTTP preview.
 const (
 	// kickstartPreviewMaxLines bounds the lines of one preview, the closing
 	// notice included.
@@ -23,21 +22,14 @@ const (
 	kickstartPreviewMaxLineRunes = 400
 )
 
-// kickstartPreviewReader reads the first page of a discovered session.
-type kickstartPreviewReader interface {
-	Previewable(sessionID string) bool
-	Read(ctx context.Context, sessionID string) (discovery.SourcePreview, error)
-}
-
-var _ kickstartPreviewReader = (*discovery.SourceReader)(nil)
-
 // kickstartPreviewTarget is a forest row resolved for a preview, copied out of
-// the session so the transcript read runs without the store lock.
+// the session so a socket capture can run without the store lock.
 type kickstartPreviewTarget struct {
 	node       onboarding.Node
 	repository discovery.PreviewContext
 	isRepo     bool
 	listings   []onboarding.SessionListing
+	scanGen    uint64
 }
 
 // previewTarget resolves one row of a session's forest. A row the forest does
@@ -47,20 +39,23 @@ func (st *kickstartSessions) previewTarget(id, nodeID string) (kickstartPreviewT
 	defer st.mu.Unlock()
 	sess, err := st.liveLocked(id)
 	if err != nil {
-		return kickstartPreviewTarget{}, err
+		// Unlike other setup routes, a preview's identifiers may contain source
+		// values. Keep its error actionable without echoing those identifiers.
+		return kickstartPreviewTarget{}, newKickstartError(schema.LocalKickstartErrorSessionNotFound,
+			"The setup session for this preview is not available in internal/api.kickstartSessions.previewTarget: it was never opened, was saved, or expired. Nothing was changed. Open a session again with POST %s.", defaults.RouteKickstartSessions)
 	}
 	for _, node := range sess.forest.Nodes {
 		if node.ID != nodeID {
 			continue
 		}
-		target := kickstartPreviewTarget{node: node, listings: sess.listings}
+		target := kickstartPreviewTarget{node: node, listings: sess.listings, scanGen: sess.scanGen}
 		if node.Kind == onboarding.NodeKindProject || node.Kind == onboarding.NodeKindBranch {
 			target.repository, target.isRepo = discovery.PreviewContexts(sess.forest)[node.ID]
 		}
 		return target, nil
 	}
 	return kickstartPreviewTarget{}, newKickstartError(schema.LocalKickstartErrorPreviewRowNotFound,
-		"The row %q is not in the forest of setup session %q in internal/api.kickstartSessions.previewTarget, so there is nothing to preview. Nothing was changed. Reload the tree and preview a row it lists.", nodeID, id)
+		"The requested row is not in the setup session's forest in internal/api.kickstartSessions.previewTarget, so there is nothing to preview. Nothing was changed. Reload the tree and preview a row it lists.")
 }
 
 // preview builds the bounded lines of one row.
@@ -72,10 +67,7 @@ func (st *kickstartSessions) preview(ctx context.Context, id, nodeID string) (sc
 	lines := newPreviewLines()
 	switch {
 	case target.node.Kind == onboarding.NodeKindSession:
-		lines.label(target.node.Label, target.node.ID)
-		if err := st.sessionPreviewLines(ctx, target, lines); err != nil {
-			return schema.LocalKickstartPreview{}, err
-		}
+		lines.text("open this session in the local preview to read its transcript")
 	case target.isRepo:
 		// The first line names the project, so the row's own label is not
 		// repeated above it.
@@ -88,53 +80,6 @@ func (st *kickstartSessions) preview(ctx context.Context, id, nodeID string) (sc
 	return schema.LocalKickstartPreview{Lines: lines.finish()}, nil
 }
 
-func (st *kickstartSessions) sessionPreviewLines(ctx context.Context, target kickstartPreviewTarget, lines *previewLines) error {
-	reader := st.env.reader(target.listings)
-	sessionID := target.node.SessionID
-	if sessionID == "" {
-		sessionID = target.node.ID
-	}
-	page, err := reader.Read(ctx, sessionID)
-	if errors.Is(err, discovery.ErrPreviewUnavailable) {
-		lines.text(discovery.PreviewUnavailableNote)
-		return nil
-	}
-	if err != nil {
-		return newKickstartError(schema.LocalKickstartErrorPreviewUnreadable,
-			"The preview of session %q could not be read in internal/api.kickstartSessions.preview: %v. Nothing was changed. The session still ingests normally; check that its transcript is readable, then preview it again.", sessionID, err)
-	}
-	if len(page.Turns) == 0 {
-		lines.text(discovery.PreviewNoTurnsNote)
-	}
-	for _, turn := range page.Turns {
-		if !lines.hasRoom() {
-			// A turn is left that the bound has no room for, so the preview
-			// says it stopped.
-			lines.overflow()
-			break
-		}
-		lines.spacer()
-		lines.label(turn.Role.String(), "turn")
-		for _, call := range turn.ToolCalls {
-			lines.text("tool: " + call.Name)
-		}
-		for _, line := range strings.Split(turn.Content, "\n") {
-			if strings.TrimSpace(line) == "" {
-				continue
-			}
-			lines.text(line)
-		}
-	}
-	if page.More {
-		notice := discovery.PreviewCutNotice(page.ConsumedBytes, page.TotalBytes, page.More, false)
-		if notice == "" {
-			notice = discovery.PreviewShortenedNote
-		}
-		lines.cut(notice)
-	}
-	return nil
-}
-
 // previewLines accumulates the lines of one preview under the bounds.
 type previewLines struct {
 	lines []schema.LocalKickstartLine
@@ -144,10 +89,6 @@ type previewLines struct {
 }
 
 func newPreviewLines() *previewLines { return &previewLines{} }
-
-// overflow records that the source holds more than the bounds let the preview
-// show, so finish closes the preview with a notice.
-func (p *previewLines) overflow() { p.full = true }
 
 func (p *previewLines) hasRoom() bool { return !p.full && len(p.lines) < kickstartPreviewMaxLines-1 }
 
@@ -170,8 +111,6 @@ func (p *previewLines) label(text, fallback string) {
 }
 
 func (p *previewLines) text(text string) { p.add(schema.LocalKickstartLineText, text) }
-
-func (p *previewLines) spacer() { p.add(schema.LocalKickstartLineSpacer, "") }
 
 // cut closes a preview that stopped before the end of its source.
 func (p *previewLines) cut(note string) {

@@ -18,6 +18,19 @@
   flex-wrap: wrap;
 }
 
+/* The answers of a stop answered by a button, in the frame's foot where
+   `continue` sits on the other stops: `stop waiting` while a sign-in waits,
+   then the answers, the primary one last at the bottom right. */
+.ks-foot-answers {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+/* How a narrow foot lays the answers out is part of the frame, so it lives with
+   the wizard host in app/globals.css. */
+
 /* One stop. */
 .ks-stop {
   display: flex;
@@ -136,7 +149,7 @@
 }
 @media (min-width: 56rem) {
   .ks-select {
-    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
   }
 }
 .ks-tree {
@@ -157,20 +170,50 @@
 .ks-num {
   font-variant-numeric: tabular-nums;
 }
+/* The preview column: the transcript viewer itself, with no heading, caption
+   or frame around it. */
 .ks-preview {
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
   min-width: 0;
-  padding: var(--sp-3);
-  border: var(--bd);
-  background: var(--surface);
 }
-.ks-preview-title {
-  margin: 0;
-  font-family: var(--font-mono);
-  font-size: var(--fs-label);
-  color: var(--ink-3);
+/* The viewer's slot. The viewer owns its own scroller, so the slot has a fixed
+   block size and the page around it does not move as segments append. Sized
+   to sit inside the wizard body above its foot at a desktop height, so the
+   viewer's scroller, and the load-more control at its end, are never half
+   under the foot. */
+.ks-session-preview {
+  height: clamp(20rem, 58vh, 40rem);
+  min-width: 0;
+  overflow: hidden;
+}
+/* Nothing previewed, reading, or stopped before a segment arrived: the state
+   fills the slot the viewer would, at the same size and with no frame. */
+.ks-session-preview-state {
+  overflow-y: auto;
+}
+.ks-preview-notice {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--ink-2);
+}
+.ks-preview-closed {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-2);
+}
+/* A stop that lost part of the session sits in the app's error card; its
+   sentence reads at full ink on the danger tint, as the card's title does. */
+.ks-preview-notice-error,
+.ks-preview-error-text {
+  color: var(--ink);
 }
 .ks-lines {
   display: flex;
@@ -408,4 +451,17 @@
   line-height: var(--lh-mono);
   color: var(--ink-2);
   overflow-wrap: anywhere;
+}
+
+.ks-counts-mobile { display: none; }
+@media (max-width: 767px) {
+  .ks-stop:has(.ks-tree) > .ks-title,
+  .ks-field:has(.ks-tree) > .ks-help:first-child {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  }
+  .wizard-page:has(.ks-wizard) { padding-inline: var(--sp-2); }
+  .ks-tree > .st { border: 0; }
+  .ks-counts-desktop { display: none; }
+  .ks-counts-mobile { display: inline; white-space: nowrap; }
 }

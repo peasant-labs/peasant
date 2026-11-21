@@ -202,7 +202,8 @@ func TestOpenCodeGenerationPriorBridgesStoredCaptureAuthority(t *testing.T) {
 				store = &priorOnlyStore{prior: activePriorFor(tc)}
 			default:
 				fake := &bridgePriorStore{prior: activePriorFor(tc)}
-				if tc.Authority == "present" {
+				const authorityFixturePresent = "present"
+				if tc.Authority == authorityFixturePresent {
 					fake.authority = authority
 				}
 				if tc.AuthorityError {

@@ -32,6 +32,7 @@ import (
 // syncDoorSecret is planted in an indexed entry, the field the outward redaction
 // exists to protect.
 const syncDoorSecret = "sk-ant-api03-SYNCDOORKEY00000000000x"
+const publicationFixtureClose = "close"
 
 //go:embed testdata/sync_publication_validation.yaml
 var syncPublicationValidationYAML []byte
@@ -75,7 +76,7 @@ func TestHandleSyncRedactionsRefusesUnpublishableCapture(t *testing.T) {
 			case "no-model-reply":
 				input.Metadata.Model = ""
 				testutil.SeedReadyPublication(t, db, &input.Metadata, input.Entries)
-			case "close":
+			case publicationFixtureClose:
 				if err := db.Close(); err != nil {
 					t.Fatal(err)
 				}

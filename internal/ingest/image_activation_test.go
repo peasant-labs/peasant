@@ -38,7 +38,7 @@ func TestAssignImagePartitionsKeepsSameIndexHistory(t *testing.T) {
 			}}},
 		}},
 	}}}, pending)
-	if pending[0].Row.PartitionID != "main" || pending[1].Row.PartitionID != string(schema.EarlierHistoryUncertainMigrated) {
+	if pending[0].Row.PartitionID != string(schema.TranscriptPartitionMain) || pending[1].Row.PartitionID != string(schema.EarlierHistoryUncertainMigrated) {
 		t.Fatalf("partitions = %q %q, want main and the earlier-history state", pending[0].Row.PartitionID, pending[1].Row.PartitionID)
 	}
 }

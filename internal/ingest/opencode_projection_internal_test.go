@@ -388,13 +388,14 @@ func TestOpenCodeManagedCurrentDiagnosticsPreserveCauses(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), testCase.ErrorContains) || strings.Contains(err.Error(), "managed legacy") {
 				t.Fatalf("current diagnostic=%v want source-neutral actionable substring %q", err, testCase.ErrorContains)
 			}
+			const fixtureTypeError = "type"
 			switch testCase.ErrorType {
 			case "syntax":
 				var target *json.SyntaxError
 				if !errors.As(err, &target) {
 					t.Fatalf("syntax cause not preserved: %v", err)
 				}
-			case "type":
+			case fixtureTypeError:
 				var target *json.UnmarshalTypeError
 				if !errors.As(err, &target) {
 					t.Fatalf("type cause not preserved: %v", err)

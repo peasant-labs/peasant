@@ -197,7 +197,8 @@ func TestFullContentConsumersDatabaseAuthority(t *testing.T) {
 					if err := json.Unmarshal([]byte(*entry.ToolOutput), &output); err != nil {
 						t.Fatal(err)
 					}
-					found = output["text"] == "visible" && output["details"] == text
+					const fixtureToolText = "visible"
+					found = output["text"] == fixtureToolText && output["details"] == text
 				}
 				if !found {
 					t.Fatal("structured tool output siblings missing after reopen")

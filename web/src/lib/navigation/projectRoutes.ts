@@ -1,3 +1,4 @@
+import { closed } from '@peasant-labs/fairtrade/closed-value';
 import { isCodeMapViewportScale } from '@peasant-labs/fairtrade/graph';
 import { isProjectHash, type ProjectHash } from '@peasant-labs/schema';
 
@@ -24,11 +25,15 @@ export type ReturnLocation = {
   readonly href: string;
 };
 
+export const ProjectRouteKind = Object.freeze({ Canonical: closed('canonical', 'canonical').wire, Legacy: closed('legacy', 'legacy').wire, Missing: closed('missing', 'missing').wire, Malformed: closed('malformed', 'malformed').wire } as const);
+export const MapRouteMode = Object.freeze({ Navigator: closed('navigator', 'navigator').wire, Canvas: closed('canvas', 'canvas').wire } as const);
+export const MapRouteGrain = Object.freeze({ Project: closed('project', 'project').wire, Package: closed('package', 'package').wire, File: closed('file', 'file').wire } as const);
+
 export type MapRouteState = {
   projectHash: ProjectHash;
   node: string | null;
-  mode: 'navigator' | 'canvas';
-  grain: 'project' | 'package' | 'file';
+  mode: (typeof MapRouteMode)[keyof typeof MapRouteMode];
+  grain: (typeof MapRouteGrain)[keyof typeof MapRouteGrain];
   expanded: readonly string[];
   filter: string;
   focus: string | null;
@@ -42,8 +47,8 @@ export type MapRouteOptions = Partial<Omit<MapRouteState, 'projectHash'>> & {
 
 export const DEFAULT_MAP_ROUTE_STATE: Omit<MapRouteState, 'projectHash'> = Object.freeze({
   node: null,
-  mode: 'navigator',
-  grain: 'package',
+  mode: MapRouteMode.Navigator,
+  grain: MapRouteGrain.Package,
   expanded: Object.freeze([]) as readonly string[],
   filter: '',
   focus: null,
@@ -59,18 +64,19 @@ export type RouteMalformedCode =
   | 'malformed_project_hash';
 
 export type ProjectRoute =
-  | { kind: 'canonical'; projectHash: ProjectHash }
-  | { kind: 'legacy'; projectLabel: string }
-  | { kind: 'missing' }
-  | { kind: 'malformed'; code: RouteMalformedCode; message: string };
+  | { kind: typeof ProjectRouteKind.Canonical; projectHash: ProjectHash }
+  | { kind: typeof ProjectRouteKind.Legacy; projectLabel: string }
+  | { kind: typeof ProjectRouteKind.Missing }
+  | { kind: typeof ProjectRouteKind.Malformed; code: RouteMalformedCode; message: string };
 
 export type TranscriptRoute =
-  | ({ sessionId: string } & Exclude<ProjectRoute, { kind: 'missing' } | { kind: 'malformed' }>)
-  | { kind: 'missing' }
-  | { kind: 'malformed'; code: RouteMalformedCode; message: string };
+  | ({ sessionId: string } & Exclude<ProjectRoute, { kind: typeof ProjectRouteKind.Missing } | { kind: typeof ProjectRouteKind.Malformed }>)
+  | { kind: typeof ProjectRouteKind.Missing }
+  | { kind: typeof ProjectRouteKind.Malformed; code: RouteMalformedCode; message: string };
 
 const MAP_FIELDS = new Set(['node', 'mode', 'grain', 'expand', 'filter', 'focus', 'scale', 'panX', 'panY']);
-const REVIEW_FIELDS = new Set(['branch']);
+const REVIEW_BRANCH_PARAM = 'branch';
+const REVIEW_FIELDS = new Set([REVIEW_BRANCH_PARAM]);
 /** Transcript route parameter naming each disclosed retained-history section. */
 export const EarlierHistoryParam = 'earlier';
 /**
@@ -96,7 +102,7 @@ export type TranscriptScope = (typeof TranscriptScope)[keyof typeof TranscriptSc
 
 function malformed(code: RouteMalformedCode, where: string, reason: string): ProjectRoute {
   return {
-    kind: 'malformed',
+    kind: ProjectRouteKind.Malformed,
     code,
     message: `The ${where} route could not be opened because ${reason}. Return to the project picker and open a fresh link.`,
   };
@@ -119,9 +125,9 @@ function decodeSegment(raw: string, where: string): string | ProjectRoute {
 
 function projectIdentity(decoded: string, where: string): ProjectRoute {
   const projectHash = parseProjectHash(decoded);
-  if (projectHash) return { kind: 'canonical', projectHash };
+  if (projectHash) return { kind: ProjectRouteKind.Canonical, projectHash };
   if (HASH_LIKE.test(decoded)) return malformed('malformed_project_hash', where, 'the project hash is not exactly 64 lowercase hexadecimal characters');
-  return { kind: 'legacy', projectLabel: decoded };
+  return { kind: ProjectRouteKind.Legacy, projectLabel: decoded };
 }
 
 function routeSegments(pathname: string, prefix: '/map' | '/review' | '/projects'): string[] | ProjectRoute {
@@ -146,7 +152,7 @@ function routeSegments(pathname: string, prefix: '/map' | '/review' | '/projects
 function parseSingleProjectRoute(pathname: string, prefix: '/map' | '/review'): ProjectRoute {
   const segments = routeSegments(pathname, prefix);
   if (!Array.isArray(segments)) return segments;
-  if (segments.length === 0) return { kind: 'missing' };
+  if (segments.length === 0) return { kind: ProjectRouteKind.Missing };
   if (segments.length !== 1) return malformed('wrong_route_shape', prefix.slice(1), 'it must contain exactly one project segment');
   const decoded = decodeSegment(segments[0], prefix.slice(1));
   return typeof decoded === 'string' ? projectIdentity(decoded, prefix.slice(1)) : decoded;
@@ -164,7 +170,7 @@ export function parseReviewRoute(pathname: string): ProjectRoute {
 export function parseProjectDetailRoute(pathname: string): ProjectRoute {
   const segments = routeSegments(pathname, '/projects');
   if (!Array.isArray(segments)) return segments;
-  if (segments.length === 0) return { kind: 'missing' };
+  if (segments.length === 0) return { kind: ProjectRouteKind.Missing };
   if (segments.length !== 1) return malformed('wrong_route_shape', 'project detail', 'it must contain exactly one project segment');
   const decoded = decodeSegment(segments[0], 'project detail');
   return typeof decoded === 'string' ? projectIdentity(decoded, 'project detail') : decoded;
@@ -172,19 +178,19 @@ export function parseProjectDetailRoute(pathname: string): ProjectRoute {
 
 export function parseTranscriptRoute(pathname: string): TranscriptRoute {
   const segments = routeSegments(pathname, '/projects');
-  if (!Array.isArray(segments)) return segments as Extract<TranscriptRoute, { kind: 'malformed' }>;
-  if (segments.length === 0) return { kind: 'missing' };
-  if (segments.length !== 2) return malformed('wrong_route_shape', 'transcript', 'it must contain exactly one project and one session segment') as Extract<TranscriptRoute, { kind: 'malformed' }>;
+  if (!Array.isArray(segments)) return segments as Extract<TranscriptRoute, { kind: typeof ProjectRouteKind.Malformed }>;
+  if (segments.length === 0) return { kind: ProjectRouteKind.Missing };
+  if (segments.length !== 2) return malformed('wrong_route_shape', 'transcript', 'it must contain exactly one project and one session segment') as Extract<TranscriptRoute, { kind: typeof ProjectRouteKind.Malformed }>;
   const project = decodeSegment(segments[0], 'transcript');
-  if (typeof project !== 'string') return project as Extract<TranscriptRoute, { kind: 'malformed' }>;
+  if (typeof project !== 'string') return project as Extract<TranscriptRoute, { kind: typeof ProjectRouteKind.Malformed }>;
   const sessionId = decodeSegment(segments[1], 'transcript');
-  if (typeof sessionId !== 'string') return sessionId as Extract<TranscriptRoute, { kind: 'malformed' }>;
+  if (typeof sessionId !== 'string') return sessionId as Extract<TranscriptRoute, { kind: typeof ProjectRouteKind.Malformed }>;
   const identity = projectIdentity(project, 'transcript');
-  return identity.kind === 'canonical'
+  return identity.kind === ProjectRouteKind.Canonical
     ? { ...identity, sessionId }
-    : identity.kind === 'legacy'
+    : identity.kind === ProjectRouteKind.Legacy
       ? { ...identity, sessionId }
-      : identity as Extract<TranscriptRoute, { kind: 'malformed' }>;
+      : identity as Extract<TranscriptRoute, { kind: typeof ProjectRouteKind.Malformed }>;
 }
 
 function appendValue(params: URLSearchParams, key: string, value: string | number | null | undefined): void {
@@ -298,14 +304,14 @@ function finiteParam(params: URLSearchParams, key: string): number | null | unde
 
 export function parseMapRouteState(pathname: string, search: string | URLSearchParams): MapRouteState | null {
   const route = parseMapRoute(pathname);
-  if (route.kind !== 'canonical') return null;
+  if (route.kind !== ProjectRouteKind.Canonical) return null;
   const params = typeof search === 'string' ? new URLSearchParams(search) : new URLSearchParams(search);
   for (const key of params.keys()) if (!MAP_FIELDS.has(key)) return null;
   for (const key of MAP_FIELDS) if (key !== 'expand' && params.getAll(key).length > 1) return null;
   const mode = singleton(params, 'mode');
-  if (mode !== null && mode !== 'navigator' && mode !== 'canvas') return null;
+  if (mode !== null && mode !== MapRouteMode.Navigator && mode !== MapRouteMode.Canvas) return null;
   const grain = singleton(params, 'grain');
-  if (grain !== null && grain !== 'project' && grain !== 'package' && grain !== 'file') return null;
+  if (grain !== null && grain !== MapRouteGrain.Project && grain !== MapRouteGrain.Package && grain !== MapRouteGrain.File) return null;
   const node = singleton(params, 'node');
   const filter = singleton(params, 'filter');
   const focus = singleton(params, 'focus');
@@ -340,9 +346,9 @@ export type ReviewRouteQuery = { branch: string | null; returnLocation: ReturnLo
 
 export function parseReviewRouteQuery(search: string | URLSearchParams): ReviewRouteQuery | null {
   const params = typeof search === 'string' ? new URLSearchParams(search) : new URLSearchParams(search);
-  for (const key of params.keys()) if (key !== 'branch' && key !== 'returnTo') return null;
-  if (params.getAll('branch').length > 1 || params.getAll('returnTo').length > 1) return null;
-  const branch = params.get('branch');
+  for (const key of params.keys()) if (key !== REVIEW_BRANCH_PARAM && key !== 'returnTo') return null;
+  if (params.getAll(REVIEW_BRANCH_PARAM).length > 1 || params.getAll('returnTo').length > 1) return null;
+  const branch = params.get(REVIEW_BRANCH_PARAM);
   if (branch != null && !safeQueryString(branch)) return null;
   const rawReturn = params.get('returnTo');
   const parsedReturn = parseReturnLocation(rawReturn);
@@ -411,10 +417,10 @@ function validateLocalReturnHref(href: string): ReturnLocation | null {
     return null;
   }
   if (url.origin !== 'http://peasant.local') return null;
-  if (parseMapRoute(url.pathname).kind === 'canonical' && parseMapRouteState(url.pathname, url.searchParams) != null) {
+  if (parseMapRoute(url.pathname).kind === ProjectRouteKind.Canonical && parseMapRouteState(url.pathname, url.searchParams) != null) {
     return { version: 1, origin: RouteOrigin.Map, href: `${url.pathname}${url.search}` };
   }
-  if (parseReviewRoute(url.pathname).kind === 'canonical') {
+  if (parseReviewRoute(url.pathname).kind === ProjectRouteKind.Canonical) {
     for (const key of url.searchParams.keys()) if (!REVIEW_FIELDS.has(key)) return null;
     if (parseReviewRouteQuery(url.searchParams) == null) return null;
     return { version: 1, origin: RouteOrigin.Review, href: `${url.pathname}${url.search}` };

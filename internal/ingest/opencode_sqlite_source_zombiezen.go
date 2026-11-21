@@ -35,6 +35,16 @@ const (
 	openCodeCurrentMessagesAfterStatement    = "SELECT id, session_id, type, time_created, time_updated, data, seq FROM session_message WHERE session_id = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3"
 	openCodeCurrentMessagesBeforeStatement   = "SELECT id, session_id, type, time_created, time_updated, data, seq FROM session_message WHERE session_id = ?1 AND seq < ?2 ORDER BY seq LIMIT ?3"
 	openCodeCurrentMessagesBoundedStatement  = "SELECT id, session_id, type, time_created, time_updated, data, seq FROM session_message WHERE session_id = ?1 AND seq > ?2 AND seq < ?3 ORDER BY seq LIMIT ?4"
+	// The row-length probes mirror the four page statements but project only
+	// seq and LENGTH(data), which SQLite reads from the record header, so a
+	// bounded preview learns a row's size without reading its payload.
+	openCodeCurrentMessageLengthsFirstStatement   = "SELECT seq, LENGTH(data) FROM session_message WHERE session_id = ?1 ORDER BY seq LIMIT ?2"
+	openCodeCurrentMessageLengthsBeforeStatement  = "SELECT seq, LENGTH(data) FROM session_message WHERE session_id = ?1 AND seq < ?2 ORDER BY seq LIMIT ?3"
+	openCodeCurrentMessageLengthsAfterStatement   = "SELECT seq, LENGTH(data) FROM session_message WHERE session_id = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3"
+	openCodeCurrentMessageLengthsBoundedStatement = "SELECT seq, LENGTH(data) FROM session_message WHERE session_id = ?1 AND seq > ?2 AND seq < ?3 ORDER BY seq LIMIT ?4"
+	// The change marker summarizes the rows a preview already read: their
+	// count, latest update time and summed payload length.
+	openCodeCurrentMessagesMarkerStatement   = "SELECT COUNT(*), COALESCE(MAX(time_updated), 0), COALESCE(SUM(LENGTH(data)), 0) FROM session_message WHERE session_id = ?1 AND seq <= ?2"
 	openCodeSessionV2ForkEvidenceStatement   = "SELECT fork_session_id, fork_boundary FROM session_v2 WHERE id = ?1 LIMIT 2"
 	openCodeCurrentSubstantiveProbeStatement = "SELECT 1 FROM session_message WHERE session_id = ?1 AND type NOT IN ('agent-switched', 'model-switched') LIMIT 1"
 	// The payload-size probes count one session's payload-bearing rows and sum
@@ -201,8 +211,11 @@ func (s *zombiezenOpenCodeSQLiteSource) withReadTransaction(ctx context.Context,
 		return fmt.Errorf("begin OpenCode SQLite snapshot for %q: %w", s.path, err)
 	}
 	s.permit <- struct{}{}
-	defer s.endReadTransaction(ctx, &err)
+	defer s.endReadTransaction(&err)
 	err = fn()
+	if ctxErr := ctx.Err(); ctxErr != nil && !errors.Is(err, ctxErr) {
+		err = errors.Join(err, ctxErr)
+	}
 	return err
 }
 
@@ -212,23 +225,42 @@ func (s *zombiezenOpenCodeSQLiteSource) beginReadTransactionLocked(ctx context.C
 	return s.executeRowsLocked(ctx, "BEGIN", nil, nil)
 }
 
-func (s *zombiezenOpenCodeSQLiteSource) endReadTransaction(ctx context.Context, operationErr *error) {
+func (s *zombiezenOpenCodeSQLiteSource) endReadTransaction(operationErr *error) {
+	// The source is private to this materialization. A cancelled read must not
+	// cancel its rollback: give cleanup its own bounded deadline, as for Close.
+	// Individual reads restore their interrupt before releasing the permit;
+	// install the cleanup interrupt while this transaction-end statement runs.
+	cleanupCtx, cancel := s.options.clock.WithTimeout(context.Background(), s.options.queryTimeout)
+	defer cancel()
 	select {
 	case <-s.permit:
-	case <-ctx.Done():
+	case <-cleanupCtx.Done():
+		*operationErr = errors.Join(*operationErr, fmt.Errorf("end OpenCode SQLite read transaction for %q stopped while waiting for the connection: %w; the transaction may still be active; retry bounded source cleanup", s.path, context.Cause(cleanupCtx)))
 		return
 	}
 	defer func() { s.permit <- struct{}{} }()
+	if cleanupCtx.Err() != nil {
+		*operationErr = errors.Join(*operationErr, fmt.Errorf("end OpenCode SQLite read transaction for %q stopped before cleanup: %w; the transaction may still be active; retry bounded source cleanup", s.path, context.Cause(cleanupCtx)))
+		return
+	}
+	oldInterrupt := s.conn.SetInterrupt(cleanupCtx.Done())
+	defer s.conn.SetInterrupt(oldInterrupt)
 	s.allowTransaction = true
+	defer func() { s.allowTransaction = false }()
 	var endErr error
 	if *operationErr != nil {
-		endErr = s.executeRowsLocked(ctx, "ROLLBACK", nil, nil)
+		// SQLite may already have rolled back an interrupted transaction.
+		if !s.conn.AutocommitEnabled() {
+			endErr = s.executeRowsLocked(cleanupCtx, "ROLLBACK", nil, nil)
+		}
 	} else {
-		endErr = s.executeRowsLocked(ctx, "COMMIT", nil, nil)
+		endErr = s.executeRowsLocked(cleanupCtx, "COMMIT", nil, nil)
 	}
-	s.allowTransaction = false
 	if endErr != nil {
-		*operationErr = errors.Join(*operationErr, endErr)
+		if cleanupCtx.Err() != nil {
+			endErr = errors.Join(endErr, context.Cause(cleanupCtx))
+		}
+		*operationErr = errors.Join(*operationErr, fmt.Errorf("end OpenCode SQLite read transaction for %q failed: %w; retry bounded source cleanup", s.path, endErr))
 	}
 }
 
@@ -1468,6 +1500,78 @@ func (s *zombiezenOpenCodeSQLiteSource) CurrentMessages(ctx context.Context, req
 	}
 	return page, nil
 }
+
+// CurrentMessageLengths returns the sequence and payload length of the rows the
+// same page request would return from CurrentMessages, without reading the
+// payloads.
+func (s *zombiezenOpenCodeSQLiteSource) CurrentMessageLengths(ctx context.Context, request OpenCodeCurrentPageRequest) ([]OpenCodeCurrentRowLength, error) {
+	if err := validateCurrentPageRequest(request); err != nil {
+		return nil, err
+	}
+	lease, err := s.beginSourceRead(ctx, "read bounded current session_message row lengths")
+	if err != nil {
+		return nil, err
+	}
+	defer lease.release()
+	lengths := make([]OpenCodeCurrentRowLength, 0, request.PageSize.value)
+	decode := func(stmt *sqlite.Stmt) error {
+		if stmt.ColumnType(0) != sqlite.TypeInteger || stmt.ColumnType(1) != sqlite.TypeInteger {
+			return fmt.Errorf("decode current row length: seq has SQLite type %s and LENGTH(data) has type %s, both must be integers", stmt.ColumnType(0), stmt.ColumnType(1))
+		}
+		seq, seqErr := NewOpenCodeCurrentSeq(stmt.ColumnInt64(0))
+		if seqErr != nil {
+			return seqErr
+		}
+		lengths = append(lengths, OpenCodeCurrentRowLength{Seq: seq, Bytes: stmt.ColumnInt64(1)})
+		return nil
+	}
+	switch {
+	case request.After == nil && request.Before == nil:
+		err = s.executeRowsLocked(lease.ctx, openCodeCurrentMessageLengthsFirstStatement, []any{request.SessionID.value, request.PageSize.value}, decode)
+	case request.After == nil:
+		err = s.executeRowsLocked(lease.ctx, openCodeCurrentMessageLengthsBeforeStatement, []any{request.SessionID.value, request.Before.value, request.PageSize.value}, decode)
+	case request.Before == nil:
+		err = s.executeRowsLocked(lease.ctx, openCodeCurrentMessageLengthsAfterStatement, []any{request.SessionID.value, request.After.sequence.value, request.PageSize.value}, decode)
+	default:
+		err = s.executeRowsLocked(lease.ctx, openCodeCurrentMessageLengthsBoundedStatement, []any{request.SessionID.value, request.After.sequence.value, request.Before.value, request.PageSize.value}, decode)
+	}
+	if err != nil || lease.ctx.Err() != nil {
+		return nil, s.sourceReadError(lease.ctx, "read bounded current session_message row lengths", err, "session_message(session_id, seq, length(data))", "supported current session_message")
+	}
+	return lengths, nil
+}
+
+// CurrentMessagesMarker summarizes one session's current rows at or before a
+// sequence in one bounded aggregate keyed on the indexed session_id and seq.
+func (s *zombiezenOpenCodeSQLiteSource) CurrentMessagesMarker(ctx context.Context, sessionID OpenCodeCurrentSessionID, through OpenCodeCurrentSeq) (OpenCodeCurrentChangeMarker, error) {
+	if err := validateOpenCodeCurrentToken("session identifier", sessionID.value); err != nil {
+		return OpenCodeCurrentChangeMarker{}, err
+	}
+	lease, err := s.beginSourceRead(ctx, "read current session change marker")
+	if err != nil {
+		return OpenCodeCurrentChangeMarker{}, err
+	}
+	defer lease.release()
+	var marker OpenCodeCurrentChangeMarker
+	decode := func(stmt *sqlite.Stmt) error {
+		for column := 0; column < 3; column++ {
+			if stmt.ColumnType(column) != sqlite.TypeInteger {
+				return fmt.Errorf("decode current change marker: column %d has SQLite type %s instead of integer", column, stmt.ColumnType(column))
+			}
+		}
+		marker = OpenCodeCurrentChangeMarker{Rows: stmt.ColumnInt64(0), MaxUpdated: stmt.ColumnInt64(1), Bytes: stmt.ColumnInt64(2)}
+		return nil
+	}
+	if err := s.executeRowsLocked(lease.ctx, openCodeCurrentMessagesMarkerStatement, []any{sessionID.value, through.value}, decode); err != nil || lease.ctx.Err() != nil {
+		return OpenCodeCurrentChangeMarker{}, s.sourceReadError(lease.ctx, "read current session change marker", err, "session_message(session_id, seq, time_updated, length(data))", "supported current session_message")
+	}
+	return marker, nil
+}
+
+var (
+	_ OpenCodeCurrentRowLengthSource    = (*zombiezenOpenCodeSQLiteSource)(nil)
+	_ OpenCodeCurrentChangeMarkerSource = (*zombiezenOpenCodeSQLiteSource)(nil)
+)
 
 // SessionForkEvidence reads the native session_v2 fork pointer for one session.
 // The pointer is optional evidence: an absent or malformed row reports no

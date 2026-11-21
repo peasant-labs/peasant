@@ -1,0 +1,596 @@
+# The raw preview of a session row, played on the mounted /selection page.
+#
+# Only the transports are replaced: `fetch` answers the kickstart routes from
+# the shared fixtures (the `selection-scope` session and the `forest` tree),
+# and the WebSocket is the test socket under the real provider. The page, the
+# preview hook, the contract's merge and the transcript viewer are the
+# production ones. A `serve` step builds one frame of the case's stream with
+# src/test/fixtures/sourcePreviewStream.ts and pushes it as the server would;
+# the frame's seq, request id and directory follow from the conversation so
+# far, so a case states what the server sends, not its arithmetic.
+#
+# Step keys, beside the shared kickstart harness's own (click, expectText,
+# expectNoText, expectControl, expectNoControlMatching, expectCalls,
+# expectNoCalls, push, socket, settle):
+#   serve          one frame: {opened: true} | {segment: N} | {segment: N, final: end|cut, ...}
+#                  | {final: end} (no segment) | {closed: reason, message?, code?, refuse?}
+#                  | {segment: N, otherCapture: true}
+#   expectSent     the preview requests sent so far: {op, count}
+#   expectLastSent the last preview request sent contains this subset; `$capture`
+#                  stands for the stream's capture id and `$seq` for the last seq served
+#   scroll         scroll every scroller to its end, wheel it, and resize the window
+#   unmount        unmount the page
+#   expectPrivacy  what the stream must not have reached: storage, url, clipboard,
+#                  requests (only the kickstart routes were called), images (no image
+#                  element points off this page)
+#   expectTurnText the text of a turn of the stream (by index) is drawn, or not
+#   clickTwice     activate a button twice in one turn of the event loop
+#   jump           move through the viewer to a held segment (its scrubber or jump control)
+#   expectHighlight the highlights tab names the last response with these words
+#   expectSessionMeta the viewer's session metadata: {reads: [whole items], lacks: [words
+#                  no item may carry]}
+#   expectTurnLabels the turn number each drawn turn reads, by stream turn index:
+#                  {"<index>": "#<label>"}
+#   expectStateInPane a state shown before any segment (reading, or a stop) sits in the
+#                  slot the viewer fills, so the slot keeps its size: the words the slot
+#                  holds
+#   expectPreviewColumn the preview column is the labelled region alone, holding the
+#                  viewer's own root or a state: {region: accessible name, holds: viewer |
+#                  state, absentText: [whole texts no element of the column may read]}
+#   expectNoticeTone how the stop's notice reads: {tone: error | neutral, text: words of it,
+#                  readAgainInside: true when `read again` sits in the error card}
+#   expectMinimap  the pinned timeline is the minimap over the loaded turns: one slider,
+#                  no segment ticks and no caption: {bands: one per loaded turn}
+#
+# Every transcript is synthetic. `marker` texts exist only in the stream, so
+# finding one in storage or a URL is a leak.
+streams:
+  ledger:
+    setupSession: ses-selection
+    sessionId: 0f5e6b1c-1111-4222-8333-944455556666
+    captureId: AAAAAAAAAAAAAAAAAAAAAA
+    revision: "7"
+    segments:
+      - - {role: user, text: "synthetic-marker-one: round the ledger totals to the cent."}
+        - role: assistant
+          text: "synthetic-marker-two: here is the rounding helper.\n\n```go\nfunc roundCents(v float64) float64 {\n\treturn math.Round(v*100) / 100\n}\n```\n\n![chart](https://example.invalid/synthetic-chart.png)"
+      - - {role: user, text: "synthetic-marker-three: add a test for a zero discount."}
+        - {role: assistant, text: "synthetic-marker-four: the zero discount keeps the total unchanged."}
+      - - {role: user, text: "synthetic-marker-five: group the totals by quarter."}
+        - {role: assistant, text: "synthetic-marker-six: the totals are grouped by quarter now."}
+  # Six prompts: five in the first segment, the sixth opens the second with two
+  # replies, so a label that restarts per segment reads #1 where #6 belongs.
+  six-prompts:
+    setupSession: ses-selection
+    sessionId: 0f5e6b1c-1111-4222-8333-944455557777
+    captureId: BBBBBBBBBBBBBBBBBBBBBA
+    revision: "9"
+    segments:
+      - - {role: user, text: "synthetic-marker-alpha: first prompt."}
+        - {role: assistant, text: "synthetic-marker-bravo: first reply."}
+        - {role: user, text: "synthetic-marker-charlie: second prompt."}
+        - {role: assistant, text: "synthetic-marker-delta: second reply."}
+        - {role: user, text: "synthetic-marker-echo: third prompt."}
+        - {role: assistant, text: "synthetic-marker-foxtrot: third reply."}
+        - {role: user, text: "synthetic-marker-golf: fourth prompt."}
+        - {role: assistant, text: "synthetic-marker-hotel: fourth reply."}
+        - {role: user, text: "synthetic-marker-india: fifth prompt."}
+        - {role: assistant, text: "synthetic-marker-juliet: fifth reply."}
+      - - {role: user, text: "synthetic-marker-kilo: sixth prompt."}
+        - {role: assistant, text: "synthetic-marker-lima: sixth prompt, first reply."}
+        - {role: assistant, text: "synthetic-marker-mike: sixth prompt, second reply."}
+  # The first segment ends on a reply the second segment repeats word for word.
+  # Fairtrade's adapter folds two adjacent identical turns into one, which is
+  # the one way a later turn can touch an earlier one's label.
+  repeated-boundary:
+    setupSession: ses-selection
+    sessionId: 0f5e6b1c-1111-4222-8333-944455558888
+    captureId: CCCCCCCCCCCCCCCCCCCCCA
+    revision: "11"
+    segments:
+      - - {role: user, text: "synthetic-marker-november: first prompt."}
+        - {role: assistant, text: "synthetic-marker-oscar: the same reply."}
+      - - {role: assistant, text: "synthetic-marker-oscar: the same reply."}
+        - {role: user, text: "synthetic-marker-papa: second prompt."}
+        - {role: assistant, text: "synthetic-marker-quebec: second reply."}
+requiredNames:
+  - title-click-opens-a-capture
+  - first-segment-paints-without-a-click
+  - row-change-closes-the-capture
+  - frames-for-another-capture-are-ignored
+  - one-more-in-flight
+  - button-requests-more
+  - one-activation-appends-one-segment
+  - scrolling-to-the-end-requests-nothing
+  - position-reads-loaded-so-far-while-open
+  - end-shows-final-response
+  - final-frame-without-segment-ends-the-load-control
+  - open-shows-latest-loaded-response
+  - cut-shows-the-server-notice
+  - grown-end-shows-the-server-notice
+  - source-changed-shows-sentence-and-read-again
+  - late-result-shows-sentence-and-read-again
+  - socket-drop-keeps-content-and-offers-read-again
+  - jump-answers-from-held-segments
+  - repository-row-keeps-typed-lines
+  - refused-open-shows-the-server-note
+  - finished-scan-closes-the-capture
+  - unmount-closes-the-capture
+  - row-left-before-opened-closes-it-when-it-arrives
+  - nothing-written-to-storage
+  - no-url-change
+  - no-clipboard-write
+  - no-external-request
+  - viewer-capabilities-are-all-off
+  - header-shows-no-unmeasured-figure-while-open
+  - header-shows-no-unmeasured-figure-when-complete
+  - turn-labels-continue-across-loaded-segments
+  - earlier-labels-stable-when-a-segment-appends
+  - earlier-labels-stable-when-a-boundary-turn-repeats
+  - oversized-record-stop-reads-as-error
+  - source-changed-stop-reads-as-error
+  - source-cap-stop-stays-neutral
+  - end-stays-neutral
+  - failed-preview-keeps-the-pane
+  - preview-column-is-the-viewer-alone
+  - preview-timeline-is-the-minimap-over-loaded-turns
+defaultServer:
+  "GET /api/v1/kickstart/status": {body: {configured: true}}
+  "POST /api/v1/kickstart/sessions": {body: {$model: selection-scope}}
+  "GET /api/v1/kickstart/sessions/ses-selection/tree": {body: {$tree: forest}}
+cases:
+  - name: title-click-opens-a-capture
+    stream: ledger
+    steps:
+      - expectSent: {op: open, count: 0}
+      - click: preview fix the ledger rounding
+      - expectSent: {op: open, count: 1}
+      - expectLastSent: {op: open, sessionId: ses-selection, nodeId: s-one}
+      # A session row asks the HTTP preview route for nothing.
+      - expectNoCalls: "/preview"
+      - expectControl: {role: status, name: reading the preview}
+
+  - name: first-segment-paints-without-a-click
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - expectTurnText: {index: 0, drawn: true}
+      - expectSent: {op: more, count: 0}
+      # Previewing does not select: the row's checkbox is as the server drew it.
+      - expectControl: {role: checkbox, name: fix the ledger rounding, checked: true}
+
+  - name: row-change-closes-the-capture
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - click: preview add a CSV export
+      - expectSent: {op: close, count: 1}
+      - expectLastSent: {op: open, nodeId: s-two}
+      - expectTurnText: {index: 0, drawn: false}
+
+  - name: frames-for-another-capture-are-ignored
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - serve: {segment: 1, otherCapture: true}
+      - expectTurnText: {index: 2, drawn: false}
+      - expectControl: {role: button, name: load more of this session, disabled: false}
+      - expectNoText: [could not be read]
+
+  - name: one-more-in-flight
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      # Two activations before the page draws again send one request.
+      - clickTwice: load more of this session
+      - expectSent: {op: more, count: 1}
+      - expectControl: {role: button, name: load more of this session, disabled: true}
+      - expectText: [loading]
+      - expectSent: {op: more, count: 1}
+
+  - name: button-requests-more
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - click: load more of this session
+      - expectSent: {op: more, count: 1}
+      - expectLastSent: {op: more, sessionId: ses-selection, captureId: $capture, after: $seq}
+
+  - name: one-activation-appends-one-segment
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - click: load more of this session
+      - serve: {segment: 1}
+      - expectTurnText: {index: 2, drawn: true}
+      - expectTurnText: {index: 4, drawn: false}
+      - expectSent: {op: more, count: 1}
+      - expectControl: {role: button, name: load more of this session, disabled: false}
+
+  - name: scrolling-to-the-end-requests-nothing
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - scroll: true
+      - settle: true
+      - expectSent: {op: more, count: 0}
+
+  - name: position-reads-loaded-so-far-while-open
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - expectText: [loaded so far]
+      - click: load more of this session
+      - serve: {segment: 1, final: end}
+      - expectNoText: [loaded so far]
+
+  - name: end-shows-final-response
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - click: load more of this session
+      - serve: {segment: 1, final: end}
+      - expectHighlight: final response
+      - expectControl: {role: button, name: load more of this session, present: false}
+
+  - name: final-frame-without-segment-ends-the-load-control
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - click: load more of this session
+      - serve: {final: end}
+      - expectControl: {role: button, name: load more of this session, present: false}
+      - expectTurnText: {index: 0, drawn: true}
+      - expectSent: {op: close, count: 0}
+
+  - name: open-shows-latest-loaded-response
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - expectHighlight: latest loaded response
+
+  - name: cut-shows-the-server-notice
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - click: load more of this session
+      - serve: {segment: 1, final: cut, cutReason: source_budget, lines: ["the preview stops at 16 MiB of this transcript; import the session to read all of it."]}
+      - expectText: ["the preview stops at 16 MiB of this transcript"]
+      - expectControl: {role: button, name: load more of this session, present: false}
+      - expectControl: {role: button, name: read again, present: false}
+
+  - name: grown-end-shows-the-server-notice
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0, final: end, lines: ["this session has grown since the preview opened. open the preview again to read the newer part."]}
+      - expectText: ["this session has grown since the preview opened"]
+      - expectControl: {role: button, name: load more of this session, present: false}
+
+  - name: source-changed-shows-sentence-and-read-again
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - serve: {closed: source_changed, code: kickstart_preview_source_changed, message: "this session's transcript changed after part of it was shown. read it again from the start."}
+      - expectText: ["this session's transcript changed after part of it was shown"]
+      - expectTurnText: {index: 0, drawn: true}
+      - expectControl: {role: button, name: load more of this session, present: false}
+      - click: read again
+      - expectSent: {op: open, count: 2}
+      - expectSent: {op: close, count: 0}
+
+  - name: late-result-shows-sentence-and-read-again
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - click: load more of this session
+      - serve: {closed: late_result, code: kickstart_preview_late_result, message: "a later part of this session answers a tool call in a turn already shown. read it again from the start to see the answer in place."}
+      - expectText: ["answers a tool call in a turn already shown"]
+      - expectNoticeTone: {tone: error, text: "answers a tool call in a turn already shown", readAgainInside: true}
+      - expectControl: {role: button, name: read again}
+      - click: read again
+      - expectSent: {op: open, count: 2}
+
+  - name: socket-drop-keeps-content-and-offers-read-again
+    stream: ledger
+    fakeTimers: true
+    server:
+      # The page reads its setup session again after the socket comes back.
+      "GET /api/v1/kickstart/sessions/ses-selection": {body: {$model: selection-scope}}
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - socket: close
+      - expectText: ["the connection to the app on this computer dropped. read this session again from the start."]
+      - expectNoticeTone: {tone: error, text: "the connection to the app on this computer dropped", readAgainInside: true}
+      - expectTurnText: {index: 0, drawn: true}
+      - expectControl: {role: button, name: read again}
+      # The socket comes back: the capture is not resumed, nothing is asked for.
+      - socket: open
+      - expectSent: {op: open, count: 1}
+      - expectSent: {op: more, count: 0}
+      - click: read again
+      - expectSent: {op: open, count: 2}
+
+  - name: jump-answers-from-held-segments
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - click: load more of this session
+      - serve: {segment: 1}
+      - jump: true
+      - expectSent: {op: more, count: 1}
+      - expectSent: {op: open, count: 1}
+
+  - name: repository-row-keeps-typed-lines
+    stream: ledger
+    server:
+      "GET /api/v1/kickstart/sessions/ses-selection/tree/p-ledger/preview": {body: {lines: [{kind: text, text: two sessions on the main branch}]}}
+    steps:
+      - click: preview ledger
+      - expectText: [two sessions on the main branch]
+      - expectCalls: {route: "GET /api/v1/kickstart/sessions/ses-selection/tree/p-ledger/preview", count: 1}
+      - expectSent: {op: open, count: 0}
+
+  - name: refused-open-shows-the-server-note
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {closed: no_turns, refuse: true, message: "no readable turns are in this session's transcript yet."}
+      - expectText: ["no readable turns are in this session's transcript yet."]
+      - expectControl: {role: button, name: read again, present: false}
+      - expectControl: {role: status, name: reading the preview, present: false}
+
+  - name: finished-scan-closes-the-capture
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - push: {kind: scan, sessionId: ses-selection, revision: 3, scan: {state: running, done: 0, total: 4}}
+      - push: {kind: scan, sessionId: ses-selection, revision: 3, scan: {state: done, done: 4, total: 4}}
+      - expectSent: {op: close, count: 1}
+      - expectText: [the sessions were scanned again, so this preview closed]
+      - expectControl: {role: button, name: read again}
+
+  - name: unmount-closes-the-capture
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - unmount: true
+      - expectSent: {op: close, count: 1}
+      - expectLastSent: {op: close, captureId: $capture}
+
+  - name: row-left-before-opened-closes-it-when-it-arrives
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - click: preview ledger
+      - expectSent: {op: close, count: 0}
+      # The server opened the capture the page no longer wants: it is closed at once.
+      - serve: {opened: true}
+      - expectSent: {op: close, count: 1}
+      - expectLastSent: {op: close, captureId: $capture}
+      - expectTurnText: {index: 0, drawn: false}
+    server:
+      "GET /api/v1/kickstart/sessions/ses-selection/tree/p-ledger/preview": {body: {lines: [{kind: text, text: two sessions on the main branch}]}}
+
+  - name: nothing-written-to-storage
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - click: load more of this session
+      - serve: {segment: 1, final: end}
+      - expectTurnText: {index: 2, drawn: true}
+      - expectPrivacy: [storage]
+
+  - name: no-url-change
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - click: load more of this session
+      - serve: {segment: 1}
+      - jump: true
+      - expectPrivacy: [url]
+
+  - name: no-clipboard-write
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - expectNoControlMatching: {role: button, pattern: "copy"}
+      - expectPrivacy: [clipboard]
+
+  - name: no-external-request
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - expectTurnText: {index: 1, drawn: true}
+      - expectPrivacy: [requests, images]
+
+  - name: viewer-capabilities-are-all-off
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - expectTurnText: {index: 0, drawn: true}
+      - expectNoControlMatching: {role: button, pattern: "^(label|add label|edit|contribute|share|publish|export|download|visibility|make public)"}
+
+  # The capture's header measures no duration, tokens or tool calls; the wire
+  # carries them as zero. The header names the turns loaded and leaves the rest
+  # out, never `0 tools` or `0 tokens`.
+  - name: header-shows-no-unmeasured-figure-while-open
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - expectSessionMeta: {reads: [2 turns], lacks: [tools, tokens, 0s]}
+
+  - name: header-shows-no-unmeasured-figure-when-complete
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - click: load more of this session
+      - serve: {segment: 1, final: end}
+      - expectSessionMeta: {reads: [4 turns], lacks: [tools, tokens, 0s]}
+
+  # The sixth prompt opens the second segment: it reads #6 and its replies #6a,
+  # #6b, as the stored viewer of the same session numbers them.
+  - name: turn-labels-continue-across-loaded-segments
+    stream: six-prompts
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - click: load more of this session
+      - serve: {segment: 1}
+      - expectTurnLabels: {"0": "#1", "1": "#1a", "8": "#5", "9": "#5a", "10": "#6", "11": "#6a", "12": "#6b"}
+
+  # Loading a segment never renumbers a turn already on screen.
+  - name: earlier-labels-stable-when-a-segment-appends
+    stream: six-prompts
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - expectTurnLabels: {"0": "#1", "1": "#1a", "2": "#2", "3": "#2a", "4": "#3", "5": "#3a", "6": "#4", "7": "#4a", "8": "#5", "9": "#5a"}
+      - click: load more of this session
+      - serve: {segment: 1, final: end}
+      - expectTurnLabels: {"0": "#1", "1": "#1a", "2": "#2", "3": "#2a", "4": "#3", "5": "#3a", "6": "#4", "7": "#4a", "8": "#5", "9": "#5a", "10": "#6", "11": "#6a", "12": "#6b"}
+
+  # The repeated reply is folded into its twin in the whole session. Both stay
+  # drawn (each segment is cooked alone) and both read #1a: the twin already on
+  # screen keeps its number, the repeat takes its twin's, and the next prompt
+  # still reads #2.
+  - name: earlier-labels-stable-when-a-boundary-turn-repeats
+    stream: repeated-boundary
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - expectTurnLabels: {"0": "#1", "1": "#1a"}
+      - click: load more of this session
+      - serve: {segment: 1, final: end}
+      - expectTurnLabels: {"0": "#1", "1": "#1a", "2": "#1a", "3": "#2", "4": "#2a"}
+
+  - name: oversized-record-stop-reads-as-error
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - click: load more of this session
+      - serve: {segment: 1, final: cut, cutReason: oversized_record, lines: ["the next record of this transcript is 40 MiB, larger than a preview shows; import the session to read it."]}
+      - expectNoticeTone: {tone: error, text: "the next record of this transcript is 40 MiB"}
+
+  - name: source-changed-stop-reads-as-error
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - serve: {closed: source_changed, code: kickstart_preview_source_changed, message: "this session's transcript changed after part of it was shown. read it again from the start."}
+      - expectNoticeTone: {tone: error, text: "this session's transcript changed after part of it was shown", readAgainInside: true}
+
+  - name: source-cap-stop-stays-neutral
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - click: load more of this session
+      - serve: {segment: 1, final: cut, cutReason: source_budget, lines: ["the preview stops at 16 MiB of this transcript; import the session to read all of it."]}
+      - expectNoticeTone: {tone: neutral, text: "the preview stops at 16 MiB of this transcript"}
+
+  - name: end-stays-neutral
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0, final: end, lines: ["this session has grown since the preview opened. open the preview again to read the newer part."]}
+      - expectNoticeTone: {tone: neutral, text: "this session has grown since the preview opened"}
+
+  - name: failed-preview-keeps-the-pane
+    stream: ledger
+    steps:
+      - click: preview fix the ledger rounding
+      - expectStateInPane: reading the preview
+      - serve: {opened: true}
+      - serve: {closed: unreadable, code: kickstart_preview_unreadable, message: "the preview could not be read; check that the transcript is readable and try again"}
+      - expectStateInPane: the preview could not be read
+      - expectNoticeTone: {tone: error, text: "the preview could not be read", readAgainInside: true}
+
+  # The right column is the transcript viewer itself: no "preview" heading, no
+  # "raw, on this computer only" line, no frame around it. Before a title is
+  # clicked, while reading and once a segment arrives, the column is one
+  # labelled region, so a screen reader still announces it.
+  - name: preview-column-is-the-viewer-alone
+    stream: ledger
+    steps:
+      - expectPreviewColumn: {region: session preview, holds: state, absentText: [preview, "raw, on this computer only"]}
+      - click: preview fix the ledger rounding
+      - expectPreviewColumn: {region: session preview, holds: state, absentText: [preview, "raw, on this computer only"]}
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - expectPreviewColumn: {region: session preview, holds: viewer, absentText: [preview, "raw, on this computer only"]}
+      - expectNoText: ["raw, on this computer only"]
+
+  # A preview reads the session front to back, so its pinned timeline is the
+  # minimap over the turns loaded so far, never the windowed read's segment
+  # ticks, and it grows by the turns each `load more` appends. The scrubber's
+  # old "loaded so far" caption is not drawn.
+  - name: preview-timeline-is-the-minimap-over-loaded-turns
+    stream: six-prompts
+    steps:
+      - click: preview fix the ledger rounding
+      - serve: {opened: true}
+      - serve: {segment: 0}
+      - expectMinimap: {bands: 10}
+      - click: load more of this session
+      - serve: {segment: 1}
+      - expectMinimap: {bands: 13}

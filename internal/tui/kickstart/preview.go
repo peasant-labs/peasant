@@ -67,6 +67,14 @@ type SessionHasMoreFunc func(sessionID string) bool
 // describes the turns on screen.
 type SessionPreviewNoticeFunc func(sessionID string) string
 
+// SessionPreviewEndNotice reports a plain sentence the preview shows BELOW
+// the turns it loaded, or the empty string. It exists for a preview that ended
+// before the session did - a read bound reached, a record too large to read, a
+// transcript that changed under the preview - or that found the session grown
+// since it opened: the reader meets that sentence where the turns stop, at the
+// bottom of what they scrolled. It is read only after the turns load.
+type SessionPreviewEndNoticeFunc func(sessionID string) string
+
 // EmptySessionPreview is the imported-but-empty session state. SourceJSON is a
 // bounded JSONL excerpt that ListingPreview renders through the JSON highlighter.
 type EmptySessionPreview struct {
@@ -138,6 +146,14 @@ func WithSessionPreviewNotice(notice SessionPreviewNoticeFunc) ListingPreviewOpt
 	}
 }
 
+// WithSessionPreviewEndNotice supplies the sentence the preview shows below
+// the turns of a session whose preview ended before the session did.
+func WithSessionPreviewEndNotice(notice SessionPreviewEndNoticeFunc) ListingPreviewOption {
+	return func(preview *ListingPreview) {
+		preview.endNotice = notice
+	}
+}
+
 // WithSessionFirstTurns supplies the quick leading read the preview paints
 // before the whole session is read. Without it the preview keeps its
 // single-step behavior: the pane shows nothing until the whole read finishes.
@@ -200,6 +216,7 @@ type ListingPreview struct {
 	th             theme.Theme
 	contexts       ListingPreviewContextSource
 	notice         SessionPreviewNoticeFunc
+	endNotice      SessionPreviewEndNoticeFunc
 	// firstTurns is the optional quick leading read. When it is nil the
 	// preview loads in one step.
 	firstTurns SessionFirstTurnsFunc
@@ -333,6 +350,16 @@ func (p *ListingPreview) load(id string, read func(string) ([]ingest.Turn, bool,
 	if err != nil {
 		return nil, false, err
 	}
+	endNotice := ""
+	if p.endNotice != nil && !more {
+		endNotice = p.endNotice(id)
+	}
+	if len(recorded) == 0 && endNotice != "" {
+		// The preview ended before its first turn: the sentence saying why is
+		// the whole body.
+		body.note = endNotice
+		return body, false, nil
+	}
 	if len(recorded) == 0 {
 		if p.emptyBody != nil {
 			preview, imported, err := p.emptyBody(id)
@@ -352,6 +379,7 @@ func (p *ListingPreview) load(id string, read func(string) ([]ingest.Turn, bool,
 	if p.notice != nil && !more {
 		body.notice = p.notice(id)
 	}
+	body.endNotice = endNotice
 	return body, more, nil
 }
 
@@ -445,9 +473,12 @@ type sessionBody struct {
 	transcript transcriptview.Document
 	// notice stands WITH the transcript rather than instead of it: it says what
 	// the loaded turns leave out. note replaces a transcript that is not there.
-	notice  string
-	note    string
-	rawJSON string
+	notice string
+	// endNotice follows the transcript: why the preview ended before the
+	// session did, where the reader stops.
+	endNotice string
+	note      string
+	rawJSON   string
 }
 
 var _ kit.PreviewBody = sessionBody{}
@@ -476,6 +507,9 @@ func (b sessionBody) Render(width int) string {
 	}
 	if body := b.transcript.Render(width); body != "" {
 		parts = append(parts, body)
+		if b.endNotice != "" {
+			parts = append(parts, styles.Muted.Render(ansi.Wrap(b.endNotice, width, "")))
+		}
 	} else if b.note != "" {
 		// The pane hands its body lines to the viewport UNSTYLED, so a body that
 		// does not color itself is drawn in whatever the terminal's default ink
@@ -503,6 +537,9 @@ func (b sessionBody) plain() string {
 	}
 	if body := b.transcript.Render(0); body != "" {
 		parts = append(parts, body)
+		if b.endNotice != "" {
+			parts = append(parts, b.endNotice)
+		}
 	} else if b.note != "" {
 		parts = append(parts, b.note)
 	}

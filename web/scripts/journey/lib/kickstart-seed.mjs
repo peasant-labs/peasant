@@ -55,6 +55,46 @@ export function sessionLines(template, { sessionId, cwd, branch, prompts, starte
 }
 
 /**
+ * The lines a long session adds after the template's own: `exchanges` more
+ * prompt and reply pairs, each reply padded to about `replyBytes` with prose and
+ * a Go code block, so the session spans several preview segments; and, when
+ * `oversizedReplyBytes` is set, one last reply of that many bytes, a record too
+ * large for a preview to read. Each reply has its own message id, and each line
+ * answers the one before it. `batch` names the run of lines, so a second run
+ * appended to the same session (a session that grows) has ids of its own.
+ * Pure: the same inputs give the same lines.
+ */
+export function longSessionLines(lastLine, { sessionId, exchanges = 0, replyBytes = 0, oversizedReplyBytes = 0, batch = 'long' }) {
+  const last = JSON.parse(lastLine);
+  const extra = [];
+  let parent = last.uuid;
+  let clock = Date.parse(last.timestamp);
+  const line = (row) => {
+    clock += 1000;
+    const next = { ...row, sessionId, cwd: last.cwd, gitBranch: last.gitBranch, parentUuid: parent, timestamp: new Date(clock).toISOString(), isSidechain: false, userType: 'external', version: last.version };
+    parent = next.uuid;
+    extra.push(JSON.stringify(next));
+  };
+  const reply = (k, bytes) => {
+    const block = `\n\n\`\`\`go\nfunc ledgerTotal${k}(items []int) int {\n\ttotal := 0\n\tfor _, value := range items {\n\t\ttotal += value\n\t}\n\treturn total\n}\n\`\`\`\n`;
+    let text = `Step ${k} of the long read: the ledger totals add up for this batch.${block}`;
+    const prose = ` The rounding stays on the cent for row ${k}, and the totals keep their order.`;
+    while (text.length < bytes) text += prose;
+    return text;
+  };
+  const uuid = (k, role) => uuidFrom(sessionId, batch, String(k), role);
+  for (let k = 1; k <= exchanges; k += 1) {
+    line({ type: 'user', uuid: uuid(k, 'user'), message: { role: 'user', content: `Continue the long read with batch ${k}.` } });
+    line({ type: 'assistant', uuid: uuid(k, 'assistant'), message: { id: `msg_${batch}_${k}`, type: 'message', role: 'assistant', model: 'claude-sonnet-4-5', stop_reason: 'end_turn', content: [{ type: 'text', text: reply(k, replyBytes) }] } });
+  }
+  if (oversizedReplyBytes > 0) {
+    line({ type: 'user', uuid: uuid('oversized', 'user'), message: { role: 'user', content: 'Paste the whole export here.' } });
+    line({ type: 'assistant', uuid: uuid('oversized', 'assistant'), message: { id: `msg_${batch}_oversized`, type: 'message', role: 'assistant', model: 'claude-sonnet-4-5', stop_reason: 'end_turn', content: [{ type: 'text', text: 'x'.repeat(oversizedReplyBytes) }] } });
+  }
+  return extra;
+}
+
+/**
  * Extra repositories of generated sessions, so a scan of the library takes
  * long enough to show its progress. They are never selected on the journey.
  * Pure: the same spec gives the same repositories.
@@ -135,7 +175,8 @@ export function seedRecordings({ home, root, repoRoot, fixture }) {
       const directory = join(projects, encodeProjectDirectory(cwd));
       mkdirSync(directory, { recursive: true });
       const sessionId = uuidFrom(fixture.template, repo.name, session.name);
-      const lines = sessionLines(template, { sessionId, cwd, branch: session.branch, prompts: session.prompts, startedAt: session.startedAt });
+      const base = sessionLines(template, { sessionId, cwd, branch: session.branch, prompts: session.prompts, startedAt: session.startedAt });
+      const lines = [...base, ...longSessionLines(base.at(-1), { sessionId, exchanges: session.exchanges, replyBytes: session.replyBytes, oversizedReplyBytes: session.oversizedReplyBytes })];
       const path = join(directory, `${sessionId}.jsonl`);
       writeFileSync(path, `${lines.join('\n')}\n`, { mode: 0o600 });
       // A recording that was last written a moment ago is still being written:

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -33,7 +32,7 @@ func prepareProfileScriptBase(path string) error {
 
 type profileScriptBaseCase struct {
 	Name      string            `yaml:"name"`
-	Setup     string            `yaml:"setup"`
+	Setup     []profileStep     `yaml:"setup"`
 	WantError string            `yaml:"wantError"`
 	Files     map[string]string `yaml:"files"`
 }
@@ -65,6 +64,9 @@ func loadProfileScriptBaseFixtures(t *testing.T) []profileScriptBaseCase {
 	names := make([]string, 0, len(cases))
 	for _, c := range cases {
 		names = append(names, c.Name)
+		if err := validateProfileSteps(c.Setup, "profile script base case "+c.Name+" setup"); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := testutil.ValidateRequiredNames(manifest, names, "profile script base"); err != nil {
 		t.Fatal(err)
@@ -76,13 +78,8 @@ func TestPrepareProfileScriptBase(t *testing.T) {
 	for _, c := range loadProfileScriptBaseFixtures(t) {
 		t.Run(c.Name, func(t *testing.T) {
 			root := t.TempDir()
-			if c.Setup != "" {
-				cmd := exec.Command("bash", "-eu", "-c", c.Setup)
-				cmd.Dir = root
-				cmd.Env = append(os.Environ(), "ROOT="+root)
-				if out, err := cmd.CombinedOutput(); err != nil {
-					t.Fatalf("setup: %v\n%s", err, out)
-				}
+			if err := (profileStepRunner{root: root}).run(c.Setup); err != nil {
+				t.Fatalf("setup: %v", err)
 			}
 			path := filepath.Join(root, "base")
 			before, err := os.Lstat(path)
