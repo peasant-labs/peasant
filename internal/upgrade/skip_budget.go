@@ -82,6 +82,12 @@ const (
 	// context, and the validated settle (metadata candidate, context
 	// validation, settle) runs against the baseline parse.
 	MeasurementCaseHashDrift MeasurementCase = "C7"
+	// MeasurementCaseContextReference is an adapter bump that also changes
+	// the captured context (the project is renamed): the cheap proof and the
+	// validator fail on the context, and the reference (plan and install of
+	// a new generation that reads the stored parse) runs against the
+	// baseline parse.
+	MeasurementCaseContextReference MeasurementCase = "C8"
 )
 
 // AllMeasurementCases lists every case in matrix order.
@@ -91,6 +97,7 @@ var AllMeasurementCases = []MeasurementCase{
 	MeasurementCaseNewSession,
 	MeasurementCaseUndeclaredProducer,
 	MeasurementCaseHashDrift,
+	MeasurementCaseContextReference,
 }
 
 // NewMeasurementCase validates a raw case id at an input boundary.
