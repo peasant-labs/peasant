@@ -1,0 +1,65 @@
+# Each harvest run writes exactly one log, $STATE/peasant/logs/harvest--<unix>.log,
+# and prints its path: the last stdout line in human mode, the "runLog" key of
+# the --json document. Every case seeds one Claude Code source with a
+# good session (aaaa...) and a session whose second record is malformed
+# (dddd...), so a run that reads the source fails one session with a reason.
+#
+#   args           - the harvest sub-args after "harvest".
+#   setup_harvest  - run a plain harvest first, under a different state dir, so
+#                    peasant-sync/ holds the good session for `harvest index`.
+#   want_error     - the run exits non-zero (the existing exit-code rule).
+#   want_log       - the run writes a log and prints its path.
+#   json_stdout    - stdout must stay one parseable JSON document naming the log.
+#   log_contains   - substrings the log must hold.
+required_names:
+  - harvest names the failed session and its reason
+  - harvest logs names the failed session and its reason
+  - harvest index logs a rebuild with no failures
+  - json run keeps stdout parseable and still logs
+  - dry run writes no log
+cases:
+  - name: harvest names the failed session and its reason
+    args: []
+    want_error: true
+    want_log: true
+    log_contains:
+      - "peasant harvest run log"
+      - "command: peasant harvest\n"
+      - "summary: 2 sessions"
+      - "  active: 1\n"
+      - "  indexed: 1\n"
+      - "  errors: 1\n"
+      - "failed sessions: 1\n"
+      - "claude-code dddddddd-0000-4000-8000-000000000001: "
+      - "capture JSONL record 2: malformed complete JSON"
+  - name: harvest logs names the failed session and its reason
+    args: [logs]
+    want_error: true
+    want_log: true
+    log_contains:
+      - "command: peasant harvest logs\n"
+      - "  errors: 1\n"
+      - "failed sessions: 1\n"
+      - "capture JSONL record 2: malformed complete JSON"
+  - name: harvest index logs a rebuild with no failures
+    args: [index, --all]
+    setup_harvest: true
+    want_error: false
+    want_log: true
+    log_contains:
+      - "command: peasant harvest index\n"
+      - "  errors: 0\n"
+      - "warnings: 0\n  (none)\n"
+      - "failed sessions: 0\n  (none)\n"
+  - name: json run keeps stdout parseable and still logs
+    args: [--json]
+    want_error: true
+    want_log: true
+    json_stdout: true
+    log_contains:
+      - "  errors: 1\n"
+      - "capture JSONL record 2: malformed complete JSON"
+  - name: dry run writes no log
+    args: [--dry-run]
+    want_error: false
+    want_log: false
