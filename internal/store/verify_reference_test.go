@@ -50,10 +50,9 @@ func loadVerifyReferenceCases(t *testing.T) []verifyReferenceCase {
 		}
 		names = append(names, c.Name)
 	}
-	for _, req := range manifest.Required {
-		if !slices.Contains(names, req) {
-			t.Fatalf("required verify reference case %q is missing", req)
-		}
+	if len(manifest.Required) == 0 ||
+		!slices.Equal(slices.Sorted(slices.Values(names)), slices.Sorted(slices.Values(manifest.Required))) {
+		t.Fatalf("verify reference cases %v differ from the required names %v", names, manifest.Required)
 	}
 	return fixture.Cases
 }
