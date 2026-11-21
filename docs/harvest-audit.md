@@ -100,6 +100,35 @@ so the rows do not sum to the run's wall time; `ingest_log.started_at` and
 `finished_at` give that. The run row, its stage rows and the stage retention
 delete commit in one transaction. Stage rows are kept for the latest 100 runs.
 
+The printed profile also carries one line of ANNOTATE session outcomes. It
+holds counts only, never session identifiers, and it is not stored:
+
+```text
+  annotation sessions: candidates=5 annotated=1 skipped=1 preparation-failed=1 persistence-failed=0 unfinished=2
+```
+
+- `candidates` is every session handed to the classifier.
+- Each candidate that finishes has exactly one outcome, however many annotation
+  rows it produced. The `annotation detail` lines below count rows and results
+  separately.
+- `annotated`: classification completed and every prepared write persisted. A
+  session whose classifiers produced no rows counts here.
+- `skipped`: the stored run state proved the annotations current, so no
+  classifier ran.
+- `preparation-failed`: loading the session's inputs, classification, or
+  preparing one of its writes failed. A session that also failed to persist
+  counts here only. A classifier without a separate flush step reports one
+  error per session, and the profile counts that error here.
+- `persistence-failed`: preparation succeeded, but writing the session's
+  annotations or its run state failed.
+- `unfinished` is `candidates` minus the four outcomes: the candidates a
+  cancelled run never completed. A cancelled run does not count an attempt
+  that fails after cancellation as failed work, and it does not count an
+  attempt that never started as successful.
+
+`ANNOTATE`'s `done` in the stage timings counts attempts, failed ones included,
+so use the outcome line, not `done`, to count annotated sessions.
+
 `done` and `total` count each stage's own unit. For `DISCOVER` the unit is
 sessions: the sessions discovery found, not the transcript files it walked. The
 live discovery display counts files, so its final count can differ from the

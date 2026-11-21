@@ -27,6 +27,10 @@ type importProfileEntrypointCase struct {
 	Entry       string   `yaml:"entry"`
 	Args        []string `yaml:"args"`
 	WantPrinted bool     `yaml:"wantPrinted"`
+	// WantLines are lines the printed output must contain; AbsentLines are
+	// substrings it must not contain.
+	WantLines   []string `yaml:"wantLines"`
+	AbsentLines []string `yaml:"absentLines"`
 }
 
 // storedProfileStages reads, from the store an entry point wrote, the stage
@@ -121,6 +125,16 @@ func TestImportEntryPointsStoreAProfile(t *testing.T) {
 			}
 			if row.Entry == "harvest" && strings.Contains(output, fixture.PrintedProfileMarker) != row.WantPrinted {
 				t.Fatalf("printed profile present = %v, want %v:\n%s", !row.WantPrinted, row.WantPrinted, output)
+			}
+			for _, want := range row.WantLines {
+				if !strings.Contains(output, want+"\n") {
+					t.Fatalf("output is missing line %q:\n%s", want, output)
+				}
+			}
+			for _, absent := range row.AbsentLines {
+				if strings.Contains(output, absent) {
+					t.Fatalf("output contains %q:\n%s", absent, output)
+				}
 			}
 		})
 	}

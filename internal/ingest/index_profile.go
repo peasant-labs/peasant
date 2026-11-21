@@ -29,6 +29,7 @@ type IndexProfiler struct {
 	sessions        []IndexProfileSession
 	stages          []IndexProfileStage
 	annotate        AnnotationProfileStats
+	annotateOutcome AnnotationSessionOutcomes
 	flushWaits      []time.Duration
 	activationSizes map[int]int
 	stagedPeak      int64
@@ -531,6 +532,72 @@ func (s AnnotationProfileStats) SortedAnnotationResults() []AnnotationProfileBre
 	return rows
 }
 
+// AnnotationSessionOutcome is the one terminal outcome an ANNOTATE candidate
+// session reaches. The outcomes are mutually exclusive: a session counts once,
+// however many annotation rows it produced, and a failure in an earlier phase
+// takes precedence over a later one.
+type AnnotationSessionOutcome int
+
+const (
+	// AnnotationSessionAnnotated: classification completed and every prepared
+	// write persisted. A session whose classifiers produced no rows counts here.
+	AnnotationSessionAnnotated AnnotationSessionOutcome = iota + 1
+	// AnnotationSessionSkipped: the stored run state proved the session's
+	// annotations current, so no classifier ran.
+	AnnotationSessionSkipped
+	// AnnotationSessionPreparationFailed: loading inputs, classification or
+	// preparing a write failed for this session. A classifier without the
+	// buffered prepare/flush split reports one error for the whole session; it
+	// counts here.
+	AnnotationSessionPreparationFailed
+	// AnnotationSessionPersistenceFailed: preparation succeeded but the flush
+	// of the session's writes or run state failed.
+	AnnotationSessionPersistenceFailed
+)
+
+// AnnotationSessionOutcomes counts ANNOTATE candidate sessions by terminal
+// outcome. It holds counts only, never session identifiers.
+//
+// Candidates is every session handed to the classifier. A candidate the run
+// never finished, because the run was cancelled before its attempt started or
+// while it ran, has no terminal outcome and is reported by Unfinished; an
+// attempt that fails after cancellation is unfinished, not failed.
+type AnnotationSessionOutcomes struct {
+	Candidates        int
+	Annotated         int
+	Skipped           int
+	PreparationFailed int
+	PersistenceFailed int
+}
+
+// Finished is the number of candidates with a terminal outcome.
+func (o AnnotationSessionOutcomes) Finished() int {
+	return o.Annotated + o.Skipped + o.PreparationFailed + o.PersistenceFailed
+}
+
+// Unfinished is the number of candidates without a terminal outcome.
+func (o AnnotationSessionOutcomes) Unfinished() int {
+	return max(0, o.Candidates-o.Finished())
+}
+
+// Any reports whether any session reached the ANNOTATE stage.
+func (o AnnotationSessionOutcomes) Any() bool {
+	return o.Candidates != 0 || o.Finished() != 0
+}
+
+func (o *AnnotationSessionOutcomes) add(outcome AnnotationSessionOutcome) {
+	switch outcome {
+	case AnnotationSessionAnnotated:
+		o.Annotated++
+	case AnnotationSessionSkipped:
+		o.Skipped++
+	case AnnotationSessionPreparationFailed:
+		o.PreparationFailed++
+	case AnnotationSessionPersistenceFailed:
+		o.PersistenceFailed++
+	}
+}
+
 // IndexProfileBatch records aggregate work for one INDEX batch.
 type IndexProfileBatch struct {
 	Source          string
@@ -567,15 +634,17 @@ func (s IndexProfileSession) TotalDuration() time.Duration {
 
 // IndexProfileSnapshot is a stable copy of profiler data.
 type IndexProfileSnapshot struct {
-	Batches         []IndexProfileBatch
-	SlowSessions    []IndexProfileSession
-	Stages          []IndexProfileStage
-	Annotation      AnnotationProfileStats
-	FlushWaitCount  int
-	FlushWaitP50    time.Duration
-	FlushWaitMax    time.Duration
-	ActivationSizes map[int]int
-	StagedPeakBytes int64
+	Batches      []IndexProfileBatch
+	SlowSessions []IndexProfileSession
+	Stages       []IndexProfileStage
+	Annotation   AnnotationProfileStats
+	// AnnotationSessions counts ANNOTATE candidates by terminal outcome.
+	AnnotationSessions AnnotationSessionOutcomes
+	FlushWaitCount     int
+	FlushWaitP50       time.Duration
+	FlushWaitMax       time.Duration
+	ActivationSizes    map[int]int
+	StagedPeakBytes    int64
 }
 
 // RecordFlushWait records time actually spent waiting on a partial drain batch.
@@ -646,6 +715,29 @@ func (p *IndexProfiler) RecordAnnotation(stats AnnotationProfileStats) {
 	p.annotate.Add(stats)
 }
 
+// RecordAnnotationCandidates adds sessions handed to the ANNOTATE classifier.
+func (p *IndexProfiler) RecordAnnotationCandidates(count int) {
+	if p == nil || count <= 0 {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.observations++
+	p.annotateOutcome.Candidates += count
+}
+
+// RecordAnnotationOutcome records the one terminal outcome of an ANNOTATE
+// candidate session. It is per session, never per entry.
+func (p *IndexProfiler) RecordAnnotationOutcome(outcome AnnotationSessionOutcome) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.observations++
+	p.annotateOutcome.add(outcome)
+}
+
 // Snapshot returns all batch observations and the slowest sessions by total time.
 func (p *IndexProfiler) Snapshot() IndexProfileSnapshot {
 	if p == nil {
@@ -675,7 +767,7 @@ func (p *IndexProfiler) Snapshot() IndexProfileSnapshot {
 		return waits[i] < waits[j]
 	})
 	result := IndexProfileSnapshot{Batches: batches, SlowSessions: sessions, Stages: stages, Annotation: annotate,
-		FlushWaitCount: len(waits), StagedPeakBytes: p.stagedPeak, ActivationSizes: make(map[int]int, len(p.activationSizes))}
+		AnnotationSessions: p.annotateOutcome, FlushWaitCount: len(waits), StagedPeakBytes: p.stagedPeak, ActivationSizes: make(map[int]int, len(p.activationSizes))}
 	if len(waits) > 0 {
 		result.FlushWaitP50 = waits[(len(waits)-1)/2]
 		result.FlushWaitMax = waits[len(waits)-1]
