@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -23,8 +24,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/api"
+	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/githooks"
+	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -50,6 +54,15 @@ const (
 	openTestReadyWait     = time.Second
 	openTestReadyInterval = 10 * time.Millisecond
 	openTestRemote        = "https://github.com/example-org/open-fixture.git"
+	// openTestMalformedSessionArg is a non-empty --session value that is not
+	// a session id.
+	openTestMalformedSessionArg = "not/a-session"
+	// openTestForkedPID is the PID the replaced server start reports. The
+	// replaced stop never signals it.
+	openTestForkedPID = 4242
+	// openTestStopError is what the replaced stop returns for a server that
+	// cannot be stopped.
+	openTestStopError = "operation not permitted"
 )
 
 // The session runs 03:12 to 03:20 on 2024-01-02. The base commit falls weeks
@@ -83,34 +96,50 @@ const (
 type openServerState string
 
 const (
-	openServerRunning    openServerState = "running"
-	openServerOtherData  openServerState = "other-data"
-	openServerStarts     openServerState = "starts"
-	openServerStartError openServerState = "start-error"
-	openServerNeverReady openServerState = "never-ready"
+	openServerRunning          openServerState = "running"
+	openServerOtherData        openServerState = "other-data"
+	openServerSummariesError   openServerState = "summaries-error"
+	openServerStarts           openServerState = "starts"
+	openServerStartError       openServerState = "start-error"
+	openServerNeverReady       openServerState = "never-ready"
+	openServerNeverReadyNoStop openServerState = "never-ready-unstoppable"
+)
+
+// openDashboardKind is which server answers the dashboard port in an
+// open-output case.
+type openDashboardKind string
+
+const (
+	// openDashboardFake is a local test server that answers the health and
+	// summaries routes from the case's server state.
+	openDashboardFake openDashboardKind = "fake"
+	// openDashboardAPI is a real in-process api.NewServer.
+	openDashboardAPI openDashboardKind = "api"
 )
 
 // openSessionRef is which session argument an open-output case passes.
 type openSessionRef string
 
 const (
-	openSessionKnown   openSessionRef = "known"
-	openSessionUnknown openSessionRef = "unknown"
-	openSessionMissing openSessionRef = "missing"
+	openSessionKnown     openSessionRef = "known"
+	openSessionUnknown   openSessionRef = "unknown"
+	openSessionMissing   openSessionRef = "missing"
+	openSessionMalformed openSessionRef = "malformed"
 )
 
 type openOutputCase struct {
-	Name                    string           `yaml:"name"`
-	Session                 openSessionRef   `yaml:"session"`
-	Prompt                  string           `yaml:"prompt"`
-	Transcript              string           `yaml:"transcript"`
-	RecordedBefore          bool             `yaml:"recorded_before"`
-	Published               bool             `yaml:"published"`
-	ReattributeAfterPublish bool             `yaml:"reattribute_after_publish"`
-	Config                  string           `yaml:"config"`
-	Server                  openServerState  `yaml:"server"`
-	StartError              string           `yaml:"start_error"`
-	Modes                   []openOutputMode `yaml:"modes"`
+	Name                    string            `yaml:"name"`
+	Session                 openSessionRef    `yaml:"session"`
+	Dashboard               openDashboardKind `yaml:"dashboard"`
+	Prompt                  string            `yaml:"prompt"`
+	Transcript              string            `yaml:"transcript"`
+	RecordedBefore          bool              `yaml:"recorded_before"`
+	Published               bool              `yaml:"published"`
+	ReattributeAfterPublish bool              `yaml:"reattribute_after_publish"`
+	Config                  string            `yaml:"config"`
+	Server                  openServerState   `yaml:"server"`
+	StartError              string            `yaml:"start_error"`
+	Modes                   []openOutputMode  `yaml:"modes"`
 	Want                    struct {
 		Failed      bool     `yaml:"failed"`
 		Lines       []string `yaml:"lines"`
@@ -118,6 +147,8 @@ type openOutputCase struct {
 		PlainStdout string   `yaml:"plain_stdout"`
 		Commits     bool     `yaml:"commits"`
 		Started     bool     `yaml:"started"`
+		Stopped     bool     `yaml:"stopped"`
+		PIDFileKept bool     `yaml:"pid_file_kept"`
 	} `yaml:"want"`
 }
 
@@ -148,6 +179,23 @@ func loadOpenOutputFixture(t *testing.T) openOutputFixture {
 		}
 		if tc.Want.Failed && len(tc.Want.Lines) != 1 {
 			t.Fatalf("failure case %q holds %d lines, want 1", tc.Name, len(tc.Want.Lines))
+		}
+		switch tc.Dashboard {
+		case openDashboardFake:
+			if tc.Server == openServerSummariesError {
+				t.Fatalf("case %q plays %q on a fake dashboard; only a real one fails its own summaries route", tc.Name, tc.Server)
+			}
+		case openDashboardAPI:
+			// A real server is already running and cannot be started or made
+			// to fail its start on demand.
+			if !slices.Contains([]openServerState{openServerRunning, openServerOtherData, openServerSummariesError}, tc.Server) {
+				t.Fatalf("case %q runs a real dashboard in server state %q, which only a fake dashboard can play", tc.Name, tc.Server)
+			}
+		default:
+			t.Fatalf("case %q has an unknown dashboard %q", tc.Name, tc.Dashboard)
+		}
+		if (tc.Want.Stopped || tc.Want.PIDFileKept) && !tc.Want.Started {
+			t.Fatalf("case %q expects a stop or a kept PID file without a start", tc.Name)
 		}
 	}
 	return fixture
@@ -225,8 +273,8 @@ func runOpenOutputCase(t *testing.T, fixture openOutputFixture, tc openOutputCas
 	case openOutputPlain:
 		if tc.Want.Failed {
 			var failed *openFailedError
-			if !errors.As(err, &failed) || exitCodeFor(err) == defaults.ExitOK {
-				t.Fatalf("a plain-mode failure must exit non-zero, got %v", err)
+			if !errors.As(err, &failed) || exitCodeFor(err) != defaults.ExitFailure {
+				t.Fatalf("a plain-mode failure must exit %d, got %v (exit %d)", defaults.ExitFailure, err, exitCodeFor(err))
 			}
 			if stdout != "" {
 				t.Fatalf("a plain-mode failure wrote to stdout: %q", stdout)
@@ -271,10 +319,18 @@ func runOpenOutputCase(t *testing.T, fixture openOutputFixture, tc openOutputCas
 	if started := world.started.Load(); started != tc.Want.Started {
 		t.Errorf("server started = %v, want %v", started, tc.Want.Started)
 	}
+	if stopped := world.stopped.Load(); stopped != tc.Want.Stopped {
+		t.Errorf("server stopped = %v, want %v", stopped, tc.Want.Stopped)
+	}
+	if !world.muteBalanced() {
+		t.Error("open did not mute the loggers exactly once and restore them")
+	}
 	if tc.Want.Started {
 		_, statErr := os.Stat(world.pidFile)
 		switch {
-		case tc.Want.Failed && !errors.Is(statErr, os.ErrNotExist):
+		case tc.Want.PIDFileKept && statErr != nil:
+			t.Errorf("a server that could not be stopped lost its PID file: %v", statErr)
+		case tc.Want.Failed && !tc.Want.PIDFileKept && !errors.Is(statErr, os.ErrNotExist):
 			t.Errorf("a failed start left its PID file behind: %v", statErr)
 		case !tc.Want.Failed && statErr != nil:
 			t.Errorf("a successful start lost its PID file: %v", statErr)
@@ -291,20 +347,54 @@ func runOpenOutputCase(t *testing.T, fixture openOutputFixture, tc openOutputCas
 	}
 }
 
-// TestOpenMutesAndRestoresTheDefaultLoggers checks that the harvest's
-// structured logs cannot reach the terminal while open runs, and that the
-// process loggers are back afterwards. It runs outside the parallel phase,
-// because it owns the process-wide loggers while it runs.
+// TestOpenHookFlagErrorExitsFailure pins the documented exception to hook
+// mode's exit 0: a flag or argument error stops the command before it runs,
+// so it exits 1 with Cobra's usage on stderr and no hook response.
+func TestOpenHookFlagErrorExitsFailure(t *testing.T) {
+	t.Parallel()
+	fixture := loadOpenOutputFixture(t)
+	index := slices.IndexFunc(fixture.Cases, func(tc openOutputCase) bool { return tc.Name == "hook-mode" })
+	world := newOpenWorld(t, fixture.Cases[index])
+
+	stdout, stderr, err := world.execute(t, buildOpenCommand(world.dependencies(t)),
+		"open", "--session", openTestSessionID, "--port", strconv.Itoa(world.port), "--hook", "extra-argument")
+	if err == nil || exitCodeFor(err) != defaults.ExitFailure {
+		t.Fatalf("an extra argument in hook mode must exit %d, got %v", defaults.ExitFailure, err)
+	}
+	// Cobra prints the usage to the command's output writer, which is stderr
+	// unless set, as here, to a buffer; the error itself goes to stderr.
+	if strings.Contains(stdout+stderr, `"continue"`) {
+		t.Errorf("a flag error printed a hook response: stdout=%q stderr=%q", stdout, stderr)
+	}
+	if !strings.Contains(stdout+stderr, "Usage:") || !strings.Contains(stderr, "extra-argument") {
+		t.Errorf("a flag error must print the error and the usage: stdout=%q stderr=%q", stdout, stderr)
+	}
+	if world.mutes.Load() != 0 || len(world.openedURLs()) != 0 || world.started.Load() {
+		t.Error("open ran despite the argument error")
+	}
+}
+
+// TestOpenMutesAndRestoresTheDefaultLoggers checks the production mute: the
+// harvest's structured logs and anything else logged while open runs go
+// nowhere, and the process loggers, with the log package's flags, are back
+// afterwards. It runs outside the parallel phase, because it owns the
+// process-wide loggers while it runs; the parallel TestOpenOutput runs inject
+// a mute that touches no process state.
 func TestOpenMutesAndRestoresTheDefaultLoggers(t *testing.T) {
 	fixture := loadOpenOutputFixture(t)
 	index := slices.IndexFunc(fixture.Cases, func(tc openOutputCase) bool { return tc.Name == "plain-mode" })
 	world := newOpenWorld(t, fixture.Cases[index])
+	world.muteLoggers = muteDefaultLoggers
 
 	var logged bytes.Buffer
 	recorder := slog.New(slog.NewTextHandler(&logged, nil))
 	previous, previousWriter, previousFlags := slog.Default(), log.Writer(), log.Flags()
 	slog.SetDefault(recorder)
 	log.SetOutput(&logged)
+	// Setting a slog default resets the log package's flags, so distinct
+	// flags show whether the mute put them back.
+	const loggerFlags = log.Lshortfile | log.Lmicroseconds
+	log.SetFlags(loggerFlags)
 	t.Cleanup(func() {
 		slog.SetDefault(previous)
 		log.SetOutput(previousWriter)
@@ -314,6 +404,8 @@ func TestOpenMutesAndRestoresTheDefaultLoggers(t *testing.T) {
 	muted := false
 	world.duringBrowserOpen = func() {
 		muted = slog.Default() != recorder && log.Writer() != &logged
+		slog.Info("logged while open runs")
+		log.Print("printed while open runs")
 	}
 	if _, stderr, err := world.open(t, openOutputPlain); err != nil {
 		t.Fatalf("open failed: %v; stderr=%q", err, stderr)
@@ -323,6 +415,9 @@ func TestOpenMutesAndRestoresTheDefaultLoggers(t *testing.T) {
 	}
 	if slog.Default() != recorder || log.Writer() != &logged {
 		t.Error("open did not restore the default loggers")
+	}
+	if got := log.Flags(); got != loggerFlags {
+		t.Errorf("log flags after open = %d, want %d", got, loggerFlags)
 	}
 	if logged.Len() != 0 {
 		t.Errorf("open wrote to the default loggers: %q", logged.String())
@@ -343,9 +438,26 @@ type openWorld struct {
 	healthy           atomic.Bool
 	serves            atomic.Bool
 	started           atomic.Bool
+	stopped           atomic.Bool
 	duringBrowserOpen func()
-	mu                sync.Mutex
-	opened            []string
+	// muteLoggers replaces the mute the world injects, which only counts
+	// calls and touches no process state.
+	muteLoggers func() (restore func())
+	mutes       atomic.Int32
+	restores    atomic.Int32
+	mu          sync.Mutex
+	opened      []string
+}
+
+// keepOpenLoggers is the logger mute for parallel open runs that do not check
+// it: it leaves the process-wide loggers alone, so no run swaps them under
+// another.
+func keepOpenLoggers() (restore func()) { return func() {} }
+
+// muteBalanced reports whether the injected mute ran once and was restored
+// once. A world whose mute was replaced does not count.
+func (w *openWorld) muteBalanced() bool {
+	return w.muteLoggers != nil || (w.mutes.Load() == 1 && w.restores.Load() == 1)
 }
 
 func newOpenWorld(t *testing.T, tc openOutputCase) *openWorld {
@@ -378,7 +490,7 @@ func newOpenWorld(t *testing.T, tc openOutputCase) *openWorld {
 	}
 	config := "version: 1\nsources:\n  claude-code:\n    enabled: true\n    paths: " + paths + "\n" +
 		"  opencode: {enabled: false}\n  cursor: {enabled: false}\n  codex: {enabled: false}\n  strike: {enabled: false}\n  pi: {enabled: false}\n" +
-		"output:\n  basePath: " + filepath.Join(w.root, "output") + "\n" + redaction
+		"output:\n  basePath: " + w.outputDir() + "\n" + redaction
 	w.configPath = writeCfg(t, filepath.Join(w.root, "config"), "config.yaml", config)
 
 	// A migrated empty database, so a run does not pay for the migrations.
@@ -392,12 +504,25 @@ func newOpenWorld(t *testing.T, tc openOutputCase) *openWorld {
 	case openServerRunning:
 		w.healthy.Store(true)
 		w.serves.Store(true)
-	case openServerOtherData:
+	case openServerOtherData, openServerSummariesError:
 		w.healthy.Store(true)
-	case openServerStarts, openServerStartError, openServerNeverReady:
+	case openServerStarts, openServerStartError, openServerNeverReady, openServerNeverReadyNoStop:
 	default:
 		t.Fatalf("unknown server %q", tc.Server)
 	}
+	switch tc.Dashboard {
+	case openDashboardAPI:
+		w.port = w.startAPIDashboard(t, dbPath)
+	default:
+		w.port = w.startFakeDashboard(t)
+	}
+	return w
+}
+
+// startFakeDashboard serves the health and summaries routes from the world's
+// server state and returns its port.
+func (w *openWorld) startFakeDashboard(t *testing.T) int {
+	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		if !w.healthy.Load() {
 			rw.WriteHeader(http.StatusServiceUnavailable)
@@ -407,11 +532,11 @@ func newOpenWorld(t *testing.T, tc openOutputCase) *openWorld {
 		case defaults.RouteHealth.String():
 			rw.WriteHeader(http.StatusOK)
 		case defaults.RouteSessionSummaries.String():
-			summaries := []schema.SessionSummary{}
+			payload := schema.SessionsPayload{Sessions: []schema.SessionSummary{}}
 			if id := r.URL.Query().Get("ids"); w.serves.Load() && id == openTestSessionID {
-				summaries = append(summaries, schema.SessionSummary{ID: id})
+				payload.Sessions = append(payload.Sessions, schema.SessionSummary{ID: id})
 			}
-			_ = json.NewEncoder(rw).Encode(map[string]any{"sessions": summaries})
+			_ = json.NewEncoder(rw).Encode(payload)
 		default:
 			rw.WriteHeader(http.StatusNotFound)
 		}
@@ -421,15 +546,76 @@ func newOpenWorld(t *testing.T, tc openOutputCase) *openWorld {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if w.port, err = strconv.Atoi(address.Port()); err != nil {
+	port, err := strconv.Atoi(address.Port())
+	if err != nil {
 		t.Fatal(err)
 	}
-	return w
+	return port
+}
+
+// startAPIDashboard runs a real in-process api.NewServer and returns its port.
+// A running dashboard reads this world's database; an other-data dashboard
+// reads a separate empty one; a dashboard in the summaries-error state has no
+// data provider, so its summaries route answers with an error.
+func (w *openWorld) startAPIDashboard(t *testing.T, dbPath string) int {
+	t.Helper()
+	serverConfig := api.ServerConfig{Port: 0, Config: config.BaseConfig(), ConfigHome: t.TempDir()}
+	switch w.tc.Server {
+	case openServerRunning, openServerOtherData:
+		if w.tc.Server == openServerOtherData {
+			dbPath = filepath.Join(w.root, "other-data", "peasant.db")
+			if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			storetest.CopyGoldenTo(t, dbPath)
+		}
+		// The production server opens the store with the managed-generation
+		// options of the configured output tree, which is where the harvest
+		// writes the session's transcript.
+		outputDir := w.outputDir()
+		db, err := openPreparedStore(t, dbPath, mustGenerationStoreOptions(t, outputDir)...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { db.Close() })
+		serverConfig.Store = db
+		serverConfig.Provider = api.NewStoreDataProvider(db, sessionvisibility.Browsing(), outputDir)
+	case openServerSummariesError:
+	default:
+		t.Fatalf("a real dashboard cannot play server state %q", w.tc.Server)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	srv := api.NewServer(serverConfig)
+	if err := srv.Listen(ctx); err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- srv.Serve(ctx) }()
+	// Registered after the store's close, so it runs first: the server stops
+	// before its store closes.
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Errorf("dashboard shutdown: %v", err)
+			}
+		case <-time.After(15 * time.Second):
+			t.Error("dashboard did not stop after cancellation")
+		}
+	})
+	address, ok := srv.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("dashboard listens on %v, not a TCP address", srv.Addr())
+	}
+	return address.Port
 }
 
 func (w *openWorld) dataDir() string   { return filepath.Join(w.root, "data") }
 func (w *openWorld) configDir() string { return filepath.Join(w.root, "config") }
 func (w *openWorld) stateDir() string  { return filepath.Join(w.root, "state") }
+func (w *openWorld) outputDir() string { return filepath.Join(w.root, "output") }
 
 // commandPrefix is how the command renders `peasant` with this run's flags.
 func (w *openWorld) commandPrefix() string {
@@ -437,30 +623,53 @@ func (w *openWorld) commandPrefix() string {
 }
 
 func (w *openWorld) dependencies(t *testing.T) openDependencies {
+	muteLoggers := w.muteLoggers
+	if muteLoggers == nil {
+		muteLoggers = func() func() {
+			w.mutes.Add(1)
+			return func() { w.restores.Add(1) }
+		}
+	}
 	return openDependencies{
-		startServer: func(spawn webServerSpawn) (string, error) {
+		startServer: func(spawn webServerSpawn) (int, string, error) {
 			if spawn.port != w.port || spawn.configPath != w.configPath || spawn.dataDir != w.dataDir() || spawn.configDir != w.configDir() || spawn.stateDir != w.stateDir() {
 				t.Errorf("the forked server would not read this run's store: %+v", spawn)
 			}
 			switch w.tc.Server {
-			case openServerRunning, openServerOtherData:
+			case openServerRunning, openServerOtherData, openServerSummariesError:
 				t.Error("started a server while one was running")
 			case openServerStartError:
-				return "", errors.New(w.tc.StartError)
+				return 0, "", errors.New(w.tc.StartError)
 			}
 			if err := os.MkdirAll(filepath.Dir(w.pidFile), 0o700); err != nil {
-				return "", err
+				return 0, "", err
 			}
-			if err := os.WriteFile(w.pidFile, []byte("1"), 0o600); err != nil {
-				return "", err
+			if err := os.WriteFile(w.pidFile, []byte(strconv.Itoa(openTestForkedPID)), 0o600); err != nil {
+				return 0, "", err
 			}
 			w.started.Store(true)
 			if w.tc.Server == openServerStarts {
 				w.serves.Store(true)
 				w.healthy.Store(true)
 			}
-			return w.pidFile, nil
+			return openTestForkedPID, w.pidFile, nil
 		},
+		stopServer: func(pid int) error {
+			if pid != openTestForkedPID {
+				t.Errorf("stopped PID %d, want the started server's PID %d", pid, openTestForkedPID)
+			}
+			// The PID file must still name the server while it is stopped, so a
+			// failed stop leaves it for `peasant web stop`.
+			if _, err := os.Stat(w.pidFile); err != nil {
+				t.Errorf("the PID file was gone before the server was stopped: %v", err)
+			}
+			w.stopped.Store(true)
+			if w.tc.Server == openServerNeverReadyNoStop {
+				return errors.New(openTestStopError)
+			}
+			return nil
+		},
+		muteLoggers: muteLoggers,
 		openBrowser: func(address string) error {
 			if !w.healthy.Load() || !w.serves.Load() {
 				t.Error("opened the browser before the dashboard served the session")
@@ -506,6 +715,8 @@ func (w *openWorld) sessionID(t *testing.T) string {
 		return openTestUnknownSessionID
 	case openSessionMissing:
 		return ""
+	case openSessionMalformed:
+		return openTestMalformedSessionArg
 	}
 	t.Fatalf("unknown session %q", w.tc.Session)
 	return ""

@@ -34,6 +34,17 @@ type Route string
 
 func (r Route) String() string { return string(r) }
 
+// SPARoutePrefix is the path prefix of a client-side route of the web
+// dashboard. The server answers every path under it with the dashboard page.
+type SPARoutePrefix string
+
+func (p SPARoutePrefix) String() string { return string(p) }
+
+// SPARouteProjects prefixes the session viewer route:
+// /projects/<project-hash>/<session-id>. The server routes it to the dashboard
+// page, and `peasant open` builds the transcript address from it.
+const SPARouteProjects SPARoutePrefix = "/projects/"
+
 const (
 	RouteHealth Route = "/api/v1/health"
 	// RouteAttachment serves one content-addressed image. The path value is a

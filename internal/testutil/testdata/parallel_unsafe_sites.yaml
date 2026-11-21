@@ -19,6 +19,7 @@ required_names:
   - harvest-metadata-tty-stderr
   - harvest-metadata-tty-slog-default
   - kickstart-metadata-slog-default
+  - open-logger-mute-slog-default
   - prune-nontty-stdin
   - scheduling-lookup-slog-default
 
@@ -49,6 +50,12 @@ cases:
     file: cmd/peasant/kickstart_metadata_diagnostics_test.go
     line: 123
     test: TestKickstartLocalIngestForwardsMetadataDiagnostics
+    hazard: slog.SetDefault
+
+  - name: open-logger-mute-slog-default
+    file: cmd/peasant/cmd_open_test.go
+    line: 392
+    test: TestOpenMutesAndRestoresTheDefaultLoggers
     hazard: slog.SetDefault
 
   - name: prune-nontty-stdin

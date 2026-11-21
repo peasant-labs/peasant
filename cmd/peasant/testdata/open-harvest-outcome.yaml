@@ -1,0 +1,108 @@
+# open-harvest-outcome.yaml - how `peasant open` reduces one harvest execution
+# to whether its session was recorded and indexed.
+#
+# Each case is a synthetic harvestExecution handed to openHarvestOutcome. The
+# open-output fixture drives the real harvest; this one reaches the branches a
+# real harvest cannot be made to take on demand.
+#
+# Placeholder in want_error: {session_id} (the session open asked for).
+#
+# Case fields:
+#   kind              succeeded | canceled | failed | unknown (a completion
+#                     kind the reducer does not know)
+#   result            the execution carries a pipeline result
+#   ui_error          the progress display's error
+#   run_error         the pipeline's error (failed)
+#   store_error       the result's store error
+#   session_errors    per-session errors in the result: session is self | other
+#   index_log         index log entries: session is self | other, outcome is
+#                     an ingest.IndexOutcome
+#   want_error        the exact error, or empty when the session was recorded
+
+# Every case is named here; a case missing from either list fails the load.
+requiredNames:
+  - recorded
+  - progress-display-failure
+  - canceled
+  - pipeline-failure
+  - unknown-completion-kind
+  - succeeded-without-result
+  - store-error
+  - own-session-error
+  - other-session-error
+  - index-failure
+  - index-failure-then-indexed
+  - other-session-index-failure
+
+cases:
+  - name: recorded
+    kind: succeeded
+    result: true
+    index_log:
+      - {session: self, outcome: indexed}
+
+  - name: progress-display-failure
+    kind: succeeded
+    result: true
+    ui_error: terminal closed
+    want_error: 'harvest progress failed: terminal closed'
+
+  - name: canceled
+    kind: canceled
+    want_error: "harvest canceled while the ingest pipeline was running: context canceled; rerun 'peasant harvest' to continue"
+
+  - name: pipeline-failure
+    kind: failed
+    run_error: database is locked
+    want_error: 'pipeline failed: database is locked'
+
+  - name: unknown-completion-kind
+    kind: unknown
+    result: true
+    want_error: 'the harvest ended without a result for session {session_id}'
+
+  - name: succeeded-without-result
+    kind: succeeded
+    want_error: 'the harvest ended without a result for session {session_id}'
+
+  - name: store-error
+    kind: succeeded
+    result: true
+    store_error: disk full
+    want_error: 'store session {session_id}: disk full'
+
+  - name: own-session-error
+    kind: succeeded
+    result: true
+    session_errors:
+      - {session: self, error: source unreadable}
+    want_error: 'record session {session_id}: source unreadable'
+
+  - name: other-session-error
+    kind: succeeded
+    result: true
+    session_errors:
+      - {session: other, error: source unreadable}
+    index_log:
+      - {session: self, outcome: indexed}
+
+  - name: index-failure
+    kind: succeeded
+    result: true
+    index_log:
+      - {session: self, outcome: error}
+    want_error: 'session {session_id} was stored, but its transcript could not be indexed for the viewer'
+
+  - name: index-failure-then-indexed
+    kind: succeeded
+    result: true
+    index_log:
+      - {session: self, outcome: error}
+      - {session: self, outcome: reindexed}
+
+  - name: other-session-index-failure
+    kind: succeeded
+    result: true
+    index_log:
+      - {session: other, outcome: error}
+      - {session: self, outcome: indexed}

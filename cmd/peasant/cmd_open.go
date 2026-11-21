@@ -45,10 +45,6 @@ const (
 	publishStatePublished    publishState = "published"
 )
 
-// transcriptRoutePrefix is the web dashboard's session viewer route:
-// /projects/<project-hash>/<session-id>.
-const transcriptRoutePrefix = "/projects/"
-
 // openFailure is one failed step and the action that fixes it. It renders as
 // the single line the command prints on failure.
 type openFailure struct {
@@ -75,13 +71,18 @@ type hookStop struct {
 }
 
 // openDependencies are the side effects of `peasant open` outside the harvest
-// and the store: the web server it may start, the HTTP client that probes it,
-// and the browser it opens.
+// and the store: the web server it may start and stop, the HTTP client that
+// probes it, the browser it opens, and the process loggers it mutes.
 type openDependencies struct {
-	// startServer forks the server the spawn describes and returns its PID
-	// file. It does not wait for the server to answer.
-	startServer   func(spawn webServerSpawn) (pidFile string, err error)
-	openBrowser   func(url string) error
+	// startServer forks the server the spawn describes and returns its PID and
+	// PID file. It does not wait for the server to answer.
+	startServer func(spawn webServerSpawn) (pid int, pidFile string, err error)
+	// stopServer stops a server startServer forked that never answered.
+	stopServer  func(pid int) error
+	openBrowser func(url string) error
+	// muteLoggers silences the process-wide loggers while open runs and
+	// returns the function that puts them back.
+	muteLoggers   func() (restore func())
 	client        *http.Client
 	readyWait     time.Duration
 	readyInterval time.Duration
@@ -91,11 +92,10 @@ type openDependencies struct {
 // opens its transcript in the local web dashboard.
 func BuildOpenCommand() *cobra.Command {
 	return buildOpenCommand(openDependencies{
-		startServer: func(spawn webServerSpawn) (string, error) {
-			_, pidFile, err := spawnWebServer(spawn)
-			return pidFile, err
-		},
+		startServer:   spawnWebServer,
+		stopServer:    stopForkedServer,
 		openBrowser:   browser.Open,
+		muteLoggers:   muteDefaultLoggers,
 		client:        &http.Client{Timeout: defaults.ServerClientTimeout},
 		readyWait:     webServerReadyWait,
 		readyInterval: defaults.HealthCheckInterval,
@@ -124,7 +124,9 @@ func buildOpenCommand(deps openDependencies) *cobra.Command {
 			"The steps are \"session check\", \"harvest\", \"session lookup\", \"dashboard start\" and \"dashboard check\". " +
 			"open never opens the dashboard root in place of the session.\n\n" +
 			"With --hook, open prints the Claude Code hook response {\"continue\":false,\"stopReason\":\"...\"} as one line on stdout instead, " +
-			"with the same lines in stopReason, writes nothing to stderr, and exits 0 on every outcome.",
+			"with the same lines in stopReason, writes nothing to stderr, and exits 0 on every outcome of the run. " +
+			"A flag or argument error, such as an extra argument, stops the command before it runs: " +
+			"it exits 1 with the usage on stderr, as for every command.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
@@ -135,7 +137,7 @@ func buildOpenCommand(deps openDependencies) *cobra.Command {
 			// command, so everything else is muted while it runs.
 			cmd.SetOut(io.Discard)
 			cmd.SetErr(io.Discard)
-			restoreLoggers := muteDefaultLoggers()
+			restoreLoggers := deps.muteLoggers()
 			lines, warning, failure := runOpen(cmd, deps, sessionID, port, noRelated)
 			restoreLoggers()
 			cmd.SetOut(nil)
@@ -166,9 +168,19 @@ func buildOpenCommand(deps openDependencies) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&sessionID, "session", "", "ID of the session to record and open (required)")
 	portFlagVar(cmd.Flags(), &port, defaults.DefaultPort, "Port of the web dashboard (1-65535)")
-	cmd.Flags().BoolVar(&hook, "hook", false, "Print the Claude Code hook response JSON instead of plain lines, and exit 0 on every outcome")
+	cmd.Flags().BoolVar(&hook, "hook", false, "Print the Claude Code hook response JSON instead of plain lines, and exit 0 on every outcome of the run (a flag error still exits 1)")
 	cmd.Flags().BoolVar(&noRelated, "no-related", false, "Process only the named sessions. By default a session-scoped run also processes each named session's child sessions and its ancestors that are not recorded yet.")
 	return cmd
+}
+
+// stopForkedServer stops a server spawnWebServer forked, by the mechanism the
+// platform offers (see terminateProcess).
+func stopForkedServer(pid int) error {
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	return terminateProcess(proc)
 }
 
 // muteDefaultLoggers sends the default slog logger and the standard log
@@ -191,11 +203,11 @@ func muteDefaultLoggers() (restore func()) {
 func runOpen(cmd *cobra.Command, deps openDependencies, rawSessionID string, port int, noRelated bool) ([]string, string, *openFailure) {
 	id, err := ingest.NewSessionID(rawSessionID)
 	if err != nil {
-		reason := fmt.Sprintf("%q is not a session id: %s", rawSessionID, firstErrorLine(err))
-		if rawSessionID == "" {
-			reason = "no session id was given"
+		return nil, "", &openFailure{
+			step:   openStepSession,
+			reason: sessionCheckReason(rawSessionID, err),
+			fix:    fmt.Sprintf("pass the session to open as `%s`", peasantCommand(cmd, "open", "--session", "<id>")),
 		}
-		return nil, "", &openFailure{step: openStepSession, reason: reason, fix: "pass the session to open as `peasant open --session <id>`"}
 	}
 	warning, err := recordOpenSession(cmd, id, noRelated)
 	if err != nil {
@@ -209,7 +221,7 @@ func runOpen(cmd *cobra.Command, deps openDependencies, rawSessionID string, por
 		return nil, warning, &openFailure{
 			step:   openStepHarvest,
 			reason: firstErrorLine(err),
-			fix:    fmt.Sprintf("run `%s` to see the full report", openHarvestCommand(cmd, id, noRelated)),
+			fix:    fmt.Sprintf("run `%s` to see the reason for each session", openHarvestCommand(cmd, id, noRelated, "--json")),
 		}
 	}
 	session, failure := lookupOpenSession(cmd, id, noRelated)
@@ -238,9 +250,25 @@ func openHarvestArgs(id ingest.SessionID, noRelated bool) []string {
 }
 
 // openHarvestCommand is the harvest `open` runs, as a command the user can
-// paste: the same arguments, on the configuration and directories of this run.
-func openHarvestCommand(cmd *cobra.Command, id ingest.SessionID, noRelated bool) string {
-	return peasantCommand(cmd, append([]string{"harvest"}, openHarvestArgs(id, noRelated)...)...)
+// paste: the same arguments, on the configuration and directories of this run,
+// followed by any extra report flags.
+func openHarvestCommand(cmd *cobra.Command, id ingest.SessionID, noRelated bool, extra ...string) string {
+	args := append([]string{"harvest"}, openHarvestArgs(id, noRelated)...)
+	return peasantCommand(cmd, append(args, extra...)...)
+}
+
+// sessionCheckReason says why rawSessionID is not a session id. The
+// validation error opens with "invalid session ID" and the quoted value, which
+// the line already says, so only its explanation is kept.
+func sessionCheckReason(rawSessionID string, err error) string {
+	if rawSessionID == "" {
+		return "no session id was given"
+	}
+	detail := firstErrorLine(err)
+	if _, explanation, ok := strings.Cut(detail, ": "); ok {
+		detail = explanation
+	}
+	return fmt.Sprintf("%q is not a session id: %s", rawSessionID, detail)
 }
 
 // peasantCommand renders a peasant command line with the configuration and
@@ -375,7 +403,7 @@ func ensureDashboard(cmd *cobra.Command, deps openDependencies, port int, id ing
 					peasantCommand(cmd, "web", "start", "--foreground", "--port", fmt.Sprint(port))),
 			}
 		}
-		pidFile, err := deps.startServer(webServerSpawnFor(cmd, port))
+		pid, pidFile, err := deps.startServer(webServerSpawnFor(cmd, port))
 		if err != nil {
 			return failed(firstErrorLine(err))
 		}
@@ -383,12 +411,11 @@ func ensureDashboard(cmd *cobra.Command, deps openDependencies, port int, id ing
 		// cancellable; making it cancellable must also keep the PID file of a
 		// server that is still starting (tracked as a follow-up)
 		if !waitForWebServer(context.WithoutCancel(cmd.Context()), deps.client, base, deps.readyWait, deps.readyInterval) {
-			// The forked server is gone or never answered; a PID file left behind
-			// would point `peasant web stop` at a process that is not it.
-			if pidFile != "" {
-				_ = os.Remove(pidFile)
+			reason := fmt.Sprintf("no Peasant server answered %s%s within %s of the start, and another program may hold port %d", base, defaults.RouteHealth, deps.readyWait, port)
+			if stopErr := stopUnreadyServer(deps, pid, pidFile); stopErr != nil {
+				reason += fmt.Sprintf("; the started server (PID %d) could not be stopped (%s), so its PID file was kept", pid, firstErrorLine(stopErr))
 			}
-			return failed(fmt.Sprintf("no Peasant server answered %s%s within %s of the start, and another program may hold port %d", base, defaults.RouteHealth, deps.readyWait, port))
+			return failed(reason)
 		}
 	}
 	serves, err := dashboardServesSession(cmd.Context(), deps.client, base, id)
@@ -403,6 +430,24 @@ func ensureDashboard(cmd *cobra.Command, deps openDependencies, port int, id ing
 			fix: fmt.Sprintf("stop it with `%s` and run open again, or pass --port with a free port",
 				peasantCommand(cmd, "web", "stop", "--port", fmt.Sprint(port))),
 		}
+	}
+	return nil
+}
+
+// stopUnreadyServer stops a forked server that never answered, then removes its
+// PID file. A slow start can still be running, so the PID file goes only once
+// the process is stopped: removed first, it would leave a server that
+// `peasant web stop` can no longer find. A process that already exited counts
+// as stopped. When the stop fails, the PID file stays and the error is
+// returned.
+func stopUnreadyServer(deps openDependencies, pid int, pidFile string) error {
+	if pid > 0 {
+		if err := deps.stopServer(pid); err != nil && !errors.Is(err, os.ErrProcessDone) {
+			return err
+		}
+	}
+	if pidFile != "" {
+		_ = os.Remove(pidFile)
 	}
 	return nil
 }
@@ -424,13 +469,11 @@ func dashboardServesSession(ctx context.Context, client *http.Client, base strin
 	if resp.StatusCode != http.StatusOK {
 		return false, fmt.Errorf("%s answered %s", defaults.RouteSessionSummaries, resp.Status)
 	}
-	var envelope struct {
-		Sessions []schema.SessionSummary `json:"sessions"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+	var payload schema.SessionsPayload
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return false, fmt.Errorf("decode the %s answer: %w", defaults.RouteSessionSummaries, err)
 	}
-	for _, summary := range envelope.Sessions {
+	for _, summary := range payload.Sessions {
 		if summary.ID == string(id) {
 			return true, nil
 		}
@@ -441,7 +484,7 @@ func dashboardServesSession(ctx context.Context, client *http.Client, base strin
 // transcriptURL is the dashboard address of the session's transcript. It always
 // names the session: open never falls back to the dashboard root.
 func transcriptURL(port int, projectHash schema.ProjectHash, id ingest.SessionID) string {
-	return dashboardBaseURL(port) + transcriptRoutePrefix + url.PathEscape(projectHash.String()) + "/" + url.PathEscape(string(id))
+	return dashboardBaseURL(port) + defaults.SPARouteProjects.String() + url.PathEscape(projectHash.String()) + "/" + url.PathEscape(string(id))
 }
 
 func openedLine(title string, state publishState) string {

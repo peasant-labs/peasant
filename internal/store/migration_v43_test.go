@@ -97,6 +97,16 @@ func loadPublicationFixture(t *testing.T) publicationFixtureFile {
 	if fixture.Rejections[0].Stage.IsValid() || fixture.Rejections[0].Name == "" || fixture.Rejections[0].ErrorContains == "" || fixture.Rejections[0].SQLiteErrorContains == "" || fixture.Rollback.Name == "" || fixture.Rollback.InitialPushedAt == 0 || fixture.Rollback.ExpectedPushedAt == 0 || fixture.Rollback.InitialLicense == "" || fixture.Rollback.ExpectedLicense == "" {
 		t.Fatal("publication fixture does not activate unknown-stage and rollback arms")
 	}
+	// The sibling must be a real session id, and no record may hold a
+	// receipt for it, or the cases that read it as unpublished prove nothing.
+	if _, err := schema.NewSessionID(fixture.UnpublishedSibling); err != nil {
+		t.Fatalf("publication fixture unpublished_sibling %q is not a session id: %v", fixture.UnpublishedSibling, err)
+	}
+	for _, record := range fixture.Records {
+		if record.SessionID == fixture.UnpublishedSibling {
+			t.Fatalf("publication fixture unpublished_sibling %q holds the receipt of record %q", fixture.UnpublishedSibling, record.Name)
+		}
+	}
 	return fixture
 }
 

@@ -309,7 +309,7 @@ session.
 |------|-------------|
 | `--session <id>` | The session to record and open (required) |
 | `--port <n>` | Port of the web dashboard, 1-65535 (default 8690, as for `peasant web start`) |
-| `--hook` | Print the Claude Code hook response `{"continue":false,"stopReason":"..."}` as one line on stdout instead, with the same lines in `stopReason`. Nothing goes to stderr, and the exit status is 0 on every outcome |
+| `--hook` | Print the Claude Code hook response `{"continue":false,"stopReason":"..."}` as one line on stdout instead, with the same lines in `stopReason`. Nothing goes to stderr, and the exit status is 0 on every outcome of the run. A flag or argument error, such as an extra argument, stops the command before it runs: it exits 1 with the usage on stderr, as for every command |
 | `--no-related` | Process only the named sessions. By default a session-scoped run also processes each named session's child sessions and its ancestors that are not recorded yet. |
 
 ### `peasant tui` flags (deprecated)
