@@ -144,9 +144,17 @@ func TestProcStatStartTimeTokenIndex(t *testing.T) {
 }
 
 func TestProcStatReadOfAnExitingProcessMeansGone(t *testing.T) {
-	err := &os.PathError{Op: "read", Path: "/proc/1/stat", Err: syscall.ESRCH}
-	if !procStatReadMeansGone(err) {
-		t.Fatalf("procStatReadMeansGone(%v) = false; a read that races the exit returns ESRCH and must count as gone", err)
+	exiting := &os.PathError{Op: "read", Path: "/proc/1/stat", Err: syscall.ESRCH}
+	if !procStatReadMeansGone(exiting) {
+		t.Fatalf("procStatReadMeansGone(%v) = false; a read that races the exit returns ESRCH and must count as gone", exiting)
+	}
+	reaped := &os.PathError{Op: "open", Path: "/proc/1/stat", Err: syscall.ENOENT}
+	if !procStatReadMeansGone(reaped) {
+		t.Fatalf("procStatReadMeansGone(%v) = false; a reaped process has no /proc entry and must count as gone", reaped)
+	}
+	denied := &os.PathError{Op: "open", Path: "/proc/1/stat", Err: syscall.EACCES}
+	if procStatReadMeansGone(denied) {
+		t.Fatalf("procStatReadMeansGone(%v) = true; an unreadable /proc entry is an error, not a gone process", denied)
 	}
 }
 
