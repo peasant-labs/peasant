@@ -1,0 +1,25 @@
+# Cases for api.ResolveByID, the one implementation of by-identifier
+# resolution shared by the real and mock providers. `stored` is the candidate
+# set in storage order; `requested` is the identifier list as the caller named
+# it; `expected` is the identifiers of the returned elements, in order.
+cases:
+  - name: unknown-identifier-is-omitted
+    stored: [alpha, beta]
+    requested: [alpha, missing, beta]
+    expected: [alpha, beta]
+  - name: repeated-identifier-is-returned-once
+    stored: [alpha, beta]
+    requested: [beta, alpha, beta]
+    expected: [beta, alpha]
+  - name: request-order-wins-over-storage-order
+    stored: [alpha, beta, gamma]
+    requested: [gamma, alpha, beta]
+    expected: [gamma, alpha, beta]
+  - name: empty-request-returns-empty-result
+    stored: [alpha, beta]
+    requested: []
+    expected: []
+  - name: nothing-stored-returns-empty-result
+    stored: []
+    requested: [alpha]
+    expected: []

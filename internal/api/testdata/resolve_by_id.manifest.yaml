@@ -1,0 +1,9 @@
+# Required-NAME manifest for the by-identifier resolution rule (ResolveByID).
+# Membership is asserted by exact set equality, so a case can only be deleted
+# or added by changing this manifest on purpose.
+requiredNames:
+  - unknown-identifier-is-omitted
+  - repeated-identifier-is-returned-once
+  - request-order-wins-over-storage-order
+  - empty-request-returns-empty-result
+  - nothing-stored-returns-empty-result
