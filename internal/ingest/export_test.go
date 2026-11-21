@@ -89,3 +89,8 @@ func SetClaudeMetadataHalfMutationForTest(t testing.TB, mutate func(GenerationBu
 func WithParseInputContextFieldsForTest(fields func(Harness) []string) PipelineOption {
 	return func(p *Pipeline) { p.parseInputContextFieldsOverride = fields }
 }
+
+// IndexManagedReferenceReasonForTest is the index-log reason of a session
+// whose context change was installed as a reference.
+// This constant is only available in test builds.
+const IndexManagedReferenceReasonForTest = indexManagedReferenceReason

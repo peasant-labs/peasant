@@ -1,0 +1,52 @@
+# Routes of the reference step on the real store. Each route seeds a store by
+# a real import, moves the stored adapter revision back by one, applies its
+# change, snapshots the store, runs the refresh, and compares every session's
+# session_detail bytes with a plain parse (refresh skips disabled) of the same
+# snapshot.
+#
+# The Claude corpus is one synthetic session of eight entries. A rename
+# changes the project name in every managed metadata sidecar, so the captured
+# context differs while the transcript bytes do not.
+cases:
+  - name: context-change-references
+    given: Claude corpus; the project is renamed
+    then: the validator answers not proven on the context; one plan and one install; no parse; the index log row is skipped with the reference reason; refresh_reference total 1 done 1
+  - name: no-candidate-parses
+    given: the Codex corpus, its cheap proof forced to a context mismatch; Codex builds no metadata candidate
+    then: refresh_validate_unsupported counts every session; no plan; every session parses
+  - name: source-moved-parses
+    given: Claude, renamed; the active generation's seal changes between the plan and the install
+    then: the install is refused with source-moved; one parse
+  - name: owner-seal-mismatch-parses
+    given: Claude, renamed; the active generation's stored seal is forged before the refresh
+    then: the plan is refused with owner-seal-mismatch; refresh_reference total 1 done 0; one parse
+  - name: parse-input-context-parses
+    given: Claude, renamed; the pipeline lists project.name as a parse input
+    then: the plan is refused with parse-input-context-changed; one parse
+  - name: plan-error-parses
+    given: Claude, renamed; the plan fails with an I/O error
+    then: refresh_reference_error counts it; one parse
+  - name: install-error-parses
+    given: Claude, renamed; the install fails with an I/O error
+    then: the old generation stays active until the parse commits; one parse
+  - name: force-skips-the-step
+    given: Claude, renamed; a forced run over the native source
+    then: no reference is attempted; the session parses
+  - name: reindex-skips-the-step
+    given: Claude, renamed; a reindex run over the native source
+    then: no reference is attempted; the run finishes without errors
+  - name: disable-refresh-skips-skips-the-step
+    given: Claude, renamed; the refresh skips disabled
+    then: no plan; the session parses
+  - name: non-context-mismatch-skips-the-step
+    given: Claude, renamed; the cheap proof answers index-not-current
+    then: no validation; no plan; one parse
+  - name: store-without-referencer
+    given: Claude, renamed; a store that does not offer the reference
+    then: the validator answers not proven; no plan; one parse
+  - name: validated-settle-wins-over-reference
+    given: Claude; only the stored metadata hash is stale, the context is unchanged
+    then: one validated settle; no plan; no parse
+  - name: claude-without-candidate-parses
+    given: a Claude fork whose parent's native source disappears after the capture
+    then: the metadata half refuses; refresh_validate_unsupported 1; no plan; one parse
