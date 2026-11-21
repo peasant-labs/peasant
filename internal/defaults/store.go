@@ -110,3 +110,9 @@ func ResolveVillagePullsDirPath() VillagePullsDirPath {
 func ResolveVillagePullsDirPathWith(xdgDataHomeOverride string) VillagePullsDirPath {
 	return VillagePullsDirPath(filepath.Join(string(ResolveDataDirPathWith(xdgDataHomeOverride)), VillagePullsSubdir))
 }
+
+// ManagedRefreshReadSlots caps how many read-only managed-generation context
+// validations run at once. The store takes the smaller of this value and half
+// its connection pool (at least one), so validations never take every pooled
+// reader from the readers the application serves.
+const ManagedRefreshReadSlots = 4

@@ -1,0 +1,21 @@
+# Whole-store parity of the validated settle with the proven settle. One Claude
+# store, after an adapter bump with its cheap proof holding, is forked: one
+# fork runs the proven settle; the other forges the stored metadata_hash, the
+# refresh validates, and the validated settle runs. Every table of the two
+# forks is dumped and compared.
+#
+# allowedDifferences: the only columns whose values may differ between the
+# forks, as table.column. The forged metadata hash is the one by design.
+allowedDifferences:
+  - session_generations.metadata_hash
+# mutations: writes removed from the validated settle through its test hook;
+# each must make the parity fail.
+mutations:
+  - skipped-stats-write
+  - skipped-mirror-write
+# drainClockColumns: columns the refresh's drain stamps with the wall clock
+# before the index stage, in both forks alike (the publication capture). No
+# settle writes them; the two runs simply happen at different instants, so
+# they are left out of the comparison.
+drainClockColumns:
+  - session_publication_metadata.captured_at

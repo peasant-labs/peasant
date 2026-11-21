@@ -1,0 +1,6 @@
+# The ingest test hooks of the Claude metadata half, and the only functions
+# that may read each. BuildGeneration must never read the metadata-half
+# mutation. No production file may assign one (internal/testkit/hookguard).
+hooks:
+  - name: claudeMetadataHalfMutationForTest
+    readers: [ClaudeIndexer.BuildGenerationMetadata]

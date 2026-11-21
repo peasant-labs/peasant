@@ -72,6 +72,7 @@ type proofCountingRefreshStore struct {
 	forgeSettleCounts bool
 	validationCalls   atomic.Int64
 	forceUnproven     bool
+	contextUnproven   bool
 	validationResult  *ingest.ManagedGenerationValidationResult
 	validationRequest ingest.ManagedGenerationValidationRequest
 	validationError   bool
@@ -87,11 +88,17 @@ func (s *proofCountingRefreshStore) ProveCapturedGenerationUnchanged(ctx context
 	if s.forceUnproven && err == nil {
 		proof = ingest.UnchangedProof{Mismatch: ingest.UnchangedNotProvenSeal}
 	}
+	if s.contextUnproven && err == nil {
+		proof = ingest.UnchangedProof{Mismatch: ingest.UnchangedNotProvenMetadata}
+	}
 	s.proof = proof
 	return proof, err
 }
 
 func (s *proofCountingRefreshStore) ValidateManagedGenerationUnchanged(ctx context.Context, request ingest.ManagedGenerationValidationRequest) (ingest.ManagedGenerationValidationResult, error) {
+	if s.validationMissing {
+		return ingest.ManagedGenerationValidationResult{Outcome: ingest.ValidationUnsupported}, nil
+	}
 	s.validationCalls.Add(1)
 	s.validationRequest = request
 	if s.validationError {
@@ -107,6 +114,13 @@ func (s *proofCountingRefreshStore) SettleCapturedGenerationUnchanged(ctx contex
 	s.settles.Add(1)
 	if s.settleRefused {
 		return ingest.ManagedGenerationUnchangedSettleOutcome{}, &ingest.StaleIndexWorkError{SessionID: request.SessionID}
+	}
+	if s.contextUnproven && s.validationResult != nil && s.validationResult.Outcome == ingest.ValidationProven {
+		if request.Validated == nil || request.Validated.GenerationID != request.Expected.ActiveGenerationID ||
+			s.validationRequest.Candidate == nil || request.Validated.Candidate.Metadata.SessionID != s.validationRequest.Candidate.Metadata.SessionID {
+			return ingest.ManagedGenerationUnchangedSettleOutcome{}, fmt.Errorf("synthetic settle: validated candidate was not forwarded")
+		}
+		return ingest.ManagedGenerationUnchangedSettleOutcome{GenerationID: request.Validated.GenerationID}, nil
 	}
 	if s.forgeSettleCounts {
 		input, conversation := int64(903), int64(902)
@@ -155,6 +169,7 @@ func TestManagedGenerationValidationPipelineSeam(t *testing.T) {
 			ValidatorCalls int64  `yaml:"validatorCalls"`
 			Builds         int64  `yaml:"builds"`
 			Settles        int64  `yaml:"settles"`
+			SettleRefused  bool   `yaml:"settleRefused"`
 			Unsupported    bool   `yaml:"unsupported"`
 			Diagnostic     bool   `yaml:"diagnostic"`
 		} `yaml:"cases"`
@@ -185,7 +200,7 @@ func TestManagedGenerationValidationPipelineSeam(t *testing.T) {
 			runManagedRefreshPipeline(t, db, source, output)
 			generationID := managedRefreshPipelineActiveGeneration(t, db, id)
 			managedRefreshPipelineDowngrade(t, db, ingest.GenerationTargets(ingest.HarvesterVersionRegistry)[ingest.HarnessClaudeCode].AdapterVersion-1)
-			counted := &proofCountingRefreshStore{Store: db, forceUnproven: true, validationError: tc.Error, validationMissing: tc.Missing}
+			counted := &proofCountingRefreshStore{Store: db, contextUnproven: true, validationError: tc.Error, validationMissing: tc.Missing, settleRefused: tc.SettleRefused}
 			if tc.Outcome != "" {
 				outcome, err := ingest.NewValidationOutcome(tc.Outcome)
 				if err != nil {
@@ -231,13 +246,13 @@ func TestManagedGenerationValidationPipelineSeam(t *testing.T) {
 			found, unsupported := false, false
 			for _, stage := range profiler.StageTotals() {
 				if stage.Stage == ingest.StageRefreshValidate {
-					found = stage.Total == 1 && stage.Done == 0
+					found = stage.Total == 1 && stage.Done == int(tc.Settles)
 				}
 				if stage.Stage == ingest.StageRefreshValidateUnsupported {
 					unsupported = stage.Total == 1 && stage.Done == 0
 				}
 			}
-			if found != (tc.ValidatorCalls == 1) || unsupported != tc.Unsupported {
+			if !found || unsupported != (tc.Unsupported || tc.Missing || tc.Error) {
 				t.Fatalf("validation profile attempts=%t unsupported=%t", found, unsupported)
 			}
 		})
@@ -275,6 +290,7 @@ func TestManagedGenerationUnchangedProofPipelineRoutes(t *testing.T) {
 		t.Helper()
 		unproven := mode == "unproven"
 		counted := &proofCountingRefreshStore{Store: db, proofError: mode == "proof-error", settleRefused: mode == "settle-refused", forgeSettleCounts: mode == "", forceUnproven: unproven, validationMissing: unproven}
+		counted.validationResult = &ingest.ManagedGenerationValidationResult{Outcome: ingest.ValidationNotProven, Mismatch: ingest.UnchangedNotProvenMetadata}
 		fs := &nativeCountingRefreshFS{OSFileSystem: &ingest.OSFileSystem{}, source: source}
 		profiler := &ingest.IndexProfiler{}
 		parses, builds := &atomic.Int64{}, &atomic.Int64{}
@@ -297,7 +313,33 @@ func TestManagedGenerationUnchangedProofPipelineRoutes(t *testing.T) {
 		}
 		t.Fatal("missing proof profile stage")
 	}
+	flagRoute := func(reindex bool, configure func(*ingest.PipelineConfig)) func(*testing.T) {
+		return func(t *testing.T) {
+			source, output, _, _, db, _ := setup(t)
+			if reindex {
+				conn, err := db.Pool().Take(t.Context())
+				if err != nil {
+					t.Fatal(err)
+				}
+				err = sqlitex.Execute(conn, `UPDATE sessions SET index_version = 0`, nil)
+				db.Pool().Put(conn)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			counted := &proofCountingRefreshStore{Store: db, contextUnproven: true}
+			var parses, builds atomic.Int64
+			var transcript []byte
+			result := runManagedRefreshPipelineConfigured(t, counted, source, output, &parses, &builds, &transcript, &ingest.OSFileSystem{}, &ingest.IndexProfiler{}, ingest.DefaultAdapterRegistry, configure)
+			if result.Summary.Errors != 0 || counted.proofs.Load() != 0 || counted.validationCalls.Load() != 0 || builds.Load() != 1 {
+				t.Fatalf("summary %+v proofs %d validations %d builds %d", result.Summary, counted.proofs.Load(), counted.validationCalls.Load(), builds.Load())
+			}
+		}
+	}
 	routes := map[string]func(*testing.T){
+		"disable-refresh-skips-never-validates": flagRoute(false, func(cfg *ingest.PipelineConfig) { cfg.DisableRefreshSkips = true }),
+		"force-never-validates":                 flagRoute(false, func(cfg *ingest.PipelineConfig) { cfg.Force = true }),
+		"reindex-never-validates":               flagRoute(true, func(cfg *ingest.PipelineConfig) { cfg.Reindex = true }),
 		"proven": func(t *testing.T) {
 			source, output, empty, id, db, _ := setup(t)
 			before := managedRefreshPipelineRows(t, db, `SELECT c.turn_count || ':' || c.conversation_turn_count || ':' || c.input_submission_count || ':' || s.input_submission_count FROM sessions s JOIN session_captured_stats c USING (session_id) WHERE s.session_id = ?`, id)
@@ -337,7 +379,7 @@ func TestManagedGenerationUnchangedProofPipelineRoutes(t *testing.T) {
 				t.Fatal(err)
 			}
 			counted, fs, profiler, _, _, builds, transcript := run(t, db, source, output, empty, "")
-			if counted.proofs.Load() != 1 || counted.proof.Proven || counted.proof.Mismatch != ingest.UnchangedNotProvenIndexer || counted.settles.Load() != 0 || builds.Load() != 1 || !bytes.Equal(*transcript, expected) || fs.reads.Load() != 0 {
+			if counted.proofs.Load() != 1 || counted.proof.Proven || counted.proof.Mismatch != ingest.UnchangedNotProvenIndexer || counted.validationCalls.Load() != 0 || counted.settles.Load() != 0 || builds.Load() != 1 || !bytes.Equal(*transcript, expected) || fs.reads.Load() != 0 {
 				t.Fatalf("proof %+v attempts %d settles %d builds %d stored bytes match %t native reads %d", counted.proof, counted.proofs.Load(), counted.settles.Load(), builds.Load(), bytes.Equal(*transcript, expected), fs.reads.Load())
 			}
 			assertProfile(t, profiler, 0)
@@ -393,6 +435,7 @@ func TestManagedGenerationUnchangedProofPipelineRoutes(t *testing.T) {
 			assertProfile(t, profiler, 1)
 		},
 	}
+	maps.Copy(routes, realStoreValidationRoutes())
 	var fixture struct {
 		Cases []struct {
 			Name string `yaml:"name"`
@@ -757,6 +800,12 @@ func (i countingManagedRefreshIndexer) BuildGeneration(ctx context.Context, inpu
 		i.calls.Add(1)
 	}
 	return i.ClaudeIndexer.BuildGeneration(ctx, input)
+}
+
+// The validator seam tests need a candidate, not a second copy of the Claude
+// metadata algorithm. The store double decides the validation outcome.
+func (i countingManagedRefreshIndexer) BuildGenerationMetadata(_ context.Context, input ingest.GenerationBuildInput) (ingest.GenerationMetadataCandidate, error) {
+	return ingest.GenerationMetadataCandidate{Metadata: *input.RecordedMetadata}, nil
 }
 
 func (i countingManagedRefreshIndexer) IndexTranscript(ctx context.Context, session ingest.DiscoveredSession) ([]schema.SessionEntry, error) {

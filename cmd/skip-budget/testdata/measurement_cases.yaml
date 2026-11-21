@@ -11,3 +11,4 @@ cases:
   - {name: C4, kind: smoke}
   - {name: C5, kind: retired}
   - {name: C6, kind: measured}
+  - {name: C7, kind: measured}

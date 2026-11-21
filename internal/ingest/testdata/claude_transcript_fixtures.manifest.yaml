@@ -1,0 +1,9 @@
+# Every Claude transcript fixture in the repository, as the metadata-half
+# differential reads it. A loader fails when a JSONL file under a testdata
+# directory with "claude" in its path sits outside these directories.
+directories:
+  - cmd/peasant-origin-audit/testdata/baseline/claude-projects
+  - internal/e2e/testdata/claude-fixture
+documents:
+  - internal/ingest/testdata/claude_producer.yaml
+  - internal/ingest/testdata/claude_metadata_half.yaml

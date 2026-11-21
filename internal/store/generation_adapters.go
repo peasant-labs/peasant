@@ -44,6 +44,7 @@ func (s *Store) capturedUnchangedRequest(ctx context.Context, request ingest.Man
 		SessionID: request.SessionID, GenerationID: *active, Metadata: request.Metadata,
 		InputDigest: request.InputDigest, IndexerTarget: request.IndexerTarget,
 		FormatTarget: request.FormatTarget, Expected: request.Expected, UpdatedAtMs: time.Now().UnixMilli(),
+		Validated: request.Validated,
 	}, true, nil
 }
 

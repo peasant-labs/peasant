@@ -87,6 +87,11 @@ deferredBegins:
     begin: sqlitex.Transaction
     mode: read-only
     reason: compares the catalog and index state in one snapshot; the settle step writes in its own IMMEDIATE transaction
+  - file: generation_validation.go
+    function: Store.ValidateManagedGenerationUnchanged
+    begin: sqlitex.Transaction
+    mode: read-only
+    reason: compares a metadata candidate with the stored catalog and context rows in one reader snapshot; the validated settle writes in its own IMMEDIATE transaction
   - file: harmonized_snapshot.go
     function: Store.WithHarmonizedSessionSnapshot
     begin: sqlitex.Save

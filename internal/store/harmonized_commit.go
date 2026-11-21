@@ -778,76 +778,14 @@ func loadGenerationChildrenOnConn(conn *sqlite.Conn, sessionID schema.SessionID,
 			ResultFunc: fn,
 		})
 	}
-	if err := query(`SELECT ordinal, subagent_session_id, parent_uuid FROM session_generation_subagents WHERE session_id = ? AND generation_id = ? ORDER BY ordinal`, func(stmt *sqlite.Stmt) error {
-		view.children.Subagents = append(view.children.Subagents, GenerationSubagent{
-			Ordinal: int(stmt.ColumnInt64(0)), SubagentSessionID: schema.SessionID(stmt.ColumnText(1)), ParentUUID: schema.SessionID(stmt.ColumnText(2)),
-		})
-		return nil
-	}); err != nil {
-		return fmt.Errorf("store: read generation subagents for session %s: %w", sessionID, err)
-	}
-	if err := query(`SELECT ordinal, hash, message, author_name, author_email, commit_time, author_time FROM session_generation_commits WHERE session_id = ? AND generation_id = ? ORDER BY ordinal`, func(stmt *sqlite.Stmt) error {
-		view.children.Commits = append(view.children.Commits, GenerationCommit{
-			Ordinal: int(stmt.ColumnInt64(0)), Hash: stmt.ColumnText(1), Message: stmt.ColumnText(2),
-			AuthorName: stmt.ColumnText(3), AuthorEmail: stmt.ColumnText(4),
-			CommitTime: stmt.ColumnInt64(5), AuthorTime: stmt.ColumnInt64(6),
-		})
-		return nil
-	}); err != nil {
-		return fmt.Errorf("store: read generation commits for session %s: %w", sessionID, err)
-	}
-	if err := query(`SELECT ordinal, association_id, observed_commit_hash FROM session_generation_associations WHERE session_id = ? AND generation_id = ? ORDER BY ordinal`, func(stmt *sqlite.Stmt) error {
-		view.children.Associations = append(view.children.Associations, GenerationAssociation{
-			Ordinal: int(stmt.ColumnInt64(0)), AssociationID: stmt.ColumnText(1), ObservedCommitHash: stmt.ColumnText(2),
-		})
-		return nil
-	}); err != nil {
-		return fmt.Errorf("store: read generation associations for session %s: %w", sessionID, err)
-	}
-	if err := query(`SELECT ordinal, error_type, location, message, remediation FROM session_generation_diagnostics WHERE session_id = ? AND generation_id = ? ORDER BY ordinal`, func(stmt *sqlite.Stmt) error {
-		view.children.Diagnostics = append(view.children.Diagnostics, GenerationDiagnostic{
-			Ordinal: int(stmt.ColumnInt64(0)), ErrorType: stmt.ColumnText(1), Location: stmt.ColumnText(2),
-			Message: stmt.ColumnText(3), Remediation: stmt.ColumnText(4),
-		})
-		return nil
-	}); err != nil {
-		return fmt.Errorf("store: read generation diagnostics for session %s: %w", sessionID, err)
+	if err := loadGenerationContextChildrenOnConn(conn, sessionID, generationID, &view.children); err != nil {
+		return err
 	}
 	if err := query(`SELECT ordinal, source_entry_ref FROM session_generation_title_refs WHERE session_id = ? AND generation_id = ? ORDER BY ordinal`, func(stmt *sqlite.Stmt) error {
 		view.children.TitleRefs = append(view.children.TitleRefs, schema.SourceEntryRef(stmt.ColumnText(1)))
 		return nil
 	}); err != nil {
 		return fmt.Errorf("store: read generation title refs for session %s: %w", sessionID, err)
-	}
-	if err := query(`SELECT kind, target_state, target_local_id, evidence, anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref FROM session_relationship_evidence WHERE session_id = ? AND generation_id = ? ORDER BY ordinal`, func(stmt *sqlite.Stmt) error {
-		relationship := GenerationRelationship{
-			Kind:        schema.SessionRelationshipKind(stmt.ColumnText(0)),
-			TargetState: schema.RelationshipTargetState(stmt.ColumnText(1)),
-		}
-		if stmt.ColumnType(2) != sqlite.TypeNull {
-			target := schema.SessionID(stmt.ColumnText(2))
-			relationship.TargetLocalID = &target
-		}
-		if stmt.ColumnType(3) != sqlite.TypeNull {
-			evidence := stmt.ColumnText(3)
-			relationship.Evidence = &evidence
-		}
-		if stmt.ColumnType(4) != sqlite.TypeNull {
-			kind := schema.PublicSourceAnchorKind(stmt.ColumnText(4))
-			relationship.AnchorKind = &kind
-		}
-		if stmt.ColumnType(5) != sqlite.TypeNull {
-			ref := schema.SourceEntryRef(stmt.ColumnText(5))
-			relationship.AnchorSourceEntryRef = &ref
-		}
-		if stmt.ColumnType(6) != sqlite.TypeNull {
-			revision := stmt.ColumnText(6)
-			relationship.AnchorSourceRevisionRef = &revision
-		}
-		view.children.Relationships = append(view.children.Relationships, relationship)
-		return nil
-	}); err != nil {
-		return fmt.Errorf("store: read relationship evidence for session %s: %w", sessionID, err)
 	}
 	if err := query(`SELECT segment_ordinal, logical_session_id, physical_source_id, coordinate_kind, start_coordinate, end_exclusive, decoded_byte_start, decoded_byte_end_exclusive, inclusion FROM session_context_segments WHERE session_id = ? AND generation_id = ? ORDER BY segment_ordinal`, func(stmt *sqlite.Stmt) error {
 		segment := GenerationSegment{

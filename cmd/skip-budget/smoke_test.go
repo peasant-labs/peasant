@@ -55,6 +55,12 @@ const (
 	childModeRunParentPID    childMode = "run-parent-pid"
 	childModeRunUnknownCause childMode = "run-unknown-reason"
 	childModeRunTwoSamples   childMode = "run-two-samples"
+	// childModeRunRefusingStore runs the sample against a store that refuses
+	// every settle as stale work.
+	childModeRunRefusingStore childMode = "run-refusing-store"
+	// childModeRunUnequalArms runs the sample, then changes one session's
+	// state digest in the skip arm only.
+	childModeRunUnequalArms childMode = "run-unequal-arms"
 )
 
 // misreports rewrites an honest case-arm sample before the child prints it.
@@ -67,6 +73,15 @@ var misreports = map[childMode]func(*sample){
 	childModeRunParentPID: func(s *sample) { s.PID = os.Getppid() },
 	// A reason id this build does not define prints an empty code.
 	childModeRunUnknownCause: func(s *sample) { s.Census[0].Reason = ingest.OutcomeReason(-1) },
+	childModeRunUnequalArms: func(s *sample) {
+		if s.Arm != armSkip {
+			return
+		}
+		for sid := range s.Equivalence {
+			s.Equivalence[sid]["entries"] = "0:unrouted"
+			return
+		}
+	},
 }
 
 func init() { runTestChild = runChildIfAsked }
@@ -113,6 +128,9 @@ func runTestChildMode(mode childMode, f sampleFlags) error {
 		return runSampleChild(ctx, f, sessions, smokeEntries, os.Stdout)
 	case childModeRun:
 		return runSampleChild(ctx, f, smokeSessions, smokeEntries, os.Stdout)
+	case childModeRunRefusingStore:
+		refuseSettlesForTest = true
+		return runSampleChild(ctx, f, smokeSessions, smokeEntries, os.Stdout)
 	}
 	var out bytes.Buffer
 	if err := runSampleChild(ctx, f, smokeSessions, smokeEntries, &out); err != nil {
@@ -153,13 +171,15 @@ func (c *testChildCommand) command(f sampleFlags) *exec.Cmd {
 }
 
 type smokeSampleCase struct {
-	Name      string     `yaml:"name"`
-	Sample    sampleKind `yaml:"sample"`
-	Child     childMode  `yaml:"child"`
-	Sessions  int        `yaml:"sessions"`
-	Rounds    int        `yaml:"rounds"`
-	WantOrder []arm      `yaml:"wantOrder"`
-	WantError string     `yaml:"wantError"`
+	Name   string     `yaml:"name"`
+	Sample sampleKind `yaml:"sample"`
+	// Case is the corpus case a case-arm row runs; empty means C1.
+	Case      upgrade.MeasurementCase `yaml:"case"`
+	Child     childMode               `yaml:"child"`
+	Sessions  int                     `yaml:"sessions"`
+	Rounds    int                     `yaml:"rounds"`
+	WantOrder []arm                   `yaml:"wantOrder"`
+	WantError string                  `yaml:"wantError"`
 }
 
 // TestSmokeSamplesRunInChildProcesses drives the new-session smoke runner
@@ -228,15 +248,23 @@ func testImportSamples(t *testing.T, c smokeSampleCase) {
 	}
 }
 
-// testRunSamples runs c.Rounds smoke rounds (default one) of the stamp-only
-// case, both arms, with the test binary as each arm's child.
+// testRunSamples runs c.Rounds smoke rounds (default one) of the row's case
+// (default the stamp-only case), both arms, with the test binary as each
+// arm's child.
 func testRunSamples(t *testing.T, c smokeSampleCase) {
 	root := t.TempDir()
 	rounds := max(c.Rounds, 1)
+	id := upgrade.MeasurementCaseStampOnly
+	if c.Case != "" {
+		var err error
+		if id, err = upgrade.NewMeasurementCase(string(c.Case)); err != nil {
+			t.Fatal(err)
+		}
+	}
 	child := &testChildCommand{mode: c.Child}
 	opts := harnessOptions{root: root, sessions: smokeSessions, entries: smokeEntries, rounds: rounds}
-	path, err := runCase(context.Background(), caseSpecs()[upgrade.MeasurementCaseStampOnly], opts, child.command)
-	reportPath := filepath.Join(root, string(upgrade.MeasurementCaseStampOnly), "report.json")
+	path, err := runCase(context.Background(), caseSpecs()[id], opts, child.command)
+	reportPath := filepath.Join(root, string(id), "report.json")
 	if c.WantError != "" {
 		if err == nil || !strings.Contains(err.Error(), c.WantError) {
 			t.Fatalf("runCase error = %v, want one containing %q", err, c.WantError)
@@ -273,12 +301,31 @@ func testRunSamples(t *testing.T, c smokeSampleCase) {
 	if len(all) != samplesPerRound*rounds {
 		t.Fatalf("report holds %d samples, want both arms of %d rounds", len(all), rounds)
 	}
+	if caseSpecs()[id].equivalent {
+		assertHashDriftBreakdown(t, report, rounds)
+	}
 	pids := map[int]bool{os.Getpid(): true}
 	for _, s := range all {
 		if pids[s.PID] {
 			t.Fatalf("sample %s round %d ran in pid %d, which the runner or another sample used", s.Arm, s.Round, s.PID)
 		}
 		pids[s.PID] = true
+	}
+}
+
+// assertHashDriftBreakdown requires the skip arm's breakdown to name every
+// session of every round as validated, with a measured validation time.
+func assertHashDriftBreakdown(t *testing.T, report caseReport, rounds int) {
+	t.Helper()
+	if len(report.Breakdown) != 1 {
+		t.Fatalf("breakdown %+v, want only validated sessions", report.Breakdown)
+	}
+	row := report.Breakdown[0]
+	if row.Outcome != outcomeValidated || row.Sessions != smokeSessions*rounds || row.MedianValidateMs <= 0 || row.MedianParseMs != 0 {
+		t.Fatalf("breakdown row %+v, want %d validated sessions with a validation time and no parse", row, smokeSessions*rounds)
+	}
+	if report.Skip.MedianValidateMs <= 0 || report.Baseline.MedianValidateMs != 0 {
+		t.Fatalf("median validate ms skip %v baseline %v, want a skip-arm time and none in the baseline", report.Skip.MedianValidateMs, report.Baseline.MedianValidateMs)
 	}
 }
 

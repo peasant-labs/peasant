@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -20,7 +21,10 @@ import (
 // fallback consults structural sibling snapshots through the same accessor the
 // stored adapter uses.
 
-var _ GenerationBuilder = (*ClaudeIndexer)(nil)
+var (
+	_ GenerationBuilder         = (*ClaudeIndexer)(nil)
+	_ GenerationMetadataBuilder = (*ClaudeIndexer)(nil)
+)
 
 // claudeCandidateRefusal is the fixed-shape, sanitized refusal for the Claude
 // candidate boundary. It names the harness and session identity plus a fixed
@@ -84,19 +88,64 @@ func (idx *ClaudeIndexer) BuildGeneration(ctx context.Context, in GenerationBuil
 	return candidate, nil
 }
 
-// buildClaudeGeneration composes the Claude candidate from the attempt's
-// captured bytes and recorded metadata. It never consults the stored-capture
-// authority: a Claude candidate is proven from the captured pair, and the prior
-// only supplies the reusable alias state a refresh must retain.
-func (idx *ClaudeIndexer) buildClaudeGeneration(ctx context.Context, in GenerationBuildInput) (GenerationCandidate, error) {
-	if in.GenerationID == "" {
-		return GenerationCandidate{}, fmt.Errorf("ingest.ClaudeIndexer.BuildGeneration: no generation identity was supplied for session %s; activation owns generation addressing and the projection invents none; wire the generation identity before requesting a candidate", in.Session.SessionID)
+// claudeMetadataHalfMutationForTest is nil in production. A test sets it to
+// change the metadata BuildGenerationMetadata returns, so a mutation of the
+// metadata half can be shown to fail the parity and validation tests. Only
+// BuildGenerationMetadata reads it; BuildGeneration never does, and no
+// production file assigns it (a source guard enforces both).
+var claudeMetadataHalfMutationForTest func(in GenerationBuildInput, metadata *UnifiedMetadata)
+
+// BuildGenerationMetadata runs the metadata half of BuildGeneration: the
+// re-gate, the stored metadata extraction, the retained identity proof and the
+// transcript metadata parse, with no entry parse, classification or
+// projection. It returns the metadata exactly as BuildGeneration hands it to
+// the projection, so its stats are the parse's own and not the projection's
+// strict counts. Any failure leaves through the same fixed sanitized refusal
+// as BuildGeneration, and means the caller has no candidate.
+func (idx *ClaudeIndexer) BuildGenerationMetadata(ctx context.Context, in GenerationBuildInput) (GenerationMetadataCandidate, error) {
+	if err := ctx.Err(); err != nil {
+		return GenerationMetadataCandidate{}, claudeMetadataCompletionFailure(in.Session)
 	}
+	half, err := idx.claudeCandidateMetadata(ctx, in)
+	if err != nil {
+		return GenerationMetadataCandidate{}, claudeMetadataCompletionFailure(in.Session)
+	}
+	if mutate := claudeMetadataHalfMutationForTest; mutate != nil {
+		mutate(in, &half.metadata)
+	}
+	return GenerationMetadataCandidate{
+		Metadata:             half.metadata,
+		Completeness:         indexformat.GenerationCompletenessComplete,
+		SourceEvidenceDigest: half.metadata.ContentHash,
+	}, nil
+}
+
+// claudeMetadataCompletionFailure is BuildGenerationMetadata's form of the
+// fixed Claude refusal: the same reason, effect and recovery, naming the
+// metadata operation.
+func claudeMetadataCompletionFailure(session DiscoveredSession) error {
+	refusal := claudeCandidateCompletionFailure(session).(*claudeCandidateRefusal)
+	refusal.Operation = "ClaudeIndexer.BuildGenerationMetadata"
+	return refusal
+}
+
+// claudeMetadataResult is the metadata half's output: the candidate metadata
+// before the entry parse.
+type claudeMetadataResult struct {
+	metadata UnifiedMetadata
+}
+
+// claudeCandidateMetadata is the metadata half both BuildGeneration and
+// BuildGenerationMetadata run: everything the builder does before its entry
+// parse. It never writes to in.RecordedMetadata: the extraction deep-copies
+// the recorded metadata before it appends, and the identity proof copies the
+// recorded relationships before it edits them.
+func (idx *ClaudeIndexer) claudeCandidateMetadata(ctx context.Context, in GenerationBuildInput) (claudeMetadataResult, error) {
 	if in.CapturedTranscript == nil {
-		return GenerationCandidate{}, fmt.Errorf("ingest.ClaudeIndexer.BuildGeneration: no captured transcript was supplied for session %s; a managed candidate indexes exactly the verified capture; capture the session bytes before requesting a candidate", in.Session.SessionID)
+		return claudeMetadataResult{}, fmt.Errorf("ingest.ClaudeIndexer.BuildGeneration: no captured transcript was supplied for session %s; a managed candidate indexes exactly the verified capture; capture the session bytes before requesting a candidate", in.Session.SessionID)
 	}
 	if in.RecordedMetadata == nil {
-		return GenerationCandidate{}, fmt.Errorf("ingest.ClaudeIndexer.BuildGeneration: no recorded metadata agreement was supplied for session %s; the candidate cannot be indexed against an identity; provide the committed metadata", in.Session.SessionID)
+		return claudeMetadataResult{}, fmt.Errorf("ingest.ClaudeIndexer.BuildGeneration: no recorded metadata agreement was supplied for session %s; the candidate cannot be indexed against an identity; provide the committed metadata", in.Session.SessionID)
 	}
 	data := in.CapturedTranscript
 
@@ -117,20 +166,53 @@ func (idx *ClaudeIndexer) buildClaudeGeneration(ctx context.Context, in Generati
 	}
 	metadata, err := metadataForTranscriptExtraction(ctx, HarnessClaudeCode, data, recorded)
 	if err != nil {
-		return GenerationCandidate{}, err
+		return claudeMetadataResult{}, err
 	}
 	allowed, relationships, err := verifyRetainedClaudeIdentityWith(data, in.RecordedMetadata, metadata.ContentHash, claudeIdentitySnapshotFrom(idx.fs))
 	if err != nil {
-		return GenerationCandidate{}, err
+		return claudeMetadataResult{}, err
 	}
 	parsed := NewUnifiedMetadata()
 	parsed.SessionID = in.RecordedMetadata.SessionID
 	if _, err := parseClaudeTranscriptMetadataWithIdentity(data, &parsed, allowed); err != nil {
-		return GenerationCandidate{}, err
+		return claudeMetadataResult{}, err
 	}
 	if err := transcriptMetadataParsingError(HarnessClaudeCode, &parsed); err != nil {
+		return claudeMetadataResult{}, err
+	}
+
+	metadata.SessionID = in.Session.SessionID
+	metadata.ModelHarness = HarnessClaudeCode
+	metadata.Model = parsed.Model
+	metadata.Version = parsed.Version
+	metadata.Relationships = relationships
+	// Relationships come from the proof, never a blind metadata copy; the root
+	// stays unset because the captured artifact carries no native root evidence.
+	metadata.RootSessionID = nil
+	metadata.Timestamp.Start, metadata.Timestamp.End = parsed.Timestamp.Start, parsed.Timestamp.End
+	metadata.Stats.DurationMs = parsed.Stats.DurationMs
+	metadata.Stats.TurnCount, metadata.Stats.ToolCallCount = parsed.Stats.TurnCount, parsed.Stats.ToolCallCount
+	metadata.Stats.TokensIn, metadata.Stats.TokensOut = parsed.Stats.TokensIn, parsed.Stats.TokensOut
+	// A fresh slice: the result never shares a backing array with the
+	// extraction's copy or with the parse.
+	metadata.Diagnostics.Warnings = slices.Concat(metadata.Diagnostics.Warnings, parsed.Diagnostics.Warnings)
+	return claudeMetadataResult{metadata: *metadata}, nil
+}
+
+// buildClaudeGeneration composes the Claude candidate from the attempt's
+// captured bytes and recorded metadata. It never consults the stored-capture
+// authority: a Claude candidate is proven from the captured pair, and the prior
+// only supplies the reusable alias state a refresh must retain.
+func (idx *ClaudeIndexer) buildClaudeGeneration(ctx context.Context, in GenerationBuildInput) (GenerationCandidate, error) {
+	if in.GenerationID == "" {
+		return GenerationCandidate{}, fmt.Errorf("ingest.ClaudeIndexer.BuildGeneration: no generation identity was supplied for session %s; activation owns generation addressing and the projection invents none; wire the generation identity before requesting a candidate", in.Session.SessionID)
+	}
+	half, err := idx.claudeCandidateMetadata(ctx, in)
+	if err != nil {
 		return GenerationCandidate{}, err
 	}
+	metadata := half.metadata
+	data := in.CapturedTranscript
 
 	// The tolerant classification parse mirrors the retained harvest parse:
 	// completion-less, full-depth, full-content, retaining unknown evidence, so
@@ -149,20 +231,6 @@ func (idx *ClaudeIndexer) buildClaudeGeneration(ctx context.Context, in Generati
 		return GenerationCandidate{}, err
 	}
 
-	metadata.SessionID = in.Session.SessionID
-	metadata.ModelHarness = HarnessClaudeCode
-	metadata.Model = parsed.Model
-	metadata.Version = parsed.Version
-	metadata.Relationships = relationships
-	// Relationships come from the proof, never a blind metadata copy; the root
-	// stays unset because the captured artifact carries no native root evidence.
-	metadata.RootSessionID = nil
-	metadata.Timestamp.Start, metadata.Timestamp.End = parsed.Timestamp.Start, parsed.Timestamp.End
-	metadata.Stats.DurationMs = parsed.Stats.DurationMs
-	metadata.Stats.TurnCount, metadata.Stats.ToolCallCount = parsed.Stats.TurnCount, parsed.Stats.ToolCallCount
-	metadata.Stats.TokensIn, metadata.Stats.TokensOut = parsed.Stats.TokensIn, parsed.Stats.TokensOut
-	metadata.Diagnostics.Warnings = append(metadata.Diagnostics.Warnings, parsed.Diagnostics.Warnings...)
-
 	priorState := NewProjectionPriorState()
 	if in.Prior != nil {
 		prior, priorErr := in.Prior.ReadGenerationPrior(ctx)
@@ -179,7 +247,7 @@ func (idx *ClaudeIndexer) buildClaudeGeneration(ctx context.Context, in Generati
 		ID:                   in.GenerationID,
 		SessionID:            in.Session.SessionID,
 		Harness:              HarnessClaudeCode,
-		Metadata:             *metadata,
+		Metadata:             metadata,
 		SourceEvidenceDigest: metadata.ContentHash,
 		Completeness:         indexformat.GenerationCompletenessComplete,
 		Blocks:               blocks,

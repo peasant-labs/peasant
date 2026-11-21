@@ -80,6 +80,9 @@ type claudeProducerCase struct {
 	RecordedContextFrom string `yaml:"recordedContextFrom"`
 	// RecordedStartedBy carries a recorded started_by proof naming it.
 	RecordedStartedBy string `yaml:"recordedStartedBy"`
+	// RecordedRelationships appends further recorded relationships, stated
+	// field by field.
+	RecordedRelationships []claudeRecordedRelationship `yaml:"recordedRelationships"`
 	// RecordedContentHash binds the recorded relationship to the transcript
 	// bytes, as a stored artifact does.
 	RecordedContentHash bool `yaml:"recordedContentHash"`
@@ -113,6 +116,16 @@ type claudeProducerCase struct {
 	Keys                   []string              `yaml:"keys"`
 	AcceptKeys             []string              `yaml:"acceptKeys"`
 	Entries                []claudeProducerEntry `yaml:"entries"`
+}
+
+// claudeRecordedRelationship is one recorded relationship a fixture row adds
+// to the recorded metadata.
+type claudeRecordedRelationship struct {
+	Kind        string `yaml:"kind"`
+	TargetState string `yaml:"targetState"`
+	Target      string `yaml:"target"`
+	Evidence    string `yaml:"evidence"`
+	AnchorKind  string `yaml:"anchorKind"`
 }
 
 type claudeProducerDocument struct {
@@ -153,7 +166,10 @@ func TestClaudeProducerFixture(t *testing.T) {
 	}
 }
 
-func runClaudeProducerCase(t *testing.T, row claudeProducerCase) {
+// claudeProducerInput builds the production Claude indexer and the builder
+// input one producer row describes, over a counting in-memory filesystem that
+// holds the row's structural sibling proofs.
+func claudeProducerInput(t *testing.T, row claudeProducerCase) (*ingest.ClaudeIndexer, ingest.GenerationBuildInput, *testutil.CountingFS, string, string) {
 	t.Helper()
 	sessionID := row.RecordedSessionID
 	if sessionID == "" {
@@ -223,6 +239,25 @@ func runClaudeProducerCase(t *testing.T, row claudeProducerCase) {
 		})
 	}
 
+	for _, recorded := range row.RecordedRelationships {
+		relationship := schema.SessionRelationship{
+			Kind:        schema.SessionRelationshipKind(recorded.Kind),
+			TargetState: schema.RelationshipTargetState(recorded.TargetState),
+			Evidence:    schema.EvidenceKind(recorded.Evidence),
+		}
+		if recorded.Target != "" {
+			target, err := ingest.NewSessionID(recorded.Target)
+			if err != nil {
+				t.Fatalf("recorded relationship target %q: %v", recorded.Target, err)
+			}
+			relationship.TargetLocalID = &target
+		}
+		if recorded.AnchorKind != "" {
+			relationship.Anchor = &schema.PublicSourceAnchor{Kind: schema.PublicSourceAnchorKind(recorded.AnchorKind)}
+		}
+		metadata.Relationships = append(metadata.Relationships, relationship)
+	}
+
 	idx := ingest.NewClaudeIndexer(mfs,
 		ingest.WithClaudeFullDepth(true),
 		ingest.WithClaudeFullContent(true),
@@ -232,7 +267,7 @@ func runClaudeProducerCase(t *testing.T, row claudeProducerCase) {
 	if err != nil {
 		t.Fatalf("fixture session id: %v", err)
 	}
-	candidate, err := idx.BuildGeneration(t.Context(), ingest.GenerationBuildInput{
+	return idx, ingest.GenerationBuildInput{
 		Session: ingest.DiscoveredSession{
 			SessionID:      sessionIDValue,
 			Harness:        ingest.HarnessClaudeCode,
@@ -243,7 +278,13 @@ func runClaudeProducerCase(t *testing.T, row claudeProducerCase) {
 		GenerationID:       "gen-fixture-" + row.Name,
 		RecordedMetadata:   metadata,
 		CapturedTranscript: []byte(row.Transcript),
-	})
+	}, mfs, sessionID, sourcePath
+}
+
+func runClaudeProducerCase(t *testing.T, row claudeProducerCase) {
+	t.Helper()
+	idx, input, mfs, sessionID, sourcePath := claudeProducerInput(t, row)
+	candidate, err := idx.BuildGeneration(t.Context(), input)
 	if got := mfs.Count(testutil.FSOpReadFile, sourcePath); got != 0 {
 		t.Fatalf("provider-source reads of %q = %d, want 0: the ordinary branch proves the candidate from the captured bytes", sourcePath, got)
 	}

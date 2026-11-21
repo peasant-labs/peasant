@@ -43,7 +43,7 @@ const (
 	// StageRefreshProof counts attempted equality proofs; Done is the number
 	// proven and Total is the number attempted.
 	StageRefreshProof Stage = "refresh_proof"
-	// StageRefreshValidate counts attempts in Total, not completed work in Done.
+	// StageRefreshValidate counts attempts in Total and proven results in Done.
 	StageRefreshValidate Stage = "refresh_validate"
 	// StageRefreshValidateUnsupported counts unsupported results in Total.
 	StageRefreshValidateUnsupported Stage = "refresh_validate_unsupported"
