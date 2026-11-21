@@ -417,7 +417,7 @@ WHERE session_search_fts MATCH ?
       AND EXISTS (
         SELECT 1 FROM sessions s2
         JOIN session_generations g ON g.session_id = s2.session_id AND g.generation_id = s2.active_generation_id
-        JOIN session_generation_entries m ON m.session_id = b.session_id AND m.generation_id = COALESCE(g.mapping_set_id, g.generation_id) AND m.partition_id = 0 AND m.body_digest = b.body_digest
+        JOIN session_generation_entries m ON m.session_id = b.session_id AND m.generation_id = %s AND m.partition_id = 0 AND m.body_digest = b.body_digest
         WHERE s2.session_id = b.session_id
       )
       AND NOT (
@@ -429,7 +429,7 @@ WHERE session_search_fts MATCH ?
           FROM session_generation_entries pm
           JOIN session_entry_bodies pb ON pb.session_id = pm.session_id AND pb.body_digest = pm.body_digest
           WHERE pm.session_id = b.session_id
-            AND pm.generation_id = (SELECT COALESCE(g2.mapping_set_id, s3.active_generation_id) FROM sessions s3 LEFT JOIN session_generations g2 ON g2.session_id = s3.session_id AND g2.generation_id = s3.active_generation_id WHERE s3.session_id = b.session_id)
+            AND pm.generation_id = %s
             AND pm.partition_id = 0
             AND pm.entry_index = b.parent_index
         )
@@ -437,6 +437,13 @@ WHERE session_search_fts MATCH ?
     )
   )%s
 %s`
+
+const (
+	searchActiveGenPre82    = `g.generation_id`
+	searchActiveGenSchema82 = `COALESCE(g.mapping_set_id, g.generation_id)`
+	searchParentGenPre82    = `(SELECT active_generation_id FROM sessions WHERE session_id = b.session_id)`
+	searchParentGenSchema82 = `(SELECT COALESCE(g2.mapping_set_id, s3.active_generation_id) FROM sessions s3 LEFT JOIN session_generations g2 ON g2.session_id = s3.session_id AND g2.generation_id = s3.active_generation_id WHERE s3.session_id = b.session_id)`
+)
 
 const searchRankedTail = "ORDER BY rank, f.session_id, f.entry_index\nLIMIT ? OFFSET ?"
 
@@ -448,25 +455,51 @@ func searchFilterSQL(filters SearchFilters) (string, []any) {
 	return "\n  AND (" + strings.Join(conditions, " AND ") + ")", args
 }
 
-func renderUnifiedSearchSQL(filters SearchFilters, columns, tail string) (string, []any) {
+func renderUnifiedSearchSQL(filters SearchFilters, columns, tail string, hasMappingSet bool) (string, []any) {
+	activeGen, parentGen := searchActiveGenPre82, searchParentGenPre82
+	if hasMappingSet {
+		activeGen, parentGen = searchActiveGenSchema82, searchParentGenSchema82
+	}
 	predicate, args := searchFilterSQL(filters)
 	return fmt.Sprintf(unifiedSearchSQLTemplate, columns,
-		BodyRowIDBase, BodyRowIDBase, BodyRowIDBase, BodyRowIDBase, predicate, tail), args
+		BodyRowIDBase, BodyRowIDBase, BodyRowIDBase, BodyRowIDBase,
+		activeGen, parentGen, predicate, tail), args
 }
 
 func unifiedSearchSQL(filters SearchFilters) (string, []any) {
-	return renderUnifiedSearchSQL(filters, unifiedSearchColumns, searchRankedTail)
+	return renderUnifiedSearchSQL(filters, unifiedSearchColumns, searchRankedTail, true)
 }
 
 func unifiedSearchExistsSQL(filters SearchFilters) (string, []any) {
-	return renderUnifiedSearchSQL(filters, " 1", "LIMIT 1")
+	return renderUnifiedSearchSQL(filters, " 1", "LIMIT 1", true)
+}
+
+func unifiedSearchSQLOnConn(conn *sqlite.Conn, filters SearchFilters) (string, []any, error) {
+	hasMappingSet, err := mappingSetColumnOnConn(conn)
+	if err != nil {
+		return "", nil, err
+	}
+	query, args := renderUnifiedSearchSQL(filters, unifiedSearchColumns, searchRankedTail, hasMappingSet)
+	return query, args, nil
+}
+
+func unifiedSearchExistsSQLOnConn(conn *sqlite.Conn, filters SearchFilters) (string, []any, error) {
+	hasMappingSet, err := mappingSetColumnOnConn(conn)
+	if err != nil {
+		return "", nil, err
+	}
+	query, args := renderUnifiedSearchSQL(filters, " 1", "LIMIT 1", hasMappingSet)
+	return query, args, nil
 }
 
 // searchUnifiedOnConn runs the consolidated-index query on the caller's
 // connection. The caller checks the rebuild flag first: while it is set
 // search refuses instead of serving postings that may be stale.
 func searchUnifiedOnConn(conn *sqlite.Conn, match string, limit, offset int, filters SearchFilters) ([]UnifiedSearchHit, error) {
-	query, args := unifiedSearchSQL(filters)
+	query, args, err := unifiedSearchSQLOnConn(conn, filters)
+	if err != nil {
+		return nil, fmt.Errorf("store: search the consolidated index for %q at offset %d with limit %d: %w", match, offset, limit, err)
+	}
 	args = append(append([]any{match}, args...), limit, offset)
 	var hits []UnifiedSearchHit
 	if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
@@ -659,7 +692,10 @@ func SearchMatchesAnyOnConn(conn *sqlite.Conn, match string, filters SearchFilte
 		return false, fmt.Errorf("store: check for search matches for %q: no search index exists; run `peasant harvest index` to build one", match)
 	}
 	if unified {
-		query, args := unifiedSearchExistsSQL(filters)
+		query, args, err := unifiedSearchExistsSQLOnConn(conn, filters)
+		if err != nil {
+			return false, fmt.Errorf("store: check for search matches for %q: %w", match, err)
+		}
 		found, err := searchExistsOnConn(conn, query, append([]any{match}, args...))
 		if err != nil || found {
 			return found, err
