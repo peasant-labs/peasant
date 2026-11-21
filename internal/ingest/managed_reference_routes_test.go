@@ -1,6 +1,7 @@
 package ingest_test
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"errors"
@@ -316,15 +317,17 @@ func managedReferenceRoutes() map[string]func(*testing.T) {
 			if result.Summary.Errors != 0 || routeParses(result) == 0 {
 				t.Fatalf("summary %+v, parses %d; want the forced run to parse", result.Summary, routeParses(result))
 			}
+			assertMatchesPlainParse(t, seed, detailOfEvery(t, seed), nil)
 		},
 		"reindex-skips-the-step": func(t *testing.T) {
 			seed := renamedRoute(t)
 			profiler := &ingest.IndexProfiler{}
 			result := runRealRoute(t, seed, newReferenceRouteStore(seed.db), seed.source, realRouteRun{reindex: true, profiler: profiler})
 			assertNoReference(t, profiler)
-			if result.Summary.Errors != 0 {
-				t.Fatalf("summary %+v; want the reindex run to finish without errors", result.Summary)
+			if result.Summary.Errors != 0 || routeParses(result) != 0 {
+				t.Fatalf("summary %+v, parses %d; want the reindex run to finish without errors and without parsing an already-current session", result.Summary, routeParses(result))
 			}
+			assertMatchesPlainParse(t, seed, detailOfEvery(t, seed), nil)
 		},
 		"disable-refresh-skips-skips-the-step": func(t *testing.T) {
 			seed := renamedRoute(t)
@@ -378,6 +381,9 @@ func managedReferenceRoutes() map[string]func(*testing.T) {
 				}
 			})
 			rewriteManagedMetadata(t, seed.output, func(_ string, metadata *schema.UnifiedMetadata) { metadata.Project.Name = referenceRouteProject }, string(fork))
+			seed.snapshot(t)
+			before := managedRefreshPipelineActiveGeneration(t, seed.db, fork)
+			beforeDetail := sessionDetailBytes(t, seed, fork)
 			observed := newReferenceRouteStore(seed.db)
 			halves := newHalfRecorder()
 			prove := &oracleProveSeam{halfValidatingStore: observed.halfValidatingStore, before: func() { removeOracleFiles(t, seed.source, []string{parent}) }}
@@ -392,6 +398,26 @@ func managedReferenceRoutes() map[string]func(*testing.T) {
 			assertNoReference(t, profiler)
 			if parses := routeParses(result); parses != 1 {
 				t.Fatalf("parses %d, want the fork to parse once", parses)
+			}
+			refused := false
+			for _, entry := range result.IndexLog {
+				if entry.SessionID == fork && entry.Outcome != ingest.IndexOutcomeSkipped && entry.Outcome != ingest.IndexOutcomeIndexed {
+					refused = true
+				}
+			}
+			for _, session := range result.Sessions {
+				if session.SessionID == fork && session.Error != nil {
+					refused = true
+				}
+			}
+			if !refused {
+				t.Fatalf("the fork's parse recorded no refusal: index log %+v", result.IndexLog)
+			}
+			if after := managedRefreshPipelineActiveGeneration(t, seed.db, fork); after != before {
+				t.Fatalf("the refused parse moved the active generation %s -> %s", before, after)
+			}
+			if afterDetail := sessionDetailBytes(t, seed, fork); !bytes.Equal(afterDetail, beforeDetail) {
+				t.Fatalf("the refused parse changed session_detail bytes:\nbefore %s\nafter  %s", beforeDetail, afterDetail)
 			}
 		},
 	}
