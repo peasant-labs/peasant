@@ -10,19 +10,21 @@ import (
 )
 
 // SkipDisposition names the skip a lane takes. The stored-metadata lane skips
-// the parse through a proven settle, or through a validated settle when the
-// proof fails only on the metadata or redaction context; any other failed
-// proof parses, so it has no skip of its own to budget.
+// the parse through a proven settle, through a validated settle when the
+// proof fails only on the metadata or redaction context and the stored context
+// matches, or through a reference install when the context changed; any other
+// failed proof parses, so it has no skip of its own to budget.
 type SkipDisposition string
 
 const (
-	SkipProven    SkipDisposition = "proven"
-	SkipValidated SkipDisposition = "validated"
-	SkipIndex     SkipDisposition = "index"
+	SkipProven     SkipDisposition = "proven"
+	SkipValidated  SkipDisposition = "validated"
+	SkipReferenced SkipDisposition = "referenced"
+	SkipIndex      SkipDisposition = "index"
 )
 
 // AllSkipDispositions lists every disposition, in planning order.
-var AllSkipDispositions = []SkipDisposition{SkipProven, SkipValidated, SkipIndex}
+var AllSkipDispositions = []SkipDisposition{SkipProven, SkipValidated, SkipReferenced, SkipIndex}
 
 // NewSkipDisposition validates a raw disposition at an input boundary.
 func NewSkipDisposition(raw string) (SkipDisposition, error) {
@@ -45,7 +47,7 @@ func PlannedSkipPaths() ([]SkipPath, error) {
 		switch lane {
 		case ingest.RefreshLaneNone, ingest.RefreshLaneNative:
 		case ingest.RefreshLaneStoredMetadata:
-			paths = append(paths, SkipPath{lane, SkipProven}, SkipPath{lane, SkipValidated})
+			paths = append(paths, SkipPath{lane, SkipProven}, SkipPath{lane, SkipValidated}, SkipPath{lane, SkipReferenced})
 		case ingest.RefreshLaneStoredIndex:
 			paths = append(paths, SkipPath{lane, SkipIndex})
 		default:
