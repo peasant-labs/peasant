@@ -62,7 +62,9 @@ func buildRootCommand() *cobra.Command {
 			return cmd.Help()
 		},
 	}
-	rootCmd.PersistentFlags().String("config", string(defaults.Config.FilePath), "Path to config file (default: ~/.config/peasant/config.yaml)")
+	// The flag's default is the resolved path, which Cobra already prints as
+	// (default "..."); the usage text must not carry a second default.
+	rootCmd.PersistentFlags().String("config", string(defaults.Config.FilePath), "Path to config file")
 	rootCmd.PersistentFlags().String("data-dir", "", "Override the data directory (default: $XDG_DATA_HOME or ~/.local/share); the DB + peasant-sync live under <data-dir>/peasant")
 	rootCmd.PersistentFlags().String("config-dir", "", "Override the config directory (default: $XDG_CONFIG_HOME or ~/.config); config lives under <config-dir>/peasant")
 	rootCmd.PersistentFlags().String("state-dir", "", "Override the state directory (default: $XDG_STATE_HOME or ~/.local/state); logs/PID live under <state-dir>/peasant")
@@ -80,7 +82,7 @@ func buildRootCommand() *cobra.Command {
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		requested, err := cmd.Flags().GetBool("version")
 		if err != nil || !requested {
-			return nil
+			return silenceUsageAfterInvocationChecks(cmd)
 		}
 		// Same print path as the version subcommand; the sentinel error is
 		// then mapped to exit 0 by main. Cobra would otherwise echo the empty
@@ -112,16 +114,48 @@ func buildRootCommand() *cobra.Command {
 // The visible behavior of the group commands is unchanged: `peasant web` still
 // prints web's help and exits 0, exactly where the non-runnable ErrHelp path
 // ended. Commands that already run something (a builder-owned Run/RunE, such
-// as `sessions`) are left untouched.
+// as `sessions`) keep their RunE.
+//
+// Every group, the ones given a RunE here and builder-owned ones alike, also
+// refuses positional arguments unless its builder declared an Args validator.
+// Cobra checks for unknown subcommands only at the root, so without this
+// `peasant sessions bogus` or `peasant village bogus` would print help and
+// exit 0. With it they fail like `peasant bogus`: an unknown-command error,
+// the usage block, and exit 1.
 func makeGroupCommandsRunnable(cmd *cobra.Command) {
 	for _, sub := range cmd.Commands() {
-		if !sub.Runnable() && len(sub.Commands()) > 0 {
-			sub.RunE = func(c *cobra.Command, args []string) error {
-				return c.Help()
+		if len(sub.Commands()) > 0 {
+			if !sub.Runnable() {
+				sub.RunE = func(c *cobra.Command, args []string) error {
+					return c.Help()
+				}
+			}
+			if sub.Args == nil {
+				sub.Args = cobra.NoArgs
 			}
 		}
 		makeGroupCommandsRunnable(sub)
 	}
+}
+
+// silenceUsageAfterInvocationChecks turns the usage block off once the
+// invocation itself is known to be well formed, so a runtime failure (a failed
+// harvest, an unreadable config, a missing session) prints only its error.
+//
+// When the persistent pre-run fires, Cobra has already parsed the flags and
+// validated the positional arguments; those failures still print usage. Cobra
+// validates required flags and flag groups only AFTER this hook, so they are
+// checked here first: a missing required flag or a broken flag group is an
+// invocation error and keeps its usage block.
+func silenceUsageAfterInvocationChecks(cmd *cobra.Command) error {
+	if err := cmd.ValidateRequiredFlags(); err != nil {
+		return err
+	}
+	if err := cmd.ValidateFlagGroups(); err != nil {
+		return err
+	}
+	cmd.SilenceUsage = true
+	return nil
 }
 
 // exitCodeFor maps a command failure to the status peasant exits with.

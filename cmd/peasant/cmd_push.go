@@ -1770,12 +1770,18 @@ func firstPushStageError(transcriptErr, annotationErr error) error {
 // sessions this build can have stored, and changes when an adapter is added or
 // removed.
 func sourceHarnessHelp() string {
+	return fmt.Sprintf("Filter to a specific harness (%s)", harvestableHarnessList())
+}
+
+// harvestableHarnessList renders ingest.HarvestableHarnesses() as the
+// comma-separated list that harness-filter help text embeds.
+func harvestableHarnessList() string {
 	harvestable := ingest.HarvestableHarnesses()
 	names := make([]string, len(harvestable))
 	for i, h := range harvestable {
 		names[i] = h.String()
 	}
-	return fmt.Sprintf("Filter to a specific harness (%s)", strings.Join(names, ", "))
+	return strings.Join(names, ", ")
 }
 
 // buildAnnotationSelection assembles a push.AnnotationSelection from the
