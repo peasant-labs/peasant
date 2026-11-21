@@ -346,6 +346,8 @@ type SourceConfig struct {
 
 // DiscoveredSession represents a session found during discovery.
 type DiscoveredSession struct {
+	// openCodeRecognition is transient evidence from stored-session lookup.
+	openCodeRecognition *openCodeProjectionRecognition
 	// ContentOmitted is carried from stored metadata when ingestion removed
 	// source records. A filtered artifact cannot certify a complete capture.
 	ContentOmitted bool

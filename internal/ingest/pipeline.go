@@ -5467,13 +5467,14 @@ func (p *Pipeline) readSessionMetadata(hostDir string, sid SessionID, logPrefix 
 			slog.Warn(logPrefix+": managed transcript unreadable", "session_id", sid, "error", readErr)
 			return nil, readErr
 		}
-		origin, recognitionErr := recognizeManagedOpenCodeProjection(transcriptData, sid)
+		recognition, recognitionErr := captureOpenCodeProjectionRecognition(transcriptData, sid)
 		if recognitionErr != nil {
 			p.reportMetadataRefusal(string(sid), recognitionErr)
 			slog.Warn(logPrefix+": managed OpenCode projection is corrupt", "session_id", sid, "transcript_path", transcriptPath, "error", recognitionErr, "impact", "recovery stopped before legacy fallback so existing index state is not replaced with an empty corpus", "fix", "re-run harvest to regenerate the managed transcript")
 			return nil, recognitionErr
 		}
-		ds.TranscriptOrigin = origin
+		ds.TranscriptOrigin = recognition.origin
+		ds.openCodeRecognition = recognition
 	}
 	if meta.ParentUUID != nil {
 		ds.ParentUUID = meta.ParentUUID
