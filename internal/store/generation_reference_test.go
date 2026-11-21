@@ -49,6 +49,7 @@ const (
 	referenceKindCrash          = "crash"
 	referenceKindMoved          = "moved"
 	referenceKindAnnotatedParse = "annotated-parse"
+	referenceKindChained        = "chained-reference"
 )
 
 // The changes a refusal case applies.
@@ -67,13 +68,14 @@ const (
 )
 
 type generationReferenceCase struct {
-	Name         string `yaml:"name"`
-	Given        string `yaml:"given"`
-	When         string `yaml:"when"`
-	Then         string `yaml:"then"`
-	Kind         string `yaml:"kind"`
-	Parent       string `yaml:"parent"`
-	AppendedLine string `yaml:"appendedLine"`
+	Name                 string `yaml:"name"`
+	Given                string `yaml:"given"`
+	When                 string `yaml:"when"`
+	Then                 string `yaml:"then"`
+	Kind                 string `yaml:"kind"`
+	Parent               string `yaml:"parent"`
+	AppendedLine         string `yaml:"appendedLine"`
+	SecondRenamedProject string `yaml:"secondRenamedProject"`
 }
 
 type generationReferenceFixture struct {
@@ -477,6 +479,47 @@ func TestGenerationReference(t *testing.T) {
 				for _, entry := range slices.Sorted(maps.Keys(want)) {
 					if len(want[entry]) == 0 || !bytes.Equal(want[entry], got[entry]) {
 						t.Errorf("%s differs between the control and post-reference parse:\ncontrol   %s\nreference %s", entry, want[entry], got[entry])
+					}
+				}
+			case referenceKindChained:
+				w.install(t, w.renamed)
+				secondRenamed := w.renamed
+				secondRenamed.Project.Name = c.SecondRenamedProject
+				secondRenamed.MetadataHash = schema.ComputeMetadataHash(&secondRenamed)
+				req := w.request(t, secondRenamed)
+				req.GenerationID = referenceLaterID
+				plan, err := db.PlanManagedGenerationReference(t.Context(), req)
+				if err != nil {
+					t.Fatalf("plan the chained reference: %v", err)
+				}
+				outcome, err := db.InstallManagedGenerationReference(t.Context(), plan)
+				if err != nil {
+					t.Fatalf("install the chained reference: %v", err)
+				}
+				w.seeded.activeID = referenceLaterID
+				if outcome.GenerationID != referenceLaterID || outcome.OwnerGenerationID != w.corpus.GenerationID {
+					t.Fatalf("chained outcome %+v, want %s reading original owner %s", outcome, referenceLaterID, w.corpus.GenerationID)
+				}
+				row := referenceQuery(t, db, `SELECT mapping_set_id, project_name FROM session_generations WHERE session_id = ? AND generation_id = ?`, string(sid), referenceLaterID)
+				if want := []string{"3:" + w.corpus.GenerationID + "|3:" + c.SecondRenamedProject}; !slices.Equal(row, want) {
+					t.Fatalf("chained reference row %v, want %v", row, want)
+				}
+				if flag := referenceQuery(t, db, `SELECT content_sweep_pending FROM sessions WHERE session_id = ?`, string(sid)); !slices.Equal(flag, []string{"1:1"}) {
+					t.Fatalf("content_sweep_pending = %v, want [1:1] because G_reference became collectable", flag)
+				}
+				twin := seedReaderEntrypointStoreWithInput(t, w.corpus, w.h, referenceInputHash)
+				if out, err := twin.parse(t, w.renamed, referenceGenerationID, referenceInputHash); err != nil || out.Disposition != ingest.ActivationCommittedNow {
+					t.Fatalf("twin parse 1: %+v %v", out, err)
+				}
+				if out, err := twin.parse(t, secondRenamed, referenceLaterID, referenceInputHash); err != nil || out.Disposition != ingest.ActivationCommittedNow {
+					t.Fatalf("twin parse 2: %+v %v", out, err)
+				}
+				twin.activeID = referenceLaterID
+				want, _ := readReaderEntrypoints(t, w.corpus, twin)
+				got, _ := readReaderEntrypoints(t, w.corpus, w.seeded)
+				for _, entry := range slices.Sorted(maps.Keys(want)) {
+					if len(want[entry]) == 0 || !bytes.Equal(want[entry], got[entry]) {
+						t.Errorf("%s differs between the plain parse and chained reference:\nparse     %s\nreference %s", entry, want[entry], got[entry])
 					}
 				}
 			default:

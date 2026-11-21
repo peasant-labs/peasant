@@ -15,6 +15,7 @@ requiredNames:
   - crash-before-commit-leaves-the-old-authority
   - owner-changed-between-plan-and-install
   - annotated-reference-keeps-anchors-on-parse
+  - chained-reference-flattens-to-owner
 cases:
   - name: project-rename-references-the-set
     given: G_golden is active and owns its parsed rows; the captured project is renamed
@@ -58,3 +59,9 @@ cases:
     then: the annotation remaps to the shifted entry span just like the control store (no anchor loss) and every harvest-path reader matches the control
     kind: annotated-parse
     appendedLine: '{"type":"assistant","sessionId":"abc00000-0000-4000-8000-0000000000c1","uuid":"a3","parentUuid":"a2","cwd":"/synthetic/reader-corpus","timestamp":"2026-01-02T00:00:03.500Z","message":{"role":"assistant","model":"claude-synthetic","content":[{"type":"text","text":"inserted synthetic reply"}],"usage":{"input_tokens":10,"output_tokens":5}}}'
+  - name: chained-reference-flattens-to-owner
+    given: G_reference is active and references G_golden; the captured project is renamed a second time
+    when: a second reference G_later is planned and installed from G_reference
+    then: G_later reports G_golden as its owner, carries mapping_set_id G_golden, sets content_sweep_pending = 1, and every harvest-path reader matches a plain parse
+    kind: chained-reference
+    secondRenamedProject: reader-corpus-renamed-twice
