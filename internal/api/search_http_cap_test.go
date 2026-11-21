@@ -8,6 +8,8 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/codemap"
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
@@ -16,17 +18,20 @@ import (
 
 // seedCapSessions stores more matching sessions than the documented cap, so a
 // request above the cap has to be truncated rather than served whole. Every
-// seeded session contributes exactly one matching entry.
+// seeded session contributes exactly one matching entry. Each seed marks only
+// itself indexed: re-marking every stored session per seed made this fixture
+// quadratic and dominated the package's runtime (#992).
 func seedCapSessions(t *testing.T, db *store.Store) {
 	t.Helper()
 	for i := 0; i < codemap.SearchMaxLimit+10; i++ {
-		seedHelperGroupSession(t, db, helperGroupListingSession{
-			ID:      fmt.Sprintf("cap-%03d", i),
+		id := fmt.Sprintf("cap-%03d", i)
+		seedHelperGroupSessionMarkedBy(t, db, helperGroupListingSession{
+			ID:      id,
 			StartMs: int64(1000 + i),
 			Purpose: "interaction",
 			Origin:  "user",
 			Text:    "pineapple",
-		}, int64(i))
+		}, int64(i), func() { markSessionIndexed(t, db, ingest.SessionID(id), defaults.HarnessCodex) })
 	}
 }
 

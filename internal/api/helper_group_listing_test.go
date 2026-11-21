@@ -622,6 +622,15 @@ func helperGroupListShape(payload schema.LocalSessionListPayload) []helperGroupL
 
 func seedHelperGroupSession(t *testing.T, db *store.Store, spec helperGroupListingSession, sequence int64) {
 	t.Helper()
+	seedHelperGroupSessionMarkedBy(t, db, spec, sequence, func() { MarkStoredSessionsIndexed(t, db) })
+}
+
+// seedHelperGroupSessionMarkedBy seeds one session and lets the caller choose how
+// it is marked indexed. seedHelperGroupSession re-marks every stored session,
+// which callers that mix seed paths rely on; a bulk seeder marks only the
+// session it just wrote.
+func seedHelperGroupSessionMarkedBy(t *testing.T, db *store.Store, spec helperGroupListingSession, sequence int64, markIndexed func()) {
+	t.Helper()
 	start := spec.StartMs
 	if start == 0 {
 		start = 1000 + sequence
@@ -669,7 +678,7 @@ func seedHelperGroupSession(t *testing.T, db *store.Store, spec helperGroupListi
 	if spec.Pushable {
 		seedHelperGroupMetrics(t, db, spec)
 	}
-	MarkStoredSessionsIndexed(t, db)
+	markIndexed()
 	if spec.Text != "" {
 		preview := spec.Text
 		entry := schema.SessionEntry{

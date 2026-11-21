@@ -26,17 +26,20 @@ func MarkStoredSessionsIndexed(t *testing.T, db *store.Store) {
 	if err != nil {
 		t.Fatalf("mark stored sessions indexed: list sessions: %v", err)
 	}
+	for i := range rows {
+		markSessionIndexed(t, db, ingest.SessionID(rows[i].SessionID), ingest.Harness(rows[i].ModelHarness))
+	}
+}
+
+// markSessionIndexed records a completed index pass for one session. A seeder
+// that writes many sessions marks each one as it lands, so the cost stays linear
+// in the number of sessions instead of re-marking every stored row per seed.
+func markSessionIndexed(t *testing.T, db *store.Store, id ingest.SessionID, harness ingest.Harness) {
+	t.Helper()
 	// A fixed, deterministic stamp: the value does not matter to discovery, only
 	// that indexed_at is non-NULL.
 	const indexedAtMs = int64(1705276800000)
-	for i := range rows {
-		if err := db.UpdateIndexState(
-			t.Context(),
-			ingest.SessionID(rows[i].SessionID),
-			ingest.HarvesterVersionRegistry[ingest.Harness(rows[i].ModelHarness)].IndexerVersion,
-			indexedAtMs,
-		); err != nil {
-			t.Fatalf("mark stored sessions indexed: %s: %v", rows[i].SessionID, err)
-		}
+	if err := db.UpdateIndexState(t.Context(), id, ingest.HarvesterVersionRegistry[harness].IndexerVersion, indexedAtMs); err != nil {
+		t.Fatalf("mark stored sessions indexed: %s: %v", id, err)
 	}
 }
