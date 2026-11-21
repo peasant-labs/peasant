@@ -1,0 +1,72 @@
+{
+  "entries": [
+    {
+      "sessionId": "ses_3cd91f52effeXd3QAJ54jOyzn1",
+      "entryIndex": 0,
+      "harness": "opencode",
+      "entryType": "text",
+      "role": "user",
+      "timestampMs": 1000,
+      "contentPreview": "native user question",
+      "hasToolUse": false,
+      "hasThinking": false,
+      "isError": false,
+      "depth": 0
+    },
+    {
+      "sessionId": "ses_3cd91f52effeXd3QAJ54jOyzn1",
+      "entryIndex": 1,
+      "harness": "opencode",
+      "entryType": "text",
+      "role": "assistant",
+      "timestampMs": 1000,
+      "contentPreview": "native assistant answer",
+      "hasToolUse": false,
+      "hasThinking": false,
+      "isError": false,
+      "depth": 0,
+      "extra": "{\"thinking_level_raw\":\"redacted\"}"
+    }
+  ],
+  "detail": {
+    "id": "ses_3cd91f52effeXd3QAJ54jOyzn1",
+    "harness": "opencode",
+    "startTime": "2026-01-01T23:59:50Z",
+    "endTime": "2026-01-01T23:59:55Z",
+    "durationMins": 0,
+    "totalTokens": 0,
+    "tokensIn": 0,
+    "tokensOut": 0,
+    "turnCount": 2,
+    "conversationTurnCount": 2,
+    "toolCallCount": 0,
+    "turns": [
+      {
+        "index": 0,
+        "role": "user",
+        "content": "native user question",
+        "timestamp": "1970-01-01T00:00:01Z",
+        "depth": 0,
+        "entryType": "text"
+      },
+      {
+        "index": 1,
+        "role": "assistant",
+        "content": "native assistant answer",
+        "timestamp": "1970-01-01T00:00:01Z",
+        "depth": 0,
+        "thinkingLevelRaw": "redacted",
+        "entryType": "text"
+      }
+    ],
+    "source": "imported",
+    "status": "local",
+    "project": "/fixtures/native-project",
+    "thinkingLevelRaw": "redacted",
+    "workingDirectory": "/fixtures/native-project",
+    "scorecard": {
+      "m7SpecHasExamples": false,
+      "m7SpecHasConstraints": false
+    }
+  }
+}

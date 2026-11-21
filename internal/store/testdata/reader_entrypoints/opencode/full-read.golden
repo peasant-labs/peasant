@@ -1,0 +1,45 @@
+{
+  "entries": [
+    {
+      "sessionId": "ses_3cd91f52effeXd3QAJ54jOyzn1",
+      "entryIndex": 0,
+      "harness": "opencode",
+      "entryType": "text",
+      "role": "user",
+      "timestampMs": 1000,
+      "contentPreview": "native user question",
+      "hasToolUse": false,
+      "hasThinking": false,
+      "isError": false,
+      "depth": 0
+    },
+    {
+      "sessionId": "ses_3cd91f52effeXd3QAJ54jOyzn1",
+      "entryIndex": 1,
+      "harness": "opencode",
+      "entryType": "text",
+      "role": "assistant",
+      "timestampMs": 1000,
+      "contentPreview": "native assistant answer",
+      "hasToolUse": false,
+      "hasThinking": false,
+      "isError": false,
+      "depth": 0,
+      "extra": "{\"thinking_level_raw\":\"redacted\"}"
+    }
+  ],
+  "capture": {
+    "PublicationCaptureRevision": 1,
+    "SessionID": "ses_3cd91f52effeXd3QAJ54jOyzn1",
+    "Status": "complete",
+    "SourceAuthority": "provider_source",
+    "TranscriptOrigin": 2,
+    "CaptureFormat": "full",
+    "EntryCount": 2,
+    "ContentRowCount": 2,
+    "FullCaptureSHA256": "ec449496fee30c49229c825075c2c8b52c806e05e51afb93abfbca3260d1cb3e",
+    "CapturedAtMs": 1767312000000,
+    "FailureCode": "",
+    "FailureMessage": ""
+  }
+}

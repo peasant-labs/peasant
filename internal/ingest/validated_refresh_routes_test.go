@@ -89,8 +89,12 @@ func (s *realRouteSeed) restore(t *testing.T) {
 // realRouteRun names how one refresh run is wired.
 type realRouteRun struct {
 	disableSkips bool
+	force        bool
+	reindex      bool
 	profiler     *ingest.IndexProfiler
 	halves       *halfRecorder
+	// options adds pipeline options after the route's own.
+	options []ingest.PipelineOption
 }
 
 func runRealRoute(t *testing.T, seed *realRouteSeed, db managedRefreshPipelineStore, source string, run realRouteRun) *ingest.PipelineResult {
@@ -102,12 +106,16 @@ func runRealRoute(t *testing.T, seed *realRouteSeed, db managedRefreshPipelineSt
 	}
 	cfg.StalenessThreshold = 0
 	cfg.DisableRefreshSkips = run.disableSkips
+	cfg.Force = run.force
+	cfg.Reindex = run.reindex
 	cfg.IndexProfiler = run.profiler
 	indexers := ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})
 	indexers[ingest.HarnessClaudeCode] = seamClaudeIndexer{ClaudeIndexer: ingest.NewClaudeIndexer(fs, ingest.WithClaudeFullDepth(true)), halves: run.halves}
-	pipeline, err := newTestPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg,
+	options := append([]ingest.PipelineOption{
 		ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithSalt(db.InstallationSalt()),
-		ingest.WithIndexers(indexers), ingest.WithLogger(db), ingest.WithIndexLogger(db))
+		ingest.WithIndexers(indexers), ingest.WithLogger(db), ingest.WithIndexLogger(db),
+	}, run.options...)
+	pipeline, err := newTestPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg, options...)
 	if err != nil {
 		t.Fatalf("build the refresh pipeline: %v", err)
 	}

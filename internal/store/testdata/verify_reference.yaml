@@ -1,0 +1,17 @@
+# Content verification and active-id readers on a reference generation.
+cases:
+  - name: verify-reference-damaged-owner-body
+    given: G_reference is active and references owner G_golden, and one owner body row has its content_preview altered under its digest
+    when: VerifyContent runs with repair enabled
+    then: VerifyContent reports body damage for the session and clears indexed_input_hash
+    kind: damaged-body
+  - name: verify-reference-damaged-owner-blob
+    given: G_reference is active and references owner G_golden, and one owner blob chunk has a flipped byte
+    when: VerifyContent runs with repair enabled
+    then: VerifyContent reports blob damage for the session and clears indexed_input_hash
+    kind: damaged-blob
+  - name: reference-active-readers-parity
+    given: G_reference is active and references owner G_golden alongside a twin control store that parsed G_reference
+    when: active-generation readers (CreateAnnotation on entry, ListUserPrompts, ValidateIndexFormatsOnConn, ListSessionsFiltered with workflow facets, SessionEntriesExist, SessionsWithoutEntries, SearchMergedOnConn) run on both stores
+    then: every reader on the reference store succeeds and matches the control store
+    kind: readers-parity

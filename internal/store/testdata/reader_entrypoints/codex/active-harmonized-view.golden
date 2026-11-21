@@ -1,0 +1,141 @@
+{
+  "Found": true,
+  "GenerationID": "G_golden",
+  "Record": {
+    "SessionID": "abc00000-0000-4000-8000-0000000000c2",
+    "GenerationID": "G_golden",
+    "SchemaVersion": 12,
+    "Harness": "codex",
+    "Model": "",
+    "Version": "",
+    "TimestampStartMs": 0,
+    "TimestampEndMs": 1767312004000,
+    "TimestampIngestedMs": null,
+    "SourceFilePath": "/synthetic/codex/rollout-reader.jsonl",
+    "SourceFormat": "jsonl",
+    "GitBranch": null,
+    "GitRemote": null,
+    "GitWorktree": null,
+    "GitTracking": null,
+    "ProjectHash": "",
+    "ProjectFilePath": null,
+    "ProjectName": "",
+    "HostSlug": "",
+    "RootSessionID": null,
+    "Purpose": null,
+    "CWD": "/synthetic/reader-corpus",
+    "DerivedAtMs": null,
+    "ContentHash": "",
+    "MetadataHash": "",
+    "RedactionApplied": false,
+    "RedactionLevel": null,
+    "RedactionRuleSetVersion": null,
+    "RedactionAtMs": null,
+    "RedactionContentHashAtRedact": null,
+    "AdapterVersion": 4,
+    "DiagnosticsPartial": null,
+    "Completeness": "complete",
+    "SourceEvidenceDigest": "6361dfd65443712dcbc75b7550eb22adf32bfe6de766663669ccc5b4621d12ca",
+    "IndexFormatVersion": 2,
+    "CandidateDigest": "",
+    "PriorEvidence": null,
+    "InstalledAtMs": 0,
+    "ActivatedAtMs": null
+  },
+  "Children": {
+    "Subagents": null,
+    "Commits": null,
+    "Associations": null,
+    "Diagnostics": null,
+    "TitleRefs": null,
+    "Relationships": [
+      {
+        "Ordinal": 0,
+        "Kind": "started_by",
+        "TargetState": "explicit_none",
+        "TargetLocalID": null,
+        "Evidence": "native_typed",
+        "AnchorKind": null,
+        "AnchorSourceEntryRef": null,
+        "AnchorSourceRevisionRef": null
+      }
+    ],
+    "Segments": [
+      {
+        "Ordinal": 0,
+        "LogicalSessionID": null,
+        "PhysicalSourceID": "src_a8ef3c082b1ec5bd",
+        "CoordinateKind": "codex_ordinal_range",
+        "StartCoordinate": 0,
+        "EndExclusive": 5,
+        "DecodedByteStart": null,
+        "DecodedByteEndExclusive": null,
+        "Inclusion": "same_thread_surviving_own"
+      }
+    ],
+    "SegmentRefs": [
+      {
+        "SegmentOrdinal": 0,
+        "Ordinal": 0,
+        "SourceEntryRef": "e_segment_0001"
+      },
+      {
+        "SegmentOrdinal": 0,
+        "Ordinal": 1,
+        "SourceEntryRef": "e_segment_0002"
+      },
+      {
+        "SegmentOrdinal": 0,
+        "Ordinal": 2,
+        "SourceEntryRef": "e_segment_0003"
+      },
+      {
+        "SegmentOrdinal": 0,
+        "Ordinal": 3,
+        "SourceEntryRef": "e_segment_0004"
+      }
+    ],
+    "Sections": [
+      {
+        "PartitionID": 0,
+        "EarlierState": null
+      }
+    ],
+    "NativeMetadata": null
+  },
+  "Mapping": [
+    {
+      "Partition": 0,
+      "Index": 0,
+      "Digest": "f5ba9d29cc4e4727ca996a0ede07d7b69ad6666bdf0f82d5ae8a8c5c03e25304"
+    },
+    {
+      "Partition": 0,
+      "Index": 1,
+      "Digest": "a777b529537c4c7486737105e4378229caef0b33c46235a123c1fa908a1b4674"
+    },
+    {
+      "Partition": 0,
+      "Index": 2,
+      "Digest": "d59a1197c0e9e9e6cdb8f743a3c8677ad907f2a7dbb38626da20b1bc6637690d"
+    },
+    {
+      "Partition": 0,
+      "Index": 3,
+      "Digest": "281c64d001851d2ebfa001f77e87fb7fe4763543fe8a596c456592b5d7db7bb2"
+    },
+    {
+      "Partition": 0,
+      "Index": 4,
+      "Digest": "f349a0ae8f20581ecaa7b04023cf5c1088e10299648f704350cb9c7f109d67c9"
+    }
+  ],
+  "Descriptors": {},
+  "Aliases": {
+    "block:codex|abc00000-0000-4000-8000-0000000000c2|item|m1|message/b0": "e_golden_0001",
+    "block:codex|abc00000-0000-4000-8000-0000000000c2|item|m2|message/b0": "e_golden_0005",
+    "block:codex|abc00000-0000-4000-8000-0000000000c2|pos|src_a8ef3c082b1ec5bd|328|function_call/call": "e_golden_0003",
+    "block:codex|abc00000-0000-4000-8000-0000000000c2|pos|src_a8ef3c082b1ec5bd|328|function_call/carrier": "e_golden_0002",
+    "block:codex|abc00000-0000-4000-8000-0000000000c2|pos|src_a8ef3c082b1ec5bd|501|function_call_output/result": "e_golden_0004"
+  }
+}

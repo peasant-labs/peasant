@@ -124,11 +124,12 @@ VALUES(?,'claude-code','fixture-model','source-lanes-host','source-lanes-project
 				t.Fatalf("opening the predecessor returned %v, want a schema-behind refusal", err)
 			}
 			plan := mustPlan(t, path)
-			if plan.From != 80 || plan.To != 81 || len(plan.Steps) != 1 {
-				t.Fatalf("upgrade plan = %+v; want one step from 80 to 81", plan)
+			stepsAfter80 := len(plan.Steps) == 2 && plan.Steps[0].Version == 81 && plan.Steps[1] == schemaStep(mappingSetSchemaVersion)
+			if plan.From != 80 || plan.To != 82 || !stepsAfter80 {
+				t.Fatalf("upgrade plan = %+v; want step 81 then the quick mapping-set step, from 80 to 82", plan)
 			}
 			if plan.HasLongStep() != planCase.WantLong {
-				t.Fatalf("upgrade plan = %+v; want one step, long=%t", plan, planCase.WantLong)
+				t.Fatalf("upgrade plan = %+v; want step 81 long=%t", plan, planCase.WantLong)
 			}
 			if _, err := Upgrade(t.Context(), path, UpgradeOptions{}); err != nil {
 				t.Fatalf("upgrade source diagnostic lanes: %v", err)

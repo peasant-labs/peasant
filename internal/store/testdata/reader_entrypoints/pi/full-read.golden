@@ -1,0 +1,47 @@
+{
+  "entries": [
+    {
+      "sessionId": "abc00000-0000-4000-8000-0000000000c4",
+      "entryIndex": 0,
+      "harness": "pi",
+      "entryType": "text",
+      "role": "user",
+      "timestampMs": 1767312001000,
+      "contentPreview": "synthetic pi request",
+      "hasToolUse": false,
+      "hasThinking": false,
+      "isError": false,
+      "depth": 0,
+      "extra": "{\"kind\":\"pi.state\",\"harness\":\"pi\",\"sourceRef\":\"pi-ebce8e86cf3e782f806fadda3a08b35fbd0e07e4987c191da86aa857cf581681\"}"
+    },
+    {
+      "sessionId": "abc00000-0000-4000-8000-0000000000c4",
+      "entryIndex": 1,
+      "harness": "pi",
+      "entryType": "text",
+      "role": "assistant",
+      "timestampMs": 1767312002000,
+      "contentPreview": "synthetic pi answer",
+      "tokensIn": 12,
+      "hasToolUse": false,
+      "hasThinking": false,
+      "isError": false,
+      "depth": 0,
+      "extra": "{\"kind\":\"pi.usage\",\"harness\":\"pi\",\"sourceRef\":\"pi-426fef6dd6a18077ae4baff5ac0186ebf60f919d3f353e697913bfafcfd98f0c\",\"usage\":{\"ownerId\":\"pi-7c83147c3604e238d966fa7e53d74453b3243809787e8d82c5c2d7bc1276d403\",\"sourceEntryRef\":\"pi-426fef6dd6a18077ae4baff5ac0186ebf60f919d3f353e697913bfafcfd98f0c\",\"scope\":\"assistant\",\"completeness\":\"partial\",\"tokens\":{\"input\":12}}}"
+    }
+  ],
+  "capture": {
+    "PublicationCaptureRevision": 1,
+    "SessionID": "abc00000-0000-4000-8000-0000000000c4",
+    "Status": "complete",
+    "SourceAuthority": "provider_source",
+    "TranscriptOrigin": 0,
+    "CaptureFormat": "full",
+    "EntryCount": 2,
+    "ContentRowCount": 2,
+    "FullCaptureSHA256": "aea44684179a6d8c4142b07b05a89b93c5636480a0318cdb6d859ecff6b1b9f4",
+    "CapturedAtMs": 1767312000000,
+    "FailureCode": "",
+    "FailureMessage": ""
+  }
+}

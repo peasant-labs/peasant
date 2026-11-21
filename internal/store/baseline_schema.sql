@@ -911,7 +911,7 @@ CREATE TABLE session_generations (
   candidate_digest       TEXT NOT NULL CHECK(length(candidate_digest) = 64),
   prior_evidence         BLOB,
   installed_at_ms        INTEGER NOT NULL CHECK(installed_at_ms >= 0),
-  activated_at_ms        INTEGER CHECK(activated_at_ms IS NULL OR activated_at_ms >= 0),
+  activated_at_ms        INTEGER CHECK(activated_at_ms IS NULL OR activated_at_ms >= 0), mapping_set_id TEXT CHECK (mapping_set_id IS NULL OR (length(mapping_set_id) > 0 AND mapping_set_id <> generation_id)),
   PRIMARY KEY (session_id, generation_id)
 ) STRICT;
 
@@ -2314,4 +2314,4 @@ DELETE FROM "session_search_fts_data";
 INSERT INTO "session_search_fts_data" ("id", "block") VALUES (1, X'000000000000');
 INSERT INTO "session_search_fts_data" ("id", "block") VALUES (10, X'00000000000000');
 
-PRAGMA user_version = 81;
+PRAGMA user_version = 82;

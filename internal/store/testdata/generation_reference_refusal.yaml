@@ -1,0 +1,32 @@
+# One case per reference refusal reason. Each starts from the session of
+# generation_reference.yaml, applies its change, then plans the reference
+# and, when the plan succeeds, installs it. The refusal must write nothing,
+# errors.As must yield the reason, and the message must name what, why,
+# where, when, the impact and the fix.
+#   change values:
+#     indexer-target-ahead    the captured index target is one past the stored producer
+#     source-evidence-changed the candidate names another source-evidence digest
+#     context-unchanged       the captured project is not renamed
+#     parse-input-field       the request lists project.name as a parse input
+#     stats-row-missing       the stored stats row is deleted
+#     source-seal-forged      the active generation's stored seal is forged
+#     latest-attempt-held     the session points at a latest attempt
+#     index-state-moved       after the plan, the stored input proof changes
+requiredNames:
+  - not-context-only
+  - content-identity-changed
+  - context-unchanged
+  - parse-input-context-changed
+  - stats-incomplete
+  - owner-seal-mismatch
+  - latest-attempt-held
+  - source-moved
+cases:
+  - {name: not-context-only, reason: not-context-only, change: indexer-target-ahead, where: plan}
+  - {name: content-identity-changed, reason: content-identity-changed, change: source-evidence-changed, where: plan}
+  - {name: context-unchanged, reason: context-unchanged, change: context-unchanged, where: plan}
+  - {name: parse-input-context-changed, reason: parse-input-context-changed, change: parse-input-field, where: plan}
+  - {name: stats-incomplete, reason: stats-incomplete, change: stats-row-missing, where: plan}
+  - {name: owner-seal-mismatch, reason: owner-seal-mismatch, change: source-seal-forged, where: plan}
+  - {name: latest-attempt-held, reason: latest-attempt-held, change: latest-attempt-held, where: plan}
+  - {name: source-moved, reason: source-moved, change: index-state-moved, where: install}

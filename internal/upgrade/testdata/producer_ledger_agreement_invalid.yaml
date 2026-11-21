@@ -29,8 +29,8 @@ required_names:
   - adapter-without-harvester-versions
 cases:
   - name: store-migration-without-a-ledger-row
-    registry: {store_schema: 82}
-    error_contains: "store-schema chain ends at 81 but the registry declares 82"
+    registry: {store_schema: 83}
+    error_contains: "store-schema chain ends at 82 but the registry declares 83"
   - name: indexer-bump-without-a-ledger-row
     registry: {set_baseline: {harness: pi, adapter: 3, indexer: 19, format: 1}}
     error_contains: "transcript-indexer/pi chain ends at 18 but the registry declares 19"

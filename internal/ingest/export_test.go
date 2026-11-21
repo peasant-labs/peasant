@@ -82,3 +82,15 @@ func SetClaudeMetadataHalfMutationForTest(t testing.TB, mutate func(GenerationBu
 	claudeMetadataHalfMutationForTest = mutate
 	t.Cleanup(func() { claudeMetadataHalfMutationForTest = previous })
 }
+
+// WithParseInputContextFieldsForTest replaces the per-harness list of
+// captured metadata fields the parsed rows depend on.
+// This function is only available in test builds.
+func WithParseInputContextFieldsForTest(fields func(Harness) []string) PipelineOption {
+	return func(p *Pipeline) { p.parseInputContextFieldsOverride = fields }
+}
+
+// IndexManagedReferenceReasonForTest is the index-log reason of a session
+// whose context change was installed as a reference.
+// This constant is only available in test builds.
+const IndexManagedReferenceReasonForTest = indexManagedReferenceReason

@@ -1,0 +1,59 @@
+{
+  "GenerationID": "G_golden",
+  "Metadata": {
+    "schemaVersion": 12,
+    "sessionId": "ses_3cd91f52effeXd3QAJ54jOyzn1",
+    "parentUuid": null,
+    "harness": "opencode",
+    "model": "",
+    "version": "",
+    "timestamp": {
+      "start": 1767311990000,
+      "end": 1767311995000,
+      "ingested": 1767312000000
+    },
+    "source": {
+      "filePath": "/synthetic/opencode/ses_3cd91f52effeXd3QAJ54jOyzn1",
+      "format": "json"
+    },
+    "git": {},
+    "project": {
+      "hash": "987468aa2aadbcf0b4ea7128f83160052825d1bd82e02aff8193ab8b0f82b916",
+      "filePath": "/fixtures/native-project",
+      "name": "reader-corpus"
+    },
+    "hostSlug": "reader-host",
+    "stats": {
+      "turnCount": 2,
+      "inputSubmissionCount": 1,
+      "conversationTurnCount": 2,
+      "toolCallCount": 0,
+      "subagentCount": 0,
+      "durationMs": 0,
+      "tokensIn": 0,
+      "tokensOut": 0
+    },
+    "subagents": [],
+    "cwd": "/fixtures/native-project",
+    "diagnostics": {
+      "warnings": []
+    },
+    "contentHash": "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a",
+    "metadataHash": "",
+    "redaction": {
+      "applied": false
+    },
+    "adapterVersion": 5
+  },
+  "Aliases": {
+    "Entries": {
+      "opencode:current:msg_native_assistant:part-slot-0": "e_golden_0002",
+      "opencode:current:msg_native_user:text": "e_golden_0001"
+    },
+    "Submissions": {
+      "opencode-accept:ses_3cd91f52effeXd3QAJ54jOyzn1:msg_native_user": "s_golden_0001"
+    }
+  },
+  "HasCompleteGeneration": true,
+  "PriorEvidence": "eyJ2ZXJzaW9uIjoyLCJlbnRyaWVzIjpbeyJuYXRpdmVLZXkiOiJvcGVuY29kZTpjdXJyZW50Om1zZ19uYXRpdmVfYXNzaXN0YW50OnBhcnQtc2xvdC0wIiwicmVmIjoiZV9nb2xkZW5fMDAwMiJ9LHsibmF0aXZlS2V5Ijoib3BlbmNvZGU6Y3VycmVudDptc2dfbmF0aXZlX3VzZXI6dGV4dCIsInJlZiI6ImVfZ29sZGVuXzAwMDEifV0sInN1Ym1pc3Npb25zIjpbeyJuYXRpdmVLZXkiOiJvcGVuY29kZS1hY2NlcHQ6c2VzXzNjZDkxZjUyZWZmZVhkM1FBSjU0ak95em4xOm1zZ19uYXRpdmVfdXNlciIsInJlZiI6InNfZ29sZGVuXzAwMDEifV0sImhhc0NhcHR1cmVkUHJlZml4IjpmYWxzZSwiaGFzQ29tcGxldGVHZW5lcmF0aW9uIjp0cnVlfQ=="
+}

@@ -88,6 +88,12 @@ CREATE TABLE ingest_run_outcomes (
 CREATE INDEX idx_ingest_run_outcomes_run ON ingest_run_outcomes(run_id, id);
 `
 
+// undoMappingSetScript undoes migration v82: the generation catalog's
+// mapping-set column. Both legacy builders start with no generation row.
+const undoMappingSetScript = `
+ALTER TABLE session_generations DROP COLUMN mapping_set_id;
+`
+
 // Both legacy builders start with an empty availability ledger. Restore the
 // pre-lane shape before stamping a version earlier than the lane migration.
 const undoSourceDiagnosticLanesScript = `
@@ -104,11 +110,12 @@ CREATE TABLE session_source_unavailability (
 // exactly what migration v76 changes - it re-creates the retired
 // session_entries_fts index with the v75 definition, points the three
 // session_entries triggers back at it, rebuilds it from session_entries so
-// both search indexes agree, undoes the two later migrations, and stamps
+// both search indexes agree, undoes the later migrations, and stamps
 // user_version 75. Migration v76 only re-points those triggers and drops that
 // index, so the result is the v75 schema with no residue: upgrading it runs
 // v76 on the targeted-insert path. Undoing the later migrations drops
-// pending_recounts (v77) and the import profile tables and columns (v79), so
+// pending_recounts (v77), the import profile tables and columns (v79), the
+// source diagnostic lanes (v81) and the mapping-set column (v82), so
 // the chain from 75 creates them again instead of colliding.
 func BuildCleanV75Store(t *testing.T, path string) {
 	t.Helper()
@@ -131,7 +138,7 @@ func BuildCleanV75Store(t *testing.T, path string) {
 			t.Errorf("close the v75 store: %v", err)
 		}
 	}()
-	if err := sqlitex.ExecuteScript(conn, legacySearchIndexScript+undoImportProfileScript+undoSourceDiagnosticLanesScript+`
+	if err := sqlitex.ExecuteScript(conn, legacySearchIndexScript+undoImportProfileScript+undoSourceDiagnosticLanesScript+undoMappingSetScript+`
 INSERT INTO session_entries_fts(session_entries_fts) VALUES('rebuild');
 DROP TABLE pending_recounts;
 PRAGMA user_version = 75;`, nil); err != nil {
@@ -172,7 +179,7 @@ func BuildRecountOwedHeadStore(t *testing.T, path string) {
 }
 
 // BuildQuickV78Store writes a real version-78 store that holds no session:
-// the current schema with migrations v79 and v81 undone, stamped 78. Its
+// the current schema with migrations v79, v81 and v82 undone, stamped 78. Its
 // availability ledger is empty, so its upgrade plan contains only quick steps.
 // Every store below 78 plans step 78, which copies the session tables and is
 // long, so this is the quick behind store an entry-point policy test needs.
@@ -194,7 +201,7 @@ func BuildQuickV78Store(t *testing.T, path string) {
 			t.Errorf("close the v78 store: %v", err)
 		}
 	}()
-	if err := sqlitex.ExecuteScript(conn, undoImportProfileScript+undoSourceDiagnosticLanesScript+`
+	if err := sqlitex.ExecuteScript(conn, undoImportProfileScript+undoSourceDiagnosticLanesScript+undoMappingSetScript+`
 PRAGMA user_version = 78;`, nil); err != nil {
 		t.Fatalf("restore the v78 shape: %v", err)
 	}

@@ -12,3 +12,4 @@ cases:
   - {name: C5, kind: retired}
   - {name: C6, kind: measured}
   - {name: C7, kind: measured}
+  - {name: C8, kind: measured}

@@ -288,12 +288,20 @@ func (s *Store) ReadGenerationPrior(ctx context.Context, sessionID schema.Sessio
 // provenance, which only the entries carry. A latest attempt is always written
 // as a harmonized generation, so the harmonized entry reader is the one that
 // applies.
+//
+// The aliases and the main entries are parsed rows, so they are read under
+// the id the resolver names: the owner's for a generation that references
+// another generation's parse.
 func readGenerationAliasStateOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) (ingest.ProjectionPriorState, error) {
-	aliases, err := readGenerationAliasesOnConn(conn, sessionID, generationID)
+	rowsID, err := rowsGenerationIDOnConn(conn, sessionID, generationID)
 	if err != nil {
 		return ingest.NewProjectionPriorState(), err
 	}
-	entries, err := readHarmonizedMainEntriesOnConn(conn, sessionID, generationID)
+	aliases, err := readGenerationAliasesOnConn(conn, sessionID, rowsID)
+	if err != nil {
+		return ingest.NewProjectionPriorState(), err
+	}
+	entries, err := readHarmonizedMainEntriesOnConn(conn, sessionID, rowsID)
 	if err != nil {
 		return ingest.NewProjectionPriorState(), err
 	}
