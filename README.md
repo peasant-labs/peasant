@@ -305,6 +305,11 @@ The step is one of `session check`, `harvest`, `session lookup`, `dashboard star
 `--data-dir`, and `--state-dir` the run was given. The command never opens the dashboard root in place of the
 session.
 
+Ctrl-C (SIGINT) or SIGTERM cancels the command: the step it interrupts, including the wait for a
+dashboard the command started, fails with a reason that says it was canceled, not timed out. A
+dashboard the command started keeps running in the background with its PID file, because it may
+still be coming up; stop it with `peasant web stop`.
+
 | Flag | Description |
 |------|-------------|
 | `--session <id>` | The session to record and open (required) |

@@ -19,6 +19,8 @@ A failed step prints one line on stderr and exits 1:
 
 The steps are "session check", "harvest", "session lookup", "dashboard start" and "dashboard check". open never opens the dashboard root in place of the session.
 
+Ctrl-C (SIGINT) or SIGTERM cancels open: the step it interrupts, including the wait for a dashboard open started, fails with a reason that says it was canceled, not timed out. A dashboard open started keeps running in the background with its PID file, so `peasant web stop` can stop it.
+
 With --hook, open prints the Claude Code hook response {"continue":false,"stopReason":"..."} as one line on stdout instead, with the same lines in stopReason, writes nothing to stderr, and exits 0 on every outcome.
 
 ```
