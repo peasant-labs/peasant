@@ -124,7 +124,7 @@ func shimBodyRecordsForGenerationOnConn(conn *sqlite.Conn, sessionID, generation
 WHERE m.session_id = ? AND m.partition_id = 0`
 	args := []any{sessionID}
 	if generationID == "" {
-		query += ` AND ` + sqlActiveRowsOfM
+		query += ` AND ` + activeRowsOfM(conn)
 	} else {
 		rowsID, err := rowsGenerationIDOnConn(conn, ingest.SessionID(sessionID), generationID)
 		if err != nil {
@@ -216,7 +216,7 @@ func shimFirstUserPreview(conn *sqlite.Conn, sessionID string) (string, error) {
 JOIN session_entry_bodies b
   ON b.session_id = m.session_id AND b.body_digest = m.body_digest
 JOIN sessions s ON s.session_id = m.session_id
-WHERE m.session_id = ? AND `+sqlActiveRowsOfM+` AND m.partition_id = 0
+WHERE m.session_id = ? AND `+activeRowsOfM(conn)+` AND m.partition_id = 0
 AND b.role = 'user' AND b.depth = 0
 ORDER BY m.entry_index ASC LIMIT 1`, &sqlitex.ExecOptions{
 		Args: []any{sessionID},
@@ -263,7 +263,7 @@ func shimFirstUserPreviewBulk(conn *sqlite.Conn, sessionIDs []string) (map[strin
   JOIN sessions s ON s.session_id = m.session_id
   WHERE m.session_id IN (` + strings.Join(placeholders, ",") + `)
   AND m.partition_id = 0 AND b.role = 'user' AND b.depth = 0
-  AND ` + sqlActiveRowsOfM + `
+  AND ` + activeRowsOfM(conn) + `
 ) WHERE rn = 1`
 	if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
 		Args: args,
@@ -356,7 +356,7 @@ func shimLeadingUserPreviewsBulk(conn *sqlite.Conn, sessionIDs []string, perSess
   JOIN sessions s ON s.session_id = m.session_id
   WHERE m.session_id IN (` + strings.Join(placeholders, ",") + `)
   AND m.partition_id = 0 AND b.role = 'user' AND b.depth = 0
-  AND ` + sqlActiveRowsOfM + `
+  AND ` + activeRowsOfM(conn) + `
 ) WHERE rn <= ? ORDER BY session_id, rn`
 	type rawPreview struct {
 		sessionID string
@@ -409,7 +409,7 @@ func shimMaxEntryIndex(conn *sqlite.Conn, sessionID string) (int, error) {
 	maxIdx := -1
 	err := sqlitex.Execute(conn, `SELECT COALESCE(MAX(m.entry_index), -1) FROM session_generation_entries m
 JOIN sessions s ON s.session_id = m.session_id
-WHERE m.session_id = ? AND `+sqlActiveRowsOfM+` AND m.partition_id = 0`, &sqlitex.ExecOptions{
+WHERE m.session_id = ? AND `+activeRowsOfM(conn)+` AND m.partition_id = 0`, &sqlitex.ExecOptions{
 		Args: []any{sessionID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			maxIdx = stmt.ColumnInt(0)
@@ -430,7 +430,7 @@ func shimFirstEntry(conn *sqlite.Conn, sessionID string) (*EntryHead, error) {
 JOIN session_entry_bodies b
   ON b.session_id = m.session_id AND b.body_digest = m.body_digest
 JOIN sessions s ON s.session_id = m.session_id
-WHERE m.session_id = ? AND `+sqlActiveRowsOfM+` AND m.partition_id = 0
+WHERE m.session_id = ? AND `+activeRowsOfM(conn)+` AND m.partition_id = 0
 ORDER BY m.entry_index ASC LIMIT 1`, &sqlitex.ExecOptions{
 		Args: []any{sessionID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {

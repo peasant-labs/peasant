@@ -44,7 +44,12 @@ var parseTables = []string{
 // read transaction.
 func rowsGenerationIDOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) (string, error) {
 	resolved := generationID
-	err := sqlitex.Execute(conn, `SELECT `+sqlRowsGeneration("?1", "?2"), &sqlitex.ExecOptions{
+	present, err := mappingSetColumnOnConn(conn)
+	if err != nil || !present {
+		// Before the mapping-set column, every generation owns its rows.
+		return resolved, err
+	}
+	err = sqlitex.Execute(conn, `SELECT `+sqlRowsGeneration("?1", "?2"), &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), generationID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			resolved = stmt.ColumnText(0)
@@ -67,10 +72,34 @@ func sqlRowsGeneration(sessionExpr, generationExpr string) string {
 		` AND g.generation_id = ` + generationExpr + `), ` + generationExpr + `)`
 }
 
-// sqlActiveRowsOfM is the predicate a reader of a parse table aliased m,
-// joined to sessions s, uses to select the parsed rows the session's active
-// generation reads.
-var sqlActiveRowsOfM = "m.generation_id = " + sqlRowsGeneration("s.session_id", "s.active_generation_id")
+// activeRowsOfM is the predicate a reader of a parse table aliased m, joined
+// to sessions s, uses to select the parsed rows the session's active
+// generation reads. On a store older than the mapping-set column (a data step
+// of an upgrade runs at its own schema) every generation owns its rows, so
+// the predicate is the active generation's own id.
+func activeRowsOfM(conn *sqlite.Conn) string {
+	if present, err := mappingSetColumnOnConn(conn); err == nil && !present {
+		return "m.generation_id = s.active_generation_id"
+	}
+	return "m.generation_id = " + sqlRowsGeneration("s.session_id", "s.active_generation_id")
+}
+
+// mappingSetColumnOnConn reports whether the store's session_generations
+// table has the mapping_set_id column. A data step of an upgrade reads the
+// store at the schema it has reached, which may predate the column.
+func mappingSetColumnOnConn(conn *sqlite.Conn) (bool, error) {
+	present := false
+	err := sqlitex.Execute(conn, `SELECT 1 FROM pragma_table_info('session_generations') WHERE name = 'mapping_set_id'`, &sqlitex.ExecOptions{
+		ResultFunc: func(*sqlite.Stmt) error {
+			present = true
+			return nil
+		},
+	})
+	if err != nil {
+		return false, fmt.Errorf("store: read the generation catalog's columns: %w; no row was read", err)
+	}
+	return present, nil
+}
 
 // generationKeepSet is what a sweep or reclaim must keep for one session: the
 // two roots (the active read authority and the latest attempt) and the
