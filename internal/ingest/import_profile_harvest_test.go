@@ -527,11 +527,14 @@ WHERE k.name = 'refresh' AND o.run_id = ?`, firstRun)
 			}
 			// The control: with per-result detail the same corpus must reach
 			// the per-entry path, one result per added reply, or the bound
-			// above proves nothing.
+			// above proves nothing. Each reply is one stored entry, so the
+			// growth is about one per reply, and the same drain-batch split
+			// that gives the bound above its slack can take one observation
+			// from either run.
 			detailSmall, _, _ := observe(fixtures.Structural.SmallEntries, true)
 			detailLarge, _, detailProfile := observe(fixtures.Structural.LargeEntries, true)
 			addedReplies := int64(len(fixtures.Sessions) * (fixtures.Structural.LargeEntries - fixtures.Structural.SmallEntries))
-			if detailLarge-detailSmall < addedReplies || len(detailProfile.Annotation.AnnotationResults) == 0 {
+			if detailLarge-detailSmall+slack < addedReplies || len(detailProfile.Annotation.AnnotationResults) == 0 {
 				t.Fatalf("per-result detail did not grow with entries (%d for %d entries, %d for %d entries): the corpus no longer makes one annotation result per entry", detailSmall, smallEntries, detailLarge, largeEntries)
 			}
 		},

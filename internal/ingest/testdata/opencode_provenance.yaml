@@ -418,7 +418,8 @@ cases:
           index: 1
           role: assistant
           entryType: thinking
-          depth: 0
+          depth: 1
+          parentIndex: 0
           content: I will inspect.
           origin: agent_output
           actor: unknown

@@ -138,10 +138,10 @@ func TestExportSession_ClaudeJSONL(t *testing.T) {
 
 	// 3. Seed DB entries from the transcript (DB is source of truth for indices).
 	seededEntries := seedEntriesFromJSONL(t, ctx, s, fs, sessionID, []byte(transcript))
-	// With fullDepth, the assistant message's content array [{"type":"text","text":...}]
-	// is decomposed into: parent entry (depth=0) + text block child (depth=1) = 3 total.
-	if len(seededEntries) != 3 {
-		t.Fatalf("seeded entry count: got %d, want 3", len(seededEntries))
+	// The assistant reply holds its text block as its own content, so the
+	// transcript stores one entry per record: user + assistant = 2 total.
+	if len(seededEntries) != 2 {
+		t.Fatalf("seeded entry count: got %d, want 2", len(seededEntries))
 	}
 
 	// 4. Export.
@@ -154,8 +154,7 @@ func TestExportSession_ClaudeJSONL(t *testing.T) {
 	if exported.ID != sessionID {
 		t.Errorf("ID: got %q, want %q", exported.ID, sessionID)
 	}
-	// Export applies EntriesToTurns: depth=1 text child is folded into the
-	// depth=0 assistant parent. Result: 2 display turns (user + assistant).
+	// Export applies EntriesToTurns: 2 display turns (user + assistant).
 	if exported.TurnCount != 2 {
 		t.Errorf("TurnCount: got %d, want 2", exported.TurnCount)
 	}
@@ -172,8 +171,7 @@ func TestExportSession_ClaudeJSONL(t *testing.T) {
 		t.Errorf("Turn[0].Content: got %q, want %q", exported.Turns[0].Content, userContent)
 	}
 
-	// Turn 1: assistant (depth=0 parent with text child folded in).
-	// Content should be the assistant's text (from the folded child or parent preview).
+	// Turn 1: the assistant reply, holding its text.
 	if exported.Turns[1].Role != schema.RoleAssistant {
 		t.Errorf("Turn[1].Role: got %q, want %q", exported.Turns[1].Role, schema.RoleAssistant)
 	}
@@ -220,15 +218,15 @@ func TestExportSession_ClaudeJSONL(t *testing.T) {
 			t.Fatalf("write token fixture: %v", err)
 		}
 		tokenSeededEntries := seedEntriesFromJSONL(t, ctx, s3, fs3, sessionID, []byte(transcript))
-		if len(tokenSeededEntries) != 3 {
-			t.Fatalf("token seeded entry count: got %d, want 3", len(tokenSeededEntries))
+		if len(tokenSeededEntries) != 2 {
+			t.Fatalf("token seeded entry count: got %d, want 2", len(tokenSeededEntries))
 		}
 
 		exportedTokens, err := export.ExportSession(ctx, s3, fs3, sessionID)
 		if err != nil {
 			t.Fatalf("ExportSession (tokens): %v", err)
 		}
-		// Tokens are on the parent assistant entry (index 1), not the depth=1 text child.
+		// Tokens are on the assistant reply entry (index 1).
 		assistantTurn := exportedTokens.Turns[1]
 		if assistantTurn.TokensIn == nil || *assistantTurn.TokensIn != 100 {
 			t.Errorf("Turn[1].TokensIn: got %v, want 100", assistantTurn.TokensIn)
@@ -560,13 +558,12 @@ func TestExportSession_OpenCodeJSON_WithActualPartFiles(t *testing.T) {
 	}
 
 	// 3. Seed DB entries from the OpenCode session directory (fullDepth=true).
-	// The assistant parent's preview comes from its first text part, so that
-	// part would render the same prose twice and the indexer drops it.
-	// Expected: user (depth=0) + assistant parent (depth=0) + the second
-	// text-part child (depth=1) = 3 entries.
+	// The assistant message has no inline content, so it is one reply whose
+	// prose is both text parts, one paragraph each; the parts are not repeated
+	// as children. Expected: user (depth=0) + assistant reply (depth=0) = 2.
 	seededEntries := seedEntriesFromOpenCode(t, ctx, s, fs, sessionID, sesPath)
-	if len(seededEntries) != 3 {
-		t.Fatalf("seeded entry count: got %d, want 3 (user, asst-parent, second part child)", len(seededEntries))
+	if len(seededEntries) != 2 {
+		t.Fatalf("seeded entry count: got %d, want 2 (user, assistant reply)", len(seededEntries))
 	}
 
 	// 4. Export.
@@ -575,13 +572,12 @@ func TestExportSession_OpenCodeJSON_WithActualPartFiles(t *testing.T) {
 		t.Fatalf("ExportSession: %v", err)
 	}
 
-	// 5. Export applies EntriesToTurns over those entries.
-	// Result: user(1) + assistant parent(1) + second text child(1) = 3.
-	if len(exported.Turns) != 3 {
-		t.Fatalf("Turns length: got %d, want 3 (EntriesToTurns folds/dedupes)", len(exported.Turns))
+	// 5. Export applies EntriesToTurns over those entries: user + assistant.
+	if len(exported.Turns) != 2 {
+		t.Fatalf("Turns length: got %d, want 2", len(exported.Turns))
 	}
-	if exported.TurnCount != 3 {
-		t.Errorf("TurnCount: got %d, want 3", exported.TurnCount)
+	if exported.TurnCount != 2 {
+		t.Errorf("TurnCount: got %d, want 2", exported.TurnCount)
 	}
 
 	// 6. Verify user entry.
@@ -592,7 +588,7 @@ func TestExportSession_OpenCodeJSON_WithActualPartFiles(t *testing.T) {
 		t.Errorf("Turn[0].Content: got %q, want %q", exported.Turns[0].Content, userContent)
 	}
 
-	// 7. Verify assistant parent has tokens.
+	// 7. Verify the assistant reply has tokens and both parts' text from the part files.
 	if exported.Turns[1].Role != schema.RoleAssistant {
 		t.Errorf("Turn[1].Role: got %q, want %q", exported.Turns[1].Role, schema.RoleAssistant)
 	}
@@ -602,18 +598,8 @@ func TestExportSession_OpenCodeJSON_WithActualPartFiles(t *testing.T) {
 	if exported.Turns[1].TokensOut == nil || *exported.Turns[1].TokensOut != 40 {
 		t.Errorf("Turn[1].TokensOut: got %v, want 40", exported.Turns[1].TokensOut)
 	}
-
-	// 10. Verify the depth=1 part children have content extracted from part files.
-	// Turn 2 and Turn 3 are the text part children; each should carry the part text.
-	if exported.Turns[2].Content == "" {
-		t.Errorf("Turn[2].Content: expected non-empty content from part file part_pf001")
-	}
-	// Turn 2: second text child (not deduped — different content from parent).
-	if exported.Turns[2].Role != schema.RoleAssistant {
-		t.Errorf("Turn[2].Role: got %q, want %q", exported.Turns[2].Role, schema.RoleAssistant)
-	}
-	if exported.Turns[2].Content == "" {
-		t.Errorf("Turn[2].Content: expected non-empty content from second part file")
+	if want := part1Text + "\n\n" + part2Text; exported.Turns[1].Content != want {
+		t.Errorf("Turn[1].Content: got %q, want %q", exported.Turns[1].Content, want)
 	}
 }
 

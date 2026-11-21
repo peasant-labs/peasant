@@ -57,11 +57,11 @@ integration suites. Publication requires validated retained evidence, partial
 signaling and the receiver's preservation capability; failed or oversized
 transfer must not silently discard evidence. Schema release/tag precedes pins.
 
-## claude-code (adapter 4, indexer 25)
+## claude-code (adapter 5, indexer 26)
 
 Baseline index format: 1.
 
-Managed generation: adapter 4, indexer 26, index format 2.
+Managed generation: adapter 5, indexer 27, index format 2.
 
 Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted evidence and mark partial interpretation. Payload: complete raw JSON and source coordinates in retainedUnknown. Source: `internal/ingest/retained_unknown.go NewRetainedUnknown`.
 
@@ -323,11 +323,11 @@ Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted e
 | retained-format-1 | content_block | `tool_use` | literal | represented | no | tool name and arguments |  | `content_capture.go captureContentBlockKinds` |
 | retained-format-1 | content_block | `tool_result` | literal | represented | yes | tool output |  | `content_capture.go captureContentBlockKinds` |
 
-## opencode (adapter 4, indexer 19)
+## opencode (adapter 4, indexer 20)
 
 Baseline index format: 1.
 
-Managed generation: adapter 5, indexer 20, index format 2.
+Managed generation: adapter 5, indexer 21, index format 2.
 
 Unseen valid kinds: **retained-unknown**, preview **no**. Retain uninterpreted evidence and mark partial interpretation. Payload: complete raw JSON and source coordinates in retainedUnknown. Source: `internal/ingest/retained_unknown.go NewRetainedUnknown`.
 
