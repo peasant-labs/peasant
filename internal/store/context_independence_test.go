@@ -178,6 +178,7 @@ func pinUnifiedMetadataInventory(t *testing.T, changes contextChangeFixture) {
 			if !field.IsExported() {
 				continue
 			}
+			// ast-grep-ignore: no-bare-format-literals
 			tag := field.Tag.Get("json")
 			if tag == "-" {
 				continue
