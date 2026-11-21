@@ -1,0 +1,10 @@
+requiredNames:
+  - runtime-error-omits-usage
+  - unknown-flag-prints-usage
+  - wrong-arg-count-prints-usage
+  - unknown-sessions-subcommand-fails
+  - unknown-nested-group-subcommand-fails
+  - unknown-village-subcommand-fails
+  - unknown-top-level-command-fails
+  - bare-group-prints-help
+  - negative-context-radius-refused

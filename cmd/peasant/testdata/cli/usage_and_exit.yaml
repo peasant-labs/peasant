@@ -1,0 +1,89 @@
+# usage_and_exit.yaml — named fixture cases for when the CLI prints its usage
+# block and which status it exits with. Each case runs the BUILT root command
+# (buildRootCommand) exactly as a user types it, so the root persistent pre-run,
+# the group-command wiring, and exitCodeFor are exercised together.
+#
+# The rule under test: an invocation error (an unknown flag, a wrong argument
+# count, an unknown subcommand) prints the usage block; a runtime failure of a
+# well-formed invocation prints only its error.
+#
+# The test prepends --config-dir/--data-dir/--state-dir pointing at a fresh
+# temporary directory, so no case reads or writes the real XDG layout. Every
+# case named here fails before it opens a store.
+#
+# Schema:
+#   cases[].name             — case name (used as the t.Run label)
+#   cases[].args             — root arguments, spelled like the real CLI
+#   cases[].want_exit        — the status exitCodeFor maps the result to
+#   cases[].want_usage       — whether the run failed AND printed the Usage:
+#                              block (help printed by a successful run is not
+#                              a usage dump)
+#   cases[].error_contains   — substrings the returned error must contain
+#                              (empty for a successful run)
+#   cases[].output_contains  — substrings the combined output must contain
+#   cases[].mutation         — the change that turns the case red
+cases:
+  - name: runtime-error-omits-usage
+    args: ["sessions", "tag", "add", "nonexist-id", "x"]
+    want_exit: 1
+    want_usage: false
+    error_contains: ["invalid session ID"]
+    mutation: the root pre-run stops setting SilenceUsage, so a RunE failure dumps usage
+
+  - name: unknown-flag-prints-usage
+    args: ["sessions", "list", "--bogus"]
+    want_exit: 1
+    want_usage: true
+    error_contains: ["unknown flag: --bogus"]
+    mutation: SilenceUsage is set on the root itself, which also hides usage for flag errors
+
+  - name: wrong-arg-count-prints-usage
+    args: ["sessions", "tag", "add", "onlyone"]
+    want_exit: 1
+    want_usage: true
+    error_contains: ["accepts 2 arg(s), received 1"]
+    mutation: SilenceUsage is set on the root itself, which also hides usage for argument errors
+
+  - name: unknown-sessions-subcommand-fails
+    args: ["sessions", "bogus"]
+    want_exit: 1
+    want_usage: true
+    error_contains: ['unknown command "bogus" for "peasant sessions"']
+    mutation: the builder-owned sessions RunE keeps accepting stray arguments and lists sessions
+
+  - name: unknown-nested-group-subcommand-fails
+    args: ["sessions", "tag", "bogus"]
+    want_exit: 1
+    want_usage: true
+    error_contains: ['unknown command "bogus" for "peasant sessions tag"']
+    mutation: the help-printing group RunE ignores its arguments and exits 0
+
+  - name: unknown-village-subcommand-fails
+    args: ["village", "bogus"]
+    want_exit: 1
+    want_usage: true
+    error_contains: ['unknown command "bogus" for "peasant village"']
+    mutation: the help-printing group RunE ignores its arguments and exits 0
+
+  - name: unknown-top-level-command-fails
+    args: ["bogus"]
+    want_exit: 1
+    # Cobra's root refusal points at --help instead of printing the block.
+    want_usage: false
+    error_contains: ['unknown command "bogus" for "peasant"']
+    output_contains: ["Run 'peasant --help' for usage."]
+    mutation: the root stops refusing unknown commands, the exit-1 baseline the groups now match
+
+  - name: bare-group-prints-help
+    args: ["village"]
+    want_exit: 0
+    want_usage: false
+    output_contains: ["Usage:", "peasant village [command]"]
+    mutation: the group refuses to run without arguments instead of printing help
+
+  - name: negative-context-radius-refused
+    args: ["sessions", "context", "--session", "S", "--turn", "1", "-C", "-1"]
+    want_exit: 2
+    want_usage: false
+    error_contains: ["invalid -C/--context value -1: must be 0 or more"]
+    mutation: a negative -C reaches the window clamp, which prints nothing and exits 0

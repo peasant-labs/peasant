@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/clicontract"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/schema"
@@ -48,6 +49,12 @@ entries are visually indented. Tool entries use box-drawing characters.
 If --session is omitted, recent sessions are listed so you can pick one.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
+
+			// A negative radius makes the window empty, which would print
+			// nothing and exit 0; refuse it before any I/O.
+			if radius < 0 {
+				return clicontract.NewUsageError(fmt.Sprintf("invalid -C/--context value %d: must be 0 or more", radius))
+			}
 
 			// Validate --format-tool-calls before opening the DB so invalid values
 			// fail fast without any I/O.

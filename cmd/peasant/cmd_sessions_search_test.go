@@ -386,13 +386,13 @@ func TestSearchWindowClampsToTheDocumentedCap(t *testing.T) {
 	}
 }
 
-func TestSessionsSearchHarnessHelpUsesKnownHarnesses(t *testing.T) {
+func TestSessionsSearchHarnessHelpUsesHarvestableHarnesses(t *testing.T) {
 	cmd := buildSessionsSearchCommand()
 	flag := cmd.Flags().Lookup("harness")
 	if flag == nil {
 		t.Fatal("missing harness flag")
 	}
-	if want := joinHarnesses(defaults.Harnesses()); !strings.Contains(flag.Usage, want) {
+	if want := harvestableHarnessList(); !strings.Contains(flag.Usage, want) {
 		t.Errorf("harness help %q does not contain %q", flag.Usage, want)
 	}
 }

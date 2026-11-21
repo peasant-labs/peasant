@@ -1,3 +1,11 @@
 requiredNames:
   - push-help-lists-claude-code
   - push-help-omits-archived-gemini-cli
+  - sessions-list-help-lists-cursor
+  - sessions-list-help-lists-strike
+  - sessions-list-help-lists-pi
+  - sessions-list-help-omits-archived-gemini-cli
+  - sessions-search-help-lists-cursor
+  - sessions-search-help-lists-strike
+  - sessions-search-help-lists-pi
+  - sessions-search-help-omits-archived-gemini-cli

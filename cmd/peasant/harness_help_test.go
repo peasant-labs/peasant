@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
 
@@ -22,7 +23,11 @@ var harnessHelpManifestYAML []byte
 // harnessHelpSurface names one piece of command help that lists harnesses.
 type harnessHelpSurface string
 
-const harnessHelpPushSourceHarness harnessHelpSurface = "push-source-harness"
+const (
+	harnessHelpPushSourceHarness     harnessHelpSurface = "push-source-harness"
+	harnessHelpSessionsListHarness   harnessHelpSurface = "sessions-list-harness"
+	harnessHelpSessionsSearchHarness harnessHelpSurface = "sessions-search-harness"
+)
 
 // harnessHelpExpectation says whether a token appears in a surface's list.
 type harnessHelpExpectation string
@@ -87,22 +92,29 @@ func loadHarnessHelpFixture(t *testing.T) harnessHelpFixture {
 // from the help the production command carries.
 func harnessHelpTokens(t *testing.T, surface harnessHelpSurface) []string {
 	t.Helper()
+	var cmd *cobra.Command
+	var flagName string
 	switch surface {
 	case harnessHelpPushSourceHarness:
-		flag := BuildPushCommand().Flags().Lookup("source-harness")
-		if flag == nil {
-			t.Fatal("--source-harness flag is not registered on the push command")
-		}
-		_, rest, okOpen := strings.Cut(flag.Usage, "(")
-		list, _, okClose := strings.Cut(rest, ")")
-		if !okOpen || !okClose {
-			t.Fatalf("--source-harness usage %q has no parenthesised harness list", flag.Usage)
-		}
-		return strings.Split(list, ", ")
+		cmd, flagName = BuildPushCommand(), "source-harness"
+	case harnessHelpSessionsListHarness:
+		cmd, flagName = buildSessionsListCommand(), "harness"
+	case harnessHelpSessionsSearchHarness:
+		cmd, flagName = buildSessionsSearchCommand(), "harness"
 	default:
 		t.Fatalf("unknown harness help surface %q; add it to harnessHelpTokens", surface)
 		return nil
 	}
+	flag := cmd.Flags().Lookup(flagName)
+	if flag == nil {
+		t.Fatalf("--%s flag is not registered for surface %s", flagName, surface)
+	}
+	_, rest, okOpen := strings.Cut(flag.Usage, "(")
+	list, _, okClose := strings.Cut(rest, ")")
+	if !okOpen || !okClose {
+		t.Fatalf("--%s usage %q has no parenthesised harness list", flagName, flag.Usage)
+	}
+	return strings.Split(list, ", ")
 }
 
 func TestHarnessHelpLists(t *testing.T) {
@@ -132,17 +144,26 @@ func TestHarnessHelpLists(t *testing.T) {
 // on the flag BuildPushCommand() actually wires to the adapter registry, the
 // owner of the harvestable set: every harness with an adapter is listed, and
 // nothing else is.
+//
+// The sessions list and search --harness help is pinned the same way: those
+// filters read the local store, which holds only harvested sessions.
 func TestPushSourceHarnessHelpEqualsAdapterRegistry(t *testing.T) {
 	t.Parallel()
-	tokens := harnessHelpTokens(t, harnessHelpPushSourceHarness)
 	want := make([]string, 0, len(ingest.DefaultAdapterRegistry))
 	for harness := range ingest.DefaultAdapterRegistry {
 		want = append(want, harness.String())
 	}
-	got := slices.Clone(tokens)
-	slices.Sort(got)
 	slices.Sort(want)
-	if !slices.Equal(got, want) {
-		t.Errorf("--source-harness help lists %v; want exactly the adapter registry's harnesses %v", tokens, want)
+	for _, surface := range []harnessHelpSurface{
+		harnessHelpPushSourceHarness,
+		harnessHelpSessionsListHarness,
+		harnessHelpSessionsSearchHarness,
+	} {
+		tokens := harnessHelpTokens(t, surface)
+		got := slices.Clone(tokens)
+		slices.Sort(got)
+		if !slices.Equal(got, want) {
+			t.Errorf("%s help lists %v; want exactly the adapter registry's harnesses %v", surface, tokens, want)
+		}
 	}
 }

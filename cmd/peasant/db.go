@@ -153,7 +153,7 @@ func buildDBCmd() *cobra.Command {
 			return enc.Encode(sessions)
 		},
 	}
-	queryListCmd.Flags().StringVar(&queryHarness, "harness", "", "Filter by harness (claude-code, gemini-cli, codex, opencode)")
+	queryListCmd.Flags().StringVar(&queryHarness, "harness", "", "Filter by harness ("+harvestableHarnessList()+")")
 	queryListCmd.Flags().StringVar(&queryProject, "project", "", "Filter by project name")
 	queryListCmd.Flags().StringVar(&querySince, "since", "", "Filter sessions starting after date (YYYY-MM-DD)")
 	queryListCmd.Flags().StringVar(&queryUntil, "until", "", "Filter sessions starting before date (YYYY-MM-DD)")
@@ -210,7 +210,7 @@ func buildDBCmd() *cobra.Command {
 			return enc.Encode(stats)
 		},
 	}
-	queryStatsCmd.Flags().StringVar(&statsHarness, "harness", "", "Filter by harness (claude-code, gemini-cli, codex, opencode)")
+	queryStatsCmd.Flags().StringVar(&statsHarness, "harness", "", "Filter by harness ("+harvestableHarnessList()+")")
 	queryStatsCmd.Flags().StringVar(&statsProject, "project", "", "Filter by project name")
 
 	// --- peasant db query quality ---

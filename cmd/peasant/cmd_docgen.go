@@ -29,12 +29,9 @@ func BuildDocgenCommand() *cobra.Command {
 			configFlag := cmd.Root().PersistentFlags().Lookup("config")
 			if configFlag != nil {
 				originalDefault := configFlag.DefValue
-				originalUsage := configFlag.Usage
 				configFlag.DefValue = "~/.config/peasant/config.yaml"
-				configFlag.Usage = "Path to config file"
 				defer func() {
 					configFlag.DefValue = originalDefault
-					configFlag.Usage = originalUsage
 				}()
 			}
 			// The generator stamps the run date into every page footer, so any

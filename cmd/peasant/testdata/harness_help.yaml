@@ -4,8 +4,12 @@
 # compares tokens, never substrings.
 #
 # Surfaces (a closed switch in the test; an unknown surface fails):
-#   push-source-harness -> the usage of --source-harness on BuildPushCommand(),
-#                          derived from ingest.HarvestableHarnesses()
+#   push-source-harness     -> the usage of --source-harness on BuildPushCommand(),
+#                              derived from ingest.HarvestableHarnesses()
+#   sessions-list-harness   -> the usage of --harness on `sessions list`,
+#                              derived from ingest.HarvestableHarnesses()
+#   sessions-search-harness -> the usage of --harness on `sessions search`,
+#                              derived from ingest.HarvestableHarnesses()
 #
 # mutation names the change to the help derivation that turns the case red.
 cases:
@@ -19,3 +23,43 @@ cases:
     token: gemini-cli
     want: omitted
     mutation: the help is left on the declared set (schema.AllHarnesses)
+  - name: sessions-list-help-lists-cursor
+    surface: sessions-list-harness
+    token: cursor
+    want: listed
+    mutation: the help is hardcoded to a list that predates the cursor adapter
+  - name: sessions-list-help-lists-strike
+    surface: sessions-list-harness
+    token: strike
+    want: listed
+    mutation: the help is hardcoded to a list that predates the strike adapter
+  - name: sessions-list-help-lists-pi
+    surface: sessions-list-harness
+    token: pi
+    want: listed
+    mutation: the help is hardcoded to a list that predates the pi adapter
+  - name: sessions-list-help-omits-archived-gemini-cli
+    surface: sessions-list-harness
+    token: gemini-cli
+    want: omitted
+    mutation: the help is left on the declared set (defaults.Harnesses)
+  - name: sessions-search-help-lists-cursor
+    surface: sessions-search-harness
+    token: cursor
+    want: listed
+    mutation: the help is hardcoded to a list that predates the cursor adapter
+  - name: sessions-search-help-lists-strike
+    surface: sessions-search-harness
+    token: strike
+    want: listed
+    mutation: the help is hardcoded to a list that predates the strike adapter
+  - name: sessions-search-help-lists-pi
+    surface: sessions-search-harness
+    token: pi
+    want: listed
+    mutation: the help is hardcoded to a list that predates the pi adapter
+  - name: sessions-search-help-omits-archived-gemini-cli
+    surface: sessions-search-harness
+    token: gemini-cli
+    want: omitted
+    mutation: the help is left on the declared set (defaults.Harnesses)
