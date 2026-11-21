@@ -273,6 +273,8 @@ type harvestReport func(cmd *cobra.Command, execution harvestExecution, options 
 // runHarvestWith runs one harvest through the production wiring and hands the
 // committed execution to report.
 func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, filesystem ingest.FileSystem, report harvestReport) error {
+	// The run's start names its log file (harvest--<unix>.log).
+	startedAt := time.Now()
 	signalCtx, stopSignals := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 	defer stopSignals()
 	ctx, cancelOperation := context.WithCancel(signalCtx)
@@ -652,6 +654,9 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 		scopeRun:   pipelineCfg.Scope != nil,
 		command:    pipelineCfg.Command,
 		prefix:     pipelineCfg.CommandPrefix,
+		mode:       mode,
+		startedAt:  startedAt,
+		stateDir:   stateDirOverride(cmd),
 	})
 }
 
@@ -675,6 +680,12 @@ type harvestOutputOptions struct {
 	scopeRun bool
 	command  string
 	prefix   string
+	// mode names the subcommand in the run log when command is unset.
+	mode harvestMode
+	// startedAt is the run's start; it names the run log file.
+	startedAt time.Time
+	// stateDir is the --state-dir override the run log is written under.
+	stateDir string
 }
 
 // errSessionsFailed ends a harvest that finished but failed at least one
@@ -718,7 +729,10 @@ func outputHarvest(cmd *cobra.Command, execution harvestExecution, options harve
 		printIndexProfile(cmd.ErrOrStderr(), options.indexProfiler.Snapshot())
 	}
 	if options.flags.jsonOutput {
-		if err := printJSON(cmd.OutOrStdout(), result); err != nil {
+		// The run log is written first so the document can name it: stdout
+		// stays one parseable document and stderr stays quiet on success.
+		runLog := writeHarvestRunLogOrWarn(cmd.ErrOrStderr(), result, options)
+		if err := printJSONWithRunLog(cmd.OutOrStdout(), result, runLog); err != nil {
 			return err
 		}
 		// The exit code must not depend on the output format: a script that
@@ -745,6 +759,11 @@ func outputHarvest(cmd *cobra.Command, execution harvestExecution, options harve
 			skipped = fmt.Sprintf("%d saved copies were damaged or stale and skipped: %s.", len(ids), strings.Join(ids, ", "))
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "Rebuilt %d sessions from peasant-sync/. %s A rebuild restores transcripts and metadata only. It does not restore annotations, peasant online publication records, session origin attribution, or a session's readiness to be shared: a rebuilt session cannot be shared until the next harvest reads it from its source. Metrics are computed again.\n", result.Summary.RebuiltFromFiles, skipped)
+	}
+
+	// The log path is the summary's last line, on stdout beside it.
+	if runLog := writeHarvestRunLogOrWarn(cmd.ErrOrStderr(), result, options); runLog != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "harvest log: %s\n", runLog)
 	}
 
 	// 11. Exit code: 1 if any errors occurred during ingestion.
@@ -1432,6 +1451,9 @@ type jsonPipelineResult struct {
 	IndexLog             []ingest.IndexLogEntry       `json:"indexLog,omitempty"`
 	IndexCoverage        *ingest.IndexCoverage        `json:"indexCoverage,omitempty"`
 	DiscoveryDiagnostics []ingest.DiscoveryDiagnostic `json:"discoveryDiagnostics,omitempty"`
+	// RunLog is the path of this run's harvest--<unix>.log; omitted when no
+	// log was written (a dry run, or a write that failed with a warning).
+	RunLog string `json:"runLog,omitempty"`
 }
 
 // jsonSessionResult is the JSON-safe equivalent of ingest.SessionResult.
@@ -1449,7 +1471,14 @@ type jsonSessionResult struct {
 // printJSON outputs the pipeline result as JSON.
 // The error field in SessionResult is serialized as a string to ensure JSON compatibility.
 func printJSON(w io.Writer, result *ingest.PipelineResult) error {
+	return printJSONWithRunLog(w, result, "")
+}
+
+// printJSONWithRunLog is printJSON naming the run's log file, when one was
+// written.
+func printJSONWithRunLog(w io.Writer, result *ingest.PipelineResult, runLog string) error {
 	out := jsonPipelineResult{
+		RunLog:               runLog,
 		Summary:              result.Summary,
 		CensusStored:         result.CensusStored,
 		Duration:             result.Duration.Round(100 * time.Millisecond).String(),
