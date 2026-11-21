@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"hash/fnv"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -73,6 +75,11 @@ func runSearchRecallCase(t *testing.T, c searchRecallCase) {
 		recallTransitionFallback(t, c)
 	case "rowid-space-guard":
 		recallRowidGuard(t, c)
+	case "claude-tool-call-term-found",
+		"claude-tool-result-term-found",
+		"claude-subagent-tool-result-term-found",
+		"claude-nested-duplicate-child-filtered":
+		recallClaudeTranscript(t, c)
 	default:
 		t.Fatalf("%s: no runner for this recall case", c.Name)
 	}
@@ -650,4 +657,71 @@ func recallRowidGuard(t *testing.T, c searchRecallCase) {
 			t.Fatal("ceiling check allows max(session_entries.rowid) at the body base")
 		}
 	}
+}
+
+// recallClaudeTranscript runs a Claude Code transcript through the production
+// capture path and writes the captured entries to each listed
+// representation. Claude Code nests tool calls and tool results under a
+// wrapper entry whose text is NULL, so these cases prove the nested-duplicate
+// filter keeps them, and still drops a nested entry that repeats its
+// parent's text, in every search template.
+func recallClaudeTranscript(t *testing.T, c searchRecallCase) {
+	t.Helper()
+	for _, representation := range c.Representations {
+		t.Run(string(representation), func(t *testing.T) {
+			s, _ := openGenerationStore(t)
+			if representation == recallRepresentationLegacyIndex {
+				seedLegacySearchIndex(t, s)
+			}
+			sid := recallSID(c.Name)
+			seedGenerationSession(t, s, string(sid))
+			entries := recallCaptureClaude(t, sid, c.ClaudeTranscript)
+			switch representation {
+			case recallRepresentationGeneration:
+				activateRecallEntries(t, s, sid, "gen-"+strings.ReplaceAll(c.Name, "-", ""), entries, nil)
+			case recallRepresentationMirror, recallRepresentationLegacyIndex:
+				if err := s.IndexSessionEntries(context.Background(), sid, entries); err != nil {
+					t.Fatalf("index mirror rows: %v", err)
+				}
+			default:
+				t.Fatalf("%s: no writer for representation %q", c.Name, representation)
+			}
+			if representation == recallRepresentationLegacyIndex {
+				// The retired index carries the mirror rows and the union
+				// none, so the hits below come from the legacy template.
+				if got := recallRawCount(t, s, "session_search_fts", c.Query); got != 0 {
+					t.Fatalf("%s: union MATCH = %d, want 0 under the retired index", c.Name, got)
+				}
+				if got := recallRawCount(t, s, "session_entries_fts", c.Query); got == 0 {
+					t.Fatalf("%s: retired index has no posting for %q", c.Name, c.Query)
+				}
+			}
+			assertRecallHits(t, c, recallProduction(t, s, c.Query))
+		})
+	}
+}
+
+// recallCaptureClaude returns the entries the production Claude Code capture
+// path emits for the transcript.
+func recallCaptureClaude(t *testing.T, sid schema.SessionID, transcript string) []schema.SessionEntry {
+	t.Helper()
+	source := []byte(strings.ReplaceAll(transcript, "{{sid}}", string(sid)))
+	path := filepath.Join(t.TempDir(), string(sid)+".jsonl")
+	if err := os.WriteFile(path, source, defaults.PrivateFilePerm); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	session := ingest.DiscoveredSession{
+		SessionID:    sid,
+		Harness:      defaults.HarnessClaudeCode,
+		SourcePath:   ingest.ResolvedPath(path),
+		SourceFormat: ingest.SourceFormatJSONL,
+	}
+	capture, err := ingest.NewClaudeIndexer(&ingest.OSFileSystem{}).IndexTranscriptBytesForCapture(context.Background(), session, source)
+	if err != nil {
+		t.Fatalf("capture the Claude Code transcript: %v", err)
+	}
+	if len(capture.Entries) == 0 {
+		t.Fatal("capture emitted no entries")
+	}
+	return capture.Entries
 }

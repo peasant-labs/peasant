@@ -19,3 +19,7 @@ requiredNames:
   - transition-window-match-set
   - transition-window-fallback-filter
   - rowid-space-guard
+  - claude-tool-call-term-found
+  - claude-tool-result-term-found
+  - claude-subagent-tool-result-term-found
+  - claude-nested-duplicate-child-filtered

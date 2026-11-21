@@ -25,7 +25,7 @@ WHERE session_entries_fts MATCH ?
   AND NOT (
     e.depth > 0
     AND e.content_preview IS NOT NULL
-    AND e.content_preview = (
+    AND e.content_preview IS (
       SELECT pe.content_preview FROM session_entries pe
       WHERE pe.session_id = e.session_id AND pe.entry_index = e.parent_index
     )
