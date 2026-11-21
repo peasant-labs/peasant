@@ -5,13 +5,11 @@ import (
 	"crypto/sha256"
 	_ "embed"
 	"encoding/hex"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -24,16 +22,31 @@ var releasePublishContractBytes []byte
 type releasePublishContractFixture struct {
 	Workflow string `yaml:"workflow"`
 	Publish  struct {
-		Job               string                       `yaml:"job"`
-		Steps             nonEmptyStrings              `yaml:"steps"`
-		CreateStep        string                       `yaml:"create_step"`
-		CreateRunContains nonEmptyStrings              `yaml:"create_run_contains"`
-		AllowedActions    nonEmptyStrings              `yaml:"allowed_actions"`
-		ForbiddenCommands nonEmptyStrings              `yaml:"forbidden_commands"`
-		StepContracts     []releasePublishStepContract `yaml:"step_contracts"`
+		Job               string                   `yaml:"job"`
+		ConcurrencyGroup  string                   `yaml:"concurrency_group"`
+		VerifyJob         string                   `yaml:"verify_job"`
+		Needs             nonEmptyStrings          `yaml:"needs"`
+		RunsOn            string                   `yaml:"runs_on"`
+		Permissions       []workflowEnvExpectation `yaml:"permissions"`
+		JobEnv            []workflowEnvExpectation `yaml:"job_env"`
+		InfraRef          string                   `yaml:"infra_ref"`
+		Steps             nonEmptyStrings          `yaml:"steps"`
+		AllowedActions    nonEmptyStrings          `yaml:"allowed_actions"`
+		ToolCheckoutStep  string                   `yaml:"tool_checkout_step"`
+		ToolCheckoutWith  []workflowEnvExpectation `yaml:"tool_checkout_with"`
+		SetupGoStep       string                   `yaml:"setup_go_step"`
+		SetupGoWith       []workflowEnvExpectation `yaml:"setup_go_with"`
+		BuildStep         string                   `yaml:"build_step"`
+		BuildEnv          []workflowEnvExpectation `yaml:"build_env"`
+		BuildRun          string                   `yaml:"build_run"`
+		DownloadStep      string                   `yaml:"download_step"`
+		DownloadWith      []workflowEnvExpectation `yaml:"download_with"`
+		PublishStep       string                   `yaml:"publish_step"`
+		PublishEnv        []workflowEnvExpectation `yaml:"publish_env"`
+		PublishRun        string                   `yaml:"publish_run"`
+		ForbiddenCommands nonEmptyStrings          `yaml:"forbidden_commands"`
 	} `yaml:"publish"`
-	ViewChecks []releaseViewCheck `yaml:"view_checks"`
-	Staging    struct {
+	Staging struct {
 		Job              string `yaml:"job"`
 		NotesEnv         string `yaml:"notes_env"`
 		GoReleaserConfig string `yaml:"goreleaser_config"`
@@ -56,36 +69,6 @@ type releasePublishContractFixture struct {
 	} `yaml:"staging"`
 }
 
-// releasePublishStepContract is one publish step's gate and command. An
-// unconditional step has no if:, and only a step with ContinueOnError may set
-// continue-on-error.
-type releasePublishStepContract struct {
-	Name            string   `yaml:"name"`
-	ID              string   `yaml:"id"`
-	Unconditional   bool     `yaml:"unconditional"`
-	ContinueOnError bool     `yaml:"continue_on_error"`
-	IfContains      []string `yaml:"if_contains"`
-	IfExcludes      []string `yaml:"if_excludes"`
-	RunContains     []string `yaml:"run_contains"`
-	RunExcludes     []string `yaml:"run_excludes"`
-}
-
-// releaseViewCheck runs one release-state step against stubbed gh output.
-type releaseViewCheck struct {
-	Step     string            `yaml:"step"`
-	Args     string            `yaml:"args"`
-	Required nonEmptyStrings   `yaml:"required"`
-	Cases    []releaseViewCase `yaml:"cases"`
-}
-
-type releaseViewCase struct {
-	Name           string `yaml:"name"`
-	Response       string `yaml:"response"`
-	APIExit        int    `yaml:"api_exit"`
-	ExpectedExit   int    `yaml:"expected_exit"`
-	ExpectedOutput string `yaml:"expected_output"`
-}
-
 type releaseStagingFixtureCase struct {
 	Name        string   `yaml:"name"`
 	AddTopLevel []string `yaml:"add_top_level"`
@@ -106,63 +89,124 @@ func loadReleasePublishContractFixture(t *testing.T) releasePublishContractFixtu
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		t.Fatalf("release: publish contract fixture must have exact EOF: %v", err)
 	}
+	if !is40HexSHA(fixture.Publish.InfraRef) {
+		t.Fatalf("release: publish fixture infra_ref %q must be a 40-hex commit SHA", fixture.Publish.InfraRef)
+	}
 	return fixture
 }
 
-// TestReleasePublishCreatesDraftAndAssetsInOneCommand pins the publish job to
-// one gh release create that makes the draft and uploads its assets, followed
-// by a gated publish. A second creator or an upload action finds the release
-// by tag and can fill a release that is never published.
-func TestReleasePublishCreatesDraftAndAssetsInOneCommand(t *testing.T) {
+func is40HexSHA(s string) bool {
+	if len(s) != 40 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
+}
+
+// TestReleasePublishUsesFiveStepPublishRelease pins the publish job to the
+// exact five-step release-intent publish-release contract: tool checkout from
+// the pinned infra commit, setup-go with cache disabled, build with GOWORK=off
+// before downloading release-dist, and publish-release with no conditionals,
+// continue-on-error, or retired gh release glue.
+func TestReleasePublishUsesFiveStepPublishRelease(t *testing.T) {
 	t.Parallel()
 	fixture := loadReleasePublishContractFixture(t)
+	pub := fixture.Publish
 	doc := readWorkflowDoc(t, filepath.Join(releaseWorkflowRepoRoot(t), fixture.Workflow))
-	steps := workflowJobSteps(t, doc, fixture.Publish.Job, fixture.Workflow)
 
+	concurrency := yamlMappingValue(doc, "concurrency")
+	assertYAMLMappingValue(t, concurrency, "group", pub.ConcurrencyGroup, fixture.Workflow+" concurrency")
+	assertYAMLMappingValue(t, concurrency, "cancel-in-progress", "false", fixture.Workflow+" concurrency")
+
+	jobs := yamlMappingValue(doc, "jobs")
+	job := yamlMappingValue(jobs, pub.Job)
+	if job == nil {
+		t.Fatalf("%s: missing job %q", fixture.Workflow, pub.Job)
+	}
+	if yamlMappingValue(job, "if") != nil {
+		t.Fatalf("%s: jobs.%s must not define an if condition", fixture.Workflow, pub.Job)
+	}
+	if yamlMappingValue(job, "continue-on-error") != nil {
+		t.Fatalf("%s: jobs.%s must not define continue-on-error", fixture.Workflow, pub.Job)
+	}
+	assertYAMLMappingValue(t, job, "runs-on", pub.RunsOn, fixture.Workflow+" jobs."+pub.Job)
+	gotNeeds := workflowNeedsValues(yamlMappingValue(job, "needs"))
+	if !sameStringSet(gotNeeds, pub.Needs) {
+		t.Fatalf("%s: jobs.%s needs = %v, want exactly %v", fixture.Workflow, pub.Job, gotNeeds, pub.Needs)
+	}
+	assertYAMLMappingExact(t, yamlMappingValue(job, "permissions"), pub.Permissions, fixture.Workflow+" jobs."+pub.Job+" permissions")
+	assertYAMLMappingExact(t, yamlMappingValue(job, "env"), pub.JobEnv, fixture.Workflow+" jobs."+pub.Job+" env")
+
+	steps := workflowJobSteps(t, doc, pub.Job, fixture.Workflow)
 	var names []string
 	for _, step := range steps {
 		name := yamlMappingValue(step, "name")
 		if name == nil {
-			t.Fatalf("%s: every %s step must be named", fixture.Workflow, fixture.Publish.Job)
+			t.Fatalf("%s: every %s step must be named", fixture.Workflow, pub.Job)
+		}
+		if yamlMappingValue(step, "if") != nil {
+			t.Fatalf("%s: %s step %q must not define an if condition", fixture.Workflow, pub.Job, name.Value)
+		}
+		if yamlMappingValue(step, "continue-on-error") != nil {
+			t.Fatalf("%s: %s step %q must not define continue-on-error", fixture.Workflow, pub.Job, name.Value)
 		}
 		names = append(names, name.Value)
 		if uses := yamlMappingValue(step, "uses"); uses != nil {
-			action, _, _ := strings.Cut(uses.Value, "@")
-			if !slices.Contains(fixture.Publish.AllowedActions, action) {
-				t.Fatalf("%s: %s step %q uses %q; only %v may run in the publish job", fixture.Workflow, fixture.Publish.Job, name.Value, action, fixture.Publish.AllowedActions)
+			action, ref, ok := strings.Cut(uses.Value, "@")
+			if !ok || !slices.Contains(pub.AllowedActions, action) {
+				t.Fatalf("%s: %s step %q uses %q; only %v may run in the publish job", fixture.Workflow, pub.Job, name.Value, action, pub.AllowedActions)
+			}
+			if !is40HexSHA(ref) {
+				t.Fatalf("%s: %s step %q uses %q, must pin a 40-hex commit SHA", fixture.Workflow, pub.Job, name.Value, uses.Value)
 			}
 		}
 	}
-	if !slices.Equal(names, fixture.Publish.Steps) {
-		t.Fatalf("%s: %s steps = %q, want exactly %q", fixture.Workflow, fixture.Publish.Job, names, fixture.Publish.Steps)
+	if !slices.Equal(names, pub.Steps) {
+		t.Fatalf("%s: %s steps = %q, want exactly %q", fixture.Workflow, pub.Job, names, pub.Steps)
 	}
 
-	create := workflowStepRun(t, steps, fixture.Publish.CreateStep)
-	for _, required := range fixture.Publish.CreateRunContains {
-		if !strings.Contains(create, required) {
-			t.Fatalf("%s: %q must pass %s, got %q", fixture.Workflow, fixture.Publish.CreateStep, required, create)
-		}
+	toolCheckout := workflowStepNode(t, steps, pub.ToolCheckoutStep)
+	assertYAMLMappingExact(t, yamlMappingValue(toolCheckout, "with"), pub.ToolCheckoutWith, fixture.Workflow+" "+pub.ToolCheckoutStep+" with")
+
+	verifySteps := workflowJobSteps(t, doc, pub.VerifyJob, fixture.Workflow)
+	verifyCheckout := workflowStepNode(t, verifySteps, pub.ToolCheckoutStep)
+	assertYAMLMappingValue(t, yamlMappingValue(verifyCheckout, "with"), "ref", pub.InfraRef, fixture.Workflow+" "+pub.VerifyJob+" "+pub.ToolCheckoutStep+" with")
+
+	setupGo := workflowStepNode(t, steps, pub.SetupGoStep)
+	assertYAMLMappingExact(t, yamlMappingValue(setupGo, "with"), pub.SetupGoWith, fixture.Workflow+" "+pub.SetupGoStep+" with")
+
+	buildStep := workflowStepNode(t, steps, pub.BuildStep)
+	assertYAMLMappingExact(t, yamlMappingValue(buildStep, "env"), pub.BuildEnv, fixture.Workflow+" "+pub.BuildStep+" env")
+	if got := strings.TrimSpace(workflowStepRun(t, steps, pub.BuildStep)); got != pub.BuildRun {
+		t.Fatalf("%s: %q run = %q, want %q", fixture.Workflow, pub.BuildStep, got, pub.BuildRun)
 	}
 
-	assertReleasePublishStepContracts(t, fixture.Workflow, steps, fixture.Publish.Steps, fixture.Publish.StepContracts)
+	downloadStep := workflowStepNode(t, steps, pub.DownloadStep)
+	assertYAMLMappingExact(t, yamlMappingValue(downloadStep, "with"), pub.DownloadWith, fixture.Workflow+" "+pub.DownloadStep+" with")
 
-	creators := 0
+	publishStep := workflowStepNode(t, steps, pub.PublishStep)
+	assertYAMLMappingExact(t, yamlMappingValue(publishStep, "env"), pub.PublishEnv, fixture.Workflow+" "+pub.PublishStep+" env")
+	if got := strings.TrimSpace(workflowStepRun(t, steps, pub.PublishStep)); got != pub.PublishRun {
+		t.Fatalf("%s: %q run = %q, want %q", fixture.Workflow, pub.PublishStep, got, pub.PublishRun)
+	}
+
 	for _, jobName := range releaseWorkflowJobNames(t, doc) {
 		for _, step := range workflowJobSteps(t, doc, jobName, fixture.Workflow) {
 			run := yamlMappingValue(step, "run")
 			if run == nil {
 				continue
 			}
-			creators += strings.Count(run.Value, "gh release create")
-			for _, forbidden := range fixture.Publish.ForbiddenCommands {
+			for _, forbidden := range pub.ForbiddenCommands {
 				if strings.Contains(run.Value, forbidden) {
-					t.Fatalf("%s: job %s runs %q; assets reach the release only through the one create", fixture.Workflow, jobName, forbidden)
+					t.Fatalf("%s: job %s runs %q; release publication uses release-intent publish-release", fixture.Workflow, jobName, forbidden)
 				}
 			}
 		}
-	}
-	if creators != 1 {
-		t.Fatalf("%s: found %d gh release create commands, want exactly one", fixture.Workflow, creators)
 	}
 }
 
@@ -296,169 +340,6 @@ func releaseWorkflowJobNames(t *testing.T, doc *yaml.Node) []string {
 		}
 	}
 	return names
-}
-
-func assertReleasePublishStepContracts(t *testing.T, workflow string, steps []*yaml.Node, names []string, contracts []releasePublishStepContract) {
-	t.Helper()
-	covered := make(map[string]bool)
-	for _, contract := range contracts {
-		if contract.Name == "" || covered[contract.Name] || !slices.Contains(names, contract.Name) {
-			t.Fatalf("%s: step contract %q is empty, duplicated or names no publish step", workflow, contract.Name)
-		}
-		covered[contract.Name] = true
-		step := workflowStepNode(t, steps, contract.Name)
-		context := fmt.Sprintf("%s: publish step %q", workflow, contract.Name)
-
-		if contract.ID != "" {
-			if id := yamlMappingValue(step, "id"); id == nil || id.Value != contract.ID {
-				t.Fatalf("%s: id = %v, want %q", context, id, contract.ID)
-			}
-		}
-		continueOnError := yamlMappingValue(step, "continue-on-error")
-		continues := false
-		if continueOnError != nil {
-			if err := continueOnError.Decode(&continues); err != nil || !continues {
-				t.Fatalf("%s: continue-on-error = %q, want the boolean true or no key", context, continueOnError.Value)
-			}
-		}
-		if contract.ContinueOnError != continues {
-			t.Fatalf("%s: continue-on-error = %v, want set to true only when the contract says so (%v)", context, continueOnError, contract.ContinueOnError)
-		}
-
-		condition := yamlMappingValue(step, "if")
-		switch {
-		case contract.Unconditional:
-			if condition != nil {
-				t.Fatalf("%s: must run unconditionally, has if: %q", context, condition.Value)
-			}
-		case condition == nil:
-			t.Fatalf("%s: must be gated, has no if:", context)
-		default:
-			// A gate is a conjunction of step outcomes: an || or a status
-			// function would let the step run past a failed predecessor.
-			for _, banned := range append([]string{"||", "()"}, contract.IfExcludes...) {
-				if strings.Contains(condition.Value, banned) {
-					t.Fatalf("%s: if: %q must not contain %q", context, condition.Value, banned)
-				}
-			}
-			for _, required := range contract.IfContains {
-				if !strings.Contains(condition.Value, required) {
-					t.Fatalf("%s: if: %q must contain %q", context, condition.Value, required)
-				}
-			}
-		}
-
-		run := yamlMappingValue(step, "run")
-		if run == nil {
-			if len(contract.RunContains)+len(contract.RunExcludes) > 0 {
-				t.Fatalf("%s: has no run, but its contract names run fragments", context)
-			}
-			continue
-		}
-		for _, required := range contract.RunContains {
-			if !strings.Contains(run.Value, required) {
-				t.Fatalf("%s: run must contain %q, got %q", context, required, run.Value)
-			}
-		}
-		for _, banned := range contract.RunExcludes {
-			if strings.Contains(run.Value, banned) {
-				t.Fatalf("%s: run must not contain %q, got %q", context, banned, run.Value)
-			}
-		}
-	}
-	for _, name := range names {
-		if !covered[name] {
-			t.Errorf("%s: publish step %q has no step contract", workflow, name)
-		}
-	}
-}
-
-// TestReleasePublishViewChecks runs each release-state step's real script and
-// jq predicate with a stubbed gh: the rerun completeness check, the refusal
-// of an existing release or draft, the draft check before publishing and the
-// published check after it.
-func TestReleasePublishViewChecks(t *testing.T) {
-	t.Parallel()
-	fixture := loadReleasePublishContractFixture(t)
-	doc := readWorkflowDoc(t, filepath.Join(releaseWorkflowRepoRoot(t), fixture.Workflow))
-	steps := workflowJobSteps(t, doc, fixture.Publish.Job, fixture.Workflow)
-	bashPath, err := exec.LookPath("bash")
-	if err != nil {
-		t.Fatalf("release: locate bash for the release-state steps: %v", err)
-	}
-	// The pool runner image and GitHub-hosted runners both ship jq; a
-	// missing jq fails rather than skipping the predicates.
-	if _, err := exec.LookPath("jq"); err != nil {
-		t.Fatalf("release: the release-state checks need jq on PATH to apply the workflow's --jq filters: %v", err)
-	}
-	if len(fixture.ViewChecks) == 0 {
-		t.Fatal("release: the publish fixture must list view checks")
-	}
-	for _, check := range fixture.ViewChecks {
-		script := workflowStepRun(t, steps, check.Step)
-		seen := make(map[string]bool)
-		for _, c := range check.Cases {
-			if c.Name == "" || seen[c.Name] {
-				t.Fatalf("release: empty or duplicate case %q for %q", c.Name, check.Step)
-			}
-			seen[c.Name] = true
-		}
-		for _, name := range check.Required {
-			if !seen[name] {
-				t.Fatalf("release: required case %q for %q is missing", name, check.Step)
-			}
-		}
-		t.Run(check.Step, func(t *testing.T) {
-			t.Parallel()
-			for _, c := range check.Cases {
-				t.Run(c.Name, func(t *testing.T) {
-					t.Parallel()
-					runReleaseViewCase(t, bashPath, script, check.Args, c)
-				})
-			}
-		})
-	}
-}
-
-// releaseGHStub requires exactly TEST_ARGS before the final --jq filter, then
-// applies that filter to TEST_RELEASE_JSON with jq, as gh does.
-const releaseGHStub = `#!/bin/sh
-filter=$(eval "printf '%s' \"\${$#}\"")
-set -- $(printf '%s\n' "$@" | head -n $(($# - 1)))
-[ "$*" = "$TEST_ARGS" ] || { printf 'stub gh got unexpected arguments: %s\n' "$*" >&2; exit 92; }
-if [ "$TEST_API_EXIT" -ne 0 ]; then
-  printf 'mock API unavailable\n' >&2
-  exit "$TEST_API_EXIT"
-fi
-printf '%s\n' "$TEST_RELEASE_JSON" | jq -e -r "$filter" || exit 1
-`
-
-func runReleaseViewCase(t *testing.T, bashPath, script, args string, c releaseViewCase) {
-	t.Helper()
-	dir := t.TempDir()
-	writeExecutable(t, filepath.Join(dir, "gh"), releaseGHStub)
-	cmd := exec.Command(bashPath, "--noprofile", "--norc", "-e", "-c", script)
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(),
-		"PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"),
-		"TAG=v1.2.3",
-		"GITHUB_REPOSITORY=peasant-labs/peasant",
-		"TEST_ARGS="+args,
-		"TEST_RELEASE_JSON="+c.Response,
-		"TEST_API_EXIT="+strconv.Itoa(c.APIExit),
-	)
-	output, err := cmd.CombinedOutput()
-	exit := 0
-	if err != nil {
-		failure, ok := err.(*exec.ExitError)
-		if !ok {
-			t.Fatalf("release: execute step: %v\n%s", err, output)
-		}
-		exit = failure.ExitCode()
-	}
-	if exit != c.ExpectedExit || !strings.Contains(string(output), c.ExpectedOutput) {
-		t.Fatalf("release: step exit %d, want %d with %q:\n%s", exit, c.ExpectedExit, c.ExpectedOutput, output)
-	}
 }
 
 // goReleaserNameConfig is the part of .goreleaser.yml that names the

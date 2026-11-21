@@ -26,13 +26,14 @@ reachable from `develop`, and the Nix, e2e, installed-package, and smoke gates
 remain. The credential-free build runs GoReleaser with `--skip=publish`,
 checks `dist/checksums.txt`, stages the release files in one flat
 `dist/assets` directory with the notes beside it, and hands `release-dist` to
-the confined GitHub Release publisher. The publisher refuses a tag that
-already has a release or a leftover draft, creates the draft and uploads every
-asset in one `gh release create --draft`, verifies the draft, then publishes
-it. A rerun after a release that is already published with at least one asset
-succeeds without changing it. That is the only completeness check on a rerun,
-so compare the asset list with the expected set in
-[§4](#4-cutting-a-release) by hand.
+the confined GitHub Release publisher. The publisher builds `release-intent`
+from the pinned `infra` commit before downloading `release-dist`, then runs
+`release-intent publish-release`, which refuses a leftover draft, creates a
+draft and uploads every asset by release id, verifies each asset's name, size,
+and SHA-256 digest against the local manifest, publishes by id, and verifies
+the published release. A rerun after a release is already published succeeds
+without changing it only when its manifest and `prerelease` flag match
+exactly; otherwise fix forward with a new tag.
 Before a rerun, delete a leftover draft by its id with
 `gh api -X DELETE repos/peasant-labs/peasant/releases/<id>`, never with
 `gh release delete <tag>`; no new tag is needed. The publisher does not
@@ -408,9 +409,9 @@ release PR's `release-content` check and, again, `build` on the tagged checkout.
 - A gate that failed re-runs together with its dependents, so `build`,
   `publish`, and the smokes run once the gate passes. That is the normal case:
   publication had been skipped, not executed, when the gate failed.
-- `build` and `publish` are safe to re-run: `publish` refuses a tag that already
-  has a release or a leftover draft, and succeeds without changes when the
-  release is already published with at least one asset (see the
+- `build` and `publish` are safe to re-run: `publish` refuses a leftover draft
+  and succeeds without changes when the published release already matches the
+  exact manifest and `prerelease` flag (see the
   [current procedure](#current-release-procedure) for deleting a leftover
   draft). `.goreleaser.yml`'s `release.mode` and `replace_existing_artifacts`
   no longer act, because `build` runs with `--skip=publish`. No job pushes to

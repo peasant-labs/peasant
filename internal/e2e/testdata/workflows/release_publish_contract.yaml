@@ -1,223 +1,87 @@
 # GitHub Release publication contract for .github/workflows/release.yml.
 #
-# Publish: one gh release create makes the draft and uploads every asset to
-# that same release, so no second creator or upload action can fill a release
-# that is never published. The listed steps are the publish job's complete
-# step list, in order.
+# Publish: release assets reach a GitHub Release only through the five-step
+# release-intent publish-release job, built from the pinned infra commit
+# before downloading release-dist, under tag-keyed concurrency with
+# cancel-in-progress: false and gated on verify-tag without status functions.
 #
 # Staging: the build job turns GoReleaser's dist into one flat dist/assets
-# directory, because gh release create refuses a directory, and keeps the
-# release notes beside it rather than inside it. The cases run the build
-# job's two staging steps against a fake GoReleaser dist. The metadata list
-# repeats the one in the "Verify the staged release assets" step of
+# directory, because publish-release requires flat regular files there, and
+# keeps the release notes beside it rather than inside it. The cases run the
+# build job's two staging steps against a fake GoReleaser dist. The metadata
+# list repeats the one in the "Verify the staged release assets" step of
 # release.yml; change both together.
 workflow: .github/workflows/release.yml
 publish:
   job: publish
+  concurrency_group: "release-${{ github.ref }}"
+  verify_job: verify-tag
+  needs:
+    - guard
+    - verify-tag
+    - build
+  runs_on: ubuntu-latest
+  permissions:
+    - key: contents
+      value: write
+  job_env:
+    - key: TAG
+      value: "${{ github.ref_name }}"
+  infra_ref: db8f1938e9a67a40914c2ab0a232ebc2243adaac
   steps:
+    - Check out release-intent
+    - Set up Go
+    - Build release-intent
     - Download the release artifacts
-    - Look for an existing release
-    - Verify the existing release is complete
-    - Refuse an existing release for the tag
-    - Create the draft release with its assets
-    - Verify the draft before publishing
-    - Publish the release
-    - Verify the published release
-  create_step: Create the draft release with its assets
-  create_run_contains:
-    - --draft
-    - --verify-tag
-    - --notes-file dist/release-notes.md
-    - "'dist/assets/*'"
+    - Publish GitHub Release
   allowed_actions:
+    - actions/checkout
+    - actions/setup-go
     - actions/download-artifact
+  tool_checkout_step: Check out release-intent
+  tool_checkout_with:
+    - key: repository
+      value: peasant-labs/infra
+    - key: ref
+      value: db8f1938e9a67a40914c2ab0a232ebc2243adaac
+    - key: path
+      value: infra-tool
+    - key: sparse-checkout
+      value: tools/release
+    - key: persist-credentials
+      value: "false"
+  setup_go_step: Set up Go
+  setup_go_with:
+    - key: go-version-file
+      value: infra-tool/tools/release/go.mod
+    - key: cache
+      value: "false"
+  build_step: Build release-intent
+  build_env:
+    - key: GOWORK
+      value: "off"
+  build_run: 'go build -C infra-tool/tools/release -o "${RUNNER_TEMP}/release-intent" ./cmd/release-intent'
+  download_step: Download the release artifacts
+  download_with:
+    - key: name
+      value: release-dist
+    - key: path
+      value: dist
+  publish_step: Publish GitHub Release
+  publish_env:
+    - key: GH_TOKEN
+      value: "${{ github.token }}"
+    - key: PRERELEASE
+      value: "${{ needs.guard.outputs.prerelease }}"
+    - key: LATEST
+      value: "${{ needs.guard.outputs.latest }}"
+  publish_run: '"${RUNNER_TEMP}/release-intent" publish-release --tag "$TAG" --repo "$GITHUB_REPOSITORY" --assets dist/assets --notes dist/release-notes.md --prerelease "$PRERELEASE" --latest "$LATEST"'
   forbidden_commands:
+    - gh release create
     - gh release upload
-  # One contract per publish step; every name in steps above must have one.
-  # A step with unconditional runs with no if:. continue_on_error is the
-  # only step allowed to set it.
-  step_contracts:
-    - name: Download the release artifacts
-      unconditional: true
-    - name: Look for an existing release
-      id: view
-      unconditional: true
-      continue_on_error: true
-      run_contains: ['gh release view "$TAG" --repo "$GITHUB_REPOSITORY"']
-    - name: Verify the existing release is complete
-      if_contains: ["steps.view.outcome == 'success'"]
-      run_contains: [--json isDraft,assets]
-    - name: Refuse an existing release for the tag
-      id: list
-      if_contains: ["steps.view.outcome == 'failure'"]
-      if_excludes: [steps.list, steps.create]
-      run_contains: [gh release list, --limit 100, select(.tagName == env.TAG)]
-    - name: Create the draft release with its assets
-      id: create
-      if_contains: ["steps.view.outcome == 'failure'", "steps.list.outcome == 'success'"]
-      run_contains: [--draft, --verify-tag, --prerelease="$PRERELEASE"]
-      run_excludes: [--latest, --draft=false]
-    - name: Verify the draft before publishing
-      if_contains: ["steps.view.outcome == 'failure'", "steps.create.outcome == 'success'"]
-      run_contains: [--json isDraft,assets, .isDraft != true]
-    - name: Publish the release
-      if_contains: ["steps.view.outcome == 'failure'", "steps.create.outcome == 'success'"]
-      run_contains: [gh release edit, --draft=false, --prerelease="$PRERELEASE", --latest="$LATEST"]
-      run_excludes: [--draft=true]
-    - name: Verify the published release
-      if_contains: ["steps.view.outcome == 'failure'", "steps.create.outcome == 'success'"]
-      run_contains: [--json isDraft,assets, .isDraft != false]
-
-# Each release-state check runs its step's real script with a stubbed gh that
-# requires exactly args before the final --jq filter and then applies that
-# filter with jq. required is the deletion-protection manifest of case names.
-view_checks:
-  - step: Verify the existing release is complete
-    args: release view v1.2.3 --repo peasant-labs/peasant --json isDraft,assets --jq
-    required:
-      - complete-published-release
-      - draft-with-assets
-      - published-without-assets
-      - missing-draft-state
-      - invalid-assets
-      - non-json-response
-      - api-failure
-    cases:
-      - name: complete-published-release
-        response: '{"isDraft":false,"assets":[{"name":"checksums.txt"}]}'
-        expected_exit: 0
-        expected_output: existing release is published and has assets
-      - name: draft-with-assets
-        response: '{"isDraft":true,"assets":[{"name":"checksums.txt"}]}'
-        expected_exit: 1
-        expected_output: 'release is an unpublished draft; list the drafts for this tag with gh api repos/$GITHUB_REPOSITORY/releases, delete each by id with gh api -X DELETE repos/$GITHUB_REPOSITORY/releases/<id> (never gh release delete $TAG), then rerun; do not create a new tag'
-      - name: published-without-assets
-        response: '{"isDraft":false,"assets":[]}'
-        expected_exit: 1
-        expected_output: published release has no assets; tags are never moved, so fix forward with a new tag
-      - name: missing-draft-state
-        response: '{"assets":[{"name":"checksums.txt"}]}'
-        expected_exit: 1
-        expected_output: release draft status is invalid; inspect the release before retrying
-      - name: invalid-assets
-        response: '{"isDraft":false,"assets":null}'
-        expected_exit: 1
-        expected_output: published release assets are invalid; inspect the release before retrying
-      - name: non-json-response
-        response: not-json
-        expected_exit: 1
-        expected_output: parse error
-      - name: api-failure
-        api_exit: 1
-        expected_exit: 1
-        expected_output: mock API unavailable
-  - step: Refuse an existing release for the tag
-    args: release list --repo peasant-labs/peasant --limit 100 --json tagName,isDraft --jq
-    required:
-      - no-release-for-tag
-      - published-release-for-tag
-      - draft-for-tag
-      - non-json-response
-      - api-failure
-    cases:
-      - name: no-release-for-tag
-        response: '[{"tagName":"v1.2.2","isDraft":false},{"tagName":"v1.2.3-rc1","isDraft":true}]'
-        expected_exit: 0
-        expected_output: no release or draft exists for this tag
-      - name: published-release-for-tag
-        response: '[{"tagName":"v1.2.3","isDraft":false}]'
-        expected_exit: 1
-        expected_output: 'a release or draft already exists for this tag, so nothing was created; list the drafts with gh api repos/$GITHUB_REPOSITORY/releases, delete stale drafts by id with gh api -X DELETE repos/$GITHUB_REPOSITORY/releases/<id> (never gh release delete $TAG), then rerun; no new tag is needed'
-      - name: draft-for-tag
-        response: '[{"tagName":"v1.2.3","isDraft":true}]'
-        expected_exit: 1
-        expected_output: a release or draft already exists for this tag, so nothing was created
-      - name: non-json-response
-        response: not-json
-        expected_exit: 1
-        expected_output: parse error
-      - name: api-failure
-        api_exit: 1
-        expected_exit: 1
-        expected_output: mock API unavailable
-  - step: Verify the draft before publishing
-    args: release view v1.2.3 --repo peasant-labs/peasant --json isDraft,assets --jq
-    required:
-      - draft-with-assets
-      - draft-without-assets
-      - draft-with-invalid-assets
-      - published-instead-of-draft
-      - missing-draft-state
-      - non-json-response
-      - api-failure
-    cases:
-      - name: draft-with-assets
-        response: '{"isDraft":true,"assets":[{"name":"checksums.txt"},{"name":"peasant_1.2.3_linux_amd64.tar.gz"}]}'
-        expected_exit: 0
-        expected_output: draft holds 2 assets
-      - name: draft-without-assets
-        response: '{"isDraft":true,"assets":[]}'
-        expected_exit: 1
-        expected_output: &draft-refused 'the draft is missing or has no assets and was not published; list the drafts for this tag with gh api repos/$GITHUB_REPOSITORY/releases, delete each by id with gh api -X DELETE repos/$GITHUB_REPOSITORY/releases/<id> (never gh release delete $TAG), then rerun; no new tag is needed'
-      - name: draft-with-invalid-assets
-        response: '{"isDraft":true,"assets":null}'
-        expected_exit: 1
-        expected_output: *draft-refused
-      - name: published-instead-of-draft
-        response: '{"isDraft":false,"assets":[{"name":"checksums.txt"}]}'
-        expected_exit: 1
-        expected_output: *draft-refused
-      - name: missing-draft-state
-        response: '{"assets":[{"name":"checksums.txt"}]}'
-        expected_exit: 1
-        expected_output: *draft-refused
-      - name: non-json-response
-        response: not-json
-        expected_exit: 1
-        expected_output: parse error
-      - name: api-failure
-        api_exit: 1
-        expected_exit: 1
-        expected_output: mock API unavailable
-  - step: Verify the published release
-    args: release view v1.2.3 --repo peasant-labs/peasant --json isDraft,assets --jq
-    required:
-      - published-with-assets
-      - still-a-draft
-      - published-without-assets
-      - invalid-assets
-      - missing-draft-state
-      - non-json-response
-      - api-failure
-    cases:
-      - name: published-with-assets
-        response: '{"isDraft":false,"assets":[{"name":"checksums.txt"}]}'
-        expected_exit: 0
-        expected_output: release is published and holds 1 assets
-      - name: still-a-draft
-        response: '{"isDraft":true,"assets":[{"name":"checksums.txt"}]}'
-        expected_exit: 1
-        expected_output: &publish-refused 'the release did not publish with its assets; inspect it with gh release view $TAG, and fix forward with a new tag rather than moving this one'
-      - name: published-without-assets
-        response: '{"isDraft":false,"assets":[]}'
-        expected_exit: 1
-        expected_output: *publish-refused
-      - name: invalid-assets
-        response: '{"isDraft":false,"assets":null}'
-        expected_exit: 1
-        expected_output: *publish-refused
-      - name: missing-draft-state
-        response: '{"assets":[{"name":"checksums.txt"}]}'
-        expected_exit: 1
-        expected_output: *publish-refused
-      - name: non-json-response
-        response: not-json
-        expected_exit: 1
-        expected_output: parse error
-      - name: api-failure
-        api_exit: 1
-        expected_exit: 1
-        expected_output: mock API unavailable
+    - gh release edit
+    - gh release list
+    - --rehearse
 staging:
   job: build
   # The staging steps read the notes name from this build-job env variable.
