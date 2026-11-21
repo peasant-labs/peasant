@@ -1290,9 +1290,13 @@ func remapHarmonizedAnnotations(conn *sqlite.Conn, sessionID schema.SessionID, e
 // entries as anchors for the C5 remap: the mapping rows joined to their
 // body rows, reconstructed through the one row-to-struct function.
 func readHarmonizedBodyAnchors(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) ([]entryTargetAnchor, error) {
+	rowsGenID, err := rowsGenerationIDOnConn(conn, sessionID, generationID)
+	if err != nil {
+		return nil, err
+	}
 	var anchors []entryTargetAnchor
-	err := sqlitex.Execute(conn, `SELECT `+sqlSelectBodyColumnsJoined+` FROM session_entry_bodies b JOIN session_generation_entries m ON m.session_id = b.session_id AND m.body_digest = b.body_digest WHERE m.session_id = ? AND m.generation_id = ? AND m.partition_id = 0 ORDER BY m.entry_index`, &sqlitex.ExecOptions{
-		Args: []any{string(sessionID), generationID},
+	err = sqlitex.Execute(conn, `SELECT `+sqlSelectBodyColumnsJoined+` FROM session_entry_bodies b JOIN session_generation_entries m ON m.session_id = b.session_id AND m.body_digest = b.body_digest WHERE m.session_id = ? AND m.generation_id = ? AND m.partition_id = 0 ORDER BY m.entry_index`, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID), rowsGenID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			entry := entryFromRow(scanEntryRecord(stmt))
 			anchors = append(anchors, entryTargetAnchorFromEntry(&entry))

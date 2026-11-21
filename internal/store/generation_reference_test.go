@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
@@ -45,8 +46,9 @@ const (
 	referenceKindRelationship = "relationship"
 	referenceKindParseParity  = "parse-parity"
 	referenceKindLaterParse   = "later-parse"
-	referenceKindCrash        = "crash"
-	referenceKindMoved        = "moved"
+	referenceKindCrash          = "crash"
+	referenceKindMoved          = "moved"
+	referenceKindAnnotatedParse = "annotated-parse"
 )
 
 // The changes a refusal case applies.
@@ -65,12 +67,13 @@ const (
 )
 
 type generationReferenceCase struct {
-	Name   string `yaml:"name"`
-	Given  string `yaml:"given"`
-	When   string `yaml:"when"`
-	Then   string `yaml:"then"`
-	Kind   string `yaml:"kind"`
-	Parent string `yaml:"parent"`
+	Name         string `yaml:"name"`
+	Given        string `yaml:"given"`
+	When         string `yaml:"when"`
+	Then         string `yaml:"then"`
+	Kind         string `yaml:"kind"`
+	Parent       string `yaml:"parent"`
+	AppendedLine string `yaml:"appendedLine"`
 }
 
 type generationReferenceFixture struct {
@@ -404,6 +407,77 @@ func TestGenerationReference(t *testing.T) {
 				assertReferenceRefusal(t, err, ingest.ReferenceRefusalSourceMoved)
 				if after := referenceStoreState(t, db, sid); !slices.Equal(before, after) {
 					t.Fatal("the refused install changed the store")
+				}
+			case referenceKindAnnotatedParse:
+				control := seedReaderEntrypointStoreWithInput(t, w.corpus, w.h, referenceInputHash)
+				createEntryAnnotation := func(targetDB *store.Store) string {
+					t.Helper()
+					annotatorID, err := targetDB.GetAnnotatorIDByName(t.Context(), "frustration-classifier")
+					if err != nil || annotatorID == "" {
+						t.Fatalf("resolve annotator: id=%q err=%v", annotatorID, err)
+					}
+					typeID, err := targetDB.GetAnnotationTypeID(t.Context(), "quality.frustration_signal")
+					if err != nil || typeID == "" {
+						t.Fatalf("resolve annotation type: id=%q err=%v", typeID, err)
+					}
+					id, err := targetDB.CreateEntryAnnotation(t.Context(), ingest.EntryAnnotationParams{
+						SessionID:        string(sid),
+						EntryIndex:       8,
+						EndIndex:         9,
+						AnnotatorID:      annotatorID,
+						AnnotationTypeID: typeID,
+						Value:            "detected",
+					})
+					if err != nil {
+						t.Fatalf("create entry annotation: %v", err)
+					}
+					return id
+				}
+				refAnnID := createEntryAnnotation(db)
+				ctrlAnnID := createEntryAnnotation(control.db)
+				w.install(t, w.renamed)
+				if outcome, err := control.parse(t, w.renamed, referenceGenerationID, referenceInputHash); err != nil || outcome.Disposition != ingest.ActivationCommittedNow {
+					t.Fatalf("control parse for renamed context: %+v %v", outcome, err)
+				}
+				control.activeID = referenceGenerationID
+				lines := strings.Split(strings.TrimRight(string(w.seeded.transcript), "\n"), "\n")
+				shifted := strings.Join(append(append(slices.Clone(lines[:len(lines)-1]), c.AppendedLine), lines[len(lines)-1]), "\n") + "\n"
+				grown := []byte(shifted)
+				grownRecorded := w.renamed
+				grownRecorded.ContentHash = schema.ComputeTranscriptHash(grown)
+				grownRecorded.MetadataHash = schema.ComputeMetadataHash(&grownRecorded)
+				grownHash := strings.Repeat("f", 64)
+				laterClock := time.Now().UnixMilli() + 10_000
+				w.seeded.transcript = grown
+				w.seeded.corpus.ClockMs = laterClock
+				w.seeded.allocator = &countingRefAllocator{entries: 100, submissions: 100}
+				control.transcript = grown
+				control.corpus.ClockMs = laterClock
+				control.allocator = &countingRefAllocator{entries: 100, submissions: 100}
+				if outcome, err := control.parse(t, grownRecorded, referenceLaterID, grownHash); err != nil || outcome.Disposition != ingest.ActivationCommittedNow {
+					t.Fatalf("control later parse: %+v %v", outcome, err)
+				}
+				control.activeID = referenceLaterID
+				if outcome, err := w.seeded.parse(t, grownRecorded, referenceLaterID, grownHash); err != nil || outcome.Disposition != ingest.ActivationCommittedNow {
+					t.Fatalf("later parse after reference: %+v %v", outcome, err)
+				}
+				w.seeded.activeID = referenceLaterID
+				wantTarget := referenceQuery(t, control.db, `SELECT entry_index, end_index FROM annotation_target_entries WHERE annotation_id = ?`, ctrlAnnID)
+				if !slices.Equal(wantTarget, []string{"1:10|1:11"}) {
+					t.Fatalf("control annotation %s target rows = %v, want [1:10|1:11]", ctrlAnnID, wantTarget)
+				}
+				if got := referenceQuery(t, db, `SELECT entry_index, end_index FROM annotation_target_entries WHERE annotation_id = ?`, refAnnID); !slices.Equal(got, wantTarget) {
+					t.Fatalf("annotation %s target rows = %v, want %v (anchor lost)", refAnnID, got, wantTarget)
+				}
+				if got := referenceQuery(t, db, `SELECT state FROM annotation_target_anchors WHERE annotation_id = ?`, refAnnID); !slices.Equal(got, []string{"3:resolved"}) {
+					t.Fatalf("annotation %s anchor state = %v, want [3:resolved]", refAnnID, got)
+				}
+				want, _ := readReaderEntrypoints(t, w.corpus, control)
+				got, _ := readReaderEntrypoints(t, w.corpus, w.seeded)
+				for _, entry := range slices.Sorted(maps.Keys(want)) {
+					if len(want[entry]) == 0 || !bytes.Equal(want[entry], got[entry]) {
+						t.Errorf("%s differs between the control and post-reference parse:\ncontrol   %s\nreference %s", entry, want[entry], got[entry])
+					}
 				}
 			default:
 				t.Fatalf("reference case %s has unknown kind %q", c.Name, c.Kind)

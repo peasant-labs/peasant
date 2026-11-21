@@ -349,6 +349,7 @@ type readerEntrypointStore struct {
 	recorded   schema.UnifiedMetadata
 	revision   int64
 	builder    ingest.GenerationBuilder
+	allocator  ingest.RefAllocator
 	opencode   ingest.OpenCodeSourceAccess
 	target     ingest.HarvesterVersions
 }
@@ -445,13 +446,17 @@ func seedReaderEntrypointStoreWithInput(t *testing.T, corpus readerEntrypointCor
 func (s readerEntrypointStore) parse(t *testing.T, recorded schema.UnifiedMetadata, generationID, inputHash string) (ingest.ActivationOutcome, error) {
 	t.Helper()
 	ctx := t.Context()
+	allocator := s.allocator
+	if allocator == nil {
+		allocator = &countingRefAllocator{}
+	}
 	input := ingest.GenerationBuildInput{
 		Session:            s.session,
 		GenerationID:       generationID,
 		RecordedMetadata:   &recorded,
 		CapturedTranscript: s.transcript,
 		Prior:              readerPriorSource{db: s.db, sid: s.sid},
-		Allocator:          &countingRefAllocator{},
+		Allocator:          allocator,
 		OpenCode:           s.opencode,
 	}
 	candidate, err := s.builder.BuildGeneration(ctx, input)
