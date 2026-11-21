@@ -144,7 +144,7 @@ sequenceDiagram
 | `release-batch.yml` | Pushes to `develop`; every 30 minutes; manual dispatch | Plans the version, keeps the standing release PR current and armed, tags the landed release commit (`RELEASE_BATCH_MODE=tag`) | Pushes `automation/release` and the annotated tag | GitHub App token, in the `release` job only |
 | `cut-release.yml` | Manual dispatch with `patch` or `minor` | Opens the empty `release[level]: cut a release` PR | Pushes `automation/cut-release` | GitHub App token, in the `cut` job only |
 | `release-validate.yml` | `workflow_call` from the release merge group (`tests.yml`) and rc tags | Builds a Goreleaser snapshot and validates deb, rpm, AUR PKGBUILD, Homebrew cask style/install, and `nix build .#peasant` | No | `GITHUB_TOKEN` read |
-| `release.yml` | Push tags matching `v*` | Verifies the releaser App actor, parses the tag, proves `develop` reaches it, checks Nix hash freshness, runs the **`e2e` + `release-e2e` publication gates** (both must PASS before publish), builds with Goreleaser without a write token, publishes the GitHub Release, smokes released archives and the tap's cask; also fans out `release-validate.yml` on rc tags (non-blocking) | Publishes the GitHub Release only | `GITHUB_TOKEN`, `contents: write` in `publish` only |
+| `release.yml` | Push tags matching `v*` | Verifies the releaser App actor, parses the tag, proves `develop` reaches it, checks Nix hash freshness, runs the **`e2e` + `release-e2e` publication gates** (both must PASS before publish), builds with Goreleaser without a write token, publishes the GitHub Release, smokes released archives and a cask rendered from the tap's template; also fans out `release-validate.yml` on rc tags (non-blocking) | Publishes the GitHub Release only | `GITHUB_TOKEN`, `contents: write` in `publish` only |
 | `e2e.yml` | PRs to `develop` on relevant paths; `workflow_call`; pushes to `develop`/`main`; manual dispatch | Full-stack push skip-gate (podman Postgres + RustFS + real village server + peasant CLI); asserts a positive `--- PASS: TestSkipGateE2E` — a SKIP or `no tests to run` fails the job | No | Read-only `GITHUB_TOKEN`; Village and schema are public |
 | `release-e2e.yml` | `workflow_call`; manual dispatch | Installed-binary / per-distro release gate; asserts a positive `--- PASS: TestReleasePerDistro` | No | Read-only `GITHUB_TOKEN`; Village and schema are public |
 
@@ -248,9 +248,13 @@ Web package manifests are also treated as packaging-relevant inputs because the
 release build embeds the dashboard output.
 
 The Homebrew cask comes from the latest final release, and rc tags never reach
-the tap. The tap publishes on its own scheduled poll (see
-`peasant-labs/homebrew-tap` `publish-cask.yml`); the final-tag smoke waits up to
-16 minutes. Peasant holds no tap credential.
+the tap. The tap publishes on its own schedule (see `peasant-labs/homebrew-tap`
+`publish-cask.yml`). The final-tag smoke does not wait for it: it renders the
+cask from the tap's template and this release's `checksums.txt` and installs it
+from a throwaway tap. The tap's publisher renders and audits the cask before it
+pushes; this smoke does not check that the tap has published, so a stale tap
+shows only as a failed or missing `publish-cask` run in the tap. Peasant holds no
+tap credential.
 
 AUR publication remains disabled until its operational checklist is complete (a
 dedicated `AUR_KEY`); Goreleaser keeps the AUR upload `skip_upload: "true"` until
