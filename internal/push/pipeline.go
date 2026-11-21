@@ -204,7 +204,8 @@ func NewPipeline(
 //   - With --dry-run: store queries run but no HTTP calls, publication receipts,
 //     push_log writes, or local publication-cursor updates occur.
 //   - With --force: AllPushableSessions is called (all sessions, regardless of pushed_at).
-//   - Uploads are concurrent (bounded by PipelineConfig.Concurrency or DefaultConcurrency).
+//   - Uploads, and dry-run scans, are concurrent (bounded by PipelineConfig.Concurrency
+//     or DefaultConcurrency); dry-run results keep the candidate order.
 //   - 3 consecutive connection errors abort the pipeline.
 //   - Receipt persistence failures become per-session errors; InsertPushLog
 //     failures are logged to stderr rather than returned.
@@ -276,17 +277,34 @@ func (p *Pipeline) Run(ctx context.Context) (result *PushResult, err error) {
 
 	result = &PushResult{BaseCandidateCount: baseCount}
 
-	// 6. Dry-run: sequential scan exercising the SAME pushSession pre-flight as the
+	concurrency := p.runCfg.Concurrency
+	if concurrency <= 0 {
+		concurrency = DefaultConcurrency
+	}
+
+	// 6. Dry-run: a scan exercising the SAME pushSession pre-flight as the
 	// real path (read → guards → map → client-side validate), diverging only at the
 	// side-effecting upload + persistence, which pushSession skips when DryRun is
 	// set. No village negotiation (no HTTP), so the forecast emits the CLI's own
-	// contract version; no audit log.
+	// contract version; no audit log. The scan runs through the same bounded
+	// worker pool as uploads, and each result lands in its input slot so the
+	// forecast keeps the candidate order whatever order the workers finish in.
+	// The upload high-water counter stays at zero: a scan uploads nothing.
 	if stopBeforeRemoteNegotiation(p.runCfg.DryRun) {
-		for _, sess := range sessions {
-			// The offline scan passes an explicitly UNKNOWN support value: it
-			// derives local requirements but performs no negotiation, so it can
-			// neither refuse for an unqueried receiver nor authorize an upload.
-			sr := p.pushSession(ctx, sess, visibility, license, defaults.PublishSchemaVersion, RemoteCapabilitySupport{}, perf.ParentSpanFromContext(ctx))
+		scanned := make([]SessionPushResult, len(sessions))
+		var g errgroup.Group
+		g.SetLimit(concurrency)
+		for i, sess := range sessions {
+			g.Go(func() error {
+				// The offline scan passes an explicitly UNKNOWN support value: it
+				// derives local requirements but performs no negotiation, so it can
+				// neither refuse for an unqueried receiver nor authorize an upload.
+				scanned[i] = p.pushSession(ctx, sess, visibility, license, defaults.PublishSchemaVersion, RemoteCapabilitySupport{}, perf.ParentSpanFromContext(ctx))
+				return nil // errors are collected in the session results
+			})
+		}
+		_ = g.Wait()
+		for _, sr := range scanned {
 			result.Sessions = append(result.Sessions, sr)
 			result.countStatus(sr.Status)
 		}
@@ -335,10 +353,6 @@ func (p *Pipeline) Run(ctx context.Context) (result *PushResult, err error) {
 
 	// 7. Concurrent uploads via errgroup, smallest first when a budget applies.
 	sessions = orderForBudget(ctx, sessions)
-	concurrency := p.runCfg.Concurrency
-	if concurrency <= 0 {
-		concurrency = DefaultConcurrency
-	}
 
 	var (
 		mu         sync.Mutex

@@ -43,8 +43,8 @@ type PipelineConfig struct {
 	// also sends License. Only an explicit request sets it (the --license flag),
 	// and it takes effect only with a License to send.
 	ChangeLicense bool
-	// Concurrency is the maximum number of parallel uploads.
-	// 0 means DefaultConcurrency.
+	// Concurrency is the maximum number of parallel uploads, or of parallel
+	// session scans in a dry run. 0 means DefaultConcurrency.
 	Concurrency int
 	// JSONOutput requests machine-readable JSON on stdout.
 	JSONOutput bool
