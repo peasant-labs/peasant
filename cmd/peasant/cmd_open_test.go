@@ -49,7 +49,11 @@ const (
 	// server's first probe; the never-ready case waits it out once.
 	openTestReadyWait     = time.Second
 	openTestReadyInterval = 10 * time.Millisecond
-	openTestRemote        = "https://github.com/example-org/open-fixture.git"
+	// openTestCanceledReadyWait is the readiness budget of the cancelled-start
+	// case. A run that waited it out instead of stopping on the cancel would
+	// take far longer than the case allows.
+	openTestCanceledReadyWait = 30 * time.Second
+	openTestRemote            = "https://github.com/example-org/open-fixture.git"
 )
 
 // The session runs 03:12 to 03:20 on 2024-01-02. The base commit falls weeks
@@ -88,6 +92,17 @@ const (
 	openServerStarts     openServerState = "starts"
 	openServerStartError openServerState = "start-error"
 	openServerNeverReady openServerState = "never-ready"
+	// openServerStartCanceled forks a server that never answers and cancels the
+	// command context while open waits for it.
+	openServerStartCanceled openServerState = "start-canceled"
+)
+
+// openPIDFileState is what became of the PID file a started server wrote.
+type openPIDFileState string
+
+const (
+	openPIDFileKept    openPIDFileState = "kept"
+	openPIDFileRemoved openPIDFileState = "removed"
 )
 
 // openSessionRef is which session argument an open-output case passes.
@@ -112,12 +127,13 @@ type openOutputCase struct {
 	StartError              string           `yaml:"start_error"`
 	Modes                   []openOutputMode `yaml:"modes"`
 	Want                    struct {
-		Failed      bool     `yaml:"failed"`
-		Lines       []string `yaml:"lines"`
-		HookStdout  string   `yaml:"hook_stdout"`
-		PlainStdout string   `yaml:"plain_stdout"`
-		Commits     bool     `yaml:"commits"`
-		Started     bool     `yaml:"started"`
+		Failed      bool             `yaml:"failed"`
+		Lines       []string         `yaml:"lines"`
+		HookStdout  string           `yaml:"hook_stdout"`
+		PlainStdout string           `yaml:"plain_stdout"`
+		Commits     bool             `yaml:"commits"`
+		Started     bool             `yaml:"started"`
+		PIDFile     openPIDFileState `yaml:"pid_file"`
 	} `yaml:"want"`
 }
 
@@ -148,6 +164,12 @@ func loadOpenOutputFixture(t *testing.T) openOutputFixture {
 		}
 		if tc.Want.Failed && len(tc.Want.Lines) != 1 {
 			t.Fatalf("failure case %q holds %d lines, want 1", tc.Name, len(tc.Want.Lines))
+		}
+		switch {
+		case tc.Want.Started && tc.Want.PIDFile != openPIDFileKept && tc.Want.PIDFile != openPIDFileRemoved:
+			t.Fatalf("case %q starts a server but its pid_file %q is not kept or removed", tc.Name, tc.Want.PIDFile)
+		case !tc.Want.Started && tc.Want.PIDFile != "":
+			t.Fatalf("case %q starts no server but sets pid_file %q", tc.Name, tc.Want.PIDFile)
 		}
 	}
 	return fixture
@@ -180,7 +202,11 @@ func runOpenOutputCase(t *testing.T, fixture openOutputFixture, tc openOutputCas
 		world.git(t, nil, "remote", "add", "origin", openTestRemote)
 	}
 
+	began := time.Now()
 	stdout, stderr, err := world.open(t, mode)
+	if elapsed := time.Since(began); tc.Server == openServerStartCanceled && elapsed >= openTestCanceledReadyWait {
+		t.Errorf("a cancelled readiness wait ran %s, its whole budget", elapsed)
+	}
 
 	replacer := strings.NewReplacer(
 		"{session_id}", world.sessionID(t),
@@ -273,11 +299,15 @@ func runOpenOutputCase(t *testing.T, fixture openOutputFixture, tc openOutputCas
 	}
 	if tc.Want.Started {
 		_, statErr := os.Stat(world.pidFile)
-		switch {
-		case tc.Want.Failed && !errors.Is(statErr, os.ErrNotExist):
-			t.Errorf("a failed start left its PID file behind: %v", statErr)
-		case !tc.Want.Failed && statErr != nil:
-			t.Errorf("a successful start lost its PID file: %v", statErr)
+		switch tc.Want.PIDFile {
+		case openPIDFileRemoved:
+			if !errors.Is(statErr, os.ErrNotExist) {
+				t.Errorf("the start left its PID file behind: %v", statErr)
+			}
+		case openPIDFileKept:
+			if statErr != nil {
+				t.Errorf("the start lost its PID file: %v", statErr)
+			}
 		}
 	}
 
@@ -344,13 +374,19 @@ type openWorld struct {
 	serves            atomic.Bool
 	started           atomic.Bool
 	duringBrowserOpen func()
-	mu                sync.Mutex
-	opened            []string
+	// ctx is the context every command of this world runs under; cancel ends
+	// it, as a Ctrl-C would.
+	ctx    context.Context
+	cancel context.CancelFunc
+	mu     sync.Mutex
+	opened []string
 }
 
 func newOpenWorld(t *testing.T, tc openOutputCase) *openWorld {
 	t.Helper()
 	w := &openWorld{tc: tc, root: t.TempDir()}
+	w.ctx, w.cancel = context.WithCancel(context.Background())
+	t.Cleanup(w.cancel)
 	w.repo = filepath.Join(w.root, "repo")
 	w.pidFile = filepath.Join(w.root, "state", "web.pid")
 	w.commits = w.createRepository(t)
@@ -394,7 +430,7 @@ func newOpenWorld(t *testing.T, tc openOutputCase) *openWorld {
 		w.serves.Store(true)
 	case openServerOtherData:
 		w.healthy.Store(true)
-	case openServerStarts, openServerStartError, openServerNeverReady:
+	case openServerStarts, openServerStartError, openServerNeverReady, openServerStartCanceled:
 	default:
 		t.Fatalf("unknown server %q", tc.Server)
 	}
@@ -437,6 +473,10 @@ func (w *openWorld) commandPrefix() string {
 }
 
 func (w *openWorld) dependencies(t *testing.T) openDependencies {
+	readyWait := openTestReadyWait
+	if w.tc.Server == openServerStartCanceled {
+		readyWait = openTestCanceledReadyWait
+	}
 	return openDependencies{
 		startServer: func(spawn webServerSpawn) (string, error) {
 			if spawn.port != w.port || spawn.configPath != w.configPath || spawn.dataDir != w.dataDir() || spawn.configDir != w.configDir() || spawn.stateDir != w.stateDir() {
@@ -455,9 +495,12 @@ func (w *openWorld) dependencies(t *testing.T) openDependencies {
 				return "", err
 			}
 			w.started.Store(true)
-			if w.tc.Server == openServerStarts {
+			switch w.tc.Server {
+			case openServerStarts:
 				w.serves.Store(true)
 				w.healthy.Store(true)
+			case openServerStartCanceled:
+				w.cancel()
 			}
 			return w.pidFile, nil
 		},
@@ -474,7 +517,7 @@ func (w *openWorld) dependencies(t *testing.T) openDependencies {
 			return nil
 		},
 		client:        &http.Client{Timeout: defaults.ServerClientTimeout},
-		readyWait:     openTestReadyWait,
+		readyWait:     readyWait,
 		readyInterval: openTestReadyInterval,
 	}
 }
@@ -492,7 +535,7 @@ func (w *openWorld) execute(t *testing.T, sub *cobra.Command, args ...string) (s
 		"--state-dir", w.stateDir(),
 		"--config", w.configPath,
 	}, args...))
-	err := root.Execute()
+	err := root.ExecuteContext(w.ctx)
 	return stdout.String(), stderr.String(), err
 }
 

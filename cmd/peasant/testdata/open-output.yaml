@@ -34,7 +34,11 @@
 #   config             valid | invalid-source-path (the harvest warns about an
 #                      extra relative path) | refused-redaction-level
 #   server             running | starts | start-error | never-ready |
-#                      other-data (healthy, but does not serve the session)
+#                      other-data (healthy, but does not serve the session) |
+#                      start-canceled (the fork writes its PID file, never
+#                      answers, and the command context is cancelled, as by
+#                      Ctrl-C, while open waits for it; the readiness budget is
+#                      then far longer than the run may take)
 #   start_error        the error the replaced server start returns (start-error)
 #   modes              hook and/or plain; each mode runs in a fresh world
 #   want.failed        the run fails; lines then holds the one failure line
@@ -43,8 +47,9 @@
 #   want.plain_stdout  exact plain-mode stdout, when pinned
 #   want.commits       session_commits holds exactly the two session commits;
 #                      otherwise it holds none
-#   want.started       the command started the web server; a failed start
-#                      also removes the PID file it wrote
+#   want.started       the command started the web server
+#   want.pid_file      kept | removed: what became of the PID file the started
+#                      server wrote; set exactly when want.started is
 
 # Every case is named here; a case missing from either list fails the load.
 requiredNames:
@@ -60,6 +65,7 @@ requiredNames:
   - malformed-transcript
   - server-start-failure
   - server-never-ready
+  - server-start-canceled
   - server-on-other-data
   - unknown-session
   - missing-session
@@ -86,6 +92,7 @@ cases:
         - 'http://localhost:{port}/projects/{project_hash}/{session_id}'
       commits: true
       started: true
+      pid_file: kept
 
   - name: refreshed-session
     session: known
@@ -236,6 +243,25 @@ cases:
         - 'peasant: dashboard start failed: no Peasant server answered http://localhost:{port}/api/v1/health within 1s of the start, and another program may hold port {port}; fix: run `{peasant} web start --foreground --port {port}` to see why, or pass --port with a free port'
       commits: true
       started: true
+      pid_file: removed
+
+  # A cancel stops the readiness wait at once and is reported apart from a
+  # timeout. The server open started may still be coming up, so it keeps
+  # running and keeps its PID file, which `peasant web stop` needs to find it.
+  - name: server-start-canceled
+    session: known
+    prompt: Fix the login redirect
+    transcript: valid
+    config: valid
+    server: start-canceled
+    modes: [hook, plain]
+    want:
+      failed: true
+      lines:
+        - 'peasant: dashboard start failed: canceled while waiting for the server it started to answer http://localhost:{port}/api/v1/health (context canceled), and that server keeps running in the background; fix: run `{peasant} open --session {session_id} --port {port}` again when it is ready, or stop it with `{peasant} web stop --port {port}`'
+      commits: true
+      started: true
+      pid_file: kept
 
   - name: server-on-other-data
     session: known

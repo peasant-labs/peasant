@@ -11,8 +11,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 	"unicode"
 
@@ -123,12 +125,21 @@ func buildOpenCommand(deps openDependencies) *cobra.Command {
 			"  peasant: <step> failed: <reason>; fix: <action>\n\n" +
 			"The steps are \"session check\", \"harvest\", \"session lookup\", \"dashboard start\" and \"dashboard check\". " +
 			"open never opens the dashboard root in place of the session.\n\n" +
+			"Ctrl-C (SIGINT) or SIGTERM cancels open: the step it interrupts, including the wait for a dashboard open started, " +
+			"fails with a reason that says it was canceled, not timed out. A dashboard open started keeps running in the background " +
+			"with its PID file, so `peasant web stop` can stop it.\n\n" +
 			"With --hook, open prints the Claude Code hook response {\"continue\":false,\"stopReason\":\"...\"} as one line on stdout instead, " +
 			"with the same lines in stopReason, writes nothing to stderr, and exits 0 on every outcome.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 			cmd.SilenceErrors = true
+			// Ctrl-C or SIGTERM cancels every step through the command context,
+			// including the dashboard readiness wait; each step reports it as a
+			// cancellation, never as a timeout.
+			ctx, stopSignals := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
+			defer stopSignals()
+			cmd.SetContext(ctx)
 			stdout, stderr := cmd.OutOrStdout(), cmd.ErrOrStderr()
 			// The harvest and the store report through the command's writers and
 			// the default loggers. The lines below are the whole output of this
@@ -364,9 +375,26 @@ func lookupOpenSession(cmd *cobra.Command, id ingest.SessionID, noRelated bool) 
 // when none does, and that it serves the session: a server started on another
 // data directory would answer the transcript address with a page that cannot
 // show it.
+//
+// A cancel ends every wait at once. When it lands while a server open started
+// is still coming up, that server keeps running and keeps its PID file, as
+// after a cancelled `peasant web start`: it may answer a moment later, and
+// stopping it would race a process that has not yet installed its shutdown
+// route. Its PID file is the only record `peasant web stop` can find it by, so
+// it is never removed for a server that may be live.
 func ensureDashboard(cmd *cobra.Command, deps openDependencies, port int, id ingest.SessionID) *openFailure {
+	ctx := cmd.Context()
 	base := dashboardBaseURL(port)
-	if !webServerHealthy(cmd.Context(), deps.client, base) {
+	again := peasantCommand(cmd, "open", "--session", string(id), "--port", fmt.Sprint(port))
+	if !webServerHealthy(ctx, deps.client, base) {
+		// A cancelled probe also reads as no server; never fork one then.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return &openFailure{
+				step:   openStepDashboardStart,
+				reason: fmt.Sprintf("canceled while checking for a dashboard on port %d (%v), before any server was started", port, ctxErr),
+				fix:    fmt.Sprintf("run `%s` again", again),
+			}
+		}
 		failed := func(reason string) *openFailure {
 			return &openFailure{
 				step:   openStepDashboardStart,
@@ -379,10 +407,16 @@ func ensureDashboard(cmd *cobra.Command, deps openDependencies, port int, id ing
 		if err != nil {
 			return failed(firstErrorLine(err))
 		}
-		// keep `peasant open` budget-only even if its command context becomes
-		// cancellable; making it cancellable must also keep the PID file of a
-		// server that is still starting (tracked as a follow-up)
-		if !waitForWebServer(context.WithoutCancel(cmd.Context()), deps.client, base, deps.readyWait, deps.readyInterval) {
+		if !waitForWebServer(ctx, deps.client, base, deps.readyWait, deps.readyInterval) {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return &openFailure{
+					step: openStepDashboardStart,
+					reason: fmt.Sprintf("canceled while waiting for the server it started to answer %s%s (%v), and that server keeps running in the background",
+						base, defaults.RouteHealth, ctxErr),
+					fix: fmt.Sprintf("run `%s` again when it is ready, or stop it with `%s`",
+						again, peasantCommand(cmd, "web", "stop", "--port", fmt.Sprint(port))),
+				}
+			}
 			// The forked server is gone or never answered; a PID file left behind
 			// would point `peasant web stop` at a process that is not it.
 			if pidFile != "" {
@@ -391,7 +425,14 @@ func ensureDashboard(cmd *cobra.Command, deps openDependencies, port int, id ing
 			return failed(fmt.Sprintf("no Peasant server answered %s%s within %s of the start, and another program may hold port %d", base, defaults.RouteHealth, deps.readyWait, port))
 		}
 	}
-	serves, err := dashboardServesSession(cmd.Context(), deps.client, base, id)
+	serves, err := dashboardServesSession(ctx, deps.client, base, id)
+	if ctxErr := ctx.Err(); err != nil && ctxErr != nil {
+		return &openFailure{
+			step:   openStepDashboardCheck,
+			reason: fmt.Sprintf("canceled while asking the dashboard on port %d for session %s (%v)", port, id, ctxErr),
+			fix:    fmt.Sprintf("run `%s` again", again),
+		}
+	}
 	if err != nil || !serves {
 		reason := fmt.Sprintf("the dashboard on port %d does not serve session %s, so it reads another data directory or mock data", port, id)
 		if err != nil {
