@@ -1,0 +1,34 @@
+# service_source_flags.yaml: how `peasant service install` passes
+# --source-harness and --source-path to the harvest the timer runs.
+#
+# Schema:
+#   cases[].name            case name
+#   cases[].args            flags after `service install --dry-run`
+#   cases[].harvest_tail    expected ExecStart words after the global
+#                           directory flags (omit with error_contains)
+#   cases[].error_contains  substring of the expected refusal
+cases:
+  - name: no source flags runs every configured harness
+    args: []
+    harvest_tail: []
+  - name: harness alone scopes to its configured path
+    args: [--source-harness, codex]
+    harvest_tail: [--source-harness, codex]
+  - name: harness and path keep the explicit override
+    args: [--source-harness, codex, --source-path, /srv/codex/../sessions]
+    harvest_tail: [--source-harness, codex, --source-path, /srv/sessions]
+  - name: path without harness is refused
+    args: [--source-path, /x]
+    error_contains: --source-path requires --source-harness
+  - name: unknown harness alone names the harness
+    args: [--source-harness, nope]
+    error_contains: unknown harness "nope"
+  - name: unknown harness with path names the harness
+    args: [--source-harness, nope, --source-path, /x]
+    error_contains: unknown harness "nope"
+  - name: legacy harness alone points at the rename
+    args: [--source-harness, claude]
+    error_contains: renamed to "claude-code"
+  - name: relative path is refused
+    args: [--source-harness, codex, --source-path, rel/dir]
+    error_contains: must be absolute

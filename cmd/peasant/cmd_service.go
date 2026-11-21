@@ -137,8 +137,8 @@ func buildServiceInstallCommand(deps serviceDeps) *cobra.Command {
 	cmd.Flags().DurationVar(&flags.interval, "interval", defaultServiceInterval, "Time between harvest runs (minimum 1m)")
 	cmd.Flags().StringVar(&flags.onCalendar, "on-calendar", "", "Run on a systemd calendar expression instead of an interval (e.g. 'hourly', '*-*-* 09:00')")
 	cmd.Flags().DurationVar(&flags.randomizedDelay, "randomized-delay", defaultServiceRandomizedDelay, "Random delay added to each run (0 disables)")
-	cmd.Flags().StringVar(&flags.sourceHarness, "source-harness", "", "Pass --source-harness to harvest (requires --source-path)")
-	cmd.Flags().StringVar(&flags.sourcePath, "source-path", "", "Pass --source-path to harvest (requires --source-harness)")
+	cmd.Flags().StringVar(&flags.sourceHarness, "source-harness", "", "Pass --source-harness to harvest: each run harvests only this harness, from its configured or default path unless --source-path is given")
+	cmd.Flags().StringVar(&flags.sourcePath, "source-path", "", "Pass --source-path to harvest, replacing the configured path of --source-harness (requires --source-harness)")
 	cmd.Flags().BoolVar(&flags.noRedact, "no-redact", false, "Do not run 'peasant redact --all' after each harvest")
 	cmd.Flags().BoolVar(&flags.dryRun, "dry-run", false, "Print the unit files and systemctl commands without changing anything")
 	return cmd
@@ -344,22 +344,26 @@ func serviceHarvestInvocation(cmd *cobra.Command, deps serviceDeps, flags servic
 		return serviceInvocation{}, err
 	}
 	harvest := append([]string{exe, "harvest"}, global...)
-	if flags.sourceHarness != "" || flags.sourcePath != "" {
-		if flags.sourceHarness == "" {
-			return serviceInvocation{}, errors.New("--source-path requires --source-harness")
-		}
-		if flags.sourcePath == "" {
-			return serviceInvocation{}, errors.New("--source-harness requires --source-path")
-		}
+	// --source-harness alone scopes each run to that harness's configured or
+	// default path, as `harvest --source-harness` does; --source-path
+	// overrides that path and needs a harness to apply to. The harness name
+	// is checked first so a typo is reported as such.
+	if flags.sourceHarness != "" {
 		harness, err := resolveHarnessFlag(flags.sourceHarness)
 		if err != nil {
 			return serviceInvocation{}, err
+		}
+		harvest = append(harvest, "--source-harness", string(harness))
+	}
+	if flags.sourcePath != "" {
+		if flags.sourceHarness == "" {
+			return serviceInvocation{}, errors.New("--source-path requires --source-harness")
 		}
 		resolved, err := ingest.NewResolvedPath(flags.sourcePath)
 		if err != nil {
 			return serviceInvocation{}, fmt.Errorf("resolve --source-path: %w", err)
 		}
-		harvest = append(harvest, "--source-harness", string(harness), "--source-path", string(resolved))
+		harvest = append(harvest, "--source-path", string(resolved))
 	}
 	invocation := serviceInvocation{harvest: harvest}
 	if !flags.noRedact {
