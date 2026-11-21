@@ -1,0 +1,40 @@
+# The origin a discovery listing carries, resolved from the typed origin an
+# adapter mined. discovered is the adapter's value, written as a plain token;
+# want is the menu value the listing must carry. Missing evidence and a token
+# outside the closed menu both resolve to the visible fail-safe unknown, so the
+# picker never hides a person's session and never crashes on a corrupt value.
+#
+# requiredCaseNames is a deletion-protection manifest, not a row count: it
+# names every case that must remain present, and adding a new case never
+# requires touching this list.
+requiredCaseNames:
+  - missing-evidence-resolves-to-unknown
+  - user-is-kept
+  - agent-is-kept
+  - unknown-is-kept
+  - a-corrupt-token-resolves-to-unknown
+  - a-differently-cased-token-resolves-to-unknown
+cases:
+  - name: missing-evidence-resolves-to-unknown
+    discovered: ""
+    want: unknown
+
+  - name: user-is-kept
+    discovered: user
+    want: user
+
+  - name: agent-is-kept
+    discovered: agent
+    want: agent
+
+  - name: unknown-is-kept
+    discovered: unknown
+    want: unknown
+
+  - name: a-corrupt-token-resolves-to-unknown
+    discovered: robot
+    want: unknown
+
+  - name: a-differently-cased-token-resolves-to-unknown
+    discovered: Agent
+    want: unknown

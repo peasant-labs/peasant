@@ -277,17 +277,14 @@ func ExpandAllowedSessionIDs(selected []SessionListing) map[ingest.SessionID]boo
 }
 
 // ResolveListingOrigin turns discovery's typed origin into the listing value.
-// Missing evidence resolves to the visible fail-safe Unknown.
+// Missing evidence resolves to the visible fail-safe Unknown, and so does a
+// value outside the closed menu. The typed value is checked directly, the same
+// idiom internal/store/writer.go applies before a session is persisted.
 func ResolveListingOrigin(discovered sessionorigin.Origin) sessionorigin.Origin {
-	token := discovered.String()
-	if token == "" {
-		token = sessionorigin.Unknown.String()
-	}
-	resolved, err := sessionorigin.Parse(token)
-	if err != nil {
+	if discovered == "" || !discovered.Valid() {
 		return sessionorigin.Unknown
 	}
-	return resolved
+	return discovered
 }
 
 // DecodeClaudeSlugToPath decodes a Claude project slug to a filesystem path
