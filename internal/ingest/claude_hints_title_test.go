@@ -96,7 +96,9 @@ func discoverClaudeHintsTitle(t *testing.T, fixture claudeHintsTitleCase) ingest
 				break
 			}
 		}
-		if firstUser == "" || firstUser != got.Title {
+		// A case that expects no title agrees when the indexer also yields no
+		// user text; every other case must match the first indexed user text.
+		if firstUser != got.Title {
 			t.Fatalf("discovery title %q disagrees with first indexed user text %q", got.Title, firstUser)
 		}
 	}
