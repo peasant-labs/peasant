@@ -56,6 +56,9 @@ type ContentVerifyReport struct {
 	// OwnerlessSessions hold content rows with no sessions row; verify
 	// fails on them because no sweep can reach them.
 	OwnerlessSessions []schema.SessionID
+	// DanglingMappingSets are generations whose mapping_set_id names no
+	// owner: a missing generation, or one that is itself a reference.
+	DanglingMappingSets []DanglingMappingSet
 }
 
 // VerifyContent checks every harmonized session's mapped objects with

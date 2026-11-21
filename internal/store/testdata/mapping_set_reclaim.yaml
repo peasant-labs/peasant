@@ -1,0 +1,172 @@
+# Reclaim by reachability over generations that share parsed rows. A
+# generation either owns its parsed rows or names, in mapping_set_id, the
+# owner whose rows it reads. A sweep or reclaim keeps the roots (the active
+# generation and the latest attempt) and the owner each root reads, and
+# collects everything else.
+#
+# Each case builds one session in order. An owner (text set) is installed by
+# the production activation and becomes active. A reference (references set)
+# is a catalog row copied from its owner with mapping_set_id naming it; with
+# activate it becomes the active generation. latest names the latest attempt.
+# After the build the session's sweep flag is set.
+#
+# "Reads" here means the generation resolves to its owner and every parsed
+# row the owner held is still there; the readers that serve a reference are
+# routed separately.
+requiredNames:
+  - sweeping-the-source-keeps-the-shared-set
+  - a-latest-attempt-root-keeps-its-set
+  - a-second-reference-flattens
+  - a-parse-collects-the-set
+  - dry-run-equals-apply
+  - interrupted-bounded-pass-never-collects-a-referenced-set
+  - dangling-root-reference-is-corruption
+  - dangling-superseded-reference-is-pending-sweep
+  - representation-delete-removes-everything
+  - session-prune-cascades
+  - concurrent-reference-and-sweep
+  - repair-of-a-shared-set
+cases:
+  - name: sweeping-the-source-keeps-the-shared-set
+    given: g1 owns its rows and is superseded; g2 is active and references g1
+    when: the session is swept
+    then: g1's catalog, context and parsed rows remain; g2 resolves to g1 and reads all of g1's parsed rows
+    action: sweep
+    generations:
+      - {id: g1, text: shared owner text}
+      - {id: g2, references: g1, activate: true}
+    wantActive: g2
+    wantKept: [g1, g2]
+    wantResolves: {g2: g1}
+
+  - name: a-latest-attempt-root-keeps-its-set
+    given: g0 is a superseded owner; g4 owns its rows and is the latest attempt; g2 is active and references g1
+    when: the session is swept
+    then: g1, g2 and g4 remain; g0 is collected
+    action: sweep
+    generations:
+      - {id: g0, text: collected owner text}
+      - {id: g4, text: latest attempt text}
+      - {id: g1, text: shared owner text}
+      - {id: g2, references: g1, activate: true}
+    latest: g4
+    wantActive: g2
+    wantKept: [g1, g2, g4]
+    wantCollected: [g0]
+    wantResolves: {g2: g1, g4: g4}
+
+  - name: a-second-reference-flattens
+    given: g1 is the owner; g2 references g1 and is superseded; g3 references g1 and is active
+    when: the session is swept
+    then: g2 is collected; g1 and g3 remain; g3 resolves to g1 and reads its rows
+    action: sweep
+    generations:
+      - {id: g1, text: shared owner text}
+      - {id: g2, references: g1, activate: true}
+      - {id: g3, references: g1, activate: true}
+    wantActive: g3
+    wantKept: [g1, g3]
+    wantCollected: [g2]
+    wantResolves: {g3: g1}
+
+  - name: a-parse-collects-the-set
+    given: g2 is active and references g1; a parse then installs g3, which owns its rows
+    when: the session is swept
+    then: g1 and g2 are collected, and the sweep removes the entry bodies only g1 mapped
+    action: sweep
+    generations:
+      - {id: g1, text: shared owner text}
+      - {id: g2, references: g1, activate: true}
+      - {id: g3, text: fresh parse text}
+    wantActive: g3
+    wantKept: [g3]
+    wantCollected: [g1, g2]
+    wantResolves: {g3: g3}
+    wantCollectedBodiesGone: true
+
+  - name: dry-run-equals-apply
+    given: each of the named sweep cases, built again in its own store
+    when: the reclaim forecast is planned, then the reclaim is applied
+    then: the forecast names exactly the collected generations, and its per-generation row counts equal the rows the apply deleted
+    action: dry-run-equals-apply
+    cases:
+      - sweeping-the-source-keeps-the-shared-set
+      - a-latest-attempt-root-keeps-its-set
+      - a-second-reference-flattens
+      - a-parse-collects-the-set
+
+  - name: interrupted-bounded-pass-never-collects-a-referenced-set
+    given: g0 is a superseded owner; g2 is active and references g1; the sweep deletes one row per batch
+    when: the sweep crashes at the mid-batch seam, and a second pass resumes it
+    then: after the crash and after the resume every row of g1 and g2 remains; the resumed pass collects g0
+    action: sweep-interrupted
+    sweepRows: 1
+    generations:
+      - {id: g0, text: collected owner text}
+      - {id: g1, text: shared owner text}
+      - {id: g2, references: g1, activate: true}
+    wantActive: g2
+    wantKept: [g1, g2]
+    wantCollected: [g0]
+    wantResolves: {g2: g1}
+
+  - name: dangling-root-reference-is-corruption
+    given: g2 is active and references g1, which does not exist (forged)
+    when: the content is verified
+    then: verify reports g2 as a dangling mapping set, as corruption
+    action: verify
+    generations:
+      - {id: g0, text: carrier owner text}
+      - {id: g2, references: g1, activate: true, forged: true}
+    wantDangling: {generation: g2, mappingSet: g1, disposition: corruption}
+
+  - name: dangling-superseded-reference-is-pending-sweep
+    given: g2 references g1 and is superseded; g3 is active; g1 was already collected by an interrupted sweep, and the sweep flag is set
+    when: the content is verified
+    then: verify reports g2 as a dangling mapping set, as a pending sweep
+    action: verify
+    generations:
+      - {id: g1, text: shared owner text}
+      - {id: g2, references: g1, activate: true}
+      - {id: g3, text: fresh parse text}
+    collectBeforeAction: [g1]
+    wantDangling: {generation: g2, mappingSet: g1, disposition: pending-sweep}
+
+  - name: representation-delete-removes-everything
+    given: g2 is active and references g1
+    when: the session's representation is deleted for a format replacement
+    then: no row of the session remains in any generation-scoped table
+    action: representation-delete
+    generations:
+      - {id: g1, text: shared owner text}
+      - {id: g2, references: g1, activate: true}
+
+  - name: session-prune-cascades
+    given: g2 is active and references g1
+    when: the session is pruned
+    then: no row of the session remains in any generation-scoped table
+    action: prune
+    generations:
+      - {id: g1, text: shared owner text}
+      - {id: g2, references: g1, activate: true}
+
+  - name: concurrent-reference-and-sweep
+    given: g1 is active; a writer holding the exclusive session lock is gated before it installs g2 as an active reference to g1, and a sweep of the same session starts
+    when: the gate is released
+    then: the two serialize on the lock within the deadline; g2 resolves to g1 and g1 remains
+    action: concurrent
+    generations:
+      - {id: g0, text: collected owner text}
+      - {id: g1, text: shared owner text}
+    concurrentReference: {id: g2, references: g1}
+    wantActive: g2
+    wantKept: [g1, g2]
+    wantCollected: [g0]
+    wantResolves: {g2: g1}
+
+  - name: repair-of-a-shared-set
+    given: g2 is active and references g1; one of g1's entry bodies is corrupted
+    when: the repair path runs
+    then: g1's rows are repaired; g2 reads clean; verify passes
+    action: repair
+    pending: the repair path does not yet resolve a reference to its owner's parsed rows; this case runs once repair reads through the resolver
