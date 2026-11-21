@@ -154,7 +154,7 @@ func TestAuditMutations(t *testing.T) {
 			err := audit(forkCopy, repoDir)
 			if c.Want == "" {
 				if err != nil {
-					t.Fatalf("audit of the unmutated copy failed: %v", err)
+					t.Fatalf("audit failed for case %q, which expects success: %v", c.Name, err)
 				}
 				return
 			}
@@ -273,6 +273,10 @@ func applyMutationStep(t *testing.T, forkCopy, repoDir string, step mutationStep
 		if err := os.Symlink("missing-probe-target", target); err != nil {
 			t.Fatalf("replace %s with a dangling symlink: %v", step.Path, err)
 		}
+	default:
+		// checkMutationStep accepts this kind, but no branch here applies it.
+		// Fail rather than run the audit over an unchanged copy.
+		t.Fatalf("mutation kind %q is accepted by checkMutationStep but not applied here; add its branch to applyMutationStep", step.Kind)
 	}
 }
 

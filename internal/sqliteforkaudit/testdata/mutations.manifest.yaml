@@ -16,6 +16,9 @@ requiredNames:
   - modified-file-change-documented
   - added-pointer-line
   - pointer-line-duplicated-in-modified-file
+  - pointer-line-extra-in-modified-file
+  - patch-file-missing
+  - owned-go-file-unreadable
   - repo-import-unaudited-driver
   - repo-import-unaudited-driver-subpath
   - repo-import-nested-file
