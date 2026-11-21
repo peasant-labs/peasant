@@ -1,0 +1,81 @@
+# prune --all --orphans: transcript directories with no database row are
+# enumerated BEFORE anything is deleted, shown in the same preview and consent
+# as the sessions, and only that enumerated list is removed.
+#
+# Every case runs against the same tree: the two seeded sessions (each with its
+# own transcript directory, so they are planned rather than orphaned), the
+# orphans below, and adopted_orphan. The loader requires every mode to appear
+# in cases, so dropping a case is caught.
+
+# On disk before the run, with no database row. The second one shares a host
+# slug with the planned sessions, so "orphan" cannot be decided per slug.
+orphans:
+  - session_id: eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee
+    output_path: orphan-host-slug
+  - session_id: ffffffff-ffff-4fff-8fff-ffffffffffff
+    output_path: github.com-test-prune
+
+# On disk with no row when the orphan set is enumerated, so it is previewed as
+# an orphan. In the prompt modes a database row for it is inserted while the
+# consent prompt is open: it is then a live session, and the pre-delete
+# re-check must keep it.
+adopted_orphan:
+  session_id: 12121212-1212-4212-8212-121212121212
+  output_path: adopted-host-slug
+
+# Created on disk while the consent prompt is open (prompt modes only), after
+# the orphan set was enumerated. It must survive and must never be named: this
+# is the failure the removed whole-directory sweep had. It shares the first
+# orphan's host slug, so removing that orphan must not take the slug with it.
+late_disk_session:
+  session_id: cccccccc-cccc-4ccc-8ccc-cccccccccccc
+  output_path: orphan-host-slug
+
+# mode is one of: decline, consent (the interactive prompt, answered n / y),
+# confirm-flag (--confirm, no prompt), dry-run (--dry-run).
+# removed lists the orphan session IDs that must be gone afterwards; every
+# other enumerated orphan must survive. kept lists the IDs the command must
+# report keeping because a row appeared for them after the preview.
+cases:
+  - name: declined consent removes nothing
+    mode: decline
+    sessions_deleted: false
+    removed: []
+    kept: []
+  - name: consent removes only the enumerated orphans that still have no row
+    mode: consent
+    sessions_deleted: true
+    removed:
+      - eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee
+      - ffffffff-ffff-4fff-8fff-ffffffffffff
+    kept:
+      - 12121212-1212-4212-8212-121212121212
+  - name: --confirm removes every enumerated orphan
+    mode: confirm-flag
+    sessions_deleted: true
+    removed:
+      - eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee
+      - ffffffff-ffff-4fff-8fff-ffffffffffff
+      - 12121212-1212-4212-8212-121212121212
+    kept: []
+  - name: dry run lists the orphans and removes nothing
+    mode: dry-run
+    sessions_deleted: false
+    removed: []
+    kept: []
+
+# Flag combinations where --orphans cannot apply. Each carries --confirm so a
+# refusal is the only thing standing between the command and a delete.
+refusals:
+  - name: --orphans alone
+    args: ["--orphans", "--confirm"]
+    error: "--orphans requires --all"
+  - name: --orphans with a session filter
+    args: ["--orphans", "--session", "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "--confirm"]
+    error: "--orphans requires --all"
+  - name: --orphans with a harness filter
+    args: ["--orphans", "--harness", "claude-code", "--confirm"]
+    error: "--orphans requires --all"
+  - name: --orphans with --unselected
+    args: ["--orphans", "--unselected", "--confirm"]
+    error: "--orphans requires --all"

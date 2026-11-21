@@ -21,6 +21,7 @@ peasant prune [flags]
       --harness string    Prune sessions by harness ({claude-code, gemini-cli, codex, opencode, cursor, antigravity, strike, pi, grok-build, devin-desktop, cline, kiro, kiro-cli, kiro-crew, antigravity-cli, antigravity-ide})
   -h, --help              help for prune
       --json              Output results as JSON
+      --orphans           With --all, also delete transcript directories under peasant-sync that have no database row. They are listed in the preview and covered by the same confirmation, and only that listed set is removed. An orphan is left by an earlier prune that could not remove its directory, a session written just before a store failure, or an interrupted ingest
       --project string    Prune sessions of one project: its hash, path, directory name or git remote (owner/repo, host/owner/repo or a clone URL)
       --session strings   Session IDs to prune (repeatable)
       --unselected        Prune sessions not selected by harness, project, clone, branch, or explicit session rules (requires selection.mode=selected)
