@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/clicommand"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -163,7 +164,7 @@ func TestPushCmd_ABudgetSpentLocallyDoesNotBlameTheVillage(t *testing.T) {
 func assertBudgetRecoveryKeepsContainment(t *testing.T, err error, repo, boundDir string) {
 	t.Helper()
 	message := err.Error()
-	quoted := githooks.ShellQuote(repo)
+	quoted := clicommand.ShellQuote(repo)
 
 	if !strings.Contains(message, "--repository "+quoted) {
 		t.Errorf("the budget failure does not confine its commands to %s; got: %v", repo, err)
@@ -185,7 +186,7 @@ func assertBudgetRecoveryKeepsContainment(t *testing.T, err error, repo, boundDi
 		t.Errorf("the reinstall command does not name %s, the repository whose cap expired; got: %v", repo, err)
 	}
 	for _, flag := range []string{"--config-dir", "--data-dir"} {
-		if !strings.Contains(message, flag+" "+githooks.ShellQuote(boundDir)) {
+		if !strings.Contains(message, flag+" "+clicommand.ShellQuote(boundDir)) {
 			t.Errorf("the recovery dropped %s, so it would inspect or reinstall against a different Peasant state directory; got: %v", flag, err)
 		}
 	}
@@ -232,7 +233,7 @@ func TestPushRun_AScopeTimeoutStaysInTheScopePhase(t *testing.T) {
 	if !strings.Contains(budgetErr.Error(), "resolving which recorded sessions belong to this repository") {
 		t.Errorf("the budget error does not use the scope-phase narrative; got: %v", budgetErr)
 	}
-	if !strings.Contains(budgetErr.Error(), "--repository "+githooks.ShellQuote(repo)) {
+	if !strings.Contains(budgetErr.Error(), "--repository "+clicommand.ShellQuote(repo)) {
 		t.Errorf("the budget error drops the repository it was confined to; got: %v", budgetErr)
 	}
 }

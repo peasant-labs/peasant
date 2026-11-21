@@ -3,8 +3,8 @@ package push
 import (
 	"context"
 
+	"github.com/peasant-labs/peasant/internal/clicommand"
 	"github.com/peasant-labs/peasant/internal/clicontract"
-	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/perf"
 	"github.com/peasant-labs/schema"
@@ -92,7 +92,7 @@ type PipelineConfig struct {
 	Repository *RepositoryScope
 	// CommandBinding is the typed, explicitly-bound config/data/state context
 	// used to render recovery commands. Its zero value uses Peasant's defaults.
-	CommandBinding githooks.Binding
+	CommandBinding clicommand.Binding
 	// Recorder optionally overrides the context recorder for direct pipeline
 	// callers. The CLI supplies its shared recorder through the run context.
 	// Nil resolves through perf.RecorderFromContext (Nop when disabled).

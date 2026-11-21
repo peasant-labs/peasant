@@ -17,8 +17,8 @@ import (
 	"unicode"
 
 	"github.com/peasant-labs/peasant/internal/browser"
+	"github.com/peasant-labs/peasant/internal/clicommand"
 	"github.com/peasant-labs/peasant/internal/defaults"
-	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/schema"
 	"github.com/spf13/cobra"
@@ -246,7 +246,7 @@ func openHarvestCommand(cmd *cobra.Command, id ingest.SessionID, noRelated bool)
 // peasantCommand renders a peasant command line with the configuration and
 // directory flags this run was given, so the command reads the same store.
 func peasantCommand(cmd *cobra.Command, args ...string) string {
-	return githooks.CommandPrefix(hookBinding(cmd)) + " " + strings.Join(args, " ")
+	return clicommand.Prefix(commandBinding(cmd)) + " " + strings.Join(args, " ")
 }
 
 // recordOpenSession harvests exactly this session, with commit detection,

@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/peasant-labs/peasant/internal/clicommand"
 	"github.com/peasant-labs/peasant/internal/defaults"
 )
 
@@ -515,7 +516,7 @@ func sharedPathReason(slot Slot, repo Repository, binding Binding, op intent, ow
 				"Impact: nothing was installed and the effective path is untouched. Do not paste an upload section into %s: it is pinned to %s, so it would run for every worktree and repository that executes that file and would still upload only %s.\n"+
 				"Fix: pick one - run the upload yourself when you want it (cd %s && %s);%s or point git at a hooks directory inside this worktree yourself and re-run this command. Peasant never sets, unsets, or changes core.hooksPath.",
 			slot.Path, repo.Root, repo.Root,
-			shellQuote(repo.Root), ManualCommand(repo.Root, binding), ownerInstallOption(slot, owner, binding))
+			shellQuote(repo.Root), clicommand.ManualPush(repo.Root, binding.Command()), ownerInstallOption(slot, owner, binding))
 	}
 }
 

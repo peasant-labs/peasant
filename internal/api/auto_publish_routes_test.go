@@ -15,6 +15,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/autopublish"
 	"github.com/peasant-labs/peasant/internal/autopublish/autopublishtest"
+	"github.com/peasant-labs/peasant/internal/clicommand"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/githooks"
@@ -385,7 +386,7 @@ func TestAutoPublishRoutesChangeNoHookOnTheirOwn(t *testing.T) {
 	if installed.Hooks[0].Status != schema.AutoPublishHookInstalled {
 		t.Fatalf("install = %+v", installed)
 	}
-	if hook := string(prePushHook(t, world.recorded)); !strings.Contains(hook, "--config-dir "+githooks.ShellQuote(world.hs.Config)) || !strings.Contains(hook, "--data-dir "+githooks.ShellQuote(world.hs.Data)) || !strings.Contains(hook, "--state-dir "+githooks.ShellQuote(world.hs.State)) {
+	if hook := string(prePushHook(t, world.recorded)); !strings.Contains(hook, "--config-dir "+clicommand.ShellQuote(world.hs.Config)) || !strings.Contains(hook, "--data-dir "+clicommand.ShellQuote(world.hs.Data)) || !strings.Contains(hook, "--state-dir "+clicommand.ShellQuote(world.hs.State)) {
 		t.Errorf("the installed hook does not bind this server's config and data directories, so it would not read its rules and store:\n%s", hook)
 	}
 	if got := autoPublish(); !got[recordedInsideSessionID] || got[recordedOutsideSessionID] {
@@ -503,7 +504,7 @@ func TestPublicationHookBindingFixtures(t *testing.T) {
 			}
 			if c.Moved {
 				written := prePushHook(t, world.recorded)
-				moved := strings.Replace(string(written), "peasant_hook_repository="+githooks.ShellQuote(world.recorded), "peasant_hook_repository="+githooks.ShellQuote(world.dir+"/moved"), 1)
+				moved := strings.Replace(string(written), "peasant_hook_repository="+clicommand.ShellQuote(world.recorded), "peasant_hook_repository="+clicommand.ShellQuote(world.dir+"/moved"), 1)
 				if moved == string(written) || !githooks.IsManaged([]byte(moved)) {
 					t.Fatal("the hook could not be pointed at a moved repository")
 				}

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/autopublish"
+	"github.com/peasant-labs/peasant/internal/clicommand"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -243,7 +244,20 @@ func parseHookEvents(raw []string) ([]githooks.Event, error) {
 // Relative overrides are made absolute, because a hook runs with git's working
 // directory, not the one the install was typed in.
 func hookBinding(cmd *cobra.Command) githooks.Binding {
+	paths := commandBinding(cmd)
 	return githooks.Binding{
+		ConfigPath: paths.ConfigPath,
+		ConfigDir:  paths.ConfigDir,
+		DataDir:    paths.DataDir,
+		StateDir:   paths.StateDir,
+	}
+}
+
+// commandBinding captures the same explicitly-overridden paths for a printed
+// recovery or follow-up command, so following it reaches the config and store
+// the command that printed it used.
+func commandBinding(cmd *cobra.Command) clicommand.Binding {
+	return clicommand.Binding{
 		ConfigPath: changedFlagPath(cmd, "config"),
 		ConfigDir:  changedFlagPath(cmd, "config-dir"),
 		DataDir:    changedFlagPath(cmd, "data-dir"),

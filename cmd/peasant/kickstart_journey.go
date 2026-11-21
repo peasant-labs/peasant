@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/auth"
+	"github.com/peasant-labs/peasant/internal/clicommand"
 	"github.com/peasant-labs/peasant/internal/collectiveobservations"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -148,7 +149,7 @@ func buildKickstartJourneyOperations(cmd *cobra.Command, configPath string, load
 		if err != nil {
 			return nil, retrySessions(ftue.StagePublication, ids), fmt.Errorf("create kickstart publication redactor: %w", err)
 		}
-		runCfg := push.PipelineConfig{FilterSessionIDs: ids, Visibility: request.Answers.EffectiveVisibility, License: request.Answers.License, CommandBinding: githooks.Binding{ConfigPath: configPath, ConfigDir: configDirOverride(cmd), DataDir: dataDirOverride(cmd)}}
+		runCfg := push.PipelineConfig{FilterSessionIDs: ids, Visibility: request.Answers.EffectiveVisibility, License: request.Answers.License, CommandBinding: clicommand.Binding{ConfigPath: configPath, ConfigDir: configDirOverride(cmd), DataDir: dataDirOverride(cmd)}}
 		if cfg.Selection.Mode == config.SelectionModeSelected {
 			matcher := cfg.SelectionMatcher()
 			selection, selectionErr := preparePushSelection(ctx, db, matcher, ingest.NewPhysicalPathResolver())

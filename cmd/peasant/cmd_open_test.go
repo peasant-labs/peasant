@@ -23,8 +23,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/clicommand"
 	"github.com/peasant-labs/peasant/internal/defaults"
-	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -433,7 +433,7 @@ func (w *openWorld) stateDir() string  { return filepath.Join(w.root, "state") }
 
 // commandPrefix is how the command renders `peasant` with this run's flags.
 func (w *openWorld) commandPrefix() string {
-	return githooks.CommandPrefix(githooks.Binding{ConfigPath: w.configPath, ConfigDir: w.configDir(), DataDir: w.dataDir(), StateDir: w.stateDir()})
+	return clicommand.Prefix(clicommand.Binding{ConfigPath: w.configPath, ConfigDir: w.configDir(), DataDir: w.dataDir(), StateDir: w.stateDir()})
 }
 
 func (w *openWorld) dependencies(t *testing.T) openDependencies {

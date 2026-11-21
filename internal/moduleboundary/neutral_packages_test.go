@@ -48,6 +48,13 @@ func TestNeutralPackageBoundaries(t *testing.T) {
 		"api-not-import-internal-tui":           {Directory: "internal/api", Forbidden: "github.com/peasant-labs/peasant/internal/tui"},
 		"discovery-not-import-internal-tui":     {Directory: "internal/discovery", Forbidden: "github.com/peasant-labs/peasant/internal/tui"},
 		"one-declaration-of-each-neutral-type":  {},
+		// Command rendering is neutral vocabulary: hooks, publishing, and storage
+		// consume it, and it consumes none of them.
+		"clicommand-not-import-githooks": {Directory: "internal/clicommand", Forbidden: "github.com/peasant-labs/peasant/internal/githooks"},
+		"clicommand-not-import-push":     {Directory: "internal/clicommand", Forbidden: "github.com/peasant-labs/peasant/internal/push"},
+		"clicommand-not-import-store":    {Directory: "internal/clicommand", Forbidden: "github.com/peasant-labs/peasant/internal/store"},
+		"push-not-import-githooks":       {Directory: "internal/push", Forbidden: "github.com/peasant-labs/peasant/internal/githooks"},
+		"store-not-import-githooks":      {Directory: "internal/store", Forbidden: "github.com/peasant-labs/peasant/internal/githooks"},
 	}
 	required := map[string]bool{}
 	for name := range edges {

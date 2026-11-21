@@ -20,10 +20,10 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/peasant-labs/peasant/internal/auth"
+	"github.com/peasant-labs/peasant/internal/clicommand"
 	"github.com/peasant-labs/peasant/internal/clicontract"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
-	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/perf"
 	"github.com/peasant-labs/peasant/internal/store"
@@ -825,7 +825,7 @@ func (p *Pipeline) manualPushCommand(extraFlag string) string {
 	if p.runCfg.Repository != nil {
 		root = p.runCfg.Repository.Root
 	}
-	command := githooks.ManualCommand(root, p.runCfg.CommandBinding)
+	command := clicommand.ManualPush(root, p.runCfg.CommandBinding)
 	if extraFlag != "" {
 		command += " " + extraFlag
 	}
@@ -895,7 +895,7 @@ func (p *Pipeline) staleIdentityNote(all []ingest.PushSessionRow) string {
 
 // ingestCommand renders ingest in the same config/data/state context as push.
 func (p *Pipeline) ingestCommand(flags string) string {
-	prefix := githooks.CommandPrefix(p.runCfg.CommandBinding)
+	prefix := clicommand.Prefix(p.runCfg.CommandBinding)
 	command := prefix + " ingest"
 	if flags != "" {
 		command += " " + flags

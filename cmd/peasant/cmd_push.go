@@ -24,6 +24,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/animation"
 	"github.com/peasant-labs/peasant/internal/auth"
+	"github.com/peasant-labs/peasant/internal/clicommand"
 	"github.com/peasant-labs/peasant/internal/clicontract"
 	"github.com/peasant-labs/peasant/internal/collectiveobservations"
 	"github.com/peasant-labs/peasant/internal/config"
@@ -458,7 +459,7 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 					Verbose:          verbose,
 					Quiet:            level == outputQuiet,
 					Concurrency:      resolvedConcurrency,
-					CommandBinding:   run.binding,
+					CommandBinding:   run.binding.Command(),
 					LastGood:         lastGood,
 				}
 				if cmd.Flags().Changed("repository") {
@@ -880,7 +881,7 @@ func buildPushCommand(deps pushCommandDependencies) *cobra.Command {
 					},
 				)
 				if annSummary != nil {
-					prefix := githooks.CommandPrefix(run.binding)
+					prefix := clicommand.Prefix(run.binding.Command())
 					for index := range annSummary.Unpublishable {
 						annSummary.Unpublishable[index] = annSummary.Unpublishable[index].WithCommandPrefix(prefix)
 					}
@@ -1522,7 +1523,7 @@ func (r pushRun) repository() string {
 // repositoryCommand renders the by-hand push for whatever this run was confined
 // to, quoted so it survives a path with a space.
 func (r pushRun) repositoryCommand() string {
-	return githooks.ManualCommand(r.repository(), r.binding)
+	return clicommand.ManualPush(r.repository(), r.binding.Command())
 }
 
 // scopeSuffix names the repository a scoped push was confined to, so a message
@@ -1533,7 +1534,7 @@ func (r pushRun) scopeSuffix() string {
 	if repository == "" {
 		return ""
 	}
-	return " --repository " + githooks.ShellQuote(repository)
+	return " --repository " + clicommand.ShellQuote(repository)
 }
 
 // pushNothingAttemptedError marks a push failure that happened before a single

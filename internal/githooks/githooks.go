@@ -37,6 +37,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/peasant-labs/peasant/internal/clicommand"
 )
 
 // Event is a supported client-side Git hook event. The set is closed: these are
@@ -319,6 +321,13 @@ type Binding struct {
 	// who needed a longer budget and edited the file would break ownership and
 	// leave a hook that still uploads but can no longer be removed by Peasant.
 	Timeout time.Duration
+}
+
+// Command is the path context of b that every peasant command rendered for this
+// hook carries. The hook-only fields - the auto-publish guard and the upload
+// budget - belong to the upload invocation and are not part of it.
+func (b Binding) Command() clicommand.Binding {
+	return clicommand.Binding{ConfigPath: b.ConfigPath, ConfigDir: b.ConfigDir, DataDir: b.DataDir, StateDir: b.StateDir}
 }
 
 func (b Binding) forEvent(event Event) Binding {

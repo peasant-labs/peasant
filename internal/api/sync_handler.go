@@ -17,11 +17,11 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/auth"
+	"github.com/peasant-labs/peasant/internal/clicommand"
 	"github.com/peasant-labs/peasant/internal/collectiveobservations"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/discovery"
-	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/push"
@@ -1593,7 +1593,7 @@ func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *
 		}
 		pipelineCfg.Scope = &sessionScope
 		pipelineCfg.Command = "harvest"
-		pipelineCfg.CommandPrefix = githooks.CommandPrefix(githooks.Binding{DataDir: string(h.dataDir())})
+		pipelineCfg.CommandPrefix = clicommand.Prefix(clicommand.Binding{DataDir: string(h.dataDir())})
 		pipelineCfg.Harness = &scope.harness
 		pipelineCfg.Force = true
 	}

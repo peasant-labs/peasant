@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/auth"
+	"github.com/peasant-labs/peasant/internal/clicommand"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
-	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
 	storepkg "github.com/peasant-labs/peasant/internal/store"
@@ -1312,7 +1312,7 @@ func runScopedEmptyState(t *testing.T, testCase scopedEmptyStateCase, quiet bool
 	runCfg := push.PipelineConfig{
 		Repository:     testScope(testCase.StaleIdentity),
 		Quiet:          quiet,
-		CommandBinding: githooks.Binding{DataDir: "/tmp/bound data"},
+		CommandBinding: clicommand.Binding{DataDir: "/tmp/bound data"},
 	}
 	switch testCase.World {
 	case worldNothingRecorded:

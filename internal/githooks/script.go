@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/clicommand"
 	"github.com/peasant-labs/peasant/internal/defaults"
 )
 
@@ -207,46 +208,12 @@ func IsManaged(content []byte) bool {
 		lines[len(lines)-1] == ScriptMarkerEnd
 }
 
-// token is one element of an upload invocation, plus whether it is a value that
-// a shell would have to see quoted.
-//
-// The two renderings of the same invocation differ only in that: a shell command
-// line quotes its path values, and an argument list quotes nothing, because each
-// element is already one argument. Building both from one token list is what
-// keeps them from drifting - a shell-quoted path handed to an argv-form
-// invocation is passed through literally, and "--repository '/path'" then fails
-// on a directory whose name contains apostrophes.
-type token struct {
-	value string
-	// quoted marks a token a shell must see quoted: a filesystem path or any
-	// other value Peasant did not choose itself. Flags and subcommands are
-	// fixed ASCII and are rendered bare.
-	quoted bool
-}
-
-// boundTokens is `peasant` plus the explicitly-bound, non-secret path
-// overrides. Every executable and recovery command starts here so a user never
-// gets sent from a bound hook to the default config or store by accident.
-func boundTokens(binding Binding) []token {
-	tokens := []token{{value: "peasant"}}
-	for _, bound := range []struct{ flag, value string }{
-		{"--config", binding.ConfigPath},
-		{"--config-dir", binding.ConfigDir},
-		{"--data-dir", binding.DataDir},
-		{"--state-dir", binding.StateDir},
-	} {
-		if bound.value != "" {
-			tokens = append(tokens, token{value: bound.flag}, token{value: bound.value, quoted: true})
-		}
-	}
-	return tokens
-}
-
-// CommandPrefix renders `peasant` with every explicitly-bound, non-secret path
-// override. Callers append their subcommand and local flags, keeping recovery
-// commands on the same config and store as the operation that produced them.
-func CommandPrefix(binding Binding) string {
-	return renderShell(boundTokens(binding))
+// boundTokens is `peasant` plus the binding's explicitly-bound, non-secret path
+// overrides. Every executable and recovery command a hook prints starts here so
+// a user never gets sent from a bound hook to the default config or store by
+// accident.
+func boundTokens(binding Binding) []clicommand.Token {
+	return clicommand.BoundTokens(binding.Command())
 }
 
 // uploadTokens is the upload invocation: the program, the explicitly-bound
@@ -265,52 +232,29 @@ func CommandPrefix(binding Binding) string {
 //
 // --timeout is always included for the same reason: git must not be held up by a
 // village that stopped answering. See DefaultUploadBudget.
-func uploadTokens(root string, binding Binding) []token {
+func uploadTokens(root string, binding Binding) []clicommand.Token {
 	tokens := boundTokens(binding)
 	tokens = append(tokens,
-		token{value: "village"}, token{value: "push"},
-		token{value: "--non-interactive"}, token{value: "--quiet"},
-		token{value: "--timeout"}, token{value: binding.UploadBudget().String()})
+		clicommand.Bare("village"), clicommand.Bare("push"),
+		clicommand.Bare("--non-interactive"), clicommand.Bare("--quiet"),
+		clicommand.Bare("--timeout"), clicommand.Bare(binding.UploadBudget().String()))
 	if binding.RequireAutoPublishRule {
-		tokens = append(tokens, token{value: "--require-auto-publish-rule"})
+		tokens = append(tokens, clicommand.Bare("--require-auto-publish-rule"))
 		if binding.AutoPublishEvent != "" {
-			tokens = append(tokens, token{value: "--auto-publish-event"}, token{value: binding.AutoPublishEvent.String()})
+			tokens = append(tokens, clicommand.Bare("--auto-publish-event"), clicommand.Bare(binding.AutoPublishEvent.String()))
 		}
 	}
 	if root != "" {
-		tokens = append(tokens, token{value: "--repository"}, token{value: root, quoted: true})
+		tokens = append(tokens, clicommand.Bare("--repository"), clicommand.Quoted(root))
 	}
 	return tokens
-}
-
-// renderShell joins tokens into a POSIX shell command line, quoting the values.
-func renderShell(tokens []token) string {
-	parts := make([]string, 0, len(tokens))
-	for _, t := range tokens {
-		if t.quoted {
-			parts = append(parts, ShellQuote(t.value))
-			continue
-		}
-		parts = append(parts, t.value)
-	}
-	return strings.Join(parts, " ")
-}
-
-// renderArgv returns tokens as raw arguments, with no quoting of any kind: each
-// element is already exactly one argument.
-func renderArgv(tokens []token) []string {
-	args := make([]string, 0, len(tokens))
-	for _, t := range tokens {
-		args = append(args, t.value)
-	}
-	return args
 }
 
 // CommandLine renders the exact upload command a hook runs, as a POSIX shell
 // command line. This is the single builder every displayed and executed shell
 // rendering of the command comes from.
 func CommandLine(binding Binding) string {
-	return renderShell(uploadTokens("", binding))
+	return clicommand.RenderShell(uploadTokens("", binding))
 }
 
 // RepositoryArgv renders the upload for root as an ARGUMENT LIST: the program
@@ -322,7 +266,7 @@ func CommandLine(binding Binding) string {
 // shell-quoted "--repository '/path'" arrives with the apostrophes still on it
 // and resolves nothing.
 func RepositoryArgv(root string, binding Binding) []string {
-	return renderArgv(uploadTokens(root, binding))
+	return clicommand.RenderArgv(uploadTokens(root, binding))
 }
 
 // ArgumentList renders an argument list in the bracketed, double-quoted form
@@ -339,24 +283,6 @@ func ArgumentList(args []string) string {
 	return "[" + strings.Join(quoted, ", ") + "]"
 }
 
-// ManualCommand renders the upload for root as a PERSON runs it: the same bound
-// paths, without the three flags that exist only because a hook runs the
-// command - the non-interactive answer to the visibility confirmation, the quiet
-// output, and the time budget whose whole purpose is to keep git moving. When
-// root is empty, the command is unscoped; otherwise it retains that boundary.
-//
-// It is derived from the same bound paths rather than written out, because the
-// hardcoded "peasant village push --repository <root>" a hook used to print as
-// its run-it-by-hand line pushes from a DIFFERENT store than the hook itself
-// whenever the install bound a config or data directory.
-func ManualCommand(root string, binding Binding) string {
-	tokens := append(boundTokens(binding), token{value: "village"}, token{value: "push"})
-	if root != "" {
-		tokens = append(tokens, token{value: "--repository"}, token{value: root, quoted: true})
-	}
-	return renderShell(tokens)
-}
-
 // StatusCommand renders the command that reports the hook state of root.
 func StatusCommand(root string) string {
 	return StatusCommandWithBinding(root, Binding{})
@@ -366,9 +292,9 @@ func StatusCommand(root string) string {
 // the hook being inspected.
 func StatusCommandWithBinding(root string, binding Binding) string {
 	tokens := append(boundTokens(binding),
-		token{value: "village"}, token{value: "hooks"}, token{value: "status"},
-		token{value: "--dir"}, token{value: root, quoted: true})
-	return renderShell(tokens)
+		clicommand.Bare("village"), clicommand.Bare("hooks"), clicommand.Bare("status"),
+		clicommand.Bare("--dir"), clicommand.Quoted(root))
+	return clicommand.RenderShell(tokens)
 }
 
 // UninstallCommand renders the command that removes event's hook from root.
@@ -381,10 +307,10 @@ func UninstallCommand(event Event, root string) string {
 // every command printed by a generated hook internally consistent.
 func UninstallCommandWithBinding(event Event, root string, binding Binding) string {
 	tokens := append(boundTokens(binding),
-		token{value: "village"}, token{value: "hooks"}, token{value: "uninstall"},
-		token{value: "--event"}, token{value: event.String()},
-		token{value: "--dir"}, token{value: root, quoted: true})
-	return renderShell(tokens)
+		clicommand.Bare("village"), clicommand.Bare("hooks"), clicommand.Bare("uninstall"),
+		clicommand.Bare("--event"), clicommand.Bare(event.String()),
+		clicommand.Bare("--dir"), clicommand.Quoted(root))
+	return clicommand.RenderShell(tokens)
 }
 
 // InstallCommand renders the command that writes event's hook for root. Status
@@ -403,10 +329,10 @@ func InstallCommand(event Event, root string) string {
 // the resulting generated hook must retain.
 func InstallCommandWithBinding(event Event, root string, binding Binding) string {
 	tokens := append(boundTokens(binding),
-		token{value: "village"}, token{value: "hooks"}, token{value: "install"},
-		token{value: "--event"}, token{value: event.String()},
-		token{value: "--dir"}, token{value: root, quoted: true})
-	return renderShell(tokens)
+		clicommand.Bare("village"), clicommand.Bare("hooks"), clicommand.Bare("install"),
+		clicommand.Bare("--event"), clicommand.Bare(event.String()),
+		clicommand.Bare("--dir"), clicommand.Quoted(root))
+	return clicommand.RenderShell(tokens)
 }
 
 // InstallCommandWithBudget renders the complete reinstall command after a hook
@@ -414,11 +340,11 @@ func InstallCommandWithBinding(event Event, root string, binding Binding) string
 // so reinstalling cannot silently switch the hook to another config or store.
 func InstallCommandWithBudget(event Event, root string, budget time.Duration, binding Binding) string {
 	tokens := append(boundTokens(binding),
-		token{value: "village"}, token{value: "hooks"}, token{value: "install"},
-		token{value: "--event"}, token{value: event.String()},
-		token{value: "--dir"}, token{value: root, quoted: true},
-		token{value: "--timeout"}, token{value: budget.String()})
-	return renderShell(tokens)
+		clicommand.Bare("village"), clicommand.Bare("hooks"), clicommand.Bare("install"),
+		clicommand.Bare("--event"), clicommand.Bare(event.String()),
+		clicommand.Bare("--dir"), clicommand.Quoted(root),
+		clicommand.Bare("--timeout"), clicommand.Bare(budget.String()))
+	return clicommand.RenderShell(tokens)
 }
 
 // EmbeddedRepository returns the repository root a generated hook was written
@@ -428,7 +354,7 @@ func InstallCommandWithBudget(event Event, root string, budget time.Duration, bi
 func EmbeddedRepository(content []byte) string {
 	for _, line := range scriptLines(content) {
 		if value, ok := strings.CutPrefix(line, embeddedRepositoryAssignment); ok {
-			return shellUnquote(value)
+			return clicommand.ShellUnquote(value)
 		}
 	}
 	return ""
@@ -457,7 +383,7 @@ func scriptLines(content []byte) []string {
 // explicitly bound path override. Generated hooks EXECUTE this, and status
 // displays it, so what a hook runs is never wider in scope than what it shows.
 func RepositoryCommand(root string, binding Binding) string {
-	return renderShell(uploadTokens(root, binding))
+	return clicommand.RenderShell(uploadTokens(root, binding))
 }
 
 // ManualRecovery renders the command a user runs after a hook's upload failed:
@@ -470,7 +396,7 @@ func RepositoryCommand(root string, binding Binding) string {
 // reproduces the same failure with the same cap and no extra detail. The
 // by-hand builder already drops exactly those flags, so it is used here.
 func ManualRecovery(root string, binding Binding) string {
-	return "cd " + shellQuote(root) + " && " + ManualCommand(root, binding)
+	return "cd " + shellQuote(root) + " && " + clicommand.ManualPush(root, binding.Command())
 }
 
 // Script renders the exact bytes Peasant writes for event in the repository
@@ -491,9 +417,9 @@ func Script(event Event, root, path string, binding Binding) (string, error) {
 		"{{PATH}}", path,
 		"{{PATH_Q}}", shellQuote(path),
 		"{{SCOPED_COMMAND}}", RepositoryCommand(root, binding),
-		"{{MANUAL_COMMAND}}", ManualCommand(root, binding),
+		"{{MANUAL_COMMAND}}", clicommand.ManualPush(root, binding.Command()),
 		"{{RECOVERY_Q}}", shellQuote(ManualRecovery(root, binding)),
-		"{{COMMAND_PREFIX_Q}}", shellQuote(CommandPrefix(binding)),
+		"{{COMMAND_PREFIX_Q}}", shellQuote(clicommand.Prefix(binding.Command())),
 		"{{BUDGET}}", binding.UploadBudget().String(),
 		"{{STATUS}}", StatusCommandWithBinding(root, binding),
 		"{{UNINSTALL}}", UninstallCommandWithBinding(event, root, binding),
@@ -617,28 +543,8 @@ func validateScriptInputs(event Event, root, path string, binding Binding) error
 	return nil
 }
 
-// ShellQuote wraps s in single quotes so a POSIX shell reads it literally.
-//
-// It is exported because every command Peasant prints for a user to paste has
-// to be quoted the same way. A remedy rendered without it - "--repository
-// /tmp/my repo" - is advice that cannot be followed from the state that printed
-// it, which is worse than no remedy at all.
-func ShellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
-
-// shellQuote is the package-internal spelling of ShellQuote.
-func shellQuote(s string) string { return ShellQuote(s) }
-
-// shellUnquote reverses shellQuote. A value that is not in exactly that form is
-// returned unchanged: a hook Peasant did not write is not Peasant's to
-// reinterpret, and a wrong guess would be reported to the user as fact.
-func shellUnquote(s string) string {
-	if len(s) < 2 || !strings.HasPrefix(s, "'") || !strings.HasSuffix(s, "'") {
-		return s
-	}
-	return strings.ReplaceAll(s[1:len(s)-1], `'\''`, "'")
-}
+// shellQuote is the package-internal spelling of clicommand.ShellQuote.
+func shellQuote(s string) string { return clicommand.ShellQuote(s) }
 
 // scriptTemplate is the whole generated hook. It stays ASCII so it behaves
 // identically under every locale Git might run it in.
