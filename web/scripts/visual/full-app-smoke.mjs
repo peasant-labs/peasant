@@ -24,7 +24,7 @@ import { mkdirSync, existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve, join } from 'node:path'
 import { measurePng, MIN_NONBG_RATIO } from './surface-gate.mjs'
-import { SMOKE_MOCKS, SMOKE_THEMES, makeSmokeSurfaces } from './smoke-surfaces.mjs'
+import { SHELL_DEFAULT_SESSION, SMOKE_MOCKS, SMOKE_THEMES, isStoreOnlySessionExtrasMiss, makeSmokeSurfaces } from './smoke-surfaces.mjs'
 import { assertKnownProject } from './validate-mock-coordinates.mjs'
 import { applyDeterminism } from './determinism.mjs'
 import { loadStrikeSmokeFixture } from './strike-smoke-fixture.mjs'
@@ -43,7 +43,7 @@ const ORIGIN = `http://localhost:${PORT}`
 // which is how this drift was caught — every project surface 404's the
 // project-resolve API and renders blank against an old sample project.
 const PROJECT = process.env.SMOKE_PROJECT || 'fortuna'
-const SESSION = process.env.SMOKE_SESSION || 'sess-c3d4e5f6-a7b8-9012-cdef-123456789012'
+const SESSION = process.env.SMOKE_SESSION || SHELL_DEFAULT_SESSION
 const BRANCH = process.env.SMOKE_BRANCH || 'feat/queue-retry'
 const CHROME = process.env.CHROME_PATH
 const MOCKS = SMOKE_MOCKS
@@ -69,7 +69,7 @@ const consoleLocationUrl = (m) => {
   return loc?.url || ''
 }
 const isHydrationConsoleMessage = (text, locationUrl) => HYDRATION_DIAGNOSTIC.test(text) || HYDRATION_DIAGNOSTIC.test(locationUrl)
-const isKnownBenignConsoleMessage = (text, locationUrl) => !isHydrationConsoleMessage(text, locationUrl) && /favicon/i.test(`${text} ${locationUrl}`)
+const isKnownBenignConsoleMessage = (text, locationUrl) => !isHydrationConsoleMessage(text, locationUrl) && (/favicon/i.test(`${text} ${locationUrl}`) || isStoreOnlySessionExtrasMiss(text, locationUrl))
 const shouldCaptureConsoleMessage = (m) => {
   const text = m.text()
   const locationUrl = consoleLocationUrl(m)
@@ -347,7 +347,7 @@ try {
       const row = { theme, id: s.id, served: 0, mounted: false, themeAttrs: false, atkinson: false, nonbg: 0, ok: false, note: '' }
       const page = await browser.newPage()
       const clientDiagnostics = []
-      // Capture diagnostics for every first-class surface; only favicon noise is benign.
+      // Capture diagnostics for every first-class surface; only favicon noise and the store-only commits/pull-requests 404s are benign.
       page.on('console', (m) => { if (shouldCaptureConsoleMessage(m)) clientDiagnostics.push(formatConsoleDiagnostic(m)) })
       page.on('pageerror', (e) => clientDiagnostics.push('pageerr: ' + (e.stack || e.message)))
       try {

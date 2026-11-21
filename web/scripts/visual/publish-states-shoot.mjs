@@ -3,7 +3,7 @@
  * Boots this worktree's `peasant` (assets embedded from this branch's
  * `web/out`) with the mock data store, opens a stored session's transcript
  * through the real route (project resolution -> SessionDetailV2 -> the
- * WebSocket session_detail -> fairtrade's TranscriptViewer and publish parts),
+ * transcript segment reads -> fairtrade's TranscriptViewer and publish parts),
  * and shoots every case of src/app/share/testdata/publish-popup-states.yaml in
  * both themes: the bar in each status and the popup in each state.
  *
@@ -35,7 +35,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join, relative, resolve } from 'node:path'
 import { SurfaceGate } from './surface-gate.mjs'
 import { applyDeterminism } from './determinism.mjs'
-import { SMOKE_MOCKS, SMOKE_THEMES } from './smoke-surfaces.mjs'
+import { SHELL_DEFAULT_SESSION, SMOKE_MOCKS, SMOKE_THEMES } from './smoke-surfaces.mjs'
 import { createPublishWorld, expectedPushBody, loadPublishStates } from '../../src/app/share/testdata/publish-popup-states.mjs'
 import { createAutomaticConsentWorld, loadAutomaticConsent } from '../../src/app/share/testdata/publish-automatic-consent.mjs'
 import { ownedServerSandbox } from './lib/owned-server-sandbox.mjs'
@@ -56,7 +56,7 @@ const ONLY = (process.env.PEASANT_PUBLISH_STATES_ONLY || '').split(',').map((nam
 
 /** The stored mock session the states are shown on, and its project label. */
 const PROJECT = 'fortuna'
-const SESSION = 'sess-c3d4e5f6-a7b8-9012-cdef-123456789012'
+const SESSION = SHELL_DEFAULT_SESSION
 /** Bytes only this change introduces, located in the binary and the served chunk. */
 const FEATURE_BYTES = ['your collectives can’t load', 'redaction review could not classify the scan while preparing publication', 'confirming automatic publishing consent']
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex')
@@ -114,29 +114,29 @@ async function assertServedChunk(chunkPath) {
 }
 
 /**
- * The stored session's turns, as the page receives them over the WebSocket
- * session_detail channel, for "N new turns". The mock store serves the detail
- * only there, so a warm-up visit reads it off the socket's frames.
+ * The stored session's turns, for "N new turns", read the way the page reads
+ * them: the transcript segment directory, then every segment it names, all
+ * under the directory's revision. The WebSocket session_detail frame carries
+ * the session metadata only, with an empty turn list.
  */
-async function sessionTurns(browser) {
-  const page = await browser.newPage()
-  try {
-    const client = await page.createCDPSession()
-    await client.send('Network.enable')
-    let turns = null
-    client.on('Network.webSocketFrameReceived', ({ response }) => {
-      try {
-        const message = JSON.parse(response.payloadData)
-        if (message.type === 'session_detail' && message.data?.id === SESSION && Array.isArray(message.data.turns)) turns = message.data.turns
-      } catch { /* a frame that is not a session detail */ }
-    })
-    await page.goto(`${ORIGIN}/projects/${PROJECT}/${SESSION}/`, { waitUntil: 'domcontentloaded' })
-    for (let attempt = 0; attempt < 80 && !turns; attempt += 1) await pause(250)
-    if (!turns?.length) throw fail('reading the mock session', `no session_detail frame for ${SESSION} arrived with turns`)
-    return turns
-  } finally {
-    await page.close()
+async function sessionTurns() {
+  const base = `${ORIGIN}/api/v1/sessions/${encodeURIComponent(SESSION)}/transcript/segments`
+  const read = async (url, what) => {
+    const response = await fetch(url).catch((error) => { throw fail('reading the mock session', `${what} could not be fetched: ${error.message}`) })
+    const body = await response.json().catch(() => null)
+    if (!response.ok || !body) throw fail('reading the mock session', `${what} answered ${response.status} ${JSON.stringify(body)}`)
+    return body
   }
+  const directory = await read(base, `the transcript segment directory of ${SESSION}`)
+  if (!Array.isArray(directory.segments) || !directory.segments.length) throw fail('reading the mock session', `the transcript segment directory of ${SESSION} names no segments`)
+  const turns = []
+  for (const segment of directory.segments) {
+    const body = await read(`${base}/${segment.index}?revision=${encodeURIComponent(directory.revision)}`, `segment ${segment.index} of ${SESSION}`)
+    if (!Array.isArray(body.turns)) throw fail('reading the mock session', `segment ${segment.index} of ${SESSION} carries no turn list`)
+    turns.push(...body.turns)
+  }
+  if (!turns.length) throw fail('reading the mock session', `the transcript segments of ${SESSION} carry no turns`)
+  return turns
 }
 
 /** Answer the publishing routes from the case; everything else reaches the real server. */
@@ -380,7 +380,7 @@ try {
   evidence.chunks = chunkPaths.map((path) => relative(REPO, path))
   evidence.servedChunks = await Promise.all(chunkPaths.map(assertServedChunk))
   browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new' })
-  const turns = await sessionTurns(browser)
+  const turns = await sessionTurns()
   evidence.turns = turns.length
   const gate = new SurfaceGate(await browser.newPage())
   for (const theme of SMOKE_THEMES) {
