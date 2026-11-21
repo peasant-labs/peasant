@@ -2339,6 +2339,11 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 			// Once the proof is attempted the session parses, unless the
 			// proof holds or a context mismatch is validated and settled.
 			forceParse = true
+		}
+		// Settlement cannot accept a different indexer revision. Keep the
+		// parse mandatory, but do not ask the store to prove a snapshot it
+		// cannot settle. Adapter-only refreshes still take the proof path.
+		if forceParse && input.expected.IndexerVersion == p.sessionVersionTarget(input.session).IndexerVersion {
 			proofStart := time.Now()
 			proof, proofErr := p.proveManagedGenerationUnchanged(ctx, input)
 			proven := 0
