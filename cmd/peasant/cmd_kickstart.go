@@ -419,12 +419,12 @@ func ftueDiscoverWith(
 }
 
 // resolveListingOrigin turns discovery's typed origin evidence into the menu
-// value the kickstart listing carries, re-validated through
-// sessionorigin.Parse at this boundary rather than forwarded as a bare
-// string. An adapter that mined no evidence (every non-Claude adapter today)
+// value the kickstart listing carries, checked directly with
+// sessionorigin.Origin.Valid at this boundary rather than forwarded
+// unchecked. An adapter that mined no evidence (every non-Claude adapter today)
 // leaves the field empty; that resolves to the visible fail-safe Unknown,
 // the same rule internal/store/writer.go applies before a session is ever
-// persisted. Parse can only fail here if the classifier produced a token
+// persisted. Valid can only be false here if the classifier produced a token
 // outside its own closed menu — a programming error, not a user one — and
 // kickstart is best-effort discovery, so it fails safe to Unknown (never
 // crashes the picker) rather than propagate a corrupt value.
