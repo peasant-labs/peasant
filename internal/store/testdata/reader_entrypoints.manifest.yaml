@@ -1,0 +1,40 @@
+# Exact membership over every harness × harvest-path entry point. A pair is
+# either a required golden (reader_entrypoints/<harness>/<entry>.golden) or
+# not applicable with its reason. Later readers join this list; none leaves it.
+entries: [list-entries-detail, full-read, active-harmonized-view, prior-evidence]
+harnesses: [claude-code, codex, opencode, pi]
+# Fields the generator overwrites before it writes a golden, each with its
+# reason. The test fails unless this list equals what the generator applied.
+# Nothing else is normalized: every other byte is the reader's own.
+normalize:
+  - {harness: claude-code, entry: active-harmonized-view, field: Record.InstalledAtMs, reason: the commit stamps the install with its own clock and no caller injects one}
+  - {harness: claude-code, entry: active-harmonized-view, field: Record.ActivatedAtMs, reason: the commit stamps the activation with its own clock and no caller injects one}
+  - {harness: codex, entry: active-harmonized-view, field: Record.InstalledAtMs, reason: the commit stamps the install with its own clock and no caller injects one}
+  - {harness: codex, entry: active-harmonized-view, field: Record.ActivatedAtMs, reason: the commit stamps the activation with its own clock and no caller injects one}
+  - {harness: codex, entry: active-harmonized-view, field: Record.TimestampIngestedMs, reason: the codex metadata extraction stamps the ingest time with its own clock}
+  - {harness: codex, entry: active-harmonized-view, field: Record.MetadataHash, reason: the metadata hash covers the codex ingest stamp}
+  - {harness: codex, entry: active-harmonized-view, field: Record.CandidateDigest, reason: the activation seal covers the codex ingest stamp and the segment references}
+  - {harness: codex, entry: active-harmonized-view, field: Children.SegmentRefs.SourceEntryRef, reason: the codex history registry mints segment references at random; they are renamed by ordinal}
+  - {harness: codex, entry: prior-evidence, field: Metadata.timestamp.ingested, reason: the codex metadata extraction stamps the ingest time with its own clock}
+  - {harness: opencode, entry: active-harmonized-view, field: Record.InstalledAtMs, reason: the commit stamps the install with its own clock and no caller injects one}
+  - {harness: opencode, entry: active-harmonized-view, field: Record.ActivatedAtMs, reason: the commit stamps the activation with its own clock and no caller injects one}
+requiredNames:
+  - claude-code/list-entries-detail
+  - claude-code/full-read
+  - claude-code/active-harmonized-view
+  - claude-code/prior-evidence
+  - codex/list-entries-detail
+  - codex/full-read
+  - codex/active-harmonized-view
+  - codex/prior-evidence
+  - opencode/list-entries-detail
+  - opencode/full-read
+  - opencode/active-harmonized-view
+  - opencode/prior-evidence
+  - pi/list-entries-detail
+  - pi/full-read
+notApplicable:
+  - name: pi/active-harmonized-view
+    reason: pi has no managed generation builder, so it has no harmonized generation to compare
+  - name: pi/prior-evidence
+    reason: pi has no managed generation builder, so no builder reads prior evidence for it

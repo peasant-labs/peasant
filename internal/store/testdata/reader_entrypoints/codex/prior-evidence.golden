@@ -1,0 +1,65 @@
+{
+  "GenerationID": "G_golden",
+  "Metadata": {
+    "schemaVersion": 12,
+    "sessionId": "abc00000-0000-4000-8000-0000000000c2",
+    "parentUuid": null,
+    "harness": "codex",
+    "model": "",
+    "version": "",
+    "timestamp": {
+      "start": 0,
+      "end": 1767312004000
+    },
+    "source": {
+      "filePath": "/synthetic/codex/rollout-reader.jsonl",
+      "format": "jsonl"
+    },
+    "git": {},
+    "project": {
+      "hash": "",
+      "name": ""
+    },
+    "hostSlug": "",
+    "stats": {
+      "turnCount": 3,
+      "inputSubmissionCount": 0,
+      "conversationTurnCount": 2,
+      "toolCallCount": 1,
+      "subagentCount": 0,
+      "durationMs": 0,
+      "tokensIn": 0,
+      "tokensOut": 0
+    },
+    "subagents": [],
+    "relationships": [
+      {
+        "kind": "started_by",
+        "targetState": "explicit_none",
+        "evidence": "native_typed"
+      }
+    ],
+    "cwd": "/synthetic/reader-corpus",
+    "diagnostics": {
+      "warnings": []
+    },
+    "contentHash": "",
+    "metadataHash": "",
+    "redaction": {
+      "applied": false
+    },
+    "adapterVersion": 4
+  },
+  "Aliases": {
+    "Entries": {
+      "codex|abc00000-0000-4000-8000-0000000000c2|item|m1|message/b0": "e_golden_0001",
+      "codex|abc00000-0000-4000-8000-0000000000c2|item|m2|message/b0": "e_golden_0005",
+      "codex|abc00000-0000-4000-8000-0000000000c2|pos|src_a8ef3c082b1ec5bd|328|function_call/call": "e_golden_0003",
+      "codex|abc00000-0000-4000-8000-0000000000c2|pos|src_a8ef3c082b1ec5bd|328|function_call/carrier": "e_golden_0002",
+      "codex|abc00000-0000-4000-8000-0000000000c2|pos|src_a8ef3c082b1ec5bd|501|function_call_output/result": "e_golden_0004"
+    },
+    "Submissions": {}
+  },
+  "HasCompleteGeneration": true,
+  "PriorEvidence": null
+}

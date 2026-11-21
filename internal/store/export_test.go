@@ -7,6 +7,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"github.com/peasant-labs/schema"
 )
 
 // PoolForTest exposes the connection pool for test assertions.
@@ -63,4 +64,46 @@ func (s *Store) SetValidatedSettleMutationForTest(t testing.TB, name string) {
 		t.Fatalf("unknown validated-settle mutation %q", name)
 	}
 	s.settleValidatedMutation = func() unchangedSettleMutation { return mutation }
+}
+
+// ActiveHarmonizedViewForTest is the exported form of the skip comparison's
+// operand, the structured read of a session's active harmonized generation.
+// This type is only available in test builds.
+type ActiveHarmonizedViewForTest struct {
+	Found        bool
+	GenerationID string
+	Record       GenerationRecord
+	Children     GenerationChildren
+	Mapping      []MappedBodyForTest
+	Descriptors  map[schema.SourceEntryRef]string
+	Aliases      map[string]schema.SourceEntryRef
+}
+
+// MappedBodyForTest is one entry-mapping row of the active view.
+// This type is only available in test builds.
+type MappedBodyForTest struct {
+	Partition int
+	Index     int
+	Digest    string
+}
+
+// ReadActiveHarmonizedViewForTest runs the production readActiveHarmonizedView
+// on a pooled connection inside one savepoint, so the reads see one snapshot.
+// This function is only available in test builds.
+func (s *Store) ReadActiveHarmonizedViewForTest(ctx context.Context, sessionID schema.SessionID) (_ ActiveHarmonizedViewForTest, err error) {
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return ActiveHarmonizedViewForTest{}, err
+	}
+	defer s.pool.Put(conn)
+	defer sqlitex.Save(conn)(&err)
+	view, err := readActiveHarmonizedView(conn, sessionID)
+	if err != nil {
+		return ActiveHarmonizedViewForTest{}, err
+	}
+	out := ActiveHarmonizedViewForTest{Found: view.found, GenerationID: view.generationID, Record: view.record, Children: view.children, Descriptors: view.descriptors, Aliases: view.aliases}
+	for _, mapped := range view.mapping {
+		out.Mapping = append(out.Mapping, MappedBodyForTest{Partition: mapped.partition, Index: mapped.index, Digest: mapped.digest})
+	}
+	return out, nil
 }

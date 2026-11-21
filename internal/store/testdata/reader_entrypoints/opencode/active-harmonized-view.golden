@@ -1,0 +1,82 @@
+{
+  "Found": true,
+  "GenerationID": "G_golden",
+  "Record": {
+    "SessionID": "ses_3cd91f52effeXd3QAJ54jOyzn1",
+    "GenerationID": "G_golden",
+    "SchemaVersion": 12,
+    "Harness": "opencode",
+    "Model": "",
+    "Version": "",
+    "TimestampStartMs": 1767311990000,
+    "TimestampEndMs": 1767311995000,
+    "TimestampIngestedMs": 1767312000000,
+    "SourceFilePath": "/synthetic/opencode/ses_3cd91f52effeXd3QAJ54jOyzn1",
+    "SourceFormat": "json",
+    "GitBranch": null,
+    "GitRemote": null,
+    "GitWorktree": null,
+    "GitTracking": null,
+    "ProjectHash": "987468aa2aadbcf0b4ea7128f83160052825d1bd82e02aff8193ab8b0f82b916",
+    "ProjectFilePath": "/fixtures/native-project",
+    "ProjectName": "reader-corpus",
+    "HostSlug": "reader-host",
+    "RootSessionID": null,
+    "Purpose": null,
+    "CWD": "/fixtures/native-project",
+    "DerivedAtMs": null,
+    "ContentHash": "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a",
+    "MetadataHash": "39e094c6f0e424e7da3579985e811af7e096f8c7c9c558747c5ff8dc6ad1d6ca",
+    "RedactionApplied": false,
+    "RedactionLevel": null,
+    "RedactionRuleSetVersion": null,
+    "RedactionAtMs": null,
+    "RedactionContentHashAtRedact": null,
+    "AdapterVersion": 5,
+    "DiagnosticsPartial": null,
+    "Completeness": "complete",
+    "SourceEvidenceDigest": "c7ba5c3461e37c523edcfbaa3a7402fccb6183d977780f85877583888388b0a8",
+    "IndexFormatVersion": 2,
+    "CandidateDigest": "e01e103bca433db7043ce6a4b1643512fcd49117a0580da9c655efa3b386969d",
+    "PriorEvidence": "eyJ2ZXJzaW9uIjoyLCJlbnRyaWVzIjpbeyJuYXRpdmVLZXkiOiJvcGVuY29kZTpjdXJyZW50Om1zZ19uYXRpdmVfYXNzaXN0YW50OnBhcnQtc2xvdC0wIiwicmVmIjoiZV9nb2xkZW5fMDAwMiJ9LHsibmF0aXZlS2V5Ijoib3BlbmNvZGU6Y3VycmVudDptc2dfbmF0aXZlX3VzZXI6dGV4dCIsInJlZiI6ImVfZ29sZGVuXzAwMDEifV0sInN1Ym1pc3Npb25zIjpbeyJuYXRpdmVLZXkiOiJvcGVuY29kZS1hY2NlcHQ6c2VzXzNjZDkxZjUyZWZmZVhkM1FBSjU0ak95em4xOm1zZ19uYXRpdmVfdXNlciIsInJlZiI6InNfZ29sZGVuXzAwMDEifV0sImhhc0NhcHR1cmVkUHJlZml4IjpmYWxzZSwiaGFzQ29tcGxldGVHZW5lcmF0aW9uIjp0cnVlfQ==",
+    "InstalledAtMs": 0,
+    "ActivatedAtMs": null
+  },
+  "Children": {
+    "Subagents": null,
+    "Commits": null,
+    "Associations": null,
+    "Diagnostics": null,
+    "TitleRefs": [
+      "e_golden_0001"
+    ],
+    "Relationships": null,
+    "Segments": null,
+    "SegmentRefs": null,
+    "Sections": [
+      {
+        "PartitionID": 0,
+        "EarlierState": null
+      }
+    ],
+    "NativeMetadata": null
+  },
+  "Mapping": [
+    {
+      "Partition": 0,
+      "Index": 0,
+      "Digest": "566533c448b386ac02de2c1483896324085c72e7a571d71b30b32b91b076ad45"
+    },
+    {
+      "Partition": 0,
+      "Index": 1,
+      "Digest": "fdf2ad29ad66cb3b0abdffd459f7111cb38a7fcd3c931dde81b72322b59bef28"
+    }
+  ],
+  "Descriptors": {},
+  "Aliases": {
+    "accept:opencode-accept:ses_3cd91f52effeXd3QAJ54jOyzn1:msg_native_user": "e_golden_0001",
+    "block:opencode:current:msg_native_assistant:part-slot-0": "e_golden_0002",
+    "block:opencode:current:msg_native_user:text": "e_golden_0001"
+  }
+}
