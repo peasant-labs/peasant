@@ -35,6 +35,33 @@ func TestCompareRequiresAffectedVersion(t *testing.T) {
 	}
 }
 
+func TestCompareJudgesTheGenerationLaneByItsOwnIndexer(t *testing.T) {
+	name := "codex@generation/IndexerVersion/native/rollout.jsonl"
+	base := snapshot{
+		Versions: map[string]versions{"codex": {AdapterVersion: 3, IndexerVersion: 19}, "codex@generation": {AdapterVersion: 4, IndexerVersion: 20}},
+		Outputs:  map[string]json.RawMessage{name: json.RawMessage(`{"Failed":false,"Output":{"timestampMs":null}}`)},
+	}
+	candidate := snapshot{
+		Versions: map[string]versions{"codex": {AdapterVersion: 3, IndexerVersion: 20}, "codex@generation": {AdapterVersion: 4, IndexerVersion: 20}},
+		Outputs:  map[string]json.RawMessage{name: json.RawMessage(`{"Failed":false,"Output":{"timestampMs":1704164403000}}`)},
+	}
+	if failures := compare(base, candidate); len(failures) != 1 {
+		t.Fatalf("a managed-generation change was accepted on a baseline indexer bump: %v", failures)
+	}
+	candidate.Versions["codex@generation"] = versions{AdapterVersion: 4, IndexerVersion: 21}
+	if failures := compare(base, candidate); len(failures) != 0 {
+		t.Fatalf("a managed-generation indexer bump was refused: %v", failures)
+	}
+}
+
+func TestEmbeddedProbeObservesTheGenerationLane(t *testing.T) {
+	for _, required := range []string{`MethodByName("BuildGeneration")`, "guardGenerationSuffix", `"/IndexerVersion/"`} {
+		if !bytes.Contains(probe, []byte(required)) {
+			t.Fatalf("the embedded probe no longer observes the managed-generation builder (%s); a change only that lane makes would pass unbumped", required)
+		}
+	}
+}
+
 func TestEmbeddedProbePinsTheRunnerContract(t *testing.T) {
 	reads := probeGetenvNames(t)
 	for _, name := range []string{corpusEnv, fallbackCorpusEnv, observedNativeEnv, outputEnv, nativeRootEnv} {

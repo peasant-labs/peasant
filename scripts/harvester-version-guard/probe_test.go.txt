@@ -17,6 +17,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
 
@@ -25,6 +26,17 @@ import (
 // in memory; the behavior under test, that an over-limit record is never
 // certified, does not depend on the limit's value.
 const probeOversizedRecordLimit = 8192
+
+// guardGenerationSuffix names the managed-generation lane of a harness in the
+// version map and the observation names. A store that can persist a managed
+// generation indexes with GenerationRepairTargets through the indexer's
+// BuildGeneration, not with the baseline entry exit, so that lane is compared
+// against its own IndexerVersion.
+const guardGenerationSuffix = "@generation"
+
+// guardGenerationID is the fixed installed identity of every probed managed
+// generation; production mints a random one per attempt.
+const guardGenerationID = "g_guard"
 
 // guardCorpusDirs are the checkout-relative directories that hold the fixture
 // families the probe reads. A fixture moves with the test that owns it, so a
@@ -91,9 +103,11 @@ func TestHarvesterGuardCapture(t *testing.T) {
 		}
 		session.ModTime = time.UnixMilli(1700000000000)
 		session.CreatedAt = session.ModTime
+		var metadata *ingest.UnifiedMetadata
 		if session.TranscriptOrigin == ingest.TranscriptOriginFile {
 			adapter := ingest.DefaultAdapterRegistry[session.Harness](filesystem, testutil.DefaultGitResolver(), salt.Salt{})
-			metadata, adapterErr := adapter.ExtractMetadata(t.Context(), session)
+			var adapterErr error
+			metadata, adapterErr = adapter.ExtractMetadata(t.Context(), session)
 			guardRecord(t, &result, string(session.Harness)+"/AdapterVersion/"+name, guardMetadata(t, metadata, ""), adapterErr)
 		}
 		// The probe runs inside every compared revision, so it may only name
@@ -144,6 +158,15 @@ func TestHarvesterGuardCapture(t *testing.T) {
 			}
 		}
 		guardRecord(t, &result, string(session.Harness)+"/IndexerVersion/"+name, output, indexErr)
+		// The managed-generation lane reads the same captured bytes through a
+		// separate classifier, so a change there must answer to that lane's
+		// own IndexerVersion. A case with an injected record limit is not
+		// observed here: the builder reads with the production limit.
+		generation := string(session.Harness) + guardGenerationSuffix
+		if _, declared := result.Versions[generation]; declared && session.TranscriptOrigin == ingest.TranscriptOriginFile && maxRecordBytes == 0 {
+			built, buildErr := guardBuildGeneration(t, indexer, session, filesystem, metadata)
+			guardRecord(t, &result, generation+"/IndexerVersion/"+name, built, buildErr)
+		}
 	}
 	observe := func(name string, session ingest.DiscoveredSession, filesystem ingest.FileSystem) {
 		observeWithLimit(name, session, filesystem, 0)
@@ -437,7 +460,11 @@ func TestHarvesterGuardCapture(t *testing.T) {
 	t.Cleanup(func() {
 		sort.Strings(result.NativeObserved)
 		for harness := range result.Versions {
-			for _, stage := range []string{"AdapterVersion", "IndexerVersion"} {
+			stages := []string{"AdapterVersion", "IndexerVersion"}
+			if strings.HasSuffix(harness, guardGenerationSuffix) {
+				stages = []string{"IndexerVersion"}
+			}
+			for _, stage := range stages {
 				found := false
 				for name := range result.Outputs {
 					found = found || strings.HasPrefix(name, harness+"/"+stage+"/")
@@ -455,6 +482,84 @@ func TestHarvesterGuardCapture(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+}
+
+// guardBuildGeneration runs the indexer's managed-generation builder the way
+// the pipeline does for a file-sourced attempt: the verified captured bytes,
+// the committed metadata, no prior evidence, and a fixed identity and
+// allocator so two revisions mint the same refs. The build input is filled by
+// field name so the probe still compiles against a revision whose input grew
+// fields the probe does not set.
+func guardBuildGeneration(t *testing.T, indexer any, session ingest.DiscoveredSession, filesystem ingest.FileSystem, metadata *ingest.UnifiedMetadata) (any, error) {
+	t.Helper()
+	method := reflect.ValueOf(indexer).MethodByName("BuildGeneration")
+	if !method.IsValid() {
+		t.Fatalf("harness %s declares a managed-generation target but its indexer has no BuildGeneration; update the probe before comparing parsers", session.Harness)
+	}
+	signature := method.Type()
+	if signature.NumIn() != 2 || signature.NumOut() != 2 || signature.In(1).Kind() != reflect.Struct {
+		t.Fatal("generation builder API changed; update the probe before comparing parsers")
+	}
+	transcript, err := filesystem.ReadFile(session.SourcePath.String())
+	if err != nil {
+		// The pipeline builds no generation without a verified capture.
+		return nil, err
+	}
+	input := reflect.New(signature.In(1)).Elem()
+	fields := []struct {
+		name  string
+		value any
+	}{
+		{"Session", session},
+		{"GenerationID", guardGenerationID},
+		{"CapturedTranscript", transcript},
+		{"RecordedMetadata", metadata},
+		{"Allocator", &guardRefAllocator{}},
+	}
+	for _, field := range fields {
+		target := input.FieldByName(field.name)
+		value := reflect.ValueOf(field.value)
+		if !target.IsValid() || !value.Type().AssignableTo(target.Type()) {
+			t.Fatalf("generation build input field %s changed; update the probe before comparing parsers", field.name)
+		}
+		target.Set(value)
+	}
+	values := method.Call([]reflect.Value{reflect.ValueOf(t.Context()), input})
+	if !values[1].IsNil() {
+		return nil, values[1].Interface().(error)
+	}
+	data, err := json.Marshal(values[0].Interface())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var candidate map[string]any
+	if err := json.Unmarshal(data, &candidate); err != nil {
+		t.Fatal(err)
+	}
+	// Diagnostic wording is not persisted parser behavior.
+	delete(candidate, "Diagnostics")
+	if result, ok := candidate["Result"].(map[string]any); ok {
+		if generation, ok := result["Generation"].(map[string]any); ok {
+			if recorded, ok := generation["Metadata"].(map[string]any); ok {
+				guardNormalizeMetadata(recorded)
+			}
+		}
+	}
+	return candidate, nil
+}
+
+// guardRefAllocator mints sequential opaque refs, so the same build in two
+// revisions allocates the same identities.
+type guardRefAllocator struct{ entries, submissions int }
+
+func (a *guardRefAllocator) NewEntryRef() (schema.SourceEntryRef, error) {
+	a.entries++
+	return schema.SourceEntryRef(fmt.Sprintf("e_GUARD%08d", a.entries)), nil
+}
+
+func (a *guardRefAllocator) NewSubmissionRef() (schema.SubmissionRef, error) {
+	a.submissions++
+	return schema.SubmissionRef(fmt.Sprintf("s_GUARD%08d", a.submissions)), nil
 }
 
 // Both historical APIs execute the real adapter. Only their return envelope
@@ -601,15 +706,20 @@ func guardMetadata(t *testing.T, metadata *ingest.UnifiedMetadata, temporaryRoot
 	if err := json.Unmarshal(data, &object); err != nil {
 		t.Fatal(err)
 	}
-	// Serialization/producer bookkeeping and hashes derived from it are not
-	// adapter semantics. Keep all actual extracted timestamps, stats and context.
+	guardNormalizeMetadata(object)
+	return object
+}
+
+// guardNormalizeMetadata removes serialization/producer bookkeeping and the
+// hashes derived from it, which are not parser semantics. All actual
+// extracted timestamps, stats and context stay compared.
+func guardNormalizeMetadata(object map[string]any) {
 	for _, key := range []string{"schemaVersion", "adapterVersion", "contentHash", "metadataHash", "artifactHash", "derivedAt"} {
 		delete(object, key)
 	}
 	if timestamp, ok := object["timestamp"].(map[string]any); ok {
 		delete(timestamp, "ingested")
 	}
-	return object
 }
 
 type guardEnvironment map[string]string

@@ -23,7 +23,14 @@ where supported). It never opens the user's native
 history or analytics database.
 
 Every changed harness must increase its affected `AdapterVersion` or
-`IndexerVersion` in `internal/ingest/harvester_versions.go`. Shared helpers can
+`IndexerVersion` in `internal/ingest/harvester_versions.go`. A harness with a
+`GenerationRepairTargets` entry is also built through its indexer's
+`BuildGeneration`, the managed-generation lane a format-2 store indexes with,
+and that output is compared against the entry's own `IndexerVersion` under the
+`<harness>@generation` name. The builder gets the captured bytes, the extracted
+metadata, no prior evidence, a fixed identity and a sequential allocator. The
+OpenCode lane reads a SQLite snapshot through the pipeline and is not built by
+the probe. Shared helpers can
 require several harness bumps. Failure becoming success, or success becoming
 failure, is a behavior change. A new fixture alone causes no bump when both
 parsers produce the same result. Old fixture inputs remain covered when the
