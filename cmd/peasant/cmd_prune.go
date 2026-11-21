@@ -13,6 +13,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -27,6 +28,7 @@ func BuildPruneCommand() *cobra.Command {
 		after      string
 		all        bool
 		unselected bool
+		orphans    bool
 		confirm    bool
 		dryRun     bool
 		jsonOutput bool
@@ -41,6 +43,12 @@ func BuildPruneCommand() *cobra.Command {
 			filter, err := buildPruneFilter(sessionIDs, project, harness, before, after, all)
 			if err != nil {
 				return err
+			}
+
+			// --orphans needs every database row in hand to know which
+			// directories have none; only --all queries every row.
+			if orphans && !all {
+				return fmt.Errorf("--orphans requires --all: an orphan is a transcript directory with no database row, and only --all reads every row, so any narrower selection cannot tell an orphan from a session it merely left out; nothing was deleted; re-run as `peasant prune --all --orphans`")
 			}
 
 			// Require at least one filter.
@@ -87,6 +95,15 @@ func BuildPruneCommand() *cobra.Command {
 
 			ctx := cmd.Context()
 
+			// --orphans: snapshot the transcript tree BEFORE the query, so that
+			// every directory seen here whose row was already committed is
+			// matched by the query below. Scanning after the query would let a
+			// session ingested in between look like an orphan.
+			var dirsBeforeQuery map[string]bool
+			if orphans {
+				dirsBeforeQuery = scanSessionDirs(pruneSyncDir(cmd))
+			}
+
 			// Query matching sessions.
 			sessions, err := db.QueryPrunableSessions(ctx, filter)
 			if err != nil {
@@ -103,7 +120,15 @@ func BuildPruneCommand() *cobra.Command {
 				}
 			}
 
-			if len(sessions) == 0 {
+			// The orphan set is enumerated once, here, before anything is
+			// previewed or deleted. It is the only set of directories --orphans
+			// may remove: nothing found later is ever added to it.
+			var orphanDirs []string
+			if orphans {
+				orphanDirs = enumeratePruneOrphans(dirsBeforeQuery, sessions)
+			}
+
+			if len(sessions) == 0 && len(orphanDirs) == 0 {
 				if jsonOutput {
 					return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{
 						"deleted": 0,
@@ -125,22 +150,36 @@ func BuildPruneCommand() *cobra.Command {
 			// only way to tell a directory that was already there without a
 			// database row from one that arrives while the user is deciding.
 			var sessionDirsBeforeRun map[string]bool
-			if all {
+			switch {
+			case orphans:
+				sessionDirsBeforeRun = dirsBeforeQuery
+			case all:
 				sessionDirsBeforeRun = scanSessionDirs(pruneSyncDir(cmd))
 			}
 
 			// Print preview.
 			if !jsonOutput {
 				printPrunePreview(cmd, plannedSessions)
+				if orphans {
+					printPruneOrphanPreview(cmd, orphanDirs)
+				}
 			}
 
 			// Dry run: preview only.
 			if dryRun {
 				if jsonOutput {
-					return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{
+					payload := map[string]any{
 						"dry_run":  true,
 						"sessions": pruneSessionsToJSON(plannedSessions),
-					})
+					}
+					if orphans {
+						payload["orphans"] = orphanDirsToJSON(orphanDirs)
+					}
+					return json.NewEncoder(cmd.OutOrStdout()).Encode(payload)
+				}
+				if orphans {
+					fmt.Fprintf(cmd.OutOrStdout(), "\ndry run: %d session(s) and %d orphaned transcript director(ies) would be deleted\n", len(plannedSessions), len(orphanDirs))
+					return nil
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "\ndry run: %d session(s) would be deleted\n", len(plannedSessions))
 				return nil
@@ -148,7 +187,7 @@ func BuildPruneCommand() *cobra.Command {
 
 			// Safety check: require confirmation.
 			if !confirm {
-				agreed, err := confirmPrune(cmd, plannedSessions)
+				agreed, err := confirmPrune(cmd, plannedSessions, orphans, orphanDirs)
 				if err != nil {
 					return err
 				}
@@ -167,8 +206,15 @@ func BuildPruneCommand() *cobra.Command {
 			// Filesystem cleanup (after DB commit).
 			fsErrs := pruneFilesystem(cmd, plannedSessions)
 			result.Errors = append(result.Errors, fsErrs...)
+
+			// Orphan cleanup: only the enumerated, previewed, confirmed list.
+			var orphanOutcome pruneOrphanOutcome
+			if orphans {
+				orphanOutcome = removePruneOrphans(ctx, cmd, db, orphanDirs)
+				result.Errors = append(result.Errors, orphanOutcome.errs...)
+			}
 			if all {
-				noticePruneResidue(cmd, sessionDirsBeforeRun, plannedSessions)
+				noticePruneResidue(cmd, sessionDirsBeforeRun, plannedSessions, orphanDirs)
 			}
 
 			if jsonOutput {
@@ -176,13 +222,20 @@ func BuildPruneCommand() *cobra.Command {
 				for i, e := range result.Errors {
 					errStrs[i] = e.Error()
 				}
-				return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{
+				payload := map[string]any{
 					"deleted": result.Deleted,
 					"errors":  errStrs,
-				})
+				}
+				if orphans {
+					payload["orphans_removed"] = orphanDirsToJSON(orphanOutcome.removed)
+				}
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(payload)
 			}
 
 			fmt.Fprintf(cmd.OutOrStdout(), "deleted %d session(s)\n", result.Deleted)
+			if orphans {
+				fmt.Fprintf(cmd.OutOrStdout(), "removed %d orphaned transcript director(ies)\n", len(orphanOutcome.removed))
+			}
 			for _, e := range result.Errors {
 				fmt.Fprintf(cmd.OutOrStderr(), "warning: %v\n", e)
 			}
@@ -197,6 +250,9 @@ func BuildPruneCommand() *cobra.Command {
 	cmd.Flags().StringVar(&after, "after", "", "Prune sessions started after this time ("+timeFilterHelp+")")
 	cmd.Flags().BoolVar(&all, "all", false, "Prune all sessions")
 	cmd.Flags().BoolVar(&unselected, "unselected", false, "Prune sessions not selected by harness, project, clone, branch, or explicit session rules (requires selection.mode=selected)")
+	cmd.Flags().BoolVar(&orphans, "orphans", false, "With --all, also delete transcript directories under peasant-sync that have no database row. "+
+		"They are listed in the preview and covered by the same confirmation, and only that listed set is removed. "+
+		"An orphan is left by an earlier prune that could not remove its directory, a session written just before a store failure, or an interrupted ingest")
 	cmd.Flags().BoolVar(&confirm, "confirm", false, "Skip interactive confirmation (for scripts/CI)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be deleted without deleting")
 	cmd.Flags().BoolVar(&jsonOutput, defaults.JSONFlagName, false, "Output results as JSON")
@@ -296,13 +352,20 @@ func buildPruneFilter(sessionIDStrs []string, project, harness, before, after st
 // invocation. Consent is refused outright unless that stream is a terminal:
 // a piped or closed stdin cannot be an informed answer to a destructive
 // question, and --confirm is the documented way to proceed without one.
-func confirmPrune(cmd *cobra.Command, plannedSessions []ingest.PruneSessionRow) (bool, error) {
+//
+// With --orphans the question also names the enumerated orphan count, so the
+// directories it removes are inside the same consent as the sessions.
+func confirmPrune(cmd *cobra.Command, plannedSessions []ingest.PruneSessionRow, orphans bool, orphanDirs []string) (bool, error) {
+	subject := fmt.Sprintf("%d session(s)", len(plannedSessions))
+	if orphans {
+		subject = fmt.Sprintf("%d session(s) and %d orphaned transcript director(ies)", len(plannedSessions), len(orphanDirs))
+	}
 	in := cmd.InOrStdin()
 	file, isFile := in.(*os.File)
 	if !isFile || !term.IsTerminal(int(file.Fd())) {
-		return false, fmt.Errorf("non-interactive terminal: `peasant prune` refused to prompt for consent to delete %d session(s) because its standard input is not a terminal, so an affirmative answer cannot be attributed to a person; nothing was deleted; re-run with --confirm to proceed without a prompt, or run the command from an interactive shell", len(plannedSessions))
+		return false, fmt.Errorf("non-interactive terminal: `peasant prune` refused to prompt for consent to delete %s because its standard input is not a terminal, so an affirmative answer cannot be attributed to a person; nothing was deleted; re-run with --confirm to proceed without a prompt, or run the command from an interactive shell", subject)
 	}
-	fmt.Fprintf(cmd.OutOrStderr(), "\nDelete %d session(s)? [y/N]: ", len(plannedSessions))
+	fmt.Fprintf(cmd.OutOrStderr(), "\nDelete %s? [y/N]: ", subject)
 	return readConsent(file), nil
 }
 
@@ -394,11 +457,18 @@ func scanSessionDirs(syncDir string) map[string]bool {
 //
 // before is the set of session directories captured when the plan was frozen,
 // which is what makes "was already there" distinguishable from "arrived since".
-func noticePruneResidue(cmd *cobra.Command, before map[string]bool, planned []ingest.PruneSessionRow) {
+//
+// orphanDirs is the set --orphans enumerated and the user confirmed. Those
+// directories were acted on: a failure to remove one is reported as an error,
+// and one that gained a row since is no longer residue, so neither is listed.
+func noticePruneResidue(cmd *cobra.Command, before map[string]bool, planned []ingest.PruneSessionRow, orphanDirs []string) {
 	syncDir := pruneSyncDir(cmd)
-	inPlan := make(map[string]bool, len(planned))
+	inPlan := make(map[string]bool, len(planned)+len(orphanDirs))
 	for _, session := range planned {
 		inPlan[filepath.Join(session.OutputPath, string(session.SessionID))] = true
+	}
+	for _, orphan := range orphanDirs {
+		inPlan[orphan] = true
 	}
 
 	var orphans []string
@@ -426,6 +496,107 @@ func noticePruneResidue(cmd *cobra.Command, before map[string]bool, planned []in
 	fmt.Fprintf(cmd.ErrOrStderr(),
 		"warning: prune --all finished, but %d transcript director(ies) under %q have no database row, so no deletion plan could include them and they were left in place: %s%s; each still holds transcript files that peasant does not track; remove those specific paths if you no longer want them, and do NOT remove %q itself — it still holds sessions that were never in scope, including any that arrived while you were deciding\n",
 		len(orphans), syncDir, strings.Join(shown, ", "), elided, syncDir)
+}
+
+// enumeratePruneOrphans returns, sorted, the "<hostSlug>/<name>" directories in
+// dirs that belong to no row of rows. rows must come from an --all query taken
+// AFTER dirs was scanned, so a directory whose row was committed before the
+// scan is matched.
+//
+// A directory stays out of the set when its name equals ANY row's session ID,
+// whatever host slug the row records: deleting a live session's transcripts
+// because its slug differs would be exactly the overreach --orphans must not
+// have.
+func enumeratePruneOrphans(dirs map[string]bool, rows []ingest.PruneSessionRow) []string {
+	known := make(map[string]bool, len(rows))
+	for _, row := range rows {
+		known[string(row.SessionID)] = true
+	}
+	var orphans []string
+	for path := range dirs {
+		if known[filepath.Base(path)] {
+			continue
+		}
+		orphans = append(orphans, path)
+	}
+	sort.Strings(orphans)
+	return orphans
+}
+
+// printPruneOrphanPreview lists every orphaned directory --orphans would
+// remove. Nothing is elided: the list is what the user consents to.
+func printPruneOrphanPreview(cmd *cobra.Command, orphanDirs []string) {
+	fmt.Fprintf(cmd.OutOrStdout(), "\nOrphaned transcript directories to delete (%d), under %q, with no database row:\n", len(orphanDirs), pruneSyncDir(cmd))
+	for _, orphan := range orphanDirs {
+		fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", orphan)
+	}
+}
+
+// pruneOrphanStore is the read the orphan cleanup re-checks against.
+type pruneOrphanStore interface {
+	QueryPrunableSessions(ctx context.Context, filter ingest.PruneFilter) ([]ingest.PruneSessionRow, error)
+}
+
+var _ pruneOrphanStore = (*store.Store)(nil)
+
+// pruneOrphanOutcome is what removePruneOrphans did with the confirmed list.
+type pruneOrphanOutcome struct {
+	removed []string
+	errs    []error
+}
+
+// removePruneOrphans removes the confirmed orphan list and nothing else. It
+// never re-scans the tree, so a directory that appeared after enumeration is
+// never touched.
+//
+// Just before removing, it re-reads the store and drops any listed directory
+// that has gained a database row since it was enumerated: a session ingested
+// while the user was deciding is live, not an orphan. The re-check can only
+// shrink the list. When it cannot be made, nothing is removed.
+func removePruneOrphans(ctx context.Context, cmd *cobra.Command, db pruneOrphanStore, orphanDirs []string) pruneOrphanOutcome {
+	var outcome pruneOrphanOutcome
+	if len(orphanDirs) == 0 {
+		return outcome
+	}
+	rows, err := db.QueryPrunableSessions(ctx, ingest.PruneFilter{All: true})
+	if err != nil {
+		outcome.errs = append(outcome.errs, fmt.Errorf("re-check the %d orphaned transcript director(ies) against the database before removing them: %w; none of them was removed; re-run `peasant prune --all --orphans` to retry", len(orphanDirs), err))
+		return outcome
+	}
+	adopted := make(map[string]bool, len(rows))
+	for _, row := range rows {
+		adopted[string(row.SessionID)] = true
+	}
+
+	syncDir := pruneSyncDir(cmd)
+	parentDirs := make(map[string]struct{})
+	for _, orphan := range orphanDirs {
+		if adopted[filepath.Base(orphan)] {
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: kept %s: it gained a database row after the preview, so it is a live session rather than an orphan\n", orphan)
+			continue
+		}
+		dir := filepath.Join(syncDir, orphan)
+		if err := os.RemoveAll(dir); err != nil && !os.IsNotExist(err) {
+			outcome.errs = append(outcome.errs, fmt.Errorf("remove orphaned transcript directory %s: %w", dir, err))
+			continue
+		}
+		outcome.removed = append(outcome.removed, orphan)
+		parentDirs[filepath.Dir(dir)] = struct{}{}
+	}
+	// Remove host slug directories the removal emptied. os.Remove only
+	// succeeds on an empty directory.
+	for dir := range parentDirs {
+		_ = os.Remove(dir)
+	}
+	return outcome
+}
+
+// orphanDirsToJSON keeps an empty list as [] rather than null in JSON output.
+func orphanDirsToJSON(orphanDirs []string) []string {
+	if orphanDirs == nil {
+		return []string{}
+	}
+	return orphanDirs
 }
 
 // pruneSessionsToJSON converts PruneSessionRows to a JSON-friendly slice.
