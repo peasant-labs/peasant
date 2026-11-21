@@ -92,3 +92,41 @@ func TestReadOnlyDataDirServesReadOnlyCommands(t *testing.T) {
 		t.Errorf("write on a read-only data dir: want a 'not writable: %s' error, got: %v", dataDir, err)
 	}
 }
+
+// TestReadOnlyDataDirWritingCommandsRefuseUpFront pins #738: a writing
+// command on a read-only data dir refuses before it does any work, with the
+// same "data dir is not writable" error, instead of SQLite's after the work.
+func TestReadOnlyDataDirWritingCommandsRefuseUpFront(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	seedPruneTestSessions(t, dir)
+	dataDir := string(defaults.ResolveDataDirPathWith(dir))
+	sourceDir := t.TempDir()
+	outputDir := filepath.Join(t.TempDir(), "out")
+	makeTreeReadOnly(t, dataDir)
+
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"harvest verify --content --repair", []string{"verify", "--content", "--repair"}},
+		{"harvest", []string{"--source-harness", string(defaults.HarnessClaudeCode), "--source-path", sourceDir, "--output", outputDir}},
+	} {
+		out, err := executeWithDataDir(t, BuildHarvestCommand(), dir, tc.args)
+		if err == nil {
+			t.Errorf("%s on a read-only data dir succeeded:\n%s", tc.name, out)
+			continue
+		}
+		if !strings.Contains(err.Error(), "data dir is not writable: "+dataDir) {
+			t.Errorf("%s: want a 'data dir is not writable: %s' error, got: %v", tc.name, dataDir, err)
+		}
+		if strings.Contains(strings.ToLower(err.Error()), "sqlite") {
+			t.Errorf("%s: want no raw SQLite error, got: %v", tc.name, err)
+		}
+		for _, work := range []string{"Peasant Database Verification", "Content verification"} {
+			if strings.Contains(out, work) {
+				t.Errorf("%s: refused only after running the check (%q printed):\n%s", tc.name, work, out)
+			}
+		}
+	}
+}

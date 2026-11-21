@@ -17,6 +17,11 @@ import (
 // activation runs in repair mode, which rewrites the failing objects;
 // healing still needs that harvest to run.
 func runVerifyContent(cmd *cobra.Command, repair bool) error {
+	if repair {
+		if err := refuseUnwritableDataDir(cmd); err != nil {
+			return err
+		}
+	}
 	cfgPath := resolveConfigPath(cmd)
 	cfg, err := loadCommandConfig(cmd, cfgPath)
 	if err != nil {
