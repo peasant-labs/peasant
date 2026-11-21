@@ -1,0 +1,69 @@
+# ANNOTATE session outcome accounting. Each case hands its sessions, in order,
+# to the ANNOTATE stage of a real Pipeline with a real IndexProfiler, once
+# through the streamed downstream worker and once through stageAnnotate, and
+# compares the profiler's per-session outcome counts. Parallelism is 1, so the
+# order below is the attempt order.
+#
+# Session behaviors (what the classifier double does for that session):
+#   annotated-rows                three writes, all persisted
+#   annotated-no-rows             classification produced nothing to write
+#   skipped                       run state proved the session current
+#   prepare-error                 PrepareAnnotations (or Annotate) returns an error
+#   prepare-write-failure         one write failed to prepare; the rest persist
+#   prepare-write-failure-persist-error  one write failed to prepare and a prepared write failed to persist
+#   persist-write-error           one of three writes fails to persist
+#   persist-batch-error           the session's batch (run state) fails to persist
+#   cancel-in-prepare             cancels the run while preparing, then fails
+#   cancel-in-flush               prepares; cancels the run while flushing, then fails
+# After cancellation every behavior fails with the context error.
+requiredNames:
+  - buffered-each-outcome-counts-once
+  - buffered-mixed-outcomes-do-not-stop-later-sessions
+  - buffered-cancel-in-prepare-leaves-candidates-unfinished
+  - buffered-cancel-in-flush-leaves-candidate-unfinished
+  - unbuffered-error-counts-as-preparation-failure
+cases:
+  - name: buffered-each-outcome-counts-once
+    classifier: buffered
+    sessions:
+      - annotated-rows
+      - annotated-no-rows
+      - skipped
+      - prepare-error
+      - prepare-write-failure
+      - prepare-write-failure-persist-error
+      - persist-write-error
+      - persist-batch-error
+    want: {candidates: 8, annotated: 2, skipped: 1, preparationFailed: 3, persistenceFailed: 2, unfinished: 0}
+  - name: buffered-mixed-outcomes-do-not-stop-later-sessions
+    classifier: buffered
+    sessions:
+      - prepare-error
+      - persist-batch-error
+      - skipped
+      - annotated-rows
+      - persist-write-error
+      - annotated-rows
+    want: {candidates: 6, annotated: 2, skipped: 1, preparationFailed: 1, persistenceFailed: 2, unfinished: 0}
+  - name: buffered-cancel-in-prepare-leaves-candidates-unfinished
+    classifier: buffered
+    sessions:
+      - annotated-no-rows
+      - skipped
+      - prepare-error
+      - cancel-in-prepare
+      - annotated-rows
+    want: {candidates: 5, annotated: 1, skipped: 1, preparationFailed: 1, persistenceFailed: 0, unfinished: 2}
+  - name: buffered-cancel-in-flush-leaves-candidate-unfinished
+    classifier: buffered
+    sessions:
+      - cancel-in-flush
+    want: {candidates: 1, annotated: 0, skipped: 0, preparationFailed: 0, persistenceFailed: 0, unfinished: 1}
+  - name: unbuffered-error-counts-as-preparation-failure
+    classifier: unbuffered
+    sessions:
+      - annotated-rows
+      - prepare-error
+      - annotated-rows
+      - cancel-in-prepare
+    want: {candidates: 4, annotated: 2, skipped: 0, preparationFailed: 1, persistenceFailed: 0, unfinished: 1}

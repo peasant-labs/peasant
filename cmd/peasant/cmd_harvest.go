@@ -787,6 +787,7 @@ func printIndexProfile(w io.Writer, profile ingest.IndexProfileSnapshot) {
 	if len(profile.Batches) == 0 {
 		fmt.Fprintln(w, "INDEX profile: no INDEX batches ran")
 		printIndexProfileStages(w, profile.Stages)
+		printIndexProfileAnnotationSessions(w, profile.AnnotationSessions)
 		printIndexProfileAnnotationStats(w, profile.Annotation)
 		return
 	}
@@ -846,6 +847,7 @@ func printIndexProfile(w io.Writer, profile ingest.IndexProfileSnapshot) {
 	printIndexProfileWriteStats(w, totalWriteStats)
 	fmt.Fprintf(w, "  parse: %s total; write: %s total; max parse workers: %d\n", totalParse.Round(time.Millisecond), totalWrite.Round(time.Millisecond), maxWorkers)
 	printIndexProfileStages(w, profile.Stages)
+	printIndexProfileAnnotationSessions(w, profile.AnnotationSessions)
 	printIndexProfileAnnotationStats(w, profile.Annotation)
 	if len(profile.SlowSessions) == 0 {
 		return
@@ -864,6 +866,17 @@ func printIndexProfile(w io.Writer, profile ingest.IndexProfileSnapshot) {
 			session.SourcePath,
 		)
 	}
+}
+
+// printIndexProfileAnnotationSessions prints one terminal outcome per ANNOTATE
+// candidate session. It prints counts only, never session identifiers.
+func printIndexProfileAnnotationSessions(w io.Writer, outcomes ingest.AnnotationSessionOutcomes) {
+	if !outcomes.Any() {
+		return
+	}
+	fmt.Fprintf(w, "  annotation sessions: candidates=%d annotated=%d skipped=%d preparation-failed=%d persistence-failed=%d unfinished=%d\n",
+		outcomes.Candidates, outcomes.Annotated, outcomes.Skipped, outcomes.PreparationFailed, outcomes.PersistenceFailed, outcomes.Unfinished())
+	fmt.Fprintln(w, "    note: each candidate counts once; unfinished candidates were not completed before the run was cancelled")
 }
 
 func printIndexProfileAnnotationStats(w io.Writer, stats ingest.AnnotationProfileStats) {

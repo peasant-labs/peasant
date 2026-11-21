@@ -12,16 +12,23 @@ session:
   workingDir: /fixtures/synthetic-project
   branch: main
   title: import profile fixture
-# A line only the printed profile carries.
+# A line only the printed profile carries. wantLines must appear as whole
+# lines; absentLines must not appear anywhere in the output.
 printedProfileMarker: "partial-batch flush waits:"
 cases:
   - name: harvest-stores-a-profile-without-the-flag
     entry: harvest
     wantPrinted: false
+    absentLines: ["annotation sessions:"]
   - name: profile-index-flag-still-prints
     entry: harvest
     args: ["--profile-index"]
     wantPrinted: true
+    # One session that produced two annotation rows counts once; the row
+    # counters stay separate.
+    wantLines:
+      - "  annotation sessions: candidates=1 annotated=1 skipped=0 preparation-failed=0 persistence-failed=0 unfinished=0"
+      - "    dedup decisions: skip=0 create=2 supersede=0"
   - name: kickstart-import-stores-a-profile
     entry: kickstart
     wantPrinted: false
