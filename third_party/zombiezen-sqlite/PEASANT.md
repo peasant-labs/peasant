@@ -7,10 +7,14 @@ This directory is the complete Go module distribution of
 file hashes, modified Go files, and metadata renames; `connection-lifetime.patch` shows the
 complete changes to upstream files. Go import literals are mechanically rewritten to the in-module package path.
 The original go.mod, go.sum, go.work and go.work.sum bytes are retained as
-UPSTREAM.*.txt, so they do not create an excluded nested module. All other
-upstream bytes are unchanged, except three formatting directives in `func_test.go` and
-`sqlite_test.go` that Go 1.26's printf analyzer rejects (`%q` on integer operands,
-now `%d`); behaviour is unchanged and the changes are part of the patch.
+UPSTREAM.*.txt, so they do not create an excluded nested module. The patch also
+changes three formatting directives in `func_test.go` and `sqlite_test.go` that
+Go 1.26's printf analyzer rejects (`%q` on integer operands, now `%d`); behaviour
+is unchanged. The two SQLite database-name comparisons share one local constant for
+SQLite's primary database. This is a naming-only change: it keeps the schema
+module's unrelated partition vocabulary out of the SQLite driver and is
+included in the patch and modified-file digests. All other upstream bytes are
+unchanged.
 
 This is an ordinary package in the Peasant module; no local replace or nested
 module is used. A real Go module ZIP therefore carries this source and supports

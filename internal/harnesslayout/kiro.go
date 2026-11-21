@@ -332,8 +332,9 @@ func (kiroIDEProbe) captureLegacyChat(src Source, rel string) (Capture, error) {
 	meta.Observe(TimeField(doc, "metadata", "endTime"), "")
 	for _, message := range ArrayField(doc, "chat") {
 		content := StringField(message, "content")
+		const kiroHumanRole = "human"
 		switch StringField(message, "role") {
-		case "human":
+		case kiroHumanRole:
 			if !strings.HasPrefix(content, "<identity>") {
 				meta.UserTurns++
 			}

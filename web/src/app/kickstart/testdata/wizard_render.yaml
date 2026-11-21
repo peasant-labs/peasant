@@ -48,10 +48,12 @@ cases:
   - name: hidden-stop-not-rendered
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 2, stale: false}}
     steps:
       - expectText: [step 1 of 8, peasant online]
       - expectNoText: [auto-ingest, sharing]
-      - click: continue
+      - click: "no"
       - click: continue
       - expectText: [publication preference]
       - expectNoText: [auto-ingest, sharing]
@@ -103,8 +105,10 @@ cases:
   - name: review-stacks-rows-summary-then-collapsed-diff
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: conflicted}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 4, stale: false}}
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - click: continue
@@ -131,14 +135,18 @@ cases:
       - expectText: [peasant online, connect to peasant online now?, step 1 of 8]
       - expectControl: {role: button, name: "yes"}
       - expectControl: {role: button, name: "no"}
-      - expectControl: {role: button, name: continue}
+      # The question is answered from the foot, where continue sits on other stops.
+      - expectControl: {role: button, name: continue, present: false}
+      # The full setup draws no title band; the trail's last crumb names the
+      # page, and its one h1, `set up peasant`, is for assistive technology.
+      - expectControl: {role: heading, name: set up peasant, level: 1, count: 1}
 
   - name: conflict-choice-is-sent-per-field
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: conflicted}}
       "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - click: continue
@@ -155,6 +163,8 @@ cases:
   - name: commit-refusal-shows-the-rows-and-saves-nothing
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "POST /api/v1/kickstart/sessions/ses-full/commit":
         status: 409
         body:
@@ -162,7 +172,7 @@ cases:
           conflicts:
             - {field: publication-preference, stop: publication, label: publication preference, mine: share-later, theirs: keep-local}
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - click: continue
@@ -184,12 +194,14 @@ cases:
     steps:
       - expectText: [step 1 of 8]
       - expectControl: {role: navigation, name: set up peasant progress}
-      - expectControl: {role: button, name: 1 peasant online, disabled: false}
+      - expectControl: {role: button, name: "step 1 of 8, peasant online", disabled: false}
       # The stop the server hides is not a step; the next visible one is, and is locked.
-      - expectControl: {role: button, name: 2 choose sessions to import, disabled: true}
-      - expectControl: {role: button, name: 3 auto-ingest new branches, present: false}
-      - expectControl: {role: button, name: back, disabled: true}
-      - expectControl: {role: button, name: continue, disabled: false}
+      - expectControl: {role: button, name: "step 2 of 8, choose sessions to import", disabled: true}
+      - expectControl: {role: button, name: "step 3 of 8, auto-ingest new branches", present: false}
+      - expectControl: {role: button, name: prev, disabled: true}
+      # The opening stop is answered by its buttons in the foot, not by continue.
+      - expectFoot: {end: ["no", "yes"], primary: "yes"}
+      - expectControl: {role: button, name: continue, present: false}
 
   # The server lists every row whose saved value moved, including a row that moved
   # because of another answer the person gave. The words over the rows must not
@@ -197,6 +209,8 @@ cases:
   - name: conflict-help-covers-rows-that-move-with-another-answer
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "POST /api/v1/kickstart/sessions/ses-full/commit":
         status: 409
         body:
@@ -204,7 +218,7 @@ cases:
           conflicts:
             - {field: publication-preference, stop: publication, label: publication preference, mine: share-later, theirs: keep-local}
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - click: continue

@@ -28,13 +28,15 @@ cases:
   - name: invalid-answer-is-shown-and-nothing-moves
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "POST /api/v1/kickstart/sessions/ses-full/commit":
         status: 400
         body:
           code: kickstart_commit_refused
           error: "The setup was not saved in internal/api.kickstartHandler.handleCommit: the selection names no session. Nothing was changed. Correct the answer the message names, then save again."
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - click: continue
@@ -52,13 +54,15 @@ cases:
   - name: unreadable-config-is-shown-and-the-save-can-be-retried
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "POST /api/v1/kickstart/sessions/ses-full/commit":
         status: 500
         body:
           code: kickstart_config_unreadable
           error: "The setup was not saved because the configuration file could not be read in internal/api.kickstartHandler.handleCommit: yaml: line 3: mapping values are not allowed here. Nothing was changed. Fix or restore the file, then save again."
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - click: continue
@@ -72,13 +76,15 @@ cases:
   - name: unwritable-config-is-shown
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "POST /api/v1/kickstart/sessions/ses-full/commit":
         status: 500
         body:
           code: kickstart_config_unwritable
           error: "The setup was not saved because the configuration file could not be written in internal/api.kickstartHandler.handleCommit: permission denied. The previous file is unchanged. Fix the directory's permissions or free space, then save again."
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - click: continue
@@ -91,13 +97,15 @@ cases:
   - name: busy-config-is-shown-and-the-save-can-be-retried
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "POST /api/v1/kickstart/sessions/ses-full/commit":
         status: 503
         body:
           code: kickstart_config_busy
           error: "The setup was not saved because another change holds the configuration file in internal/api.kickstartHandler.handleCommit: lock timeout. Nothing was changed. Wait for it to finish, then save again."
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - click: continue
@@ -111,13 +119,15 @@ cases:
   - name: changing-config-is-shown
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "POST /api/v1/kickstart/sessions/ses-full/commit":
         status: 503
         body:
           code: kickstart_config_changing
           error: "The setup was not saved because the configuration file kept changing in internal/api.kickstartHandler.handleCommit: changed 3 times. Nothing was written. Stop the other program that edits it, then save again."
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - click: continue
@@ -130,9 +140,11 @@ cases:
   - name: a-body-that-is-not-json-is-shown-as-text
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "POST /api/v1/kickstart/sessions/ses-full/commit": {status: 502, text: "bad gateway: the upstream refused the save", malformed: true}
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - click: continue
@@ -145,9 +157,11 @@ cases:
   - name: an-envelope-with-no-reason-gets-a-sentence-that-says-what-to-do
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "POST /api/v1/kickstart/sessions/ses-full/commit": {status: 500, body: {code: kickstart_failed, error: "   "}}
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - click: continue
@@ -160,13 +174,15 @@ cases:
   - name: saving-a-session-the-server-forgot-ends-it
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "POST /api/v1/kickstart/sessions/ses-full/commit":
         status: 404
         body:
           code: kickstart_session_not_found
           error: "No setup session has the id \"ses-full\" in internal/api.kickstartSessions. It was never opened, it was saved, or it expired after 30m0s without a change, and a server restart drops every session. Nothing was changed. Open a session again with POST /api/v1/kickstart/sessions."
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - click: continue
@@ -181,13 +197,15 @@ cases:
   - name: answering-a-session-the-server-forgot-ends-it
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      # The village question is answered no first; the page keeps the view it drew.
       "PATCH /api/v1/kickstart/sessions/ses-full":
-        status: 404
-        body:
-          code: kickstart_session_not_found
-          error: "No setup session has the id \"ses-full\" in internal/api.kickstartSessions. Nothing was changed. Open a session again with POST /api/v1/kickstart/sessions."
+        - {body: {revision: 2, stale: false}}
+        - status: 404
+          body:
+            code: kickstart_session_not_found
+            error: "No setup session has the id \"ses-full\" in internal/api.kickstartSessions. Nothing was changed. Open a session again with POST /api/v1/kickstart/sessions."
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - choose: plan to publish later
       - expectText: [this setup session timed out]
@@ -196,6 +214,8 @@ cases:
   - name: a-retry-after-a-refused-save-saves
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "POST /api/v1/kickstart/sessions/ses-full/commit":
         - status: 503
           body:
@@ -207,7 +227,7 @@ cases:
             ingest: {state: running, new: 0, updated: 0}
             nextSteps: [config, web-start]
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - click: continue
@@ -227,13 +247,15 @@ cases:
   - name: answering-while-the-session-is-being-saved-adds-what-the-page-does
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      # The village question is answered no first; the page keeps the view it drew.
       "PATCH /api/v1/kickstart/sessions/ses-full":
-        status: 400
-        body:
-          code: kickstart_session_committing
-          error: "Setup session \"ses-full\" is being saved, so this request was not applied in internal/api.kickstartSessions. Nothing was changed. Wait for the save to finish, then reload the session."
+        - {body: {revision: 2, stale: false}}
+        - status: 400
+          body:
+            code: kickstart_session_committing
+            error: "Setup session \"ses-full\" is being saved, so this request was not applied in internal/api.kickstartSessions. Nothing was changed. Wait for the save to finish, then reload the session."
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - choose: plan to publish later
       - expectText:
@@ -247,13 +269,15 @@ cases:
   - name: answering-a-hidden-field-adds-what-changed
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      # The village question is answered no first; the page keeps the view it drew.
       "PATCH /api/v1/kickstart/sessions/ses-full":
-        status: 400
-        body:
-          code: kickstart_field_hidden
-          error: "The answer for a hidden field was refused in internal/api.kickstartSessions.patch: publication-preference is shown only when village-connect is accept, and the full setup session does not meet that now. Nothing was changed. Answer a field the setup shows, or send the answer that reveals this one in the same request."
+        - {body: {revision: 2, stale: false}}
+        - status: 400
+          body:
+            code: kickstart_field_hidden
+            error: "The answer for a hidden field was refused in internal/api.kickstartSessions.patch: publication-preference is shown only when village-connect is accept, and the full setup session does not meet that now. Nothing was changed. Answer a field the setup shows, or send the answer that reveals this one in the same request."
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - choose: plan to publish later
       - expectText:
@@ -266,13 +290,15 @@ cases:
   - name: a-404-that-is-not-a-forgotten-session-does-not-end-it
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      # The village question is answered no first; the page keeps the view it drew.
       "PATCH /api/v1/kickstart/sessions/ses-full":
-        status: 404
-        body:
-          code: kickstart_preview_row_not_found
-          error: "No row has the id \"x\" in the forest of setup session \"ses-full\". Nothing was changed."
+        - {body: {revision: 2, stale: false}}
+        - status: 404
+          body:
+            code: kickstart_preview_row_not_found
+            error: "No row has the id \"x\" in the forest of setup session \"ses-full\". Nothing was changed."
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - choose: plan to publish later
       - expectText: [No row has the id]
@@ -284,6 +310,8 @@ cases:
   - name: an-unknown-refusal-code-is-refused-with-the-contract-message
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "POST /api/v1/kickstart/sessions/ses-full/commit":
         status: 500
         malformed: true
@@ -291,7 +319,7 @@ cases:
           code: kickstart_brand_new
           error: something peasant says that this page has no code for
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - click: continue
@@ -309,12 +337,14 @@ cases:
   - name: a-refusal-without-a-code-is-refused-with-the-contract-message
     server:
       "POST /api/v1/kickstart/sessions": {body: {$model: second-tab-answer}}
+      # The village question is answered no; the page keeps the view it drew.
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 3, stale: false}}
       "POST /api/v1/kickstart/sessions/ses-full/commit":
         status: 503
         malformed: true
         body: {error: the server says what happened but not which refusal it is}
     steps:
-      - click: continue
+      - click: "no"
       - click: continue
       - click: continue
       - click: continue

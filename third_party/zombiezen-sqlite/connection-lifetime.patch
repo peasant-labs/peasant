@@ -952,3 +952,19 @@
  		}
  		typ := stmt.ColumnType(0)
  		if typ != sqlite.TypeText {
+
+--- a/blob.go
++++ b/blob.go
+@@ -309,0 +310,3 @@
++// mainDatabaseName is SQLite's name for the primary database.
++const mainDatabaseName = "main"
++
+@@ -313 +316 @@
+-	case "", "main":
++	case "", mainDatabaseName:
+
+--- a/session.go
++++ b/session.go
+@@ -52 +52 @@
+-	if db == "" || db == "main" {
++	if db == "" || db == mainDatabaseName {

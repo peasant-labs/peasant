@@ -1,0 +1,147 @@
+# The answers of a stop that is answered by a button sit in the wizard's foot,
+# where `continue` sits on every other stop, so a reader clicking through finds
+# them without moving the pointer. Today that is the village question at the
+# start and the server's connect offer at the license boundary. A stop answered
+# by a radio group, a checkbox or the tree keeps `continue`. The question stays
+# in the body and names the answers; the sign-in's waiting sentence and its
+# failure stay in the body too.
+defaultServer:
+  "GET /api/v1/kickstart/sessions/ses-full/tree": {body: {$tree: forest}}
+requiredNames:
+  - connection-stop-draws-answers-in-the-foot
+  - connection-stop-draws-no-continue
+  - connect-offer-draws-answers-in-the-foot
+  - choice-stop-keeps-continue
+  - tree-stop-keeps-continue
+  - waiting-disables-answers-and-offers-stop-waiting
+  - failed-sign-in-keeps-the-alert-in-the-body
+  - answer-group-is-named-by-the-question
+  - tab-order-is-back-then-no-then-yes
+  - expired-session-draws-no-answers
+cases:
+  - name: connection-stop-draws-answers-in-the-foot
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+    steps:
+      - expectText: [connect to peasant online now?]
+      # `no` then `yes`; `yes` is the one primary action, at the bottom right.
+      - expectFoot: {end: ["no", "yes"], primary: "yes"}
+      - expectInBody: {text: [connect to peasant online now?, connect this machine without publishing a transcript], noButtons: ["yes", "no"]}
+
+  - name: connection-stop-draws-no-continue
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+    steps:
+      - expectText: [connect to peasant online now?]
+      - expectControl: {role: button, name: continue, present: false}
+      - expectFoot: {end: ["no", "yes"]}
+
+  - name: connect-offer-draws-answers-in-the-foot
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 2, stale: false, view: {$model: boundary-offer}}}
+    steps:
+      - click: "no"
+      # selection, publication, privacy, license: the offer follows the license.
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - expectText: [log in now to choose a default sharing visibility?]
+      - expectFoot: {end: ["no", "yes"], primary: "yes"}
+      - expectInBody: {text: [log in now to choose a default sharing visibility?, connecting signs this computer in], noButtons: ["yes", "no"]}
+      - expectControl: {role: button, name: continue, present: false}
+
+  - name: choice-stop-keeps-continue
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 2, stale: false, view: {$model: boundary-offer}}}
+    steps:
+      - click: "no"
+      - click: continue
+      - expectControl: {role: radio, name: plan to publish later}
+      - expectFoot: {end: [continue], primary: continue}
+
+  - name: tree-stop-keeps-continue
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 2, stale: false, view: {$model: boundary-offer}}}
+    steps:
+      - click: "no"
+      - expectText: [choose sessions to import]
+      - expectFoot: {end: [continue], primary: continue}
+
+  - name: waiting-disables-answers-and-offers-stop-waiting
+    fakeTimers: true
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      "POST /api/v1/sync/login": {body: {status: pending}}
+      "GET /api/v1/sync/auth": {body: {authenticated: false}}
+    steps:
+      - focusButton: "yes"
+      - click: "yes"
+      - expectInBody: {text: [finish signing in on the page that opened in your browser]}
+      # `stop waiting` comes first; both answers are disabled and `yes` is busy.
+      - expectFoot: {end: [stop waiting, "no", "yes"], primary: "yes", tabOrder: [stop waiting]}
+      - expectControl: {role: button, name: "yes", disabled: true}
+      - expectControl: {role: button, name: "no", disabled: true}
+      # Focus was on `yes`, which the wait disabled: it moved to `stop waiting`.
+      - expectFocus: stop waiting
+      - click: stop waiting
+      - expectFoot: {end: ["no", "yes"], primary: "yes", tabOrder: ["no", "yes"]}
+      - expectControl: {role: button, name: "yes", disabled: false}
+      # `stop waiting` went away under the focus: it returned to `yes`.
+      - expectFocus: "yes"
+      - expectNoText: [finish signing in on the page that opened in your browser]
+      # Nothing was recorded.
+      - expectCalls: {route: "PATCH /api/v1/kickstart/sessions/ses-full", count: 0}
+
+  - name: failed-sign-in-keeps-the-alert-in-the-body
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      "POST /api/v1/sync/login": {status: 500, body: {error: could not open the browser to sign in}}
+    steps:
+      - click: "yes"
+      - expectInBody: {alert: could not open the browser to sign in, noButtons: ["yes", "no"]}
+      - expectFoot: {end: ["no", "yes"], primary: "yes"}
+      - expectControl: {role: button, name: "yes", disabled: false}
+      - expectCalls: {route: "PATCH /api/v1/kickstart/sessions/ses-full", count: 0}
+
+  - name: answer-group-is-named-by-the-question
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 2, stale: false, view: {$model: boundary-offer}}}
+    steps:
+      - expectFoot: {group: connect to peasant online now?}
+      - click: "no"
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - expectFoot: {group: log in now to choose a default sharing visibility?}
+
+  - name: tab-order-is-back-then-no-then-yes
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+      "PATCH /api/v1/kickstart/sessions/ses-full": {body: {revision: 2, stale: false, view: {$model: boundary-offer}}}
+    steps:
+      # The first stop has nowhere to go back to, so `back` is disabled.
+      - expectFoot: {tabOrder: ["no", "yes"]}
+      - click: "no"
+      - click: continue
+      - click: continue
+      - click: continue
+      - click: continue
+      - expectText: [log in now to choose a default sharing visibility?]
+      - expectFoot: {tabOrder: [prev, "no", "yes"]}
+
+  - name: expired-session-draws-no-answers
+    server:
+      "POST /api/v1/kickstart/sessions": {body: {$model: fresh}}
+    steps:
+      - expectFoot: {end: ["no", "yes"]}
+      - push: {kind: closed, sessionId: ses-full, revision: 1, reason: expired}
+      - expectText: [this setup session timed out]
+      - expectFoot: {end: []}
+      - expectControl: {role: button, name: "yes", present: false}
+      - expectControl: {role: button, name: "no", present: false}

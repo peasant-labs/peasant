@@ -2,7 +2,11 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
+
+/** The program flock runs while it holds the lock; see its header. */
+const FLOCK_KEEPER = fileURLToPath(new URL('./flock-keeper.mjs', import.meta.url));
 
 export async function bounded(promise, ms, operation) {
   let timer;
@@ -75,8 +79,7 @@ export async function acquireLifecycle(directory, { termMs = 1500, killMs = 2000
   if (process.platform !== 'linux' || !existsSync('/proc/self/stat')) throw new Error('This focused binary journey requires Linux /proc and util-linux flock; run it in the documented Nix shell');
   directory = resolve(directory);
   mkdirSync(resolve(directory, '..'), { recursive: true });
-  const gate = start('flock', ['--wait', '0.5', '--conflict-exit-code', '73', `${directory}.gate`, process.execPath, '-e',
-    "process.stdout.write('locked\\n'); process.stdin.resume(); process.stdin.on('end',()=>process.exit(0))"], { stdio: ['pipe', 'pipe', 'inherit'] });
+  const gate = start('flock', ['--wait', '0.5', '--conflict-exit-code', '73', `${directory}.gate`, process.execPath, FLOCK_KEEPER], { stdio: ['pipe', 'pipe', 'inherit'] });
   try {
     const ready = new Promise((done, fail) => gate.child.stdout.once('data', bytes => bytes.toString().trim() === 'locked' ? done() : fail(new Error('flock did not confirm ownership'))));
     await bounded(Promise.race([ready, gate.settled.then(() => { throw new Error('Journey ownership is busy or flock is unavailable; no ownership metadata changed; wait for the current owner or install util-linux'); })]), 3000, 'journey ownership acquisition');
@@ -112,9 +115,12 @@ export async function acquireLifecycle(directory, { termMs = 1500, killMs = 2000
   }
   return {
     identity,
+    /** Starts a child in its own process group, marked as this owner's. An `env` the caller gives
+     * is the child's whole environment, so a variable it leaves out (such as one a server sandbox
+     * drops) is not put back from this process's own; without one the child inherits this process's. */
     launch(command, args, options = {}) {
       if (stopping || gate.child.exitCode !== null || gate.child.signalCode !== null) throw new Error('Journey ownership is stopping or its flock keeper exited; no new child may start');
-      const child = start(command, args, { ...options, detached: true, env: { ...process.env, ...options.env, PEASANT_OBSERVATIONS_OWNER: owner } });
+      const child = start(command, args, { ...options, detached: true, env: { ...(options.env ?? process.env), PEASANT_OBSERVATIONS_OWNER: owner } });
       children.push(child); return child;
     },
     cleanup() {

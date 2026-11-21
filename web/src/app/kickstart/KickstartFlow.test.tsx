@@ -18,12 +18,19 @@ vi.mock('next/navigation', () => ({
 
 afterEach(teardown);
 
+const LIVE_SESSION = 'src/app/kickstart/testdata/live_session.yaml';
+const FINISH = 'src/app/kickstart/testdata/finish.yaml';
+const COMMIT_FAILURES = 'src/app/kickstart/testdata/commit_failures.yaml';
+const VILLAGE = 'src/app/kickstart/testdata/village.yaml';
+const FOOT_ANSWERS = 'src/app/kickstart/testdata/foot_answers.yaml';
+const PRIVACY = 'src/app/kickstart/testdata/privacy.yaml';
 const FILES = {
-  'the live session': 'src/app/kickstart/testdata/live_session.yaml',
-  'the finish panel': 'src/app/kickstart/testdata/finish.yaml',
-  'a save that was refused': 'src/app/kickstart/testdata/commit_failures.yaml',
-  'the village sign-in': 'src/app/kickstart/testdata/village.yaml',
-  'the privacy example': 'src/app/kickstart/testdata/privacy.yaml',
+  'the live session': LIVE_SESSION,
+  'the finish panel': FINISH,
+  'a save that was refused': COMMIT_FAILURES,
+  'the village sign-in': VILLAGE,
+  'the answers in the foot': FOOT_ANSWERS,
+  'the privacy example': PRIVACY,
 } as const;
 
 for (const [title, path] of Object.entries(FILES)) {

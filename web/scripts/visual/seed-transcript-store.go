@@ -1,13 +1,22 @@
 //go:build ignore
 
-// Seed a synthetic multi-segment transcript into a throwaway data directory
-// so the mounted capture can open the production route. No real transcript
-// text, session id, or personal path is used.
+// Seed a synthetic multi-segment transcript into a fresh temporary data
+// directory so the mounted capture can open the production route. No real
+// transcript text, session id, or personal path is used.
+//
+//	go run ./web/scripts/visual/seed-transcript-store.go
+//
+// The seeder creates the data directory itself, under TMPDIR, and prints its
+// path as JSON. It accepts no directory to write into: a supplied -data-dir or
+// a positional path is refused, so an accidental real data directory can never
+// be opened, migrated or modified. The caller starts the binary with the
+// printed dataDir and removes that directory when its server has stopped.
 package main
 
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -43,38 +52,71 @@ var (
 )
 
 func main() {
+	if err := run(); err != nil {
+		fmt.Fprintf(os.Stderr, "seed transcript store failed: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// run seeds one synthetic transcript into a fresh temporary data directory.
+//
+// It takes no directory to write into. os.MkdirTemp creates the directory atomically with a random
+// name under TMPDIR; because no supplied path is ever opened, an accidental real data directory
+// cannot be opened, migrated or modified. A failed run keeps the directory it created and reports
+// it: without a handle to the directory, a path cannot prove it is still the one this run made, so
+// deleting it could remove a replacement.
+func run() (err error) {
+	dataDir := flag.String("data-dir", "", "not accepted: the seeder creates its own temporary data directory")
+	flag.Parse()
+	if *dataDir != "" {
+		return fmt.Errorf("-data-dir is not accepted, but %q was given. The seeder creates a fresh temporary data directory itself and never opens a path it is given, so a real store cannot be opened, migrated or modified. Nothing was created or written. Run it without -data-dir and start the binary with the dataDir it prints", *dataDir)
+	}
+	if flag.NArg() > 0 {
+		return fmt.Errorf("positional arguments are not accepted, but %q was given. The seeder creates a fresh temporary data directory itself and never opens a path it is given, so a real store cannot be opened, migrated or modified. Nothing was created or written. Run it without a path and start the binary with the dataDir it prints", flag.Args())
+	}
 	root, err := os.MkdirTemp("", "peasant-transcript-segments-")
 	if err != nil {
-		fail(err)
+		return fmt.Errorf("the seeder could not create its temporary data directory under %q: %w. Nothing was opened or written. Check that TMPDIR names a writable directory, or unset it to use the system temporary directory", os.TempDir(), err)
 	}
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("%w. The temporary data directory %s was kept; remove it if you need the space", err, root)
+		}
+	}()
 	dbPath := string(defaults.ResolveDBFilePathWith(root))
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
-		fail(err)
+		return fmt.Errorf("the temporary data directory %q was created but its store directory %q could not be made: %w. Nothing was opened or written", root, filepath.Dir(dbPath), err)
 	}
 	db, err := store.Open(dbPath)
 	if err != nil {
-		fail(err)
+		return fmt.Errorf("the temporary data directory %q was created but its store could not be opened at %s: %w", root, dbPath, err)
 	}
+	closed := false
+	defer func() {
+		if !closed {
+			_ = db.Close()
+		}
+	}()
 	ctx := context.Background()
 	sid, err := ingest.NewSessionID(sessionID)
 	if err != nil {
-		fail(err)
+		return fmt.Errorf("the synthetic session id could not be built: %w", err)
 	}
 	hash, err := ingest.NewProjectHash(projectHash)
 	if err != nil {
-		fail(err)
+		return fmt.Errorf("the synthetic project hash could not be built: %w", err)
 	}
 	host, err := ingest.NewHostSlug(hostSlug)
 	if err != nil {
-		fail(err)
+		return fmt.Errorf("the synthetic host slug could not be built: %w", err)
 	}
 	model, err := ingest.NewModelID("claude-opus-4-6")
 	if err != nil {
-		fail(err)
+		return fmt.Errorf("the synthetic model id could not be built: %w", err)
 	}
 	source, err := ingest.NewResolvedPath("/tmp/synthetic-large/session.jsonl")
 	if err != nil {
-		fail(err)
+		return fmt.Errorf("the synthetic source path could not be built: %w", err)
 	}
 	const start = int64(1_700_000_000_000)
 	measured := int64(conversationTurns)
@@ -117,7 +159,7 @@ func main() {
 		},
 	}
 	if err := db.InsertSessions(ctx, []ingest.StoreEntry{entry}); err != nil {
-		fail(err)
+		return fmt.Errorf("the seeded store could not record the synthetic session: %w", err)
 	}
 	// Entry indexes remain contiguous and the final entry is a parent, so each
 	// child is inside the span a segment read can return. The middle action run
@@ -188,11 +230,12 @@ func main() {
 		})
 	}
 	if err := testutil.WriteFullEntries(ctx, db, sid, entries); err != nil {
-		fail(err)
+		return fmt.Errorf("the seeded store could not record the transcript entries: %w", err)
 	}
 	if err := db.Close(); err != nil {
-		fail(err)
+		return fmt.Errorf("the seeded store could not be closed: %w", err)
 	}
+	closed = true
 	encoded, err := json.Marshal(map[string]any{
 		"dataDir":           root,
 		"sessionId":         sessionID,
@@ -203,12 +246,8 @@ func main() {
 		"conversationTurns": conversationTurns,
 	})
 	if err != nil {
-		fail(err)
+		return fmt.Errorf("the seed result could not be encoded: %w", err)
 	}
 	fmt.Println(string(encoded))
-}
-
-func fail(err error) {
-	fmt.Fprintf(os.Stderr, "seed transcript store failed: %v\n", err)
-	os.Exit(1)
+	return nil
 }

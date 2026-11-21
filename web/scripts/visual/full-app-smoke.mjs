@@ -19,7 +19,7 @@
  *       SMOKE_PROJECT / SMOKE_SESSION / SMOKE_BRANCH  mock fixture coordinates
  *       PUPPETEER_CORE      explicit puppeteer-core module path
  */
-import { execSync, spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { mkdirSync, existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve, join } from 'node:path'
@@ -297,7 +297,7 @@ async function runStrikeFlow(browser, theme) {
 // ── 1. build (the user's exact path) ──────────────────────────────────────────
 if (!process.env.SMOKE_SKIP_BUILD) {
   console.log('[smoke] make build (user canonical path) …')
-  execSync('make build', { cwd: REPO, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  execFileSync('make', ['build'], { cwd: REPO, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
   console.log('[smoke] build path: pnpm (required)')
 } else {
   console.log('[smoke] SMOKE_SKIP_BUILD=1 — reusing existing ./peasant')

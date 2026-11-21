@@ -622,6 +622,33 @@ func helperGroupListShape(payload schema.LocalSessionListPayload) []helperGroupL
 
 func seedHelperGroupSession(t *testing.T, db *store.Store, spec helperGroupListingSession, sequence int64) {
 	t.Helper()
+	storeHelperGroupSessionRow(t, db, spec, sequence)
+	MarkStoredSessionsIndexed(t, db)
+	writeHelperGroupSearchText(t, db, spec)
+}
+
+// seedHelperGroupSessions seeds many sessions with the same rows and entries
+// seedHelperGroupSession writes, but marks the store indexed once instead of
+// once per session. MarkStoredSessionsIndexed stamps EVERY stored session, so
+// calling it per seed costs one write transaction per stored row per seed:
+// seeding n sessions that way is n²/2 transactions. Each session's search text
+// is written after the single stamp, as an ingest writes its entries after the
+// session row.
+func seedHelperGroupSessions(t *testing.T, db *store.Store, specs []helperGroupListingSession) {
+	t.Helper()
+	for i, spec := range specs {
+		storeHelperGroupSessionRow(t, db, spec, int64(i))
+	}
+	MarkStoredSessionsIndexed(t, db)
+	for _, spec := range specs {
+		writeHelperGroupSearchText(t, db, spec)
+	}
+}
+
+// storeHelperGroupSessionRow inserts the session row and the optional grouping
+// evidence and pushable metrics a fixture session asks for.
+func storeHelperGroupSessionRow(t *testing.T, db *store.Store, spec helperGroupListingSession, sequence int64) {
+	t.Helper()
 	start := spec.StartMs
 	if start == 0 {
 		start = 1000 + sequence
@@ -669,7 +696,12 @@ func seedHelperGroupSession(t *testing.T, db *store.Store, spec helperGroupListi
 	if spec.Pushable {
 		seedHelperGroupMetrics(t, db, spec)
 	}
-	MarkStoredSessionsIndexed(t, db)
+}
+
+// writeHelperGroupSearchText stores the session's one searchable entry, when the
+// fixture names search text.
+func writeHelperGroupSearchText(t *testing.T, db *store.Store, spec helperGroupListingSession) {
+	t.Helper()
 	if spec.Text != "" {
 		preview := spec.Text
 		entry := schema.SessionEntry{

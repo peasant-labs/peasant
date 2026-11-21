@@ -86,7 +86,7 @@ cases:
       - expectText: [how long claude code keeps its transcripts]
       - expectNoText: [log in now to choose a default sharing visibility?]
       # Going back and forward again does not bring the offer back.
-      - click: back
+      - click: prev
       - click: continue
       - expectNoText: [log in now to choose a default sharing visibility?]
       - expectText: [how long claude code keeps its transcripts]

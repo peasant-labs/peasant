@@ -93,7 +93,21 @@ func (s FileTranscriptSlicer) Supported() bool {
 // MaterializeTranscriptSlice reads the next budgetBytes-sized slice of complete
 // lines from the transcript file, continuing after the given cursor. Pass the
 // zero cursor for the first slice.
-func (s FileTranscriptSlicer) MaterializeTranscriptSlice(_ context.Context, session DiscoveredSession, budgetBytes int64, after TranscriptSliceCursor) (TranscriptSlice, error) {
+func (s FileTranscriptSlicer) MaterializeTranscriptSlice(ctx context.Context, session DiscoveredSession, budgetBytes int64, after TranscriptSliceCursor) (TranscriptSlice, error) {
+	return s.MaterializeTranscriptSliceWithin(ctx, session, budgetBytes, after, TranscriptSliceLimits{})
+}
+
+// MaterializeTranscriptSliceWithin is MaterializeTranscriptSlice with an
+// allocation ceiling for one record. A line that is still longer than
+// limits.RecordCeilingBytes when the slicer chases its end is refused with a
+// [*RecordExceedsBudgetError] naming the line and the size read so far, before
+// any byte past the ceiling (plus one chase chunk) is read. A zero ceiling keeps
+// the unbounded chase of MaterializeTranscriptSlice.
+//
+// The read never passes the extent the first slice measured: a file that grew
+// after the first slice is read only up to the size it had then, so the bytes a
+// preview shows always belong to one fixed extent.
+func (s FileTranscriptSlicer) MaterializeTranscriptSliceWithin(_ context.Context, session DiscoveredSession, budgetBytes int64, after TranscriptSliceCursor, limits TranscriptSliceLimits) (TranscriptSlice, error) {
 	path := string(session.SourcePath)
 	if budgetBytes <= 0 {
 		return TranscriptSlice{}, fmt.Errorf("materialize a slice of transcript %q failed before opening it: the byte budget %d is not positive, so the read could not be proven bounded; nothing was read; pass the preview slice budget", path, budgetBytes)
@@ -124,12 +138,27 @@ func (s FileTranscriptSlicer) MaterializeTranscriptSlice(_ context.Context, sess
 		return TranscriptSlice{Next: next, More: false}, nil
 	}
 
-	data, err := ranged.ReadFileRange(path, offset, budgetBytes)
+	length := budgetBytes
+	if remaining := total - offset; length > remaining {
+		// Never read past the extent the first slice measured, even when the
+		// file has grown since: appended bytes belong to a later preview.
+		length = remaining
+	}
+	data, err := ranged.ReadFileRange(path, offset, length)
 	if err != nil {
 		return TranscriptSlice{}, err
 	}
-	complete, err := s.completeLines(ranged, path, offset, data, total)
+	if int64(len(data)) < length {
+		// The range lies inside the extent the first slice measured, so a
+		// short read means the file is now shorter than it was then.
+		return TranscriptSlice{}, shrankError(offset+int64(len(data)), total)
+	}
+	complete, err := s.completeLines(ranged, path, offset, data, total, limits.RecordCeilingBytes)
 	if err != nil {
+		var oversized *RecordExceedsBudgetError
+		if errors.As(err, &oversized) {
+			oversized.Line = after.fileLines + 1
+		}
 		return TranscriptSlice{}, err
 	}
 
@@ -138,6 +167,7 @@ func (s FileTranscriptSlicer) MaterializeTranscriptSlice(_ context.Context, sess
 	next.origin = session.TranscriptOrigin
 	next.fileOffset = offset + int64(len(complete))
 	next.consumedBytes = next.fileOffset
+	next.fileLines += int64(bytes.Count(complete, []byte{'\n'}))
 	next.totalBytes = total
 	next.unit = MaterializeUnitLines
 	return TranscriptSlice{Data: complete, Next: next, More: next.fileOffset < total}, nil
@@ -157,7 +187,7 @@ func (s FileTranscriptSlicer) MaterializeTranscriptSlice(_ context.Context, sess
 // paying an extra forward read it does not need. Neither is load-bearing for
 // correctness, which is why removing either one changes no result - only the
 // number of reads.
-func (s FileTranscriptSlicer) completeLines(ranged RangeReadableFileSystem, path string, offset int64, data []byte, total int64) ([]byte, error) {
+func (s FileTranscriptSlicer) completeLines(ranged RangeReadableFileSystem, path string, offset int64, data []byte, total, ceiling int64) ([]byte, error) {
 	if int64(len(data)) == 0 {
 		return nil, nil
 	}
@@ -174,21 +204,105 @@ func (s FileTranscriptSlicer) completeLines(ranged RangeReadableFileSystem, path
 	extended := data
 	readOffset := offset + int64(len(data))
 	for readOffset < total {
-		more, err := ranged.ReadFileRange(path, readOffset, fileSliceOversizedLineChunk)
+		if ceiling > 0 && int64(len(extended)) > ceiling {
+			// The line is already longer than the caller can hold. Stop before
+			// reading any more of it; the caller names the line and the size.
+			return nil, &RecordExceedsBudgetError{AtLeastBytes: int64(len(extended)), CeilingBytes: ceiling}
+		}
+		chunk := int64(fileSliceOversizedLineChunk)
+		if remaining := total - readOffset; chunk > remaining {
+			chunk = remaining
+		}
+		if ceiling > 0 {
+			// Read at most one byte past the ceiling, so a line over it is
+			// known to be over it without allocating the rest.
+			chunk = min(chunk, ceiling-int64(len(extended))+1)
+		}
+		more, err := ranged.ReadFileRange(path, readOffset, chunk)
 		if err != nil {
 			return nil, err
 		}
-		if len(more) == 0 {
-			break
+		if int64(len(more)) < chunk {
+			return nil, shrankError(readOffset+int64(len(more)), total)
 		}
 		readOffset += int64(len(more))
 		if cut := bytes.IndexByte(more, '\n'); cut >= 0 {
-			return append(extended, more[:cut+1]...), nil
+			line := append(extended, more[:cut+1]...)
+			if ceiling > 0 && int64(len(line)) > ceiling {
+				return nil, &RecordExceedsBudgetError{AtLeastBytes: int64(len(line)), CeilingBytes: ceiling}
+			}
+			return line, nil
 		}
 		extended = append(extended, more...)
 	}
+	if ceiling > 0 && int64(len(extended)) > ceiling {
+		return nil, &RecordExceedsBudgetError{AtLeastBytes: int64(len(extended)), CeilingBytes: ceiling}
+	}
 	return extended, nil
 }
+
+// TranscriptSliceLimits bounds what one slice read may allocate beyond its byte
+// budget. The zero value adds no bound.
+type TranscriptSliceLimits struct {
+	// RecordCeilingBytes is the largest single record (a line, or a SQLite row)
+	// the caller can hold. A record over it is refused before it is read whole.
+	// Zero means no ceiling.
+	RecordCeilingBytes int64
+}
+
+// LimitedResumableTranscriptMaterializer is the OPTIONAL capability of a slice
+// reader that can refuse a record over a ceiling before allocating it.
+type LimitedResumableTranscriptMaterializer interface {
+	MaterializeTranscriptSliceWithin(ctx context.Context, session DiscoveredSession, budgetBytes int64, after TranscriptSliceCursor, limits TranscriptSliceLimits) (TranscriptSlice, error)
+}
+
+var (
+	_ LimitedResumableTranscriptMaterializer = FileTranscriptSlicer{}
+	_ LimitedResumableTranscriptMaterializer = (*OpenCodeAdapter)(nil)
+)
+
+// ErrTranscriptShrank reports a slice read that found the file shorter than the
+// extent the first slice measured: the file was truncated or rewritten after a
+// preview began reading it. Continuing would read bytes that never belonged to
+// that extent, so the caller ends the read.
+var ErrTranscriptShrank = errors.New("the transcript is shorter than when its first slice was read")
+
+func shrankError(at, total int64) error {
+	return fmt.Errorf("%w: the file ended at byte %d of the %d bytes it held when the first slice was read; nothing past it was read; open the transcript again from its start", ErrTranscriptShrank, at, total)
+}
+
+// ErrRecordExceedsBudget matches every [*RecordExceedsBudgetError].
+var ErrRecordExceedsBudget = errors.New("a transcript record is larger than the read may hold")
+
+// RecordExceedsBudgetError reports one record a slice read refused before it
+// read it whole. It names the record by its 1-based line (file origin) or its
+// 1-based row ordinal within the session (SQLite origin) and never by content
+// or path, so it is safe to show and to log.
+type RecordExceedsBudgetError struct {
+	// Line is the 1-based line of the record in a line-oriented file, or 0.
+	Line int64
+	// Row is the 1-based ordinal of the row within the session, or 0.
+	Row int64
+	// AtLeastBytes is how large the record is known to be: the exact size for
+	// a SQLite row, a lower bound for a line the slicer stopped chasing.
+	AtLeastBytes int64
+	// CeilingBytes is the ceiling the record exceeded.
+	CeilingBytes int64
+}
+
+func (e *RecordExceedsBudgetError) Error() string {
+	where := "a record"
+	switch {
+	case e.Line > 0:
+		where = fmt.Sprintf("line %d", e.Line)
+	case e.Row > 0:
+		where = fmt.Sprintf("row %d", e.Row)
+	}
+	return fmt.Sprintf("read a transcript slice stopped before %s: the record is at least %d bytes, over the %d-byte ceiling this read may hold; nothing past the ceiling was read and the source is unchanged; the full session still ingests normally, and a preview with a larger budget can read it", where, e.AtLeastBytes, e.CeilingBytes)
+}
+
+// Is makes errors.Is(err, ErrRecordExceedsBudget) match.
+func (e *RecordExceedsBudgetError) Is(target error) bool { return target == ErrRecordExceedsBudget }
 
 // fileSliceOversizedLineChunk is how much more is read at a time while chasing
 // the end of a line that is longer than a whole slice budget. It is small

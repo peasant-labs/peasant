@@ -34,20 +34,33 @@ type recordKindsStatusMutationFixture struct {
 	ShippedOutOfSetNames []string `yaml:"shipped_out_of_set_names"`
 }
 
+type registryFixtureOperation string
+
+const (
+	registryFixtureYAML          registryFixtureOperation = "yaml"
+	registryFixtureTrailing      registryFixtureOperation = "trailing"
+	registryFixtureBehavior      registryFixtureOperation = "behavior"
+	registryFixtureMutateStatus  registryFixtureOperation = "mutate-status"
+	registryFixtureMutatePreview registryFixtureOperation = "mutate-preview"
+	registryFixtureLookup        registryFixtureOperation = "lookup"
+	registryFixtureDiagnostic    registryFixtureOperation = "diagnostic"
+	registryFixtureNativeEvent   registryFixtureOperation = "native-event-behavior"
+)
+
 type recordKindsValidationFixtures struct {
 	RequiredNames []string `yaml:"required_names"`
 	Cases         []struct {
-		Name      string            `yaml:"name"`
-		Operation string            `yaml:"operation"`
-		Find      string            `yaml:"find"`
-		Replace   string            `yaml:"replace"`
-		Error     string            `yaml:"error"`
-		Harness   Harness           `yaml:"harness"`
-		Context   RecordKindContext `yaml:"context"`
-		Namespace string            `yaml:"namespace"`
-		Kind      string            `yaml:"kind"`
-		Status    RecordKindStatus  `yaml:"status"`
-		Preview   RecordKindPreview `yaml:"preview"`
+		Name      string                   `yaml:"name"`
+		Operation registryFixtureOperation `yaml:"operation"`
+		Find      string                   `yaml:"find"`
+		Replace   string                   `yaml:"replace"`
+		Error     string                   `yaml:"error"`
+		Harness   Harness                  `yaml:"harness"`
+		Context   RecordKindContext        `yaml:"context"`
+		Namespace string                   `yaml:"namespace"`
+		Kind      string                   `yaml:"kind"`
+		Status    RecordKindStatus         `yaml:"status"`
+		Preview   RecordKindPreview        `yaml:"preview"`
 	} `yaml:"cases"`
 }
 
@@ -129,39 +142,39 @@ func TestRecordKindsValidationMutations(t *testing.T) {
 			}
 			var result error
 			switch row.Operation {
-			case "yaml":
+			case registryFixtureYAML:
 				if !strings.Contains(string(recordKindsYAML), row.Find) {
 					t.Fatal("mutation target not found")
 				}
 				_, result = decodeEmbeddedRecordKindRegistry([]byte(strings.Replace(string(recordKindsYAML), row.Find, row.Replace, 1)))
-			case "trailing":
+			case registryFixtureTrailing:
 				_, result = decodeEmbeddedRecordKindRegistry(append(append([]byte{}, recordKindsYAML...), []byte("\n---\nversion: 2\n")...))
-			case "behavior", "mutate-status", "mutate-preview":
+			case registryFixtureBehavior, registryFixtureMutateStatus, registryFixtureMutatePreview:
 				section := registry.Harnesses[row.Harness]
 				for i := range section.Kinds {
 					kind := &section.Kinds[i]
 					if kind.Context == row.Context && kind.Namespace == row.Namespace && kind.Kind == row.Kind {
-						if row.Operation == "mutate-status" {
+						if row.Operation == registryFixtureMutateStatus {
 							kind.Status = row.Status
 						}
-						if row.Operation == "mutate-preview" {
+						if row.Operation == registryFixtureMutatePreview {
 							kind.Preview = row.Preview
 						}
 					}
 				}
 				result = verifyControlBehavior(section, row.Namespace, row.Kind)
-			case "lookup":
+			case registryFixtureLookup:
 				kind := registry.Harnesses[row.Harness].Lookup(row.Context, row.Namespace, row.Kind)
 				if kind.Status != row.Status || kind.Preview != row.Preview {
 					result = fmt.Errorf("lookup %s/%s, want %s/%s", kind.Status, kind.Preview, row.Status, row.Preview)
 				}
-			case "diagnostic":
+			case registryFixtureDiagnostic:
 				kind := registry.Harnesses[row.Harness].Lookup(row.Context, row.Namespace, row.Kind)
 				attribution, ok := codexContentKindRegistry()[row.Kind]
 				if !ok || !attribution.mediaDiagnostic || kind.Status != RecordKindRepresented || kind.Preview != RecordKindPreviewYes || !strings.Contains(kind.Payload, "no standalone submitted-input count") {
 					result = fmt.Errorf("diagnostic-only attribution differs from production")
 				}
-			case "native-event-behavior":
+			case registryFixtureNativeEvent:
 				kind := registry.Harnesses[HarnessCodex].Lookup(RecordKindNative, "event", row.Kind)
 				// The mutation goes through the one production constructor, so
 				// no fixture can satisfy a dispatch arm with the nil-map shape

@@ -120,6 +120,7 @@ func captureDevinACPEvents(src Source, id, rel string) (Capture, error) {
 		message := StringField(update, "messageId")
 		continues := kind == lastKind && message == lastMessage
 		lastKind, lastMessage = kind, message
+		const devinToolCallUpdate = "tool_call"
 		switch kind {
 		case "user_message_chunk":
 			if !continues {
@@ -129,7 +130,7 @@ func captureDevinACPEvents(src Source, id, rel string) (Capture, error) {
 			if !continues {
 				meta.AssistantMsgs++
 			}
-		case "tool_call":
+		case devinToolCallUpdate:
 			meta.ToolCalls++
 		case "session_info_update":
 			if title := strings.TrimSpace(StringField(update, "title")); title != "" {

@@ -14,7 +14,7 @@
     "lint": "node scripts/assert-unstring-eslint-enabled.mjs && node scripts/assert-directive-prologue.mjs && eslint src --quiet",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:journey:support": "node --test scripts/journey/lifecycle.test.mjs scripts/journey/server-sandbox.test.mjs scripts/journey/provenance.test.mjs scripts/journey/selection.test.mjs scripts/journey/compiled-mutation.test.mjs scripts/journey/kickstart-journey.test.mjs",
+    "test:journey:support": "node --test scripts/journey/lifecycle.test.mjs scripts/journey/server-sandbox.test.mjs scripts/journey/seed-transcript-store.test.mjs scripts/journey/provenance.test.mjs scripts/journey/selection.test.mjs scripts/journey/compiled-mutation.test.mjs scripts/journey/kickstart-journey.test.mjs scripts/journey/determinism.test.mjs",
     "journey:kickstart": "node scripts/journey/run-kickstart.mjs",
     "test:journey:fixture": "node scripts/journey/run-fixture-tests.mjs",
     "test:journey:api": "vitest run --config vitest.journey-api.config.mjs",
@@ -48,7 +48,7 @@
     "test:directive-guard": "node scripts/test-directive-prologue.mjs"
   },
   "dependencies": {
-    "@peasant-labs/fairtrade": "0.0.71",
+    "@peasant-labs/fairtrade": "0.2.1",
     "@peasant-labs/schema": "0.58.1",
     "@xyflow/react": "^12.10.1",
     "clsx": "^2.1.1",

@@ -1,0 +1,14 @@
+package ingest_test
+
+import "github.com/peasant-labs/peasant/internal/ingest"
+
+// parserVersions reads the versions of a revision from before per-harness
+// registration (no harvester_versions.go): adapter baseline 1 and
+// CurrentIndexVersion described every harness's parsers.
+func parserVersions() map[string]versions {
+	result := make(map[string]versions)
+	for harness := range ingest.DefaultAdapterRegistry {
+		result[string(harness)] = versions{1, ingest.CurrentIndexVersion}
+	}
+	return result
+}

@@ -387,6 +387,37 @@ describe('SessionDetailV2 segmented transcript', () => {
     expect(requests.some((url) => url.includes('/api/v1/attachments/'))).toBe(false);
   });
 
+  it('keeps segment ticks on the pinned timeline of a stored windowed read', async () => {
+    // A stored read holds a window of the session, so its timeline samples the
+    // directory's segments; only a front-to-back preview draws the minimap.
+    const plan = cases.find((row) => row.name === 'mount-segment-zero');
+    if (!plan) throw new Error('mount-segment-zero fixture is missing');
+    activeCase = plan;
+    revision = plan.revision;
+    channelData = detail(plan);
+    vi.stubGlobal('fetch', vi.fn(answer));
+    const view = render(<TestDetail turn={null} />);
+    await waitFor(() => expect(reads).toContain('segment:0'));
+    const stream = await waitFor(() => {
+      const found = view.container.querySelector<HTMLElement>('.txn-stream');
+      if (found === null) throw new Error('the stored read drew no trace to scroll');
+      return found;
+    });
+    // The timeline pins once the trace scrolls past its header.
+    await act(async () => {
+      stream.scrollTop = 300;
+      fireEvent.scroll(stream);
+    });
+    const pinned = await waitFor(() => {
+      const found = view.container.querySelector<HTMLElement>('.txn-sticky');
+      if (found === null) throw new Error('the stored read pinned no timeline header');
+      return found;
+    });
+    await waitFor(() => expect(pinned.querySelectorAll('.txn-scrub-segments .txn-scrub-segment-tick').length, 'one tick per directory segment').toBe(plan.totalSegments));
+    expect(pinned.querySelector('.txn-minimap'), 'a stored windowed read draws no minimap').toBeNull();
+    expect((pinned.querySelector('.txn-scrub-segments')?.textContent ?? '').trim(), 'the segment scrubber carries no caption').toBe('');
+  });
+
   for (const plan of cases) {
     it(plan.name, async () => {
       activeCase = plan;

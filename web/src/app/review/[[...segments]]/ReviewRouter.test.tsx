@@ -6,6 +6,10 @@ import { DiscoveryRequestError } from '@/lib/api/errors';
 import { parseStrictYAML, requireExactRequiredFields, requireRecord, requireUniqueNames } from '@/test/strictYaml';
 import { ReviewRouter } from './ReviewRouter';
 
+const Resolution = Object.freeze({ Ready: 'ready', Missing: 'missing', Transient: 'transient' } as const);
+const Scenario = Object.freeze({ Canonical: 'canonical', Legacy: 'legacy', Malformed: 'malformed', Missing: 'missing', Retry: 'retry' } as const);
+const ReplacementKind = Object.freeze({ Project: 'project', Branch: 'branch' } as const);
+
 let pathname = '/review';
 let search = '';
 const replace = vi.fn();
@@ -69,7 +73,7 @@ const reviewPayload = {
 
 type ReplacementCase = {
   name: string;
-  kind: 'project' | 'branch';
+  kind: (typeof ReplacementKind)[keyof typeof ReplacementKind];
   fromPath: string;
   fromSearch: string;
   toPath: string;
@@ -95,7 +99,7 @@ function loadReplacementFixture(value: string): ReplacementCase[] {
   requireUniqueNames(cases, 'mounted review replacement cases');
   cases.forEach((row, index) => {
     requireExactRequiredFields(row, ['name', 'kind', 'fromPath', 'fromSearch', 'toPath', 'toSearch', 'oldLabel', 'oldAction', 'newLabel', 'newAction'], `mounted review replacement cases[${index}]`);
-    if (!requiredNames.includes(row.name) || !['project', 'branch'].includes(String(row.kind))) throw new Error(`mounted review replacement case ${index} is invalid`);
+    if (!requiredNames.includes(row.name) || ![ReplacementKind.Project, ReplacementKind.Branch].some((kind) => kind === row.kind)) throw new Error(`mounted review replacement case ${index} is invalid`);
   });
   if (cases.length !== requiredNames.length || requiredNames.some((name) => !cases.some((testCase) => testCase.name === name))) throw new Error('mounted review replacement cases must have exact set equality');
   return cases as ReplacementCase[];
@@ -148,21 +152,21 @@ describe('mounted ReviewRouter fixture', () => {
   for (const fixture of cases) it(fixture.name, async () => {
     pathname = fixture.pathname;
     search = fixture.search;
-    if (fixture.resolution === 'ready') fetchProjectResolution.mockResolvedValue({ project: fixture.scenario === 'canonical' ? fixture.expected : 'team alpha', projectHash: hash });
-    if (fixture.resolution === 'missing') fetchProjectResolution.mockRejectedValue(new DiscoveryRequestError('/api/v1/projects/resolve', 404, MISSING_PROJECT_REASON));
-    if (fixture.resolution === 'transient') fetchProjectResolution.mockRejectedValueOnce(new Error('temporary provider failure')).mockResolvedValueOnce({ project: 'team', projectHash: hash });
+    if (fixture.resolution === Resolution.Ready) fetchProjectResolution.mockResolvedValue({ project: fixture.scenario === Scenario.Canonical ? fixture.expected : 'team alpha', projectHash: hash });
+    if (fixture.resolution === Resolution.Missing) fetchProjectResolution.mockRejectedValue(new DiscoveryRequestError('/api/v1/projects/resolve', 404, MISSING_PROJECT_REASON));
+    if (fixture.resolution === Resolution.Transient) fetchProjectResolution.mockRejectedValueOnce(new Error('temporary provider failure')).mockResolvedValueOnce({ project: 'team', projectHash: hash });
     render(<ReviewRouter />);
 
     switch (fixture.scenario) {
-      case 'canonical':
+      case Scenario.Canonical:
         expect(await screen.findByTestId('changes')).toHaveTextContent(fixture.expected);
         expect(fetchReviewChanges).toHaveBeenCalledWith(hash);
         expect(screen.queryByText(hash)).not.toBeInTheDocument();
         break;
-      case 'legacy':
+      case Scenario.Legacy:
         await waitFor(() => expect(replace).toHaveBeenCalledWith(fixture.expected));
         break;
-      case 'malformed':
+      case Scenario.Malformed:
         expect(await screen.findByRole('alert')).toHaveTextContent(fixture.expected);
         expect(fetchProjectResolution).not.toHaveBeenCalled();
         expect(fetchReviewChanges).not.toHaveBeenCalled();
@@ -177,7 +181,7 @@ describe('mounted ReviewRouter fixture', () => {
         expect(fetchReviewChanges).not.toHaveBeenCalled();
         break;
       }
-      case 'missing': {
+      case Scenario.Missing: {
         // One human line and a way forward; never the failed request or the
         // server's internal reason.
         const problem = await screen.findByTestId('project-identity-problem');
@@ -188,7 +192,7 @@ describe('mounted ReviewRouter fixture', () => {
         expect(problem).not.toHaveTextContent(MISSING_PROJECT_REASON);
         break;
       }
-      case 'retry':
+      case Scenario.Retry:
         fireEvent.click(await screen.findByRole('button', { name: 'try again' }));
         await waitFor(() => expect(replace).toHaveBeenCalledWith(fixture.expected));
         expect(fetchProjectResolution).toHaveBeenCalledTimes(2);
@@ -220,11 +224,11 @@ describe('mounted ReviewRouter canonical replacements', () => {
     const nextReview = deferred<typeof reviewPayload>();
     const nextDetail = deferred<ReturnType<typeof detailPayload>>();
     fetchProjectResolution.mockImplementation(async (identity: string) => ({
-      project: identity.startsWith('b') ? fixture.newLabel : fixture.kind === 'project' ? fixture.oldLabel : 'project alpha',
+      project: identity.startsWith('b') ? fixture.newLabel : fixture.kind === ReplacementKind.Project ? fixture.oldLabel : 'project alpha',
       projectHash: identity,
     }));
 
-    if (fixture.kind === 'project') {
+    if (fixture.kind === ReplacementKind.Project) {
       fetchReviewChanges
         .mockResolvedValueOnce({ ...reviewPayload, sessions: [{ sessionId: 'old', title: fixture.oldAction, harness: 'claude-code', startMs: 1 }] })
         .mockReturnValueOnce(nextReview.promise);
@@ -245,7 +249,7 @@ describe('mounted ReviewRouter canonical replacements', () => {
     expect(screen.queryByText(fixture.oldLabel)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: fixture.oldAction })).not.toBeInTheDocument();
 
-    if (fixture.kind === 'project') {
+    if (fixture.kind === ReplacementKind.Project) {
       nextReview.resolve({ ...reviewPayload, sessions: [{ sessionId: 'new', title: fixture.newAction, harness: 'claude-code', startMs: 2 }] });
     } else {
       nextReview.resolve(reviewPayload);

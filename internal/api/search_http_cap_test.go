@@ -16,18 +16,22 @@ import (
 
 // seedCapSessions stores more matching sessions than the documented cap, so a
 // request above the cap has to be truncated rather than served whole. Every
-// seeded session contributes exactly one matching entry.
+// seeded session contributes exactly one matching entry. The sessions are seeded
+// as one batch: seeding them one at a time re-stamps every earlier session on
+// each seed, which is quadratic in the cap and dominated this package's runtime.
 func seedCapSessions(t *testing.T, db *store.Store) {
 	t.Helper()
+	specs := make([]helperGroupListingSession, 0, codemap.SearchMaxLimit+10)
 	for i := 0; i < codemap.SearchMaxLimit+10; i++ {
-		seedHelperGroupSession(t, db, helperGroupListingSession{
+		specs = append(specs, helperGroupListingSession{
 			ID:      fmt.Sprintf("cap-%03d", i),
 			StartMs: int64(1000 + i),
 			Purpose: "interaction",
 			Origin:  "user",
 			Text:    "pineapple",
-		}, int64(i))
+		})
 	}
+	seedHelperGroupSessions(t, db, specs)
 }
 
 func startCapServer(t *testing.T, db *store.Store) string {

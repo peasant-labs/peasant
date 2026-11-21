@@ -1,0 +1,11 @@
+package p
+
+import "os/exec"
+
+func first() {
+	exec.Command("go", "vet", "./...")
+}
+
+func second() {
+	exec.Command("go", "build", "-race=false", "-o", "out", "./cmd/app")
+}

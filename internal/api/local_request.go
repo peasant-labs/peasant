@@ -112,17 +112,20 @@ func isLoopbackHost(hostport string) bool {
 }
 
 // writeLocalRequestRefusal answers a refused request with 403 and a JSON error
-// that names the reason, the refusing site, and what did not happen.
+// that names the reason, the refusing site, and what did not happen. Refusals
+// include a request description, so they must not be cached, regardless of route.
 func writeLocalRequestRefusal(w http.ResponseWriter, r *http.Request, refusal localRequestRefusal, site, outcome string) {
+	w.Header().Set(defaults.HeaderCacheControl, defaults.CacheControlNoStore)
+	requestPath := diagnosticPath(r)
 	slog.Warn("http: refused a request that did not come from this local server",
 		"method", r.Method,
-		"path", r.URL.Path,
+		"path", requestPath,
 		"code", refusal.code,
 		"host", r.Host,
 		"origin", r.Header.Get(defaults.HeaderOrigin),
 	)
 	message := fmt.Sprintf("The %s %s request was refused because %s in %s. %s Open the dashboard at the loopback address that `peasant web start` prints, and retry from there.",
-		r.Method, r.URL.Path, refusal.reason, site, outcome)
+		r.Method, requestPath, refusal.reason, site, outcome)
 	writeAPIError(w, http.StatusForbidden, message, string(refusal.code))
 }
 

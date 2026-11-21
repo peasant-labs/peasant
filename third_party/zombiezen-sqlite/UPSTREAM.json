@@ -79,6 +79,7 @@
     "auth_test.go": "f0914c256964c9ae00bd2eae213af115f2447d6a13469e2b15ee1243ff604ac9",
     "backup_example_test.go": "3eef54f6b0d77cc4a840dc9f7ac9ec19cfcd1f03202a27854c656e83e02f6f65",
     "backup_test.go": "ef4a66819a4222c4fe07bb204e53fd26105eb7086d6ae7940e0af779ce1ce6fb",
+    "blob.go": "4a5da0ee3a361a18af691e71cb7a75531fe94cc3a9bde0f6b4d34010463aab0d",
     "blob_test.go": "ae3ba90c3ef2402a7c156896e430bacb92da718b70d63b27b47db578971a72f6",
     "example_test.go": "6b179d99f5047e609fe83feb735532932daaca3d6500fe665bfbf1cfe36ab25a",
     "ext/generateseries/example_test.go": "5a1a35e9dcb15db8f0aa7f877247bbee2d972d2e08d1ac9ac73863f07ce14c76",
@@ -86,6 +87,7 @@
     "ext/refunc/refunc.go": "3e3316f896dffeb5e7699766d9cdcf7915dcee32865e0c1aaa6a1610d72d9e54",
     "ext/refunc/refunc_test.go": "d10b3c858a278c88de641a45e88e4fabb97310af904cbc9656cd87411eec0f22",
     "http_example_test.go": "db743a24e12a968972ff4591222f3c765b24beb70abd64b1d9e6918f1fb6cf13",
+    "session.go": "6a7e85da2b9880d013dbcdf1cb52a55101b1ed4ab54068f762aea02cd3553812",
     "session_test.go": "2f0d91aacb4943b425cd84ae6575e651e97e0dbf1e63751b8fa5f69ea1ccd27d",
     "shell/example_test.go": "3a07fef3be676d6bca9290f42632e4158ce0835e2d9f5de8d4abc741942d8052",
     "shell/shell.go": "1797b1eb73efa8936eac05f3177effdb5c4cbbb10c1158b1105c22372941621d",
@@ -118,7 +120,7 @@
     "go.work": "UPSTREAM.go.work.txt",
     "go.work.sum": "UPSTREAM.go.work.sum.txt"
   },
-  "patch_sha256": "6a4fb7df701845ffe4efd06ff633b6e85b866c3711959f554d4295a52d13116b",
+  "patch_sha256": "8cd702b67c64a95625665fd6bbab594a8ce16d40ff3f298374d680e3f5040b24",
   "native_pointer_lines": {
     "blob.go": [
       "blobPtr := *(*uintptr)(unsafe.Pointer(blobPtrPtr))"

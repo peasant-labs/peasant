@@ -455,7 +455,7 @@ func readOpenCodeCurrentProjection(ctx context.Context, source OpenCodeSQLiteSou
 // name how much it left out. The full-session read and the preview prefix read
 // share this one path.
 func readOpenCodeCurrentProjectionCore(ctx context.Context, source OpenCodeSQLiteSource, sessionID OpenCodeCurrentSessionID, pageSize OpenCodeCurrentPageSize, budget int64, size OpenCodePayloadSize) (openCodeCurrentProjection, map[string]int, MaterializeTruncation, error) {
-	projection, unknownControlTypes, truncation, _, err := readOpenCodeCurrentProjectionSlice(ctx, source, sessionID, pageSize, budget, size, nil)
+	projection, unknownControlTypes, truncation, _, err := readOpenCodeCurrentProjectionSlice(ctx, source, sessionID, pageSize, budget, size, nil, openCodeRowCeiling{})
 	return projection, unknownControlTypes, truncation, err
 }
 
@@ -468,7 +468,7 @@ func readOpenCodeCurrentProjectionCore(ctx context.Context, source OpenCodeSQLit
 // a message boundary, so no message is ever split across two slices and
 // appending one slice's turns to the previous slice's can never duplicate or
 // halve a turn.
-func readOpenCodeCurrentProjectionSlice(ctx context.Context, source OpenCodeSQLiteSource, sessionID OpenCodeCurrentSessionID, pageSize OpenCodeCurrentPageSize, budget int64, size OpenCodePayloadSize, after *OpenCodeCurrentCursor) (openCodeCurrentProjection, map[string]int, MaterializeTruncation, openCodeCurrentSliceStop, error) {
+func readOpenCodeCurrentProjectionSlice(ctx context.Context, source OpenCodeSQLiteSource, sessionID OpenCodeCurrentSessionID, pageSize OpenCodeCurrentPageSize, budget int64, size OpenCodePayloadSize, after *OpenCodeCurrentCursor, ceiling openCodeRowCeiling) (openCodeCurrentProjection, map[string]int, MaterializeTruncation, openCodeCurrentSliceStop, error) {
 	projection := openCodeCurrentProjection{Format: openCodeCurrentProjectionFormat, Version: openCodeCurrentProjectionVersion, SessionID: sessionID.String(), Messages: []openCodeLegacyProjectionMessage{}}
 	registry := openCodeCurrentIdentityRegistry{kinds: make(map[string]string)}
 	unknownControlTypes := make(map[string]int)
@@ -483,9 +483,38 @@ func readOpenCodeCurrentProjectionSlice(ctx context.Context, source OpenCodeSQLi
 	var readBytes, includedBytes, includedRows int64
 	var traversalPosition int64
 	truncated := false
+	var readRows int64
 rowLoop:
 	for {
-		page, err := source.CurrentMessages(ctx, OpenCodeCurrentPageRequest{SessionID: sessionID, PageSize: pageSize, After: cursor})
+		request := OpenCodeCurrentPageRequest{SessionID: sessionID, PageSize: pageSize, After: cursor}
+		// stopBefore is set when the row-length probe found a row this read may
+		// not hold: the page is fetched only up to it, so the row is never read.
+		stopBefore := false
+		if ceiling.bytes > 0 {
+			if lengths, ok := source.(OpenCodeCurrentRowLengthSource); ok {
+				probed, err := lengths.CurrentMessageLengths(ctx, request)
+				if err != nil {
+					return openCodeCurrentProjection{}, nil, MaterializeTruncation{}, openCodeCurrentSliceStop{}, err
+				}
+				tentative := readBytes
+				for i, length := range probed {
+					if budget > 0 && tentative >= budget {
+						break
+					}
+					if length.Bytes > ceiling.bytes-tentative {
+						if tentative == 0 {
+							return openCodeCurrentProjection{}, nil, MaterializeTruncation{}, openCodeCurrentSliceStop{}, &RecordExceedsBudgetError{Row: ceiling.rowsBefore + readRows + int64(i) + 1, AtLeastBytes: length.Bytes, CeilingBytes: ceiling.bytes}
+						}
+						before := length.Seq
+						request.Before = &before
+						stopBefore = true
+						break
+					}
+					tentative += length.Bytes
+				}
+			}
+		}
+		page, err := source.CurrentMessages(ctx, request)
 		if err != nil {
 			return openCodeCurrentProjection{}, nil, MaterializeTruncation{}, openCodeCurrentSliceStop{}, err
 		}
@@ -499,7 +528,17 @@ rowLoop:
 				truncated = true
 				break rowLoop
 			}
+			if ceiling.bytes > 0 && int64(len(row.Data)) > ceiling.bytes-readBytes {
+				// A source without the row-length probe: the row is already in
+				// memory, but it is still never taken into the projection.
+				if readBytes == 0 {
+					return openCodeCurrentProjection{}, nil, MaterializeTruncation{}, openCodeCurrentSliceStop{}, &RecordExceedsBudgetError{Row: ceiling.rowsBefore + readRows + 1, AtLeastBytes: int64(len(row.Data)), CeilingBytes: ceiling.bytes}
+				}
+				truncated = true
+				break rowLoop
+			}
 			readBytes += int64(len(row.Data))
+			readRows++
 			taken := NewOpenCodeCurrentCursor(row.Seq)
 			stop = &taken
 			if err := registry.add(row.ID.String(), "message row"); err != nil {
@@ -535,6 +574,12 @@ rowLoop:
 			includedRows++
 			includedBytes += int64(len(row.Data))
 		}
+		if stopBefore {
+			// The page ended just before a row this read may not hold, so the
+			// slice stops there and the next slice meets that row first.
+			truncated = true
+			break
+		}
 		if page.Next == nil {
 			break
 		}
@@ -545,6 +590,45 @@ rowLoop:
 		truncation = MaterializeTruncation{Truncated: true, Unit: MaterializeUnitMessages, BudgetBytes: budget, IncludedBytes: includedBytes, TotalBytes: size.Bytes, IncludedRows: includedRows, TotalRows: size.Rows}
 	}
 	return projection, unknownControlTypes, truncation, openCodeCurrentSliceStop{cursor: stop, exhausted: !truncated, includedBytes: includedBytes, includedRows: includedRows}, nil
+}
+
+// openCodeRowCeiling is the largest row one slice read may hold, and how many
+// rows earlier slices read, so a refused row can be named by its ordinal. The
+// zero value adds no ceiling.
+type openCodeRowCeiling struct {
+	bytes      int64
+	rowsBefore int64
+}
+
+// OpenCodeCurrentRowLength is the size of one current row's payload, read
+// without the payload itself.
+type OpenCodeCurrentRowLength struct {
+	Seq   OpenCodeCurrentSeq
+	Bytes int64
+}
+
+// OpenCodeCurrentRowLengthSource is the OPTIONAL capability of a source that can
+// report the payload length of the rows a page request would return, without
+// reading the payloads. A bounded preview asks it before each page, so a row
+// larger than the preview may hold is refused before it is allocated.
+type OpenCodeCurrentRowLengthSource interface {
+	CurrentMessageLengths(ctx context.Context, request OpenCodeCurrentPageRequest) ([]OpenCodeCurrentRowLength, error)
+}
+
+// OpenCodeCurrentChangeMarker summarizes the current rows of one session at or
+// before a sequence: how many there are, the latest update time among them and
+// their summed payload length. Two equal markers mean no row a preview already
+// read was added, removed, edited or resized in between.
+type OpenCodeCurrentChangeMarker struct {
+	Rows       int64
+	MaxUpdated int64
+	Bytes      int64
+}
+
+// OpenCodeCurrentChangeMarkerSource is the OPTIONAL capability of a source that
+// can compute an [OpenCodeCurrentChangeMarker] in one bounded aggregate.
+type OpenCodeCurrentChangeMarkerSource interface {
+	CurrentMessagesMarker(ctx context.Context, sessionID OpenCodeCurrentSessionID, through OpenCodeCurrentSeq) (OpenCodeCurrentChangeMarker, error)
 }
 
 // openCodeCurrentSliceStop is where a resumable current read ended. exhausted

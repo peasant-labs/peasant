@@ -14,8 +14,9 @@ import (
 )
 
 type subscribeMsg struct {
-	conn *Conn
-	subs []ChannelSubscription
+	conn    *Conn
+	subs    []ChannelSubscription
+	applied chan struct{}
 }
 
 type unsubscribeMsg struct {
@@ -39,6 +40,7 @@ type Hub struct {
 	// kickstart snapshot.
 	kickstartMu sync.RWMutex
 	kickstart   kickstartSnapshotSource
+	previews    *previewRegistry
 }
 
 // kickstartSnapshotSource yields one session event per live kickstart session.
@@ -51,6 +53,10 @@ type kickstartSnapshotSource interface {
 func (h *Hub) attachKickstart(source kickstartSnapshotSource) {
 	h.kickstartMu.Lock()
 	h.kickstart = source
+	if sessions, ok := source.(*kickstartSessions); ok {
+		h.previews = newPreviewRegistry(sessions)
+		sessions.previews = h.previews
+	}
 	h.kickstartMu.Unlock()
 }
 
@@ -127,6 +133,9 @@ func (h *Hub) Run(ctx context.Context) {
 			}
 			slog.Info("ws: subscribe", "topics", topics, "count", len(topics))
 			msg.conn.Subscribe(topics)
+			if msg.applied != nil {
+				close(msg.applied)
+			}
 			// Snapshot-on-subscribe: push current data for each subscription.
 			// Off the hub loop: a cold snapshot build (the quality payload
 			// reads the whole store) must never block the tick or every

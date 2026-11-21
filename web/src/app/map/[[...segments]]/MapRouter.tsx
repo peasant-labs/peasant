@@ -1,5 +1,7 @@
 'use client';
 
+import { ProjectRouteKind } from '@/lib/navigation/projectRoutes';
+
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Breadcrumbs } from '@/components/Breadcrumbs';
@@ -7,7 +9,7 @@ import { FeedbackPanel, Skeleton } from '@/lib/ft-ui';
 import { ProjectPickerPage } from '@/components/picker/ProjectPickerPage';
 import { MapPageClient } from './MapPageClient';
 import { formatMapRouteState, mapHref, parseMapRoute, parseMapRouteState } from '@/lib/navigation/projectRoutes';
-import { useProjectIdentity } from '@/lib/navigation/useProjectIdentity';
+import { ProjectIdentityPhase, useProjectIdentity } from '@/lib/navigation/useProjectIdentity';
 import { ProjectIdentityProblem } from '@/components/ProjectIdentityProblem';
 
 /**
@@ -29,9 +31,9 @@ export function MapRouter() {
   }
 
   const route = parseMapRoute(pathname);
-  if (route.kind === 'canonical') return <MapPageClient projectHash={route.projectHash} />;
-  if (route.kind === 'legacy') return <LegacyMapRoute projectLabel={route.projectLabel} search={searchParams?.toString() ?? ''} />;
-  if (route.kind === 'malformed') return <MalformedMapRoute message={route.message} />;
+  if (route.kind === ProjectRouteKind.Canonical) return <MapPageClient projectHash={route.projectHash} />;
+  if (route.kind === ProjectRouteKind.Legacy) return <LegacyMapRoute projectLabel={route.projectLabel} search={searchParams?.toString() ?? ''} />;
+  if (route.kind === ProjectRouteKind.Malformed) return <MalformedMapRoute message={route.message} />;
 
   return <MapPicker />;
 }
@@ -40,13 +42,13 @@ function LegacyMapRoute({ projectLabel, search }: { projectLabel: string; search
   const router = useRouter();
   const { state, retry } = useProjectIdentity(projectLabel);
   useEffect(() => {
-    if (state.phase === 'ready') {
+    if (state.phase === ProjectIdentityPhase.Ready) {
       const canonicalPath = mapHref(state.projectHash);
       const preserved = parseMapRouteState(canonicalPath, search);
       router.replace(preserved ? formatMapRouteState(preserved) : canonicalPath);
     }
   }, [router, search, state]);
-  if (state.phase === 'missing' || state.phase === 'error') {
+  if (state.phase === ProjectIdentityPhase.Missing || state.phase === ProjectIdentityPhase.Error) {
     return <ProjectIdentityProblem state={state} onRetry={retry} />;
   }
   return <MapRouteSkeleton />;

@@ -49,7 +49,7 @@ func (c *Conn) CreateSession(db string) (*Session, error) {
 		return nil, fmt.Errorf("sqlite: create session: nil connection")
 	}
 	var cdb uintptr
-	if db == "" || db == "main" {
+	if db == "" || db == mainDatabaseName {
 		cdb = mainCString
 	} else {
 		var err error

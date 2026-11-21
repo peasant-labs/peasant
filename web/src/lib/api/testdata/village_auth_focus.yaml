@@ -1,0 +1,281 @@
+# The sign-in read on window focus, shared by the sidebar and the online page,
+# played on a fake clock. Each case is a timeline of subscriptions, focus
+# events and unsubscriptions (`at` in milliseconds from the start), the reads
+# the server answers in order (`ms` it takes, then what it says: a username
+# when signed in, `signed out`, `fail`, `throw`, `stall`, `abort-success` (an answer
+# delivered on abort), or `abort-delay-success` (an answer `ms` after abort);
+# the last answer repeats), and what
+# is expected: the times each read started, what each subscriber heard in
+# order (`no account` when the read failed), and whether the reader still
+# listens for focus when the timeline ends (`pendingTimers` checks how many
+# timers are waiting at that moment, `listeners` how many focus listeners it
+# holds). No two reads are ever in flight at once, in any case.
+requiredNames:
+  - one-read-per-focus-burst
+  - focus-during-a-read-starts-no-read
+  - gap-is-two-seconds-from-read-end
+  - dropped-focus-gets-one-trailing-read
+  - two-subscribers-share-one-read
+  - failed-read-reports-no-account-and-allows-the-next
+  - last-unsubscribe-removes-the-listener-and-the-timer
+  - unsubscribe-last-during-a-read-remount-waits-for-its-end
+  - unsubscribe-after-completion-remount-waits-out-the-gap
+  - orphaned-read-ends-unheard-remount-waits-out-the-gap
+  - stalled-read-clears-account-and-retries-held-focus
+  - stalled-orphan-remount-waits-for-abort-and-fresh-read
+  - answer-delivered-after-abort-is-not-an-account
+  - delayed-abort-settlement-keeps-guard-and-remount-fresh
+  - synchronous-failure-clears-deadline-and-allows-retry
+cases:
+  # Five focus events inside one second: one read at once, one after the gap.
+  - name: one-read-per-focus-burst
+    reads: [{ms: 100, answer: ada}]
+    timeline:
+      - {at: 0, subscribe: sidebar}
+      - {at: 3000, focus: true}
+      - {at: 3200, focus: true}
+      - {at: 3400, focus: true}
+      - {at: 3600, focus: true}
+      - {at: 3800, focus: true}
+    until: 10000
+    expectReads: [0, 3000, 5100]
+    expectHeard: {sidebar: [ada, ada, ada]}
+    expectListening: true
+
+  # The first read is slow; a focus while it runs starts nothing then, and is
+  # read once, the gap after that read ends.
+  - name: focus-during-a-read-starts-no-read
+    reads: [{ms: 1000, answer: ada}]
+    timeline:
+      - {at: 0, subscribe: sidebar}
+      - {at: 500, focus: true}
+      - {at: 900, focus: true}
+    until: 8000
+    expectReads: [0, 3000]
+    expectHeard: {sidebar: [ada, ada]}
+    expectListening: true
+
+  # The gap is measured from where a read ended, not where it started: a focus
+  # 2400 ms after a read that started at 0 and ended at 500 is inside it.
+  - name: gap-is-two-seconds-from-read-end
+    reads: [{ms: 500, answer: ada}]
+    timeline:
+      - {at: 0, subscribe: sidebar}
+      - {at: 2400, focus: true}
+      - {at: 5100, focus: true}
+    until: 9000
+    expectReads: [0, 2500, 5100]
+    expectHeard: {sidebar: [ada, ada, ada]}
+    expectListening: true
+
+  # A sign-in finished in another window during the gap is not missed: the
+  # focus that came back with it is read at the end of the gap, once.
+  - name: dropped-focus-gets-one-trailing-read
+    reads: [{ms: 100, answer: signed out}, {ms: 100, answer: ada}]
+    timeline:
+      - {at: 0, subscribe: sidebar}
+      - {at: 1000, focus: true}
+      - {at: 1500, focus: true}
+      - {at: 1900, focus: true}
+    until: 8000
+    expectReads: [0, 2100]
+    expectHeard: {sidebar: [signed out, ada]}
+    expectListening: true
+
+  # The online page mounts the sidebar and its own reader: both hear one read.
+  - name: two-subscribers-share-one-read
+    reads: [{ms: 100, answer: ada}]
+    timeline:
+      - {at: 0, subscribe: sidebar}
+      - {at: 0, subscribe: online}
+      - {at: 5000, focus: true}
+    until: 9000
+    expectReads: [0, 5000]
+    expectHeard: {sidebar: [ada, ada], online: [ada, ada]}
+    expectListening: true
+
+  # A failed read reports no account, as it always has, and the next focus
+  # after the gap reads again.
+  - name: failed-read-reports-no-account-and-allows-the-next
+    reads: [{ms: 100, answer: ada}, {ms: 100, answer: fail}, {ms: 100, answer: ada}]
+    timeline:
+      - {at: 0, subscribe: sidebar}
+      - {at: 3000, focus: true}
+      - {at: 6000, focus: true}
+    until: 9000
+    expectReads: [0, 3000, 6000]
+    expectHeard: {sidebar: [ada, no account, ada]}
+    expectListening: true
+
+  # When the last page leaves, the focus listener and the trailing read it was
+  # owed go with it: a later focus reads nothing.
+  - name: last-unsubscribe-removes-the-listener-and-the-timer
+    reads: [{ms: 100, answer: ada}]
+    timeline:
+      - {at: 0, subscribe: sidebar}
+      - {at: 0, subscribe: online}
+      - {at: 1000, focus: true}
+      - {at: 1500, unsubscribe: online}
+      - {at: 1600, unsubscribe: sidebar}
+      # The trailing read the focus at 1000 was owed is no longer scheduled.
+      - {at: 1650, pendingTimers: 0}
+      - {at: 1700, focus: true}
+      - {at: 4000, focus: true}
+    until: 9000
+    expectReads: [0]
+    expectHeard: {sidebar: [ada], online: [ada]}
+    expectListening: false
+
+  # The last subscriber leaves while its read is slow. A new subscriber mounts
+  # before that read settles: no second read starts, the old answer is told to
+  # nobody, and a fresh read runs two seconds after the old read actually ends.
+  # A focus during the transition is held for that fresh read.
+  - name: unsubscribe-last-during-a-read-remount-waits-for-its-end
+    reads: [{ms: 1000, answer: ada}, {ms: 100, answer: signed out}]
+    timeline:
+      - {at: 0, subscribe: sidebar}
+      - {at: 300, unsubscribe: sidebar}
+      - {at: 600, subscribe: online}
+      - {at: 601, listeners: 1}
+      - {at: 800, focus: true}
+      # The old read ends at 1000 and schedules the fresh read for 3000.
+      - {at: 1000, pendingTimers: 1}
+      - {at: 1200, focus: true}
+      # The fresh read reaches the new subscriber and ends at 3100.
+      - {at: 3200, unsubscribe: online}
+      - {at: 3201, listeners: 0, pendingTimers: 0}
+      - {at: 4000, focus: true}
+    until: 8000
+    expectReads: [0, 3000]
+    expectHeard: {sidebar: [], online: [signed out]}
+    expectListening: false
+
+  # A read completed, then the last subscriber left. A quick remount has no
+  # reading to show, so it waits out the rest of the two seconds from the
+  # completed read's actual end and then reads once. It is not shown the old
+  # account and it does not start a read immediately on mounting.
+  - name: unsubscribe-after-completion-remount-waits-out-the-gap
+    reads: [{ms: 100, answer: ada}, {ms: 100, answer: signed out}]
+    timeline:
+      - {at: 0, subscribe: sidebar}
+      # The read ends at 100; the subscriber leaves at 300.
+      - {at: 300, unsubscribe: sidebar}
+      - {at: 600, subscribe: online}
+      - {at: 601, listeners: 1, pendingTimers: 1}
+      # A focus inside the gap adds nothing to the one scheduled read.
+      - {at: 800, focus: true}
+      # The fresh read starts at 2100, two seconds after the read ended.
+      - {at: 2201, pendingTimers: 0}
+      - {at: 2400, unsubscribe: online}
+      - {at: 2401, listeners: 0, pendingTimers: 0}
+      - {at: 3000, focus: true}
+    until: 8000
+    expectReads: [0, 2100]
+    expectHeard: {sidebar: [ada], online: [signed out]}
+    expectListening: false
+
+  # A slow read outlives every subscriber, so nobody hears it. A remount inside
+  # the gap starts none of its own and waits for one fresh read at the end of
+  # the gap measured from the old read's actual end.
+  - name: orphaned-read-ends-unheard-remount-waits-out-the-gap
+    reads: [{ms: 1000, answer: ada}, {ms: 100, answer: signed out}]
+    timeline:
+      - {at: 0, subscribe: sidebar}
+      - {at: 300, unsubscribe: sidebar}
+      # The old read ends unheard at 1000; no timer or listener is left.
+      - {at: 1001, pendingTimers: 0}
+      - {at: 1200, subscribe: online}
+      - {at: 1201, listeners: 1, pendingTimers: 1}
+      - {at: 1500, focus: true}
+      # The fresh read starts at 3000, two seconds after the old read ended.
+      - {at: 3101, pendingTimers: 0}
+      - {at: 3200, unsubscribe: online}
+      - {at: 3201, listeners: 0, pendingTimers: 0}
+      - {at: 4000, focus: true}
+    until: 8000
+    expectReads: [0, 3000]
+    expectHeard: {sidebar: [], online: [signed out]}
+    expectListening: false
+
+  # The previous account is no longer reliable. The deadline aborts the slow
+  # read, reports failure, and retries the held focus after the normal gap.
+  - name: stalled-read-clears-account-and-retries-held-focus
+    reads: [{ms: 100, answer: ada}, {ms: 0, answer: stall}, {ms: 100, answer: signed out}]
+    timeline:
+      - {at: 0, subscribe: sidebar}
+      - {at: 3000, focus: true}
+      - {at: 3500, focus: true}
+      - {at: 4000, focus: true}
+      - {at: 13001, pendingTimers: 1}
+      - {at: 16000, unsubscribe: sidebar}
+      - {at: 16001, pendingTimers: 0, listeners: 0}
+    until: 17000
+    expectReads: [0, 3000, 15000]
+    expectAborts: [13000]
+    expectHeard: {sidebar: [ada, no account, signed out]}
+    expectListening: false
+
+  # A remount cannot overlap the orphaned read, hear its result, or wait
+  # indefinitely for it. The timeout remains armed without subscribers.
+  - name: stalled-orphan-remount-waits-for-abort-and-fresh-read
+    reads: [{ms: 0, answer: stall}, {ms: 100, answer: signed out}]
+    timeline:
+      - {at: 0, subscribe: sidebar}
+      - {at: 300, unsubscribe: sidebar}
+      - {at: 301, pendingTimers: 1, listeners: 0}
+      - {at: 600, subscribe: online}
+      - {at: 800, focus: true}
+      - {at: 10001, pendingTimers: 1, listeners: 1}
+      - {at: 12500, unsubscribe: online}
+      - {at: 12501, pendingTimers: 0, listeners: 0}
+    until: 13000
+    expectReads: [0, 12000]
+    expectAborts: [10000]
+    expectHeard: {sidebar: [], online: [signed out]}
+    expectListening: false
+
+  # Even a misbehaving dependency that resolves on abort cannot deliver the
+  # expired account before the queued fresh read.
+  - name: answer-delivered-after-abort-is-not-an-account
+    reads: [{ms: 0, answer: abort-success}, {ms: 100, answer: signed out}]
+    timeline:
+      - {at: 0, subscribe: sidebar}
+      - {at: 500, focus: true}
+      - {at: 12500, unsubscribe: sidebar}
+    until: 13000
+    expectReads: [0, 12000]
+    expectAborts: [10000]
+    expectHeard: {sidebar: [no account, signed out]}
+    expectListening: false
+
+  # An abort may take time to settle. The old answer is unheard by the new
+  # subscriber, and the next read waits for the actual end plus the full gap.
+  - name: delayed-abort-settlement-keeps-guard-and-remount-fresh
+    reads: [{ms: 3000, answer: abort-delay-success}, {ms: 100, answer: signed out}]
+    timeline:
+      - {at: 0, subscribe: sidebar}
+      - {at: 300, unsubscribe: sidebar}
+      - {at: 600, subscribe: online}
+      - {at: 10300, focus: true}
+      - {at: 16000, unsubscribe: online}
+      - {at: 16001, pendingTimers: 0, listeners: 0}
+    until: 17000
+    expectReads: [0, 15000]
+    expectAborts: [10000]
+    expectHeard: {sidebar: [], online: [signed out]}
+    expectListening: false
+
+  # A failure before a promise is returned also cancels the deadline, reports
+  # no account and permits a later focus read.
+  - name: synchronous-failure-clears-deadline-and-allows-retry
+    reads: [{ms: 0, answer: throw}, {ms: 100, answer: signed out}]
+    timeline:
+      - {at: 0, subscribe: sidebar}
+      - {at: 1, pendingTimers: 0}
+      - {at: 2500, focus: true}
+      - {at: 3000, unsubscribe: sidebar}
+      - {at: 3001, pendingTimers: 0, listeners: 0}
+    until: 13000
+    expectReads: [0, 2500]
+    expectHeard: {sidebar: [no account, signed out]}
+    expectListening: false

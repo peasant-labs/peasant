@@ -184,7 +184,7 @@ func TestIngestOutcomeReasons(t *testing.T) {
 		},
 		"refresh-unavailable-is-a-diagnostic-and-keeps-its-code": func(t *testing.T) {
 			reason := ingest.OutcomeReasonAdapterRefreshUnavailable
-			if reason.Kind() != ingest.OutcomeKindDiagnostic || reason.Code() != "adapter_refresh_unavailable" {
+			if reason.Kind() != ingest.OutcomeKindDiagnostic || reason.Code() != ingest.OutcomeReasonAdapterRefreshUnavailable.Code() {
 				t.Fatalf("refresh unavailable = %s %s", reason.Kind(), reason.Code())
 			}
 		},

@@ -220,6 +220,9 @@ func (st *kickstartSessions) finishScan(sess *kickstartSession, gen uint64, resu
 			sess.restore(before)
 			return st.failScanLocked(sess, err), nil
 		}
+		if st.previews != nil {
+			st.previews.closeSession(sess.id, schema.LocalKickstartPreviewRescanned)
+		}
 		return append(events, schema.LocalKickstartEvent{Kind: schema.LocalKickstartEventSession, SessionID: sess.id, Revision: revision, View: &draft.view}), []*kickstartViewDraft{draft}
 	})
 }

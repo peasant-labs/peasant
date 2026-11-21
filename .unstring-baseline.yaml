@@ -23,7 +23,6 @@ rules:
     web/scripts/journey/api-binary.test.mjs: 3
     web/scripts/journey/collective-observations.journey.mjs: 12
     web/scripts/journey/kickstart-journey.test.mjs: 2
-    web/scripts/journey/kickstart.journey.mjs: 20
     web/scripts/journey/lib/fake-server.mjs: 1
     web/scripts/journey/lib/kickstart-rail.mjs: 2
     web/scripts/journey/lib/kickstart-seed.mjs: 2
@@ -31,7 +30,6 @@ rules:
     web/scripts/journey/lib/provenance.mjs: 1
     web/scripts/journey/lib/village-fixture.mjs: 3
     web/scripts/journey/lifecycle.test.mjs: 5
-    web/scripts/journey/provenance.test.mjs: 2
     web/scripts/journey/run-collective-observations.mjs: 4
     web/scripts/journey/run-fixture-tests.mjs: 1
     web/scripts/journey/run-kickstart.mjs: 1
@@ -51,10 +49,8 @@ rules:
     web/scripts/visual/publish-states-shoot.mjs: 14
     web/scripts/visual/root-page-visual.mjs: 18
     web/scripts/visual/search-share-visual.mjs: 11
-    web/scripts/visual/settings-shoot.mjs: 3
     web/scripts/visual/shell-chrome-manifest.mjs: 3
     web/scripts/visual/shell-nav-default-gate.mjs: 5
-    web/scripts/visual/shell-nav-gate.mjs: 6
     web/scripts/visual/stitch-sxs.mjs: 1
     web/scripts/visual/transcript-input-gate.mjs: 4
     web/scripts/visual/transcript-segments-shoot.mjs: 2
@@ -62,12 +58,11 @@ rules:
     web/src/app/dev/visual-harness/page.tsx: 2
     web/src/app/dev/visual-harness/sample-session.ts: 7
     web/src/app/home-adapter.test.tsx: 1
-    web/src/app/map/[[...segments]]/MapPageClient.tsx: 7
+    web/src/app/map/[[...segments]]/MapPageClient.tsx: 6
     web/src/app/map/[[...segments]]/MapRail.tsx: 3
     web/src/app/map/[[...segments]]/MapRouter.test.tsx: 1
-    web/src/app/map/[[...segments]]/MapRouter.tsx: 4
     web/src/app/map/[[...segments]]/MapShell.realCodeMap.test.tsx: 1
-    web/src/app/map/[[...segments]]/MapShell.test.tsx: 3
+    web/src/app/map/[[...segments]]/MapShell.test.tsx: 1
     web/src/app/map/lib/codeMapRouteState.errors.test.ts: 2
     web/src/app/map/lib/mapData.test.ts: 1
     web/src/app/page.cache.test.tsx: 6
@@ -76,14 +71,11 @@ rules:
     web/src/app/page.test.tsx: 7
     web/src/app/page.tsx: 4
     web/src/app/projects/[[...segments]]/ProjectsRouter.test.tsx: 6
-    web/src/app/projects/[[...segments]]/ProjectsRouter.tsx: 11
     web/src/app/projects/[[...segments]]/transcriptContextNavigation.mounted.test.tsx: 2
     web/src/app/review/[[...segments]]/ChangeDetail.tsx: 1
-    web/src/app/review/[[...segments]]/ReviewRouter.test.tsx: 10
-    web/src/app/review/[[...segments]]/ReviewRouter.tsx: 4
     web/src/app/review/[[...segments]]/ReviewSurface.diff.mounted.test.tsx: 6
     web/src/app/review/[[...segments]]/ReviewSurface.test.tsx: 5
-    web/src/app/review/[[...segments]]/ReviewSurface.tsx: 7
+    web/src/app/review/[[...segments]]/ReviewSurface.tsx: 5
     web/src/app/review/[[...segments]]/changeGraphLayout.test.ts: 5
     web/src/app/review/[[...segments]]/timelineNavigation.fixture.ts: 1
     web/src/app/review/[[...segments]]/timelineNavigation.test.ts: 3
@@ -100,14 +92,12 @@ rules:
     web/src/app/share/publishPopupStates.mounted.test.tsx: 17
     web/src/app/share/testdata/grouped-sync.ts: 1
     web/src/app/share/testdata/grouped-wire-cases.ts: 1
-    web/src/app/share/testdata/publish-automatic-consent.mjs: 7
     web/src/app/share/testdata/publish-popup-states.mjs: 26
     web/src/app/village/VillagePageClient.tsx: 2
     web/src/components/ChoiceMenu.tsx: 1
     web/src/components/ConnectionState.tsx: 1
     web/src/components/DocsLink.tsx: 2
     web/src/components/LayoutShell.capabilities.test.tsx: 1
-    web/src/components/LayoutShell.tsx: 1
     web/src/components/LocalOfflineNotice.test.tsx: 11
     web/src/components/LocalSidebar.test.tsx: 1
     web/src/components/ProjectIdentityProblem.tsx: 1
@@ -129,7 +119,6 @@ rules:
     web/src/components/session-detail/v2/SessionDetailV2.test.tsx: 12
     web/src/components/session-detail/v2/SessionNotIndexed.tsx: 6
     web/src/components/session-detail/v2/lib/relationshipLink.test.ts: 3
-    web/src/components/session-detail/v2/lib/scopeTurns.ts: 1
     web/src/components/session-detail/v2/publish/publishModel.test.ts: 4
     web/src/components/session-detail/v2/publish/publishModel.ts: 1
     web/src/components/session-detail/v2/publish/segmentConsent.test.ts: 3
@@ -156,8 +145,6 @@ rules:
     web/src/lib/kickstart/model.ts: 1
     web/src/lib/kickstart/useVillageSignIn.ts: 2
     web/src/lib/nav/sections.test.ts: 2
-    web/src/lib/navigation/projectRoutes.test.ts: 7
-    web/src/lib/navigation/projectRoutes.ts: 4
     web/src/lib/navigation/useProjectIdentity.test.ts: 10
     web/src/lib/quality/types.test.ts: 2
     web/src/lib/quality/utils.ts: 1
@@ -180,7 +167,6 @@ rules:
     web/src/test/kickstartHarness.tsx: 4
   copy-query-literal:
     web/scripts/journey/collective-observations.journey.mjs: 31
-    web/scripts/journey/kickstart.journey.mjs: 41
     web/scripts/journey/transcript-viewport.journey.mjs: 13
     web/scripts/visual/home-pages-visual.mjs: 15
     web/scripts/visual/root-page-visual.mjs: 6
@@ -286,7 +272,6 @@ rules:
     web/scripts/visual/transcript-input-gate.mjs: 1
     web/src/app/analytics/dashboard-10k.test.tsx: 2
     web/src/app/home-adapter.test.tsx: 2
-    web/src/app/kickstart/KickstartFlow.test.tsx: 5
     web/src/app/kickstart/SettingsLinks.test.tsx: 1
     web/src/app/map/lib/codeMapRouteState.test.ts: 2
     web/src/app/noFullQualityTopic.test.ts: 1
@@ -355,22 +340,19 @@ rules:
     web/src/test/fixtures/strikeMountedWeb.ts: 1
     web/src/test/fixtures/uiCapabilities.ts: 1
   endpoint-literal:
-    web/scripts/journey/api-binary.test.mjs: 5
+    web/scripts/journey/api-binary.test.mjs: 4
     web/scripts/journey/collective-observations.journey.mjs: 2
-    web/scripts/journey/kickstart.journey.mjs: 5
     web/scripts/journey/lib/village-fixture.mjs: 11
-    web/scripts/journey/run-collective-observations.mjs: 1
-    web/scripts/journey/run-kickstart.mjs: 1
     web/scripts/journey/server-sandbox.test.mjs: 2
     web/scripts/visual/grouped-list-visual.mjs: 7
-    web/scripts/visual/home-pages-visual.mjs: 6
+    web/scripts/visual/home-pages-visual.mjs: 5
     web/scripts/visual/inspect-feedback-shoot.mjs: 1
-    web/scripts/visual/root-page-visual.mjs: 10
+    web/scripts/visual/root-page-visual.mjs: 9
     web/scripts/visual/search-share-visual.mjs: 8
-    web/scripts/visual/settings-shoot.mjs: 5
+    web/scripts/visual/settings-shoot.mjs: 4
     web/scripts/visual/shell-nav-default-gate.mjs: 1
     web/scripts/visual/shell-nav-gate.mjs: 2
-    web/scripts/visual/transcript-segments-shoot.mjs: 3
+    web/scripts/visual/transcript-segments-shoot.mjs: 2
     web/scripts/visual/validate-mock-coordinates.mjs: 1
     web/src/app/kickstart/SettingsLinks.test.tsx: 1
     web/src/app/map/[[...segments]]/MapShell.realCodeMap.test.tsx: 1
@@ -604,7 +586,6 @@ rules:
     internal/harnesslayout/layout_test.go: 4
     internal/ingest/assistant_entry_type_test.go: 1
     internal/ingest/capture_assessment_test.go: 7
-    internal/ingest/captured_source_test.go: 1
     internal/ingest/claude.go: 2
     internal/ingest/claude_agent_collision_test.go: 1
     internal/ingest/claude_control_records.go: 3
@@ -645,7 +626,6 @@ rules:
     internal/ingest/native_coverage_test.go: 8
     internal/ingest/native_latest_attempt_retention_test.go: 1
     internal/ingest/native_prior_authority_bridge_test.go: 9
-    internal/ingest/native_unknown_public_test.go: 1
     internal/ingest/opencode_candidates.go: 1
     internal/ingest/opencode_candidates_test.go: 2
     internal/ingest/opencode_capture.go: 5
@@ -720,10 +700,9 @@ rules:
     internal/push/pipeline_test.go: 2
     internal/push/profile_test.go: 2
     internal/push/publication_omissions_test.go: 2
-    internal/push/published_provenance_envelope_test.go: 4
+    internal/push/published_provenance_envelope_test.go: 2
     internal/push/published_session_scope_test.go: 1
     internal/push/redaction_profile_test.go: 2
-    internal/sessionvisibility/policy_test.go: 6
     internal/sqliteforkaudit/audit.go: 1
     internal/store/annotation_store_test.go: 10
     internal/store/annotation_target_fixtures_test.go: 1
@@ -779,7 +758,6 @@ rules:
     internal/store/publication_metadata_test.go: 2
     internal/store/search_health_entry_test.go: 1
     internal/store/search_rebuild_test.go: 1
-    internal/store/search_recall_test.go: 4
     internal/store/session_lock_test.go: 1
     internal/store/stats_drop_guard_test.go: 1
     internal/store/stats_overflow_test.go: 1
@@ -794,7 +772,6 @@ rules:
     internal/testkit/teststream/stream.go: 2
     internal/testkit/testwait/testwait_test.go: 1
     internal/testutil/ansipaint.go: 1
-    internal/testutil/cmd/collectiveobservations-fixture/main.go: 2
     internal/testutil/cmd/collectiveobservations-fixture/main_test.go: 1
     internal/testutil/fs_decorators_test.go: 1
     internal/testutil/mocks_test.go: 1
@@ -1055,7 +1032,6 @@ rules:
     scripts/harvester-version-guard/main_test.go: 1
     scripts/post-merge-evidence/main_test.go: 4
     scripts/profile_push_copy_setup_test.go: 2
-    scripts/profile_push_copy_test.go: 2
     scripts/rollup_test.go: 2
   go-endpoint-literal:
     cmd/peasant/browsing_startup_test.go: 2
@@ -1196,7 +1172,6 @@ rules:
     internal/ingest/opencode_provenance_test.go: 1
     internal/ingest/opencode_session_locator_test.go: 3
     internal/ingest/opencode_session_records_internal_test.go: 1
-    internal/ingest/pi_sanitize.go: 1
     internal/ingest/pipeline_opencode_synthetic_reindex_test.go: 1
     internal/ingest/thinking_level_extraction_test.go: 4
     internal/ingest/toolkind_indexer_test.go: 2

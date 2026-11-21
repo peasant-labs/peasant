@@ -110,7 +110,7 @@ ast-grep scan --config sgconfig.yml .
 
 ### Static guard
 
-`make check-unstring` runs `unstring` v0.0.2 over the Go tree and `web/`. It
+`make check-unstring` runs `unstring` v0.0.4 over the Go tree and `web/`. It
 needs Go 1.26+ and ast-grep 0.51.2; the dev shell provides both. `make check`
 runs the guard directly after the strict ast-grep scan, and a guard failure
 stops the gate. The generated baseline can only shrink; `make unstring-update`

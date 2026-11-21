@@ -318,7 +318,8 @@ func TestExecGitResolver_Branch(t *testing.T) {
 		t.Fatalf("Branch: %v", err)
 	}
 	// git init defaults to "master" or "main" depending on git version/config
-	if got != "master" && got != "main" {
+	const initialMainBranch = "main"
+	if got != "master" && got != initialMainBranch {
 		t.Errorf("Branch = %q, want \"master\" or \"main\"", got)
 	}
 }

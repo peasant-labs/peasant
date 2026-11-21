@@ -1,8 +1,9 @@
 package proc
 
 import (
+	"os"
 	"os/exec"
-	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -12,18 +13,20 @@ import (
 // caught on one platform.
 func TestHideConsoleWindowLeavesTheCommandRunnable(t *testing.T) {
 	t.Parallel()
-	name, args := "sh", []string{"-c", "printf hidden"}
-	if runtime.GOOS == "windows" {
-		name, args = "cmd", []string{"/c", "echo hidden"}
+	// The command is this test binary, which exists on every platform and
+	// prints PASS when told to run no tests.
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("locate this test binary: %v", err)
 	}
-	cmd := exec.Command(name, args...)
+	cmd := exec.Command(self, "-test.run=^$")
 	HideConsoleWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("%s did not run after HideConsoleWindow: %v", name, err)
+		t.Fatalf("%s did not run after HideConsoleWindow: %v", self, err)
 	}
-	if got := string(out); len(got) == 0 {
-		t.Fatalf("%s produced no output after HideConsoleWindow", name)
+	if got := string(out); !strings.Contains(got, "PASS") {
+		t.Fatalf("%s printed %q after HideConsoleWindow, want its PASS line", self, got)
 	}
 }
 

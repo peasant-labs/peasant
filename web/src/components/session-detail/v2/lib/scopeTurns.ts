@@ -1,4 +1,4 @@
-import { Role as SchemaRole } from '@peasant-labs/schema';
+import { EntryType, Role as SchemaRole } from '@peasant-labs/schema';
 import { prefilterTurns as packagePrefilterTurns } from '@peasant-labs/fairtrade/ui';
 import type { TurnDetail } from '@/types/messages';
 import {
@@ -217,7 +217,7 @@ export function prefilterTurns(turns: TurnDetail[]): TurnDetail[] {
   // The published viewer names an image entry the pinned schema client does not.
   // The filter returns a subset of the turns it was given; drop an image entry
   // rather than widen the host's turn type.
-  return packagePrefilterTurns(turns).filter((turn): turn is TurnDetail => turn.entryType !== 'image');
+  return packagePrefilterTurns(turns).filter((turn): turn is TurnDetail => turn.entryType !== EntryType.Image);
 }
 
 // -- Breadcrumb + chip helpers ---------------------------------------------------

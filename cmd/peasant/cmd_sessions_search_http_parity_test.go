@@ -33,8 +33,9 @@ func TestSessionsSearchHTTPParity(t *testing.T) {
 		t.Fatal(err)
 	}
 	var dbPath string
+	const primaryDatabase = "main"
 	err = sqlitex.ExecuteTransient(conn, "PRAGMA database_list", &sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error {
-		if stmt.ColumnText(1) == "main" {
+		if stmt.ColumnText(1) == primaryDatabase {
 			dbPath = stmt.ColumnText(2)
 		}
 		return nil

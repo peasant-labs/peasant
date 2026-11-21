@@ -68,7 +68,7 @@ readerCases:
     harness: claude-code
     origin: file
     transcript: missing
-    wantErrorContains: read the harness transcript
+    wantErrorContains: transcript could not be read
   - name: a-harness-with-no-reader-fails-closed
     harness: nonesuch
     origin: file
@@ -78,7 +78,7 @@ readerCases:
     harness: claude-code
     origin: ""
     transcript: present
-    wantErrorContains: outside the supported closed set
+    wantErrorContains: discovery listing could not be mapped
 bodyCases:
   - name: an-unimported-session-shows-its-harness-transcript
     highlight: 4b0d2e17-6c58-4a39-8f21-0d7e3b9c5a12

@@ -26,7 +26,7 @@ import {
   type DecodedMapNodeDetailPayload,
   type DecodedProjectTasksPayload,
 } from '@/lib/api/map';
-import { useProjectIdentity } from '@/lib/navigation/useProjectIdentity';
+import { ProjectIdentityPhase, useProjectIdentity } from '@/lib/navigation/useProjectIdentity';
 import { ProjectIdentityProblem } from '@/components/ProjectIdentityProblem';
 import { mapHref, returnLocation, reviewHref, type ProjectHash } from '@/lib/navigation/projectRoutes';
 import type { ReviewListPayload } from '@peasant-labs/schema';
@@ -523,8 +523,8 @@ export function MapShell({
 /** The /map/{project} page: container + breadcrumbs + the map shell. */
 export function MapPageClient({ projectHash, projectName: requestedProjectName }: { projectHash?: ProjectHash; projectName?: string }) {
   const { state, retry } = useProjectIdentity(projectHash ?? requestedProjectName ?? null);
-  if (state.phase === 'resolving') return <CanvasShimmer note="resolving project identity…" />;
-  if (state.phase === 'missing' || state.phase === 'error') {
+  if (state.phase === ProjectIdentityPhase.Resolving) return <CanvasShimmer note="resolving project identity…" />;
+  if (state.phase === ProjectIdentityPhase.Missing || state.phase === ProjectIdentityPhase.Error) {
     return <ProjectIdentityProblem state={state} onRetry={retry} />;
   }
   const projectName = state.label;
