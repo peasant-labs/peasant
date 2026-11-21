@@ -3,6 +3,7 @@ package store_test
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -73,6 +74,7 @@ func withContextValue(t *testing.T, recorded schema.UnifiedMetadata, field, valu
 func TestParseRowsIgnoreTheCapturedContext(t *testing.T) {
 	corpus, _ := loadReaderEntrypoints(t)
 	changes := LoadContextChanges(t)
+	pinUnifiedMetadataInventory(t, changes)
 	for _, h := range corpus.Harnesses {
 		if !slices.Contains(changes.Harnesses, h.Harness) {
 			continue
@@ -110,5 +112,112 @@ func TestParseRowsIgnoreTheCapturedContext(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+// nonContextUnifiedMetadataFields lists the schema.UnifiedMetadata leaf JSON
+// paths that are identity, transcript-derived, stats, diagnostic, or stamp
+// fields rather than captured context variations in context_changes.yaml.
+var nonContextUnifiedMetadataFields = map[string]bool{
+	"adapterVersion":                   true,
+	"contentHash":                      true,
+	"derivedAt":                        true,
+	"diagnostics.partial":              true,
+	"diagnostics.warnings":             true,
+	"git.associations":                 true,
+	"git.commits":                      true,
+	"git.tracking":                     true,
+	"harness":                          true,
+	"metadataHash":                     true,
+	"model":                            true,
+	"project.filePath":                 true,
+	"redaction.applied":                true,
+	"redaction.content_hash_at_redact": true,
+	"redaction.redacted_at_ms":         true,
+	"redaction.rule_set_version":       true,
+	"schemaVersion":                    true,
+	"sessionId":                        true,
+	"source.filePath":                  true,
+	"source.format":                    true,
+	"stats.cachedReadTokens":           true,
+	"stats.cachedWriteTokens":          true,
+	"stats.conversationTurnCount":      true,
+	"stats.durationMs":                 true,
+	"stats.inputSubmissionCount":       true,
+	"stats.subagentCount":              true,
+	"stats.thoughtTokens":              true,
+	"stats.tokensIn":                   true,
+	"stats.tokensOut":                  true,
+	"stats.toolCallCount":              true,
+	"stats.turnCount":                  true,
+	"subagents":                        true,
+	"thinkingLevel":                    true,
+	"thinkingLevelHistory":             true,
+	"thinkingLevelRaw":                 true,
+	"timestamp.end":                    true,
+	"timestamp.ingested":               true,
+	"timestamp.start":                  true,
+	"version":                          true,
+}
+
+func pinUnifiedMetadataInventory(t *testing.T, changes contextChangeFixture) {
+	t.Helper()
+	var collect func(prefix string, typ reflect.Type, out map[string]bool)
+	collect = func(prefix string, typ reflect.Type, out map[string]bool) {
+		for typ.Kind() == reflect.Pointer {
+			typ = typ.Elem()
+		}
+		if typ.Kind() != reflect.Struct {
+			if prefix != "" {
+				out[prefix] = true
+			}
+			return
+		}
+		for i := range typ.NumField() {
+			field := typ.Field(i)
+			if !field.IsExported() {
+				continue
+			}
+			tag := field.Tag.Get("json")
+			if tag == "-" {
+				continue
+			}
+			name, _, _ := strings.Cut(tag, ",")
+			if name == "" {
+				name = field.Name
+			}
+			path := name
+			if prefix != "" {
+				path = prefix + "." + name
+			}
+			ft := field.Type
+			for ft.Kind() == reflect.Pointer {
+				ft = ft.Elem()
+			}
+			if ft.Kind() == reflect.Struct {
+				collect(path, ft, out)
+			} else {
+				out[path] = true
+			}
+		}
+	}
+	actual := map[string]bool{}
+	collect("", reflect.TypeOf(schema.UnifiedMetadata{}), actual)
+	covered := map[string]bool{}
+	for _, c := range changes.Changes {
+		covered[c.Field] = true
+		if !actual[c.Field] {
+			t.Errorf("context_changes.yaml names %q, which is not a field of schema.UnifiedMetadata", c.Field)
+		}
+	}
+	for path := range actual {
+		if !covered[path] && !nonContextUnifiedMetadataFields[path] {
+			t.Errorf("schema.UnifiedMetadata field %q is neither in context_changes.yaml nor in nonContextUnifiedMetadataFields", path)
+		}
+	}
+	for path := range nonContextUnifiedMetadataFields {
+		if !actual[path] {
+			t.Errorf("nonContextUnifiedMetadataFields names %q, which is not a field of schema.UnifiedMetadata", path)
+		}
 	}
 }

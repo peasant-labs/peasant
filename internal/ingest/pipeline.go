@@ -2376,6 +2376,7 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 						result.logEntry = p.makeIndexLogEntry(im, IndexOutcomeSkipped, 0, result.startedAt, &reason, nil)
 						result.bytes = 0
 						input.transcript, input.tree = nil, nil
+						activeParses.Add(-1)
 						return result
 					}
 				}
@@ -2397,6 +2398,7 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 					result.logEntry = p.makeIndexLogEntry(im, IndexOutcomeSkipped, 0, result.startedAt, &reason, nil)
 					result.bytes = 0
 					input.transcript, input.tree = nil, nil
+					activeParses.Add(-1)
 					return result
 				}
 				slog.Warn(logPrefix+": unchanged generation settlement refused", "session_id", im.session.SessionID, "error", settleErr)

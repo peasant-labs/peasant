@@ -479,3 +479,21 @@ metadata context again at the next refresh and is validated again. A non-context
 explicit rebuilds and runs with refresh skips disabled. No stored generation is
 copied. The reader concurrency bound is defined by
 `defaults.ManagedRefreshReadSlots` and the store connection pool.
+
+## Golden normalization
+
+The reader-entrypoint golden manifest
+(`internal/store/testdata/reader_entrypoints.manifest.yaml`) normalizes a
+bounded set of fields rather than injecting test clocks or deterministic IDs
+into production:
+
+- **Install and activation timestamps** (`Record.InstalledAtMs`,
+  `Record.ActivatedAtMs`): the harmonized commit stamps these with its own clock
+  and no caller injects one.
+- **Codex ingest timestamps and random segment references**
+  (`Record.TimestampIngestedMs`, `Metadata.timestamp.ingested`,
+  `Record.MetadataHash`, `Record.CandidateDigest`, and
+  `Children.SegmentRefs.SourceEntryRef`): Codex metadata extraction stamps the
+  ingest time with its own clock (which the metadata hash and activation seal
+  cover) and mints segment references at random, so the golden generator
+  normalizes those fields by ordinal with explicit reasons in the manifest.
