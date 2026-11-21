@@ -41,6 +41,9 @@ func TestHarvestHumanOutputNamesWhyASessionFailed(t *testing.T) {
 		if !strings.Contains(output, "ERROR") || !strings.Contains(output, "capture JSONL record 2: malformed complete JSON") {
 			t.Errorf("harvest %v does not say why the session failed:\n%s", args, output)
 		}
+		if strings.Count(output, "repair this record and retry ingest") != 1 || strings.Contains(output, "restore source readability") {
+			t.Errorf("harvest %v reason must give one remedy, repair the record:\n%s", args, output)
+		}
 	}
 }
 

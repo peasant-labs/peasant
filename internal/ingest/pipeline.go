@@ -3925,6 +3925,13 @@ func (p *Pipeline) captureSession(ctx context.Context, session DiscoveredSession
 			}
 		}
 		if err != nil {
+			// A malformed record already names its one remedy: repair the
+			// record. Readability advice would contradict it, because the
+			// source was read; only the other capture failures get it.
+			var malformed malformedSourceRecord
+			if errors.As(err, &malformed) {
+				return nil, fmt.Errorf("capture transcript source for %s: %w", session.SessionID, err)
+			}
 			return nil, fmt.Errorf("capture transcript source for %s: %w; prior stored state remains unchanged; restore source readability and retry", session.SessionID, err)
 		}
 		if session.Harness != HarnessOpenCode {
