@@ -15,8 +15,8 @@ Peasant is a local-first tool. All ingestion, indexing, and analysis happens on 
 | [Hook-triggered push](#6-hook-triggered-push) | `git commit` or `git push` | Village API | Same as the two rows above; under an auto-publish rule, also a share of each sent transcript with the rule's collectives | **Yes — after an explicit per-repository install** |
 | [`peasant village auto`](#6-hook-triggered-push) | `peasant village auto` | Village API | Nothing (GET only): the shares of the transcript you published last, and your collectives' names | No — explicit command |
 | [Waiting prompt request lookup](#7-waiting-prompt-request-lookup) | `peasant village push` (by hand or from a hook) | Village API | Nothing (GET only) | Yes — whenever a logged-in push runs |
-| [Login](#3-login) | `peasant login` | Village API | OAuth code exchange | No — explicit command |
-| [Logout](#4-logout) | `peasant logout` | Village API | API key revocation | No — explicit command |
+| [Login](#3-login) | `peasant village login` | Village API | OAuth code exchange | No — explicit command |
+| [Logout](#4-logout) | `peasant village logout` | Village API | API key revocation | No — explicit command |
 | [Model registry fetch](#5-model-registry-fetch) | `peasant ingest` | models.dev | Nothing (GET only) | Yes — during ingest |
 
 **No telemetry. No analytics. No crash reporting. No update checker. No phone-home.**
@@ -29,10 +29,10 @@ Peasant is a local-first tool. All ingestion, indexing, and analysis happens on 
 
 **Endpoint:** `POST {village}/api/v1/transcripts/publish`
 
-**Authentication:** Bearer token (obtained via `peasant login`)
+**Authentication:** Bearer token (obtained via `peasant village login`)
 
 **Consent mechanism:**
-- User must first run `peasant login` (one-time OAuth flow)
+- User must first run `peasant village login` (one-time OAuth flow)
 - A push you run yourself shows an interactive wizard listing sessions to upload
 - User selects/deselects individual sessions before confirming
 - `--force` flag skips the wizard (for scripting)
@@ -197,7 +197,7 @@ rather than accepting a dangling target.
 
 ## 3. Login
 
-**Trigger:** `peasant login` command
+**Trigger:** `peasant village login` command ([reference](cli/peasant_village_login.md))
 
 **Endpoint:** `{village}/api/v1/auth/cli/login` (browser redirect) + `{village}/api/v1/auth/cli/exchange` (code exchange)
 
@@ -210,13 +210,13 @@ rather than accepting a dangling target.
 
 **What is sent:** OAuth authorization code + state token
 **What is received:** API key, key ID, user ID, username
-**What is stored locally:** API key + key ID in `~/.config/peasant/auth.json`
+**What is stored locally:** API key + key ID in `credentials.json` in the config directory (`$XDG_CONFIG_HOME/peasant/credentials.json`, by default `~/.config/peasant/credentials.json`), mode `0600`; see [the auth model](auth.md#1-identity--credentials)
 
 ---
 
 ## 4. Logout
 
-**Trigger:** `peasant logout` command
+**Trigger:** `peasant village logout` command ([reference](cli/peasant_village_logout.md))
 
 **Endpoint:** `DELETE {village}/api/v1/auth/api-keys/{keyId}`
 

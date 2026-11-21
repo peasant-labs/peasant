@@ -120,7 +120,7 @@ session_entries (DB) → ListEntries() → RedactEntries() ───┤
 | **Wire type sent** | `{"code": "...", "state": "..."}` (exchange body, `server.go:100-103`) |
 | **Wire type received** | `APIKey`, `KeyID`, `UserID`, `Username` (`server.go:149-163`) |
 | **Local callback** | `127.0.0.1:17249` or ephemeral port (`server.go:383-396`) |
-| **Trigger** | `peasant login` CLI command |
+| **Trigger** | `peasant village login` CLI command |
 | **TLS** | Localhost allows insecure TLS for dev (`server.go:127-133`) |
 
 ### Call 5: OAuth Logout (Key Revocation)
@@ -130,7 +130,7 @@ session_entries (DB) → ListEntries() → RedactEntries() ───┤
 | **Method** | `DELETE` |
 | **Endpoint** | `{village}/api/v1/auth/api-keys/{keyId}` |
 | **Client** | `internal/auth/logout.go:37-67` → `revokeRemoteKey()` |
-| **Trigger** | `peasant logout` CLI command |
+| **Trigger** | `peasant village logout` CLI command |
 | **Auth** | Bearer token with the key being revoked (`logout.go:44`) |
 
 ### Call 6: Model Registry Fetch
