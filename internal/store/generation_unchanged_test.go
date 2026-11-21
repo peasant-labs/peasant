@@ -82,11 +82,16 @@ func LoadUnchangedProofFixtures(t *testing.T) unchangedProofFixtures {
 
 func unchangedProofSetup(t *testing.T) (*Store, ManagedGenerationUnchangedProof) {
 	t.Helper()
+	return unchangedProofSetupWith(t, WithPoolSize(1), WithWALAutocheckpointDisabled())
+}
+
+func unchangedProofSetupWith(t *testing.T, options ...OpenOption) (*Store, ManagedGenerationUnchangedProof) {
+	t.Helper()
 	sid, err := schema.NewSessionID("d4d4d4d4-d4d4-44d4-84d4-d4d4d4d4d4d4")
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, _ := openGenerationStoreWith(t, WithPoolSize(1), WithWALAutocheckpointDisabled())
+	s, _ := openGenerationStoreWith(t, options...)
 	seedGenerationSession(t, s, string(sid))
 	v, blobs := buildTestGeneration(t, sid, "unchanged_base", "body", "mutation-input", "output")
 	v.Generation.Metadata.ContentHash = strings.Repeat("b", 64)
@@ -410,99 +415,7 @@ func TestManagedGenerationUnchangedProof(t *testing.T) {
 	for _, tc := range LoadUnchangedProofFixtures(t).Cases {
 		t.Run(tc.Name, func(t *testing.T) {
 			s, p := unchangedProofSetup(t)
-			switch tc.Mutation {
-			case "mutation-none":
-			case "adapter":
-				n := 4
-				p.Metadata.AdapterVersion = &n
-			case "redaction-provenance":
-				n := int64(123)
-				p.Metadata.Redaction.RedactedAtMs = &n
-				p.Metadata.Redaction.RuleSetVersion = "new"
-			case "mutation-active":
-				p.GenerationID = "different"
-			case "mutation-unsupported", "latest-attempt":
-				conn, err := s.pool.Take(context.Background())
-				if err != nil {
-					t.Fatal(err)
-				}
-				query := `UPDATE sessions SET latest_attempt_generation_id=? WHERE session_id=?`
-				id := p.GenerationID
-				if tc.Mutation == "mutation-unsupported" {
-					query = `UPDATE sessions SET active_generation_id=? WHERE session_id=?`
-					id = "file_backed"
-					err = sqlitex.Execute(conn, `INSERT INTO session_projection_generations(session_id,generation_id,metadata_json,title_refs_json,source_evidence_digest,completeness,index_format_version,installed_at_ms) VALUES(?,?,'{}','[]',?,'complete',2,1)`, &sqlitex.ExecOptions{Args: []any{string(p.SessionID), id, strings.Repeat("b", 64)}})
-					if err != nil {
-						t.Fatal(err)
-					}
-					p.GenerationID = id
-				}
-				err = sqlitex.Execute(conn, query, &sqlitex.ExecOptions{Args: []any{id, string(p.SessionID)}})
-				s.pool.Put(conn)
-				if err != nil {
-					t.Fatal(err)
-				}
-			case "mutation-content":
-				p.Metadata.ContentHash = strings.Repeat("c", 64)
-			case "mutation-source-format":
-				p.Metadata.Source.Format = schema.SourceFormatJSON
-			case "mutation-harness":
-				p.Metadata.ModelHarness = defaults.HarnessCodex
-			case "mutation-metadata":
-				p.Metadata.Project.Name = "changed"
-			case "redaction":
-				p.Metadata.Redaction.ContentHashAtRedact = "changed"
-			case "indexer":
-				p.IndexerTarget = 2
-			case "mutation-input":
-				p.InputDigest = strings.Repeat("d", 64)
-			case "null-input-proof":
-				conn, err := s.pool.Take(context.Background())
-				if err != nil {
-					t.Fatal(err)
-				}
-				err = sqlitex.Execute(conn, `UPDATE sessions SET indexed_input_hash=NULL WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(p.SessionID)}})
-				s.pool.Put(conn)
-				if err != nil {
-					t.Fatal(err)
-				}
-				p.Expected, err = s.ReadIndexState(context.Background(), p.SessionID)
-				if err != nil || p.Expected == nil || p.Expected.IndexedInputHash != nil {
-					t.Fatalf("expected NULL input proof: %+v, %v", p.Expected, err)
-				}
-			case "mutation-completeness", "mutation-source-evidence", "zero-metadata", "forged-metadata", "seal":
-				conn, err := s.pool.Take(context.Background())
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err = sqlitex.Execute(conn, `DROP TRIGGER session_generations_immutable`, nil); err != nil {
-					t.Fatal(err)
-				}
-				field, value := "", ""
-				switch tc.Mutation {
-				case "mutation-completeness":
-					field = "completeness"
-					value = "incomplete_new"
-				case "mutation-source-evidence":
-					field = "source_evidence_digest"
-					value = strings.Repeat("0", 64)
-				case "zero-metadata":
-					field = "metadata_hash"
-					value = strings.Repeat("0", 64)
-				case "forged-metadata":
-					field = "metadata_hash"
-					value = strings.Repeat("f", 64)
-				case "seal":
-					field = "candidate_digest"
-					value = strings.Repeat("0", 64)
-				}
-				if err = sqlitex.Execute(conn, `UPDATE session_generations SET `+field+`=? WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{value, string(p.SessionID)}}); err != nil {
-					t.Fatal(err)
-				}
-				s.pool.Put(conn)
-			default:
-				t.Fatalf("unknown mutation %q", tc.Mutation)
-			}
+			applyUnchangedProofMutation(t, s, &p, tc.Mutation)
 			got, err := s.ProveManagedGenerationUnchanged(context.Background(), p)
 			if err != nil {
 				t.Fatal(err)
@@ -515,5 +428,105 @@ func TestManagedGenerationUnchangedProof(t *testing.T) {
 				t.Fatalf("proof = %+v, mismatch %q", got, expected)
 			}
 		})
+	}
+}
+
+// applyUnchangedProofMutation changes one term of the unchanged proof, either
+// in the captured request or in the stored rows, as the shared mismatch
+// fixtures name it.
+func applyUnchangedProofMutation(t *testing.T, s *Store, p *ManagedGenerationUnchangedProof, mutation string) {
+	t.Helper()
+	switch mutation {
+	case "mutation-none":
+	case "adapter":
+		n := 4
+		p.Metadata.AdapterVersion = &n
+	case "redaction-provenance":
+		n := int64(123)
+		p.Metadata.Redaction.RedactedAtMs = &n
+		p.Metadata.Redaction.RuleSetVersion = "new"
+	case "mutation-active":
+		p.GenerationID = "different"
+	case "mutation-unsupported", "latest-attempt":
+		conn, err := s.pool.Take(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		query := `UPDATE sessions SET latest_attempt_generation_id=? WHERE session_id=?`
+		id := p.GenerationID
+		if mutation == "mutation-unsupported" {
+			query = `UPDATE sessions SET active_generation_id=? WHERE session_id=?`
+			id = "file_backed"
+			err = sqlitex.Execute(conn, `INSERT INTO session_projection_generations(session_id,generation_id,metadata_json,title_refs_json,source_evidence_digest,completeness,index_format_version,installed_at_ms) VALUES(?,?,'{}','[]',?,'complete',2,1)`, &sqlitex.ExecOptions{Args: []any{string(p.SessionID), id, strings.Repeat("b", 64)}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			p.GenerationID = id
+		}
+		err = sqlitex.Execute(conn, query, &sqlitex.ExecOptions{Args: []any{id, string(p.SessionID)}})
+		s.pool.Put(conn)
+		if err != nil {
+			t.Fatal(err)
+		}
+	case "mutation-content":
+		p.Metadata.ContentHash = strings.Repeat("c", 64)
+	case "mutation-source-format":
+		p.Metadata.Source.Format = schema.SourceFormatJSON
+	case "mutation-harness":
+		p.Metadata.ModelHarness = defaults.HarnessCodex
+	case "mutation-metadata":
+		p.Metadata.Project.Name = "changed"
+	case "redaction":
+		p.Metadata.Redaction.ContentHashAtRedact = "changed"
+	case "indexer":
+		p.IndexerTarget = 2
+	case "mutation-input":
+		p.InputDigest = strings.Repeat("d", 64)
+	case "null-input-proof":
+		conn, err := s.pool.Take(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = sqlitex.Execute(conn, `UPDATE sessions SET indexed_input_hash=NULL WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(p.SessionID)}})
+		s.pool.Put(conn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p.Expected, err = s.ReadIndexState(context.Background(), p.SessionID)
+		if err != nil || p.Expected == nil || p.Expected.IndexedInputHash != nil {
+			t.Fatalf("expected NULL input proof: %+v, %v", p.Expected, err)
+		}
+	case "mutation-completeness", "mutation-source-evidence", "zero-metadata", "forged-metadata", "seal":
+		conn, err := s.pool.Take(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = sqlitex.Execute(conn, `DROP TRIGGER session_generations_immutable`, nil); err != nil {
+			t.Fatal(err)
+		}
+		field, value := "", ""
+		switch mutation {
+		case "mutation-completeness":
+			field = "completeness"
+			value = "incomplete_new"
+		case "mutation-source-evidence":
+			field = "source_evidence_digest"
+			value = strings.Repeat("0", 64)
+		case "zero-metadata":
+			field = "metadata_hash"
+			value = strings.Repeat("0", 64)
+		case "forged-metadata":
+			field = "metadata_hash"
+			value = strings.Repeat("f", 64)
+		case "seal":
+			field = "candidate_digest"
+			value = strings.Repeat("0", 64)
+		}
+		if err = sqlitex.Execute(conn, `UPDATE session_generations SET `+field+`=? WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{value, string(p.SessionID)}}); err != nil {
+			t.Fatal(err)
+		}
+		s.pool.Put(conn)
+	default:
+		t.Fatalf("unknown mutation %q", mutation)
 	}
 }

@@ -1,7 +1,11 @@
+# inherit_verdict lets a release-only candidate reuse its base commit's
+# merge-gate verdict; the check job (`make check`) is the full suite that
+# verdict proves.
 queue:
   required:
     - {context: merge-gate, workflow: tests.yml, job: merge-gate, aggregator: true}
     - {context: title-guard, workflow: title-guard.yml, job: title-guard, guard: true}
+  inherit_verdict: {context: merge-gate, full_suite_job: check}
   release_job:
     workflow: release-batch.yml
     job: release

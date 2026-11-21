@@ -189,3 +189,45 @@ func TestSkipBudgetRowsNameTheirMeasurement(t *testing.T) {
 		t.Fatalf("every budget row has the same ratio %v; record each row from its own case report", ratios)
 	}
 }
+
+// TestSkipDispositionsAreOneClosedSet requires the disposition constructor to
+// accept exactly the fixture's dispositions, which every planned skip path
+// draws from, and to refuse the fixture's unknown values.
+func TestSkipDispositionsAreOneClosedSet(t *testing.T) {
+	var fixture struct {
+		Dispositions        []string `yaml:"dispositions"`
+		UnknownDispositions []string `yaml:"unknownDispositions"`
+	}
+	if err := yaml.Unmarshal(skipBudgetFixture, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixture.Dispositions) == 0 || len(fixture.UnknownDispositions) == 0 {
+		t.Fatal("the fixture names no dispositions or no unknown dispositions")
+	}
+	var all []string
+	for _, d := range AllSkipDispositions {
+		all = append(all, string(d))
+	}
+	if !slices.Equal(all, fixture.Dispositions) {
+		t.Fatalf("AllSkipDispositions = %q, want exactly %q", all, fixture.Dispositions)
+	}
+	for _, raw := range fixture.Dispositions {
+		if got, err := NewSkipDisposition(raw); err != nil || string(got) != raw {
+			t.Errorf("NewSkipDisposition(%q) = %q, %v; want it accepted", raw, got, err)
+		}
+	}
+	for _, raw := range fixture.UnknownDispositions {
+		if _, err := NewSkipDisposition(raw); err == nil {
+			t.Errorf("NewSkipDisposition(%q) accepted an unknown disposition", raw)
+		}
+	}
+	paths, err := PlannedSkipPaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range paths {
+		if _, err := NewSkipDisposition(string(path.Disposition)); err != nil {
+			t.Errorf("planned skip path %+v: %v", path, err)
+		}
+	}
+}

@@ -6,6 +6,10 @@ All notable changes to Peasant are recorded here. The format follows
 GitHub Releases, which hold the signed artifacts and checksums. A version that
 was tagged but not published links to its tag instead.
 
+## [0.23.0] - 2026-11-21
+
+- settle a context-only change after validating it instead of parsing (#1149)
+
 ## [0.22.0] - 2026-11-20
 
 - return a failed commit instead of reporting success (#1134)

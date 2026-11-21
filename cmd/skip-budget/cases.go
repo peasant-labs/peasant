@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -57,6 +56,11 @@ type mutation int
 const (
 	mutateAdapterStamp mutation = iota + 1
 	mutateIndexer
+	// mutateStaleMetadataHash moves the adapter stamp back by one, as
+	// mutateAdapterStamp does, and forges every stored metadata_hash to
+	// another non-zero value, so the cheap proof fails on the metadata
+	// context while the stored context is unchanged.
+	mutateStaleMetadataHash
 	// mutateNone leaves the imported base as it is. Only the new-session
 	// smoke case uses it: it times the import itself.
 	mutateNone
@@ -83,6 +87,10 @@ type caseSpec struct {
 	// run in which the undeclared adapter makes the pipeline take the full
 	// step.
 	undeclared bool
+	// equivalent requires, after every round, that both arms left every
+	// session's entries, metrics, captured stats, annotations and session
+	// row equal (arm_equivalence_allowlist.yaml names the exceptions).
+	equivalent bool
 }
 
 // withholdingClaudeAdapter is the claude-code adapter registered as one that
@@ -123,6 +131,9 @@ func caseSpecs() map[upgrade.MeasurementCase]caseSpec {
 	}
 	parsesAll := func(n int) executed { return executed{Parses: n} }
 	settlesAll := func(n int) executed { return executed{Proofs: n, Proven: n, Settles: n} }
+	validatesAll := func(n int) executed {
+		return executed{Proofs: n, Candidates: n, Validations: n, Validated: n, Settles: n}
+	}
 	stampOnly := func(n int, a arm, s sample) error {
 		if a == armSkip {
 			return expect(a, s, settlesAll(n))
@@ -169,13 +180,31 @@ func caseSpecs() map[upgrade.MeasurementCase]caseSpec {
 				return expectLane(a, s, ingest.RefreshLaneNative, n)
 			},
 		},
+		upgrade.MeasurementCaseHashDrift: {
+			id: upgrade.MeasurementCaseHashDrift, mutation: mutateStaleMetadataHash,
+			skipLabel:     "stale stored metadata hash, as shipped: cheap proof fails on the metadata context, metadata candidate, validation proven, validated settle",
+			baselineLabel: "stored-metadata lane with the refresh skips disabled: parse, identical generation not installed",
+			baseline:      disableSkips, wantLane: ingest.RefreshLaneStoredMetadata, equivalent: true,
+			check: func(n int, a arm, s sample) error {
+				if a == armSkip {
+					return expect(a, s, validatesAll(n))
+				}
+				return expect(a, s, parsesAll(n))
+			},
+		},
 	}
 }
 
 // executed counts the work one run did, so a check compares it as a whole.
 type executed struct {
-	Proofs  int `json:"proofs"`
-	Proven  int `json:"proven"`
+	Proofs int `json:"proofs"`
+	Proven int `json:"proven"`
+	// Candidates counts metadata candidates built, Validations the
+	// validator's answers, and Validated its proven answers.
+	Candidates  int `json:"candidates"`
+	Validations int `json:"validations"`
+	Validated   int `json:"validated"`
+	// Settles counts settles the store accepted.
 	Settles int `json:"settles"`
 	Parses  int `json:"parses"`
 }
@@ -191,7 +220,18 @@ type sample struct {
 	IndexStageMs float64 `json:"indexStageMs"`
 	ParseMs      float64 `json:"parseMs"`
 	WriteMs      float64 `json:"writeMs"`
+	// ValidateMs is the refresh_validate stage: the metadata half and the
+	// validator, summed over sessions.
+	ValidateMs float64 `json:"validateMs"`
 	executed
+	// Unsupported counts sessions whose validation was unsupported: no
+	// candidate, or a validator that could not answer.
+	Unsupported int `json:"unsupported"`
+	// Traces is what each session went through on the index stage.
+	Traces []sessionTrace `json:"traces,omitempty"`
+	// Equivalence digests each session's state after the run, per table,
+	// for the arm-equivalence check.
+	Equivalence map[string]map[string]string `json:"equivalence,omitempty"`
 	// UndeclaredDecisions counts session decisions that name the adapter as
 	// undeclared.
 	UndeclaredDecisions int                         `json:"undeclaredDecisions"`
@@ -248,6 +288,8 @@ type armSummary struct {
 	MedianProofMs float64  `json:"medianProofMs"`
 	MedianParseMs float64  `json:"medianParseMs"`
 	MedianIndexMs float64  `json:"medianIndexStageMs"`
+	// MedianValidateMs is the median refresh_validate stage time.
+	MedianValidateMs float64 `json:"medianValidateMs"`
 }
 
 type caseShape struct {
@@ -281,8 +323,10 @@ type caseReport struct {
 	Baseline   armSummary               `json:"baseline"`
 	// NotProvenRate is the share of attempted proofs that did not hold in
 	// the skip arm, summed over rounds.
-	NotProvenRate float64  `json:"notProvenRate"`
-	Notes         []string `json:"notes"`
+	NotProvenRate float64 `json:"notProvenRate"`
+	// Breakdown is the skip arm's sessions by outcome, over every round.
+	Breakdown []outcomeRow `json:"breakdown,omitempty"`
+	Notes     []string     `json:"notes"`
 }
 
 // harnessOptions is one invocation's shape and provenance.
@@ -334,6 +378,7 @@ func runCase(ctx context.Context, spec caseSpec, opts harnessOptions, command sa
 		if round%2 == 0 {
 			order = []arm{armBaseline, armSkip}
 		}
+		byArm := map[arm]sample{}
 		for _, a := range order {
 			s, err := collectRunSample(sampleFlags{Kind: string(sampleKindRun), Dir: filepath.Join(dir, fmt.Sprintf("round-%d-%s", round, a)),
 				Base: baseDir, Case: string(spec.id), Arm: string(a), Round: round}, command)
@@ -343,10 +388,16 @@ func runCase(ctx context.Context, spec caseSpec, opts harnessOptions, command sa
 			if err := spec.check(opts.sessions, a, s); err != nil {
 				return "", fmt.Errorf("%s round %d: %w", spec.id, round, err)
 			}
+			byArm[a] = s
 			if a == armSkip {
 				report.Skip.Samples = append(report.Skip.Samples, s)
 			} else {
 				report.Baseline.Samples = append(report.Baseline.Samples, s)
+			}
+		}
+		if spec.equivalent {
+			if err := armsEquivalent(byArm[armSkip], byArm[armBaseline]); err != nil {
+				return "", fmt.Errorf("%s round %d: %w", spec.id, round, err)
 			}
 		}
 	}
@@ -362,8 +413,14 @@ func runCase(ctx context.Context, spec caseSpec, opts harnessOptions, command sa
 	}
 	report.Notes = append(report.Notes,
 		"Each sample runs in its own child process on a fresh heap: it copies the prepared base outside the timed region and times one pipeline run; arms alternate order by round.",
-		"Settle counts come from a store wrapper that counts calls; parses are index-log attempts with a measured parse duration.",
+		"Settle counts are settles the store accepted, counted by a store wrapper; candidates, validations and validated answers come from the same wrapper and the traced Claude indexer; parses are index-log attempts with a measured parse duration.",
 		"INDEX includes settlement; no separate settle duration is persisted.")
+	if spec.equivalent {
+		report.Breakdown = breakdown(report.Skip.Samples)
+		report.Notes = append(report.Notes,
+			"After every round both arms left each session's entries, metrics, captured stats, annotations and session row equal, apart from the columns arm_equivalence_allowlist.yaml names with a reason.",
+			"secondScanMs is, for a session that built a metadata candidate and then parsed, that session's own measured metadata half: BuildGeneration runs the same half over the same input again.")
+	}
 	if report.Smoke {
 		report.Notes = append(report.Notes, fmt.Sprintf("Smoke shape %d x %d: validates the case, not a budget. Budgets need %d x %d on a quiet machine.", opts.sessions, opts.entries, matrixSessions, matrixEntries))
 	}
@@ -419,21 +476,49 @@ func summarize(a *armSummary) {
 	a.MedianProofMs = median(pick(func(s sample) float64 { return s.ProofMs }))
 	a.MedianParseMs = median(pick(func(s sample) float64 { return s.ParseMs }))
 	a.MedianIndexMs = median(pick(func(s sample) float64 { return s.IndexStageMs }))
+	a.MedianValidateMs = median(pick(func(s sample) float64 { return s.ValidateMs }))
 }
 
-// countingStore counts the unchanged settles, which the stored profile folds
-// into the INDEX stage. Every other capability is promoted from the embedded
-// store unchanged.
+// countingStore records, per session, the cheap proof, the validator's
+// answer and the settle, which the stored profile folds into the INDEX stage.
+// Every other capability is promoted from the embedded store unchanged.
 type countingStore struct {
 	*store.Store
-	settles atomic.Int64
+	trace *runTrace
 }
 
-var _ ingest.ManagedGenerationUnchangedProver = (*countingStore)(nil)
+var (
+	_ ingest.ManagedGenerationUnchangedProver = (*countingStore)(nil)
+	_ ingest.ManagedGenerationValidator       = (*countingStore)(nil)
+)
+
+// refuseSettlesForTest makes every settle refuse as stale work, so a test can
+// show a case whose skip arm cannot settle fails its executed counts. Only a
+// test child sets it.
+var refuseSettlesForTest bool
+
+func (s *countingStore) ProveCapturedGenerationUnchanged(ctx context.Context, request ingest.ManagedGenerationUnchangedProof) (ingest.UnchangedProof, error) {
+	proof, err := s.Store.ProveCapturedGenerationUnchanged(ctx, request)
+	s.trace.proved(request.SessionID, proof, err)
+	return proof, err
+}
+
+func (s *countingStore) ValidateManagedGenerationUnchanged(ctx context.Context, request ingest.ManagedGenerationValidationRequest) (ingest.ManagedGenerationValidationResult, error) {
+	start := time.Now()
+	result, err := s.Store.ValidateManagedGenerationUnchanged(ctx, request)
+	s.trace.validated(request.SessionID, result, err, time.Since(start))
+	return result, err
+}
 
 func (s *countingStore) SettleCapturedGenerationUnchanged(ctx context.Context, request ingest.ManagedGenerationUnchangedProof) (ingest.ManagedGenerationUnchangedSettleOutcome, error) {
-	s.settles.Add(1)
-	return s.Store.SettleCapturedGenerationUnchanged(ctx, request)
+	if refuseSettlesForTest {
+		err := &ingest.StaleIndexWorkError{SessionID: request.SessionID}
+		s.trace.settled(request.SessionID, err)
+		return ingest.ManagedGenerationUnchangedSettleOutcome{}, err
+	}
+	outcome, err := s.Store.SettleCapturedGenerationUnchanged(ctx, request)
+	s.trace.settled(request.SessionID, err)
+	return outcome, err
 }
 
 func openStore(dbPath, output string) (*store.Store, error) {
@@ -446,8 +531,16 @@ func openStore(dbPath, output string) (*store.Store, error) {
 
 // newPipeline wires the pipeline as `peasant harvest` does for one harness,
 // with the metrics engine and classifier.
-func newPipeline(db *store.Store, metricsStore ingest.MetricsStore, adapters map[ingest.Harness]ingest.AdapterFactory, source, output string, profiler *ingest.IndexProfiler, configure func(*ingest.PipelineConfig)) (*ingest.Pipeline, error) {
+func newPipeline(db *store.Store, metricsStore ingest.MetricsStore, adapters map[ingest.Harness]ingest.AdapterFactory, source, output string, profiler *ingest.IndexProfiler, configure func(*ingest.PipelineConfig), trace *runTrace) (*ingest.Pipeline, error) {
 	fsys := &ingest.OSFileSystem{}
+	indexers := ingest.NewIndexerRegistry(fsys, ingest.IndexerRegistryOptions{})
+	if trace != nil {
+		claude, ok := indexers[ingest.HarnessClaudeCode].(*ingest.ClaudeIndexer)
+		if !ok {
+			return nil, fmt.Errorf("the registered claude-code indexer is %T, not the Claude indexer the trace wraps", indexers[ingest.HarnessClaudeCode])
+		}
+		indexers[ingest.HarnessClaudeCode] = tracingClaudeIndexer{ClaudeIndexer: claude, trace: trace}
+	}
 	cfg := ingest.PipelineConfig{
 		Sources: map[ingest.Harness]ingest.SourceConfig{
 			ingest.HarnessClaudeCode: {Enabled: true, Paths: []ingest.ResolvedPath{ingest.ResolvedPath(source)}},
@@ -460,7 +553,7 @@ func newPipeline(db *store.Store, metricsStore ingest.MetricsStore, adapters map
 	}
 	return ingest.NewPipeline(fsys, testutil.NoGitResolver(), adapters, cfg,
 		ingest.WithStore(db), ingest.WithMetricsStore(metricsStore), ingest.WithSalt(db.InstallationSalt()),
-		ingest.WithIndexers(ingest.NewIndexerRegistry(fsys, ingest.IndexerRegistryOptions{})),
+		ingest.WithIndexers(indexers),
 		ingest.WithLogger(db), ingest.WithIndexLogger(db),
 		ingest.WithAnalyzer(metrics.NewEngineWithModels(db, db)),
 		ingest.WithClassifier(metrics.NewClassifierAnnotator(db, db)))
@@ -487,7 +580,7 @@ func prepareBase(ctx context.Context, baseDir string, sessions, entries int, m m
 		return caseShape{}, err
 	}
 	defer db.Close()
-	pipeline, err := newPipeline(db, db, ingest.DefaultAdapterRegistry, source, output, &ingest.IndexProfiler{}, nil)
+	pipeline, err := newPipeline(db, db, ingest.DefaultAdapterRegistry, source, output, &ingest.IndexProfiler{}, nil, nil)
 	if err != nil {
 		return caseShape{}, err
 	}
@@ -510,7 +603,7 @@ func prepareBase(ctx context.Context, baseDir string, sessions, entries int, m m
 	target := ingest.GenerationTargets(ingest.HarvesterVersionRegistry)[ingest.HarnessClaudeCode]
 	switch m {
 	case mutateNone:
-	case mutateAdapterStamp:
+	case mutateAdapterStamp, mutateStaleMetadataHash:
 		if err := execSQL(ctx, db, `UPDATE sessions SET adapter_version = ?`, target.AdapterVersion-1); err != nil {
 			return caseShape{}, err
 		}
@@ -520,6 +613,15 @@ func prepareBase(ctx context.Context, baseDir string, sessions, entries int, m m
 		}
 		if stamped != sessions {
 			return caseShape{}, fmt.Errorf("stamped %d metadata files, want %d", stamped, sessions)
+		}
+		if m == mutateStaleMetadataHash {
+			forged, err := forgeStoredMetadataHashes(ctx, db)
+			if err != nil {
+				return caseShape{}, err
+			}
+			if forged != int64(sessions) {
+				return caseShape{}, fmt.Errorf("forged %d stored metadata hashes, want %d", forged, sessions)
+			}
 		}
 	case mutateIndexer:
 		if target.IndexerVersion < 2 {
@@ -580,7 +682,8 @@ func runRound(ctx context.Context, spec caseSpec, baseDir, roundDir string, roun
 		return sample{}, err
 	}
 	defer db.Close()
-	counted := &countingStore{Store: db}
+	trace := newRunTrace()
+	counted := &countingStore{Store: db, trace: trace}
 	profiler := &ingest.IndexProfiler{}
 	var configure func(*ingest.PipelineConfig)
 	adapters := ingest.DefaultAdapterRegistry
@@ -591,7 +694,7 @@ func runRound(ctx context.Context, spec caseSpec, baseDir, roundDir string, roun
 		}
 	}
 	// Discovery reads the prepared source in place: it is never written.
-	pipeline, err := newPipeline(db, counted, adapters, filepath.Join(baseDir, "source"), output, profiler, configure)
+	pipeline, err := newPipeline(db, counted, adapters, filepath.Join(baseDir, "source"), output, profiler, configure, trace)
 	if err != nil {
 		return sample{}, err
 	}
@@ -607,7 +710,7 @@ func runRound(ctx context.Context, spec caseSpec, baseDir, roundDir string, roun
 		return sample{}, fmt.Errorf("run reported %d errors", result.Summary.Errors)
 	}
 	s.DBBytesAfter, s.WALBytes = fileSize(dbPath), fileSize(dbPath+"-wal")
-	s.Settles = int(counted.settles.Load())
+	trace.count(&s.executed, &s.Unsupported)
 	for _, entry := range result.IndexLog {
 		s.Outcomes[entry.Outcome]++
 		if entry.ParseDuration != nil && *entry.ParseDuration > 0 {
@@ -628,6 +731,8 @@ func runRound(ctx context.Context, spec caseSpec, baseDir, roundDir string, roun
 			s.ProofMs = float64(stage.Duration.Microseconds()) / 1000
 		case ingest.StageIndex:
 			s.IndexStageMs = float64(stage.Duration.Microseconds()) / 1000
+		case ingest.StageRefreshValidate:
+			s.ValidateMs = float64(stage.Duration.Microseconds()) / 1000
 		}
 	}
 	for _, session := range result.Sessions {
@@ -644,6 +749,12 @@ func runRound(ctx context.Context, spec caseSpec, baseDir, roundDir string, roun
 	if result.WriteLane != nil {
 		lane := *result.WriteLane
 		s.WriteLane = &lane
+	}
+	s.Traces = trace.sessions(result)
+	if spec.equivalent {
+		if s.Equivalence, err = digestArmState(ctx, db); err != nil {
+			return sample{}, fmt.Errorf("digest the %s arm's state for the equivalence check: %w", a, err)
+		}
 	}
 	return s, nil
 }

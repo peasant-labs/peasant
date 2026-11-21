@@ -27,8 +27,8 @@ Each lane reports three phases separately:
 The test command additionally reports its own internals:
 
 - **amd64 gate:** `make check` stamps `CHECK_START_NS` in the Makefile and the
-  gate prints the in-`make check` pre-test wall (fmt / vet / ast-grep /
-  release-guard), the plan (`go test -list`) wall, the per-pass walls, and the
+  gate prints the in-`make check` pre-test wall (fmt / vet / ast-grep), the
+  plan (`go test -list`) wall, the per-pass walls, and the
   combined test wall. The CI step summary carries the outer job-level split.
 - **arm64 lane:** the `make web-stub` step stamps `WEB_STUB_S`, so the Nix
   install, the web stub, and the gate's subset invocation

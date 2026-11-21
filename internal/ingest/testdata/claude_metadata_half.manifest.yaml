@@ -1,0 +1,7 @@
+requiredNames:
+  - no-relationships-with-timestamps
+  - no-relationships-without-timestamps
+  - recorded-proof-other-bytes
+  - derived-owner-source-unavailable
+  - multi-source-conflicting-evidence
+  - multi-source-other-bytes-refusal

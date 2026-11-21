@@ -31,7 +31,7 @@ RACE ?= 0
 GORACE_FLAG := $(if $(filter 0,$(RACE)),,-race)
 
 # Wall-clock start of `make check`, stamped immediately at parse time so the
-# gate's pre-test wall includes the fmt/lint/ast-grep/release-guard steps that
+# gate's pre-test wall includes the fmt/lint/ast-grep steps that
 # run before the test passes. `cmd/testgate run` reads it and reports
 # `test-start - CHECK_START_NS` as the pre-test wall, separate from the test
 # wall. `:=` forces the stamp now, before the prerequisites run.

@@ -1,15 +1,19 @@
 # Child behaviours the sample runners must accept or refuse. Every sample
 # runs in its own child process, launched with the harness flags.
 #   sample:    new-session-import drives the new-session smoke runner;
-#              case-arm drives 2 x 10 rounds of the stamp-only case, both
-#              arms.
+#              case-arm drives 2 x 10 rounds of a corpus case, both arms.
+#   case:      the corpus case of a case-arm row; default C1 (stamp-only).
+#              C7 (stale stored metadata hash) also checks arm equivalence
+#              after every round and reports the outcome breakdown.
 #   child:     import imports a sessions x 10 corpus; run runs the case-arm
 #              sample it is given; garbage prints a line that is not a
 #              sample result. Every other run-* mode runs the sample and
 #              then misreports it: one extra parse, the next round, the
 #              other arm, the parent's pid, a census reason id this build
 #              does not define (it prints an empty code), or the sample
-#              printed twice.
+#              printed twice. run-refusing-store runs against a store that
+#              refuses every settle; run-unequal-arms changes one session's
+#              state digest in the skip arm only.
 #   rounds:    case-arm rounds; default 1.
 #   wantOrder: the arms the children ran, in launch order.
 #   wantError: a substring of the runner's error; empty means it succeeds.
@@ -27,6 +31,10 @@ requiredNames:
   - run-unknown-census-reason
   - run-trailing-sample
   - run-garbage-output
+  - run-stamp-only-refusing-store
+  - run-hash-drift-arms
+  - run-hash-drift-refusing-store
+  - run-hash-drift-unequal-arms
 cases:
   - name: smoke-shape
     sample: new-session-import
@@ -77,3 +85,23 @@ cases:
     sample: case-arm
     child: garbage
     wantError: want one JSON sample
+  - name: run-stamp-only-refusing-store
+    sample: case-arm
+    child: run-refusing-store
+    wantError: skip arm executed
+  - name: run-hash-drift-arms
+    sample: case-arm
+    case: C7
+    child: run
+    rounds: 2
+    wantOrder: [skip, baseline, baseline, skip]
+  - name: run-hash-drift-refusing-store
+    sample: case-arm
+    case: C7
+    child: run-refusing-store
+    wantError: skip arm executed
+  - name: run-hash-drift-unequal-arms
+    sample: case-arm
+    case: C7
+    child: run-unequal-arms
+    wantError: "arm equivalence: the skip and baseline arms left different state"

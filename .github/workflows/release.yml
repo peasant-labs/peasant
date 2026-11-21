@@ -596,51 +596,63 @@ jobs:
             if ($LASTEXITCODE -ne 0) { Write-Host "::warning::web stop exited $LASTEXITCODE" }
           }
 
-  # Post-publish macOS smoke: on final tags, install from the live tap.
-  # The tap publisher polls on its own fifteen-minute schedule and peasant holds
-  # no tap credential, so this job waits for the tap to carry the tagged version
-  # before installing. A tap that never catches up still fails the smoke rather
-  # than certifying an older package as the current release.
+  # Post-publish macOS smoke: on final tags, install the cask users get, rendered
+  # here from the tap's own template and this release's checksums. The tap's
+  # scheduled publisher is best-effort and peasant holds no tap credential, so
+  # this job never waits on it. The tap's publisher renders and audits the cask
+  # before it pushes; this smoke does not check that the tap has published, so a
+  # stale tap shows only as a failed or missing publish-cask run in the tap. The
+  # checkout tracks the tap's main unpinned on purpose, so the smoke renders with
+  # the template the tap publishes from.
   macos-cask-smoke:
     name: macos cask smoke (final only)
     needs: publish
     if: github.event_name == 'push' && !contains(github.ref_name, '-rc')
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 15
     permissions:
       contents: read
     env:
       TAG: ${{ github.ref_name }}
     steps:
-      - name: Wait for the tap publisher to carry this release
+      - name: Check out the tap (read-only)
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: peasant-labs/homebrew-tap
+          path: homebrew-tap
+          persist-credentials: false
+
+      - name: Render the cask from the tap template and this release's checksums
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          expected="${TAG#v}"
-          deadline=$((SECONDS + 960))
-          while :; do
-            published="$(gh api -H 'Accept: application/vnd.github.raw' \
-              repos/peasant-labs/homebrew-tap/contents/Casks/peasant.rb 2>/dev/null || true)"
-            if printf '%s' "${published}" | grep -qF "version \"${expected}\""; then
-              echo "the tap serves peasant ${expected}"
-              exit 0
-            fi
-            if [ "${SECONDS}" -ge "${deadline}" ]; then
-              echo "::error::the tap did not publish peasant ${expected} within 16 minutes. The tap publisher runs every 15 minutes; a stale tap fails this smoke rather than certifying an older package as the current release."
-              exit 1
-            fi
-            echo "the tap does not carry ${expected} yet; checking again in 30s"
-            sleep 30
-          done
+          mkdir -p "${RUNNER_TEMP}/release"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern checksums.txt --dir "${RUNNER_TEMP}/release" --clobber
+          # render-cask.sh needs bash 4 (mapfile); macOS ships bash 3.2. The
+          # script is fail-closed: a missing archive digest or a surviving
+          # placeholder exits non-zero before anything is installed.
+          HOMEBREW_NO_AUTO_UPDATE=1 brew install bash
+          "$(brew --prefix bash)/bin/bash" homebrew-tap/scripts/render-cask.sh \
+            "${TAG#v}" \
+            "${RUNNER_TEMP}/release/checksums.txt" \
+            homebrew-tap/templates/peasant.rb.tmpl \
+            "${RUNNER_TEMP}/peasant.rb"
+          grep -F "version \"${TAG#v}\"" "${RUNNER_TEMP}/peasant.rb"
 
-      - name: Tap + install the published cask
+      - name: Install the rendered cask from a throwaway tap
         run: |
           set -euxo pipefail
-          brew tap peasant-labs/tap
+          tap="peasant-labs/cask-smoke"
+          brew tap-new "$tap"
+          tap_dir="$(brew --repository "$tap")"
+          mkdir -p "$tap_dir/Casks"
+          cp "${RUNNER_TEMP}/peasant.rb" "$tap_dir/Casks/peasant.rb"
+          brew trust --cask "$tap/peasant"
           # Fully-qualified token so this never resolves a same-named cask from
           # another tap.
-          brew install --cask peasant-labs/tap/peasant
+          brew install --cask "$tap/peasant"
 
       - name: Assert version matches the tag
         run: |

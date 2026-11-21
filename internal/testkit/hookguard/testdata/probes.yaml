@@ -1,0 +1,65 @@
+# Probe packages for the hook guard. Each probe is one production file; the
+# guard must report exactly the findings whose substrings are listed (an empty
+# list means the probe is clean).
+hooks:
+  - name: mutationHook
+    readers: [Builder.Build]
+  - name: seamField
+    readers: [Store.acquire]
+probes:
+  - name: clean
+    source: |
+      package probe
+      var mutationHook func()
+      type Builder struct{}
+      type Store struct{ seamField func() }
+      func (Builder) Build() { if mutationHook != nil { mutationHook() } }
+      func (s *Store) acquire() { if s.seamField != nil { s.seamField() } }
+    findings: []
+  - name: production-assigns-a-hook
+    source: |
+      package probe
+      var mutationHook func()
+      type Builder struct{}
+      type Store struct{ seamField func() }
+      func (Builder) Build() { if mutationHook != nil { mutationHook() } }
+      func (s *Store) acquire() { if s.seamField != nil { s.seamField() } }
+      func install() { mutationHook = func() {} }
+    findings: ["install assigns the test hook mutationHook", "install reads the test hook mutationHook"]
+  - name: production-sets-a-field-hook
+    source: |
+      package probe
+      var mutationHook func()
+      type Builder struct{}
+      type Store struct{ seamField func() }
+      func (Builder) Build() { if mutationHook != nil { mutationHook() } }
+      func (s *Store) acquire() { if s.seamField != nil { s.seamField() } }
+      func open() *Store { s := &Store{}; s.seamField = func() {}; return s }
+    findings: ["open assigns the test hook seamField", "open reads the test hook seamField"]
+  - name: another-function-reads-a-hook
+    source: |
+      package probe
+      var mutationHook func()
+      type Builder struct{}
+      type Store struct{ seamField func() }
+      func (Builder) Build() { if mutationHook != nil { mutationHook() } }
+      func (Builder) BuildAll() { if mutationHook != nil { mutationHook() } }
+      func (s *Store) acquire() { if s.seamField != nil { s.seamField() } }
+    findings: ["Builder.BuildAll reads the test hook mutationHook"]
+  - name: initialized-hook
+    source: |
+      package probe
+      var mutationHook = func() {}
+      type Builder struct{}
+      type Store struct{ seamField func() }
+      func (Builder) Build() { if mutationHook != nil { mutationHook() } }
+      func (s *Store) acquire() { if s.seamField != nil { s.seamField() } }
+    findings: ["mutationHook has a package-level initializer"]
+  - name: undeclared-and-unread
+    source: |
+      package probe
+      type Builder struct{}
+      type Store struct{}
+      func (Builder) Build() {}
+      func (s *Store) acquire() {}
+    findings: ["mutationHook is not declared", "seamField is not declared", "Builder.Build is listed as a reader of mutationHook", "Store.acquire is listed as a reader of seamField"]

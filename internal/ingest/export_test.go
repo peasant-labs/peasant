@@ -1,6 +1,9 @@
 package ingest
 
-import "context"
+import (
+	"context"
+	"testing"
+)
 
 // RetainedNoMaterializationEncodings is the closed set of stored encodings the
 // allocation proof covers, single-sourced here so the internal fixture
@@ -67,4 +70,15 @@ const IndexBindWithoutReparseReason = indexBindWithoutReparseReason
 // location the fixture read; no file is opened.
 func StoredDecisionForTest(p *Pipeline, session DiscoveredSession, loc SessionLocation) RefreshDecision {
 	return p.refreshDecisionForLocation(session, loc, nil)
+}
+
+// SetClaudeMetadataHalfMutationForTest installs a mutation of the Claude
+// metadata half's output for the rest of the test and removes it on cleanup.
+// Only BuildGenerationMetadata applies it. A test that sets it must not run
+// in parallel with another test that builds a metadata candidate.
+func SetClaudeMetadataHalfMutationForTest(t testing.TB, mutate func(GenerationBuildInput, *UnifiedMetadata)) {
+	t.Helper()
+	previous := claudeMetadataHalfMutationForTest
+	claudeMetadataHalfMutationForTest = mutate
+	t.Cleanup(func() { claudeMetadataHalfMutationForTest = previous })
 }

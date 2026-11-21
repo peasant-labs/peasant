@@ -1,0 +1,95 @@
+# Extra rows of the Claude metadata-half differential, beside the producer
+# rows (claude_producer.yaml) and the JSONL fixture directories. Each row uses
+# the producer row's input fields and carries no generation expectations.
+#
+# branches names, for each builder branch the differential must cover, the
+# corpus row that exercises it. outcomes names every corpus row that does not
+# end "equal" (see claude_metadata_half_test.go), and afterHalfClasses names
+# the refusal class of each builder-refuses-after-half row.
+rows:
+  - name: no-relationships-with-timestamps
+    transcript: |
+      {"type":"user","uuid":"t1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"timed prompt"}}
+      {"type":"assistant","uuid":"t2","parentUuid":"t1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","timestamp":"2026-01-01T00:00:04Z","message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"text","text":"timed reply"}],"usage":{"input_tokens":12,"output_tokens":7}}}
+
+  - name: no-relationships-without-timestamps
+    transcript: |
+      {"type":"user","uuid":"n1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"untimed prompt"}}
+      {"type":"assistant","uuid":"n2","parentUuid":"n1","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"text","text":"untimed reply"}]}}
+
+  - name: recorded-proof-other-bytes
+    # A recorded started_by whose content hash names other bytes does not
+    # prove the owner; the derived owner needs the owner's source snapshot.
+    sourcePath: /projects/proj/agent-abc123.jsonl
+    recordedSessionId: agent-abc123
+    recordedStartedBy: 11111111-1111-4111-8111-111111111111
+    recordedContentHashMismatch: true
+    siblings:
+      /projects/proj/11111111-1111-4111-8111-111111111111.jsonl: |
+        {"type":"user","uuid":"owner-root","sessionId":"11111111-1111-4111-8111-111111111111","message":{"role":"user","content":"owner"}}
+    transcript: |
+      {"type":"assistant","uuid":"a1","sessionId":"11111111-1111-4111-8111-111111111111","agentId":"abc123","isSidechain":true,"message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"text","text":"agent reply"}]}}
+
+  - name: derived-owner-source-unavailable
+    # The transcript names its owner, no recorded proof is bound to these
+    # bytes, and the owner's source is gone: both refuse.
+    sourcePath: /projects/proj/agent-abc123.jsonl
+    recordedSessionId: agent-abc123
+    transcript: |
+      {"type":"assistant","uuid":"a1","sessionId":"11111111-1111-4111-8111-111111111111","agentId":"abc123","isSidechain":true,"message":{"role":"assistant","model":"claude-sonnet-4","content":[{"type":"text","text":"agent reply"}]}}
+
+  - name: multi-source-conflicting-evidence
+    # A multi-source last-good capture has no single public target; the
+    # persisted transcript digest binds the structural ids to these bytes.
+    recordedContentHash: true
+    recordedRelationships:
+      - {kind: context_from, targetState: conflicting_current_native_evidence, evidence: conflict}
+    transcript: |
+      {"type":"user","uuid":"m1","sessionId":"22222222-2222-4222-8222-222222222222","message":{"role":"user","content":"first source"}}
+      {"type":"user","uuid":"m2","sessionId":"33333333-3333-4333-8333-333333333333","message":{"role":"user","content":"second source"}}
+      {"type":"user","uuid":"m3","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"own prompt"}}
+
+  - name: multi-source-other-bytes-refusal
+    # The same multi-source provenance recorded for other bytes refuses.
+    recordedContentHashMismatch: true
+    recordedRelationships:
+      - {kind: context_from, targetState: conflicting_current_native_evidence, evidence: conflict}
+    transcript: |
+      {"type":"user","uuid":"m1","sessionId":"22222222-2222-4222-8222-222222222222","message":{"role":"user","content":"first source"}}
+      {"type":"user","uuid":"m3","sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","message":{"role":"user","content":"own prompt"}}
+
+branches:
+  no-relationships: half/no-relationships-with-timestamps
+  recorded-started-by-bound-to-these-bytes: producer/retained-started-by-owner-gone
+  recorded-proof-other-bytes: half/recorded-proof-other-bytes
+  derived-owner-source-available: producer/legacy-root-agent
+  derived-owner-source-unavailable: half/derived-owner-source-unavailable
+  legacy-fallback-through-the-native-snapshot: producer/legacy-fallback-sibling-available
+  context-from-with-an-anchor: producer/forked-prompt-continuation
+  multi-source-conflicting-current-native-evidence: half/multi-source-conflicting-evidence
+  with-timestamps: half/no-relationships-with-timestamps
+  without-timestamps: half/no-relationships-without-timestamps
+  re-gated-legacy-schema: producer/legacy-schema-eight-metadata
+  omitted-oversized-record: producer/raw-oversized-placeholder
+  unknown-record-kind: producer/unknown-kind-retained
+
+outcomes:
+  producer/legacy-fallback-sibling-unavailable: both-refuse
+  producer/proof-failure-refusal: both-refuse
+  producer/malformed-refusal: both-refuse
+  producer/retained-fork-source-gone-refusal: both-refuse
+  producer/retained-disconnected-context-refusal: both-refuse
+  producer/retained-conflicting-owner-refusal: both-refuse
+  producer/future-schema-thirteen: both-refuse
+  producer/self-owner-agent-refusal: both-refuse
+  producer/negative-schema-metadata: both-refuse
+  producer/self-parent-agent-refusal: both-refuse
+  producer/retained-started-by-unbound-refusal: both-refuse
+  producer/retained-started-by-wrong-hash-refusal: both-refuse
+  half/derived-owner-source-unavailable: both-refuse
+  half/multi-source-other-bytes-refusal: both-refuse
+  producer/over-bound-answer-key-refusal: builder-refuses-after-half
+afterHalfClasses:
+  # The classifier refuses an AskUserQuestion answer key over the persisted
+  # alias bound; the metadata half never assembles a key.
+  producer/over-bound-answer-key-refusal: classification-key-over-bound

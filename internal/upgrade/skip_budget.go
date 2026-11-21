@@ -10,14 +10,27 @@ import (
 )
 
 // SkipDisposition names the skip a lane takes. The stored-metadata lane skips
-// the parse only through a proven settle; a proof that fails parses, so it has
-// no skip of its own to budget.
+// the parse through a proven settle, or through a validated settle when the
+// proof fails only on the metadata or redaction context; any other failed
+// proof parses, so it has no skip of its own to budget.
 type SkipDisposition string
 
 const (
-	SkipProven SkipDisposition = "proven"
-	SkipIndex  SkipDisposition = "index"
+	SkipProven    SkipDisposition = "proven"
+	SkipValidated SkipDisposition = "validated"
+	SkipIndex     SkipDisposition = "index"
 )
+
+// AllSkipDispositions lists every disposition, in planning order.
+var AllSkipDispositions = []SkipDisposition{SkipProven, SkipValidated, SkipIndex}
+
+// NewSkipDisposition validates a raw disposition at an input boundary.
+func NewSkipDisposition(raw string) (SkipDisposition, error) {
+	if d := SkipDisposition(raw); slices.Contains(AllSkipDispositions, d) {
+		return d, nil
+	}
+	return "", fmt.Errorf("skip budget: read skip disposition %q: no planned skip takes it; the budget row was not accepted; use one of %q", raw, AllSkipDispositions)
+}
 
 // SkipPath identifies both the decision lane and, where necessary, its outcome.
 type SkipPath struct {
@@ -32,7 +45,7 @@ func PlannedSkipPaths() ([]SkipPath, error) {
 		switch lane {
 		case ingest.RefreshLaneNone, ingest.RefreshLaneNative:
 		case ingest.RefreshLaneStoredMetadata:
-			paths = append(paths, SkipPath{lane, SkipProven})
+			paths = append(paths, SkipPath{lane, SkipProven}, SkipPath{lane, SkipValidated})
 		case ingest.RefreshLaneStoredIndex:
 			paths = append(paths, SkipPath{lane, SkipIndex})
 		default:
@@ -64,6 +77,11 @@ const (
 	// against a table in which the adapter declares no change scope: the
 	// full step the plan names.
 	MeasurementCaseUndeclaredProducer MeasurementCase = "C6"
+	// MeasurementCaseHashDrift is an adapter bump over generations whose
+	// stored metadata hash is stale: the cheap proof fails on the metadata
+	// context, and the validated settle (metadata candidate, context
+	// validation, settle) runs against the baseline parse.
+	MeasurementCaseHashDrift MeasurementCase = "C7"
 )
 
 // AllMeasurementCases lists every case in matrix order.
@@ -72,6 +90,7 @@ var AllMeasurementCases = []MeasurementCase{
 	MeasurementCaseIndexerBump,
 	MeasurementCaseNewSession,
 	MeasurementCaseUndeclaredProducer,
+	MeasurementCaseHashDrift,
 }
 
 // NewMeasurementCase validates a raw case id at an input boundary.
