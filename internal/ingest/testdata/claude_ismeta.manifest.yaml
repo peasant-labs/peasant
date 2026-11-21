@@ -1,0 +1,6 @@
+requiredNames:
+  - image coordinate note for an image the agent rendered
+  - skill body with no Base-directory prefix
+  - usage limit notice
+  - isMeta absent
+  - isMeta explicitly false
