@@ -340,6 +340,17 @@ type readerEntrypointStore struct {
 	sid     schema.SessionID
 	harness schema.Harness
 	managed bool
+	// activeID is the generation the readers expect to be active.
+	activeID string
+	// The build inputs, kept so a test can parse the session again.
+	corpus     readerEntrypointCorpus
+	session    ingest.DiscoveredSession
+	transcript []byte
+	recorded   schema.UnifiedMetadata
+	revision   int64
+	builder    ingest.GenerationBuilder
+	opencode   ingest.OpenCodeSourceAccess
+	target     ingest.HarvesterVersions
 }
 
 func (s readerEntrypointStore) path() string { return filepath.Join(s.root, "peasant.db") }
@@ -364,6 +375,13 @@ func openReaderEntrypointStore(t *testing.T, root string) *store.Store {
 // the production builder and activation (or, for a harness with no managed
 // generation, the production entry batch).
 func seedReaderEntrypointStore(t *testing.T, corpus readerEntrypointCorpus, h readerEntrypointHarness) readerEntrypointStore {
+	t.Helper()
+	return seedReaderEntrypointStoreWithInput(t, corpus, h, "")
+}
+
+// seedReaderEntrypointStoreWithInput is seedReaderEntrypointStore recording
+// inputHash, when set, as the input the activation consumed.
+func seedReaderEntrypointStoreWithInput(t *testing.T, corpus readerEntrypointCorpus, h readerEntrypointHarness, inputHash string) readerEntrypointStore {
 	t.Helper()
 	ctx := t.Context()
 	var harness schema.Harness
@@ -406,45 +424,74 @@ func seedReaderEntrypointStore(t *testing.T, corpus readerEntrypointCorpus, h re
 		return seeded
 	}
 	seeded.managed = true
-	input := ingest.GenerationBuildInput{
-		Session:            session,
-		GenerationID:       corpus.GenerationID,
-		RecordedMetadata:   &recorded,
-		CapturedTranscript: transcriptBytes,
-		Prior:              readerPriorSource{db: db, sid: sid},
-		Allocator:          &countingRefAllocator{},
-	}
+	seeded.activeID = corpus.GenerationID
+	seeded.corpus, seeded.session, seeded.transcript, seeded.recorded = corpus, session, transcriptBytes, recorded
+	seeded.revision, seeded.builder, seeded.target = revisions[sid], builder, target
 	if h.NativeFixture != "" {
 		adapter := ingest.NewOpenCodeAdapter(&ingest.OSFileSystem{}, nil, salt.Salt{})
-		input.OpenCode = readerOpenCodeAccess{snapshot: func(ctx context.Context) (ingest.OpenCodeHistorySnapshot, error) {
+		seeded.opencode = readerOpenCodeAccess{snapshot: func(ctx context.Context) (ingest.OpenCodeHistorySnapshot, error) {
 			return adapter.SnapshotOpenCodeProvenance(ctx, native.Path, h.SessionID, ingest.OpenCodeSnapshotOptions{})
 		}}
 	}
-	candidate, err := builder.BuildGeneration(ctx, input)
+	if _, err := seeded.parse(t, recorded, corpus.GenerationID, inputHash); err != nil {
+		t.Fatalf("activate the corpus generation: %v", err)
+	}
+	return seeded
+}
+
+// parse builds the session's generation from recorded through the
+// production builder and activates it under generationID, recording
+// inputHash as the consumed input when it is set.
+func (s readerEntrypointStore) parse(t *testing.T, recorded schema.UnifiedMetadata, generationID, inputHash string) (ingest.ActivationOutcome, error) {
+	t.Helper()
+	ctx := t.Context()
+	input := ingest.GenerationBuildInput{
+		Session:            s.session,
+		GenerationID:       generationID,
+		RecordedMetadata:   &recorded,
+		CapturedTranscript: s.transcript,
+		Prior:              readerPriorSource{db: s.db, sid: s.sid},
+		Allocator:          &countingRefAllocator{},
+		OpenCode:           s.opencode,
+	}
+	candidate, err := s.builder.BuildGeneration(ctx, input)
 	if err != nil {
 		t.Fatalf("build the corpus generation: %v", err)
 	}
 	generation := candidate.Result
 	if generation.Generation.Metadata.AdapterVersion == nil {
-		version := target.AdapterVersion
+		version := s.target.AdapterVersion
 		generation.Generation.Metadata.AdapterVersion = &version
 	}
-	assessment, err := ingest.AssessCapture(ingest.CaptureFacts{Harness: harness, Result: generation, Policy: ingest.CaptureFreshCandidate, Authoritative: true})
+	assessment, err := ingest.AssessCapture(ingest.CaptureFacts{Harness: s.harness, Result: generation, Policy: ingest.CaptureFreshCandidate, Authoritative: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	capture, err := assessment.ContentCapture(ingest.ContentSourceProviderSource, session.TranscriptOrigin, corpus.ClockMs)
+	capture, err := assessment.ContentCapture(ingest.ContentSourceProviderSource, s.session.TranscriptOrigin, s.corpus.ClockMs)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ActivateGenerationCandidate(ctx, ingest.GenerationActivation{
+	activation := ingest.GenerationActivation{
 		Generation: generation, Blobs: candidate.Blobs, PriorEvidence: candidate.PriorEvidence,
-		IndexerVersion: target.IndexerVersion, IndexedAtMs: corpus.ClockMs, ContentCapture: capture,
-		CaptureRevision: revisions[sid],
-	}); err != nil {
-		t.Fatalf("activate the corpus generation: %v", err)
+		IndexerVersion: s.target.IndexerVersion, IndexedAtMs: s.corpus.ClockMs, ContentCapture: capture,
+		CaptureRevision: s.revision,
 	}
-	return seeded
+	if inputHash != "" {
+		// An input proof names the consumed input, the state it was
+		// captured against and, for the first proof, the pair identity it
+		// was captured from; the synthetic pair identity is fixed.
+		state, err := s.db.ReadIndexState(ctx, s.sid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		activation.ExpectedState = state
+		activation.IndexedInputHash = &inputHash
+		if state == nil || state.ArtifactHash == nil {
+			artifact := strings.Repeat("a", 64)
+			activation.ArtifactIdentity = &artifact
+		}
+	}
+	return s.db.ActivateGenerationCandidate(ctx, activation)
 }
 
 // readReaderEntrypoints returns each entry point's bytes for the corpus
@@ -461,7 +508,7 @@ func readReaderEntrypoints(t *testing.T, corpus readerEntrypointCorpus, s reader
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !view.Found || view.GenerationID != corpus.GenerationID || len(view.Mapping) == 0 {
+	if !view.Found || view.GenerationID != s.activeID || len(view.Mapping) == 0 {
 		t.Fatalf("the active view did not find the corpus generation: found=%t id=%q mapping=%d", view.Found, view.GenerationID, len(view.Mapping))
 	}
 	var applied []string

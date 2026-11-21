@@ -140,7 +140,7 @@ func evaluateUnchangedTermsOnConn(conn *sqlite.Conn, p ManagedGenerationUnchange
 	if !nonzeroDigest(seal) {
 		return mismatch(ingest.UnchangedNotProvenSeal)
 	}
-	if p.Expected == nil || !sameIndexState(p.Expected, state) || !sameIndexValue(p.Expected.LatestAttemptArtifactHash, state.LatestAttemptArtifactHash) || !sameIndexValue(p.Expected.LatestAttemptIndexerVersion, state.LatestAttemptIndexerVersion) || !sameIndexValue(p.Expected.LatestAttemptAdapterVersion, state.LatestAttemptAdapterVersion) || p.Expected.ContentFailureCode != state.ContentFailureCode {
+	if !indexStateStillExpected(p.Expected, state) {
 		return mismatch(ingest.UnchangedNotProvenInputProof)
 	}
 	if mode.contextMode() {
@@ -153,4 +153,17 @@ func evaluateUnchangedTermsOnConn(conn *sqlite.Conn, p ManagedGenerationUnchange
 		}
 	}
 	return ingest.UnchangedProof{Proven: true}, nil
+}
+
+// indexStateStillExpected reports whether the stored index state is exactly
+// the state a caller captured: the index stamps, the latest-attempt stamps and
+// the content failure code.
+func indexStateStillExpected(expected, state *ingest.SessionIndexState) bool {
+	if expected == nil || state == nil || !sameIndexState(expected, state) {
+		return false
+	}
+	latestSame := sameIndexValue(expected.LatestAttemptArtifactHash, state.LatestAttemptArtifactHash) &&
+		sameIndexValue(expected.LatestAttemptIndexerVersion, state.LatestAttemptIndexerVersion) &&
+		sameIndexValue(expected.LatestAttemptAdapterVersion, state.LatestAttemptAdapterVersion)
+	return latestSame && expected.ContentFailureCode == state.ContentFailureCode
 }

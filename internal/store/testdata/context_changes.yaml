@@ -74,7 +74,7 @@ changes:
   - name: purpose
     field: purpose
     before: ""
-    after: subagent
+    after: delegated_work
     routes: {claude-code: reference, codex: parse:validate-unsupported, opencode: parse:validate-unsupported}
   # Claude sets the root to nil from the transcript, so a recorded root change
   # leaves the candidate context equal to the stored one.

@@ -308,6 +308,10 @@ type Store struct {
 	// carries a validated answer reads it, and no production file assigns it
 	// (a source guard enforces that).
 	settleValidatedMutation func() unchangedSettleMutation
+	// referenceInstallSeam is zero in production. A test sets it to observe
+	// the reference install's connection or to add a read inside its
+	// transaction.
+	referenceInstallSeam referenceInstallSeam
 }
 
 // InstallationSalt returns the salt used by ingestion to derive canonical,

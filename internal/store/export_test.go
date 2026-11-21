@@ -2,7 +2,11 @@ package store
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"testing"
+
+	"github.com/peasant-labs/peasant/internal/indexformat"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
@@ -142,4 +146,65 @@ func BuildChainReferenceForTest(t *testing.T, path string) {
 func DumpDatabaseForTest(t *testing.T, path string) []byte {
 	t.Helper()
 	return dumpDatabase(t, path)
+}
+
+// SetReferenceInstallSeamForTest observes the reference install: conn is
+// called with the install connection before its transaction, and read runs
+// inside the transaction before any write; an error from read fails the
+// install there.
+// This function is only available in test builds.
+func (s *Store) SetReferenceInstallSeamForTest(t testing.TB, conn func(*sqlite.Conn), read func(*sqlite.Conn) error) {
+	t.Helper()
+	s.referenceInstallSeam = referenceInstallSeam{conn: conn, read: read}
+	t.Cleanup(func() { s.referenceInstallSeam = referenceInstallSeam{} })
+}
+
+// RebindReferencePlanForTest hands a plan made by one store to another
+// store opened on the same database, so a test can install it on fresh
+// connections.
+// This function is only available in test builds.
+func RebindReferencePlanForTest(plan ingest.ManagedGenerationReferencePlan, s *Store) ingest.ManagedGenerationReferencePlan {
+	planned := *plan.(*ManagedGenerationReferencePlan)
+	planned.store = s
+	return &planned
+}
+
+// ParseTablesForTest lists the tables whose rows a generation may read from
+// its owner.
+// This function is only available in test builds.
+func ParseTablesForTest() []string { return append([]string(nil), parseTables...) }
+
+// GenerationScopedTablesForTest lists every generation-scoped table.
+// This function is only available in test builds.
+func GenerationScopedTablesForTest() []string { return append([]string(nil), reclaimTableNames...) }
+
+// ParseProjectionForTest prepares a candidate the way activation does and
+// returns its parse projection as JSON: the ordered body digests and their
+// partitions, the blob digests, the aliases, and the title refs, segments,
+// segment refs, sections and native metadata. renameSegmentRefs replaces each
+// segment ref by its position, for a builder that mints those refs at random.
+// This function is only available in test builds.
+func ParseProjectionForTest(generation indexformat.Generation, blobs map[schema.SourceEntryRef][]byte, renameSegmentRefs bool) ([]byte, error) {
+	prepared, err := prepareHarmonizedCandidate(generation.Metadata.SessionID, generation, blobs)
+	if err != nil {
+		return nil, err
+	}
+	children := prepared.children
+	segmentRefs := append([]GenerationSegmentRef(nil), children.SegmentRefs...)
+	if renameSegmentRefs {
+		for i := range segmentRefs {
+			segmentRefs[i].SourceEntryRef = schema.SourceEntryRef(fmt.Sprintf("segment-ref-%d", i))
+		}
+	}
+	return json.Marshal(struct {
+		Bodies         []BodyDigest
+		Partitions     []int
+		Blobs          []BlobDigest
+		Aliases        map[string]schema.SourceEntryRef
+		TitleRefs      []schema.SourceEntryRef
+		Segments       []GenerationSegment
+		SegmentRefs    []GenerationSegmentRef
+		Sections       []GenerationSection
+		NativeMetadata []GenerationNativeMetadata
+	}{prepared.bodyDigests, prepared.partitions, prepared.blobDigests(), prepared.aliases, children.TitleRefs, children.Segments, segmentRefs, children.Sections, children.NativeMetadata})
 }

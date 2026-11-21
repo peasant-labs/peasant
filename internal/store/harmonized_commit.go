@@ -771,15 +771,24 @@ func indexFormatCompleteness(text string) indexformat.GenerationCompleteness {
 // Every collection loads in key order so the comparison is order-exact
 // where order is identity (children, mapping) and order-free where it is
 // not (descriptors, aliases).
+//
+// The context rows are the generation's own. The parsed rows (title refs,
+// segments, sections, native metadata, the mapping, the descriptors and the
+// aliases) are read under the id the resolver names: the owner's for a
+// generation that references another generation's parse.
 func loadGenerationChildrenOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string, view *activeHarmonizedView) error {
-	query := func(sql string, fn func(*sqlite.Stmt) error) error {
-		return sqlitex.Execute(conn, sql, &sqlitex.ExecOptions{
-			Args:       []any{string(sessionID), generationID},
-			ResultFunc: fn,
-		})
-	}
 	if err := loadGenerationContextChildrenOnConn(conn, sessionID, generationID, &view.children); err != nil {
 		return err
+	}
+	rowsID, err := rowsGenerationIDOnConn(conn, sessionID, generationID)
+	if err != nil {
+		return err
+	}
+	query := func(sql string, fn func(*sqlite.Stmt) error) error {
+		return sqlitex.Execute(conn, sql, &sqlitex.ExecOptions{
+			Args:       []any{string(sessionID), rowsID},
+			ResultFunc: fn,
+		})
 	}
 	if err := query(`SELECT ordinal, source_entry_ref FROM session_generation_title_refs WHERE session_id = ? AND generation_id = ? ORDER BY ordinal`, func(stmt *sqlite.Stmt) error {
 		view.children.TitleRefs = append(view.children.TitleRefs, schema.SourceEntryRef(stmt.ColumnText(1)))
@@ -994,16 +1003,31 @@ func generationRecordsEqual(candidate, active GenerationRecord) bool {
 // the install instant, while a latest attempt passes nil so its
 // generation row records no activation (the column already admits NULL).
 func insertHarmonizedGenerationOnConn(conn *sqlite.Conn, prepared *preparedHarmonized, priorEvidence []byte, installedAtMs int64, activatedAtMs *int64) error {
-	sessionID := prepared.sessionID
-	generationID := prepared.generation.ID
 	record := prepared.record
 	record.CandidateDigest = prepared.binding
 	record.PriorEvidence = append([]byte(nil), priorEvidence...)
 	record.InstalledAtMs = installedAtMs
 	record.ActivatedAtMs = activatedAtMs
+	if err := insertGenerationCatalogOnConn(conn, prepared.sessionID, prepared.generation.ID, record, prepared.children, ""); err != nil {
+		return err
+	}
+	return insertGenerationMappingOnConn(conn, prepared)
+}
+
+// insertGenerationCatalogOnConn writes one generation's catalog row and its
+// context rows: subagents, commits, associations, diagnostics and
+// relationship evidence. mappingSetID names the generation whose parsed rows
+// this generation reads; empty means it owns its own, written by
+// insertGenerationMappingOnConn. record carries the final seal, prior
+// evidence and stamps.
+func insertGenerationCatalogOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string, record GenerationRecord, children GenerationChildren, mappingSetID string) error {
+	var mappingSet any
+	if mappingSetID != "" {
+		mappingSet = mappingSetID
+	}
 	r := record
-	if err := sqlitex.Execute(conn, `INSERT INTO session_generations(session_id, generation_id, schema_version, harness, model, version, ts_start, ts_end, ts_ingested, source_file_path, source_format, git_branch, git_remote, git_worktree, git_tracking, project_hash, project_file_path, project_name, host_slug, root_session_id, purpose, cwd, derived_at, content_hash, metadata_hash, redaction_applied, redaction_level, redaction_rule_set_version, redaction_at_ms, redaction_content_hash_at_redact, adapter_version, diagnostics_partial, completeness, source_evidence_digest, index_format_version, candidate_digest, prior_evidence, installed_at_ms, activated_at_ms)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
+	if err := sqlitex.Execute(conn, `INSERT INTO session_generations(session_id, generation_id, schema_version, harness, model, version, ts_start, ts_end, ts_ingested, source_file_path, source_format, git_branch, git_remote, git_worktree, git_tracking, project_hash, project_file_path, project_name, host_slug, root_session_id, purpose, cwd, derived_at, content_hash, metadata_hash, redaction_applied, redaction_level, redaction_rule_set_version, redaction_at_ms, redaction_content_hash_at_redact, adapter_version, diagnostics_partial, completeness, source_evidence_digest, index_format_version, candidate_digest, prior_evidence, installed_at_ms, activated_at_ms, mapping_set_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
 		string(sessionID), generationID,
 		int64(r.SchemaVersion), string(r.Harness), string(r.Model), r.Version,
 		r.TimestampStartMs, r.TimestampEndMs, optInt64(r.TimestampIngestedMs),
@@ -1016,11 +1040,10 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
 		optInt64(r.RedactionAtMs), optString(r.RedactionContentHashAtRedact),
 		optInt(r.AdapterVersion), optDiagnosticsPartial(r.DiagnosticsPartial),
 		string(r.Completeness), r.SourceEvidenceDigest, int64(r.IndexFormatVersion), r.CandidateDigest,
-		optBytes(r.PriorEvidence), r.InstalledAtMs, optInt64(r.ActivatedAtMs),
+		optBytes(r.PriorEvidence), r.InstalledAtMs, optInt64(r.ActivatedAtMs), mappingSet,
 	}}); err != nil {
 		return fmt.Errorf("store: install harmonized generation %s for session %s: %w; no generation was activated", generationID, sessionID, err)
 	}
-	children := prepared.children
 	for _, subagent := range children.Subagents {
 		if err := sqlitex.Execute(conn, `INSERT INTO session_generation_subagents(session_id, generation_id, ordinal, subagent_session_id, parent_uuid) VALUES (?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
 			string(sessionID), generationID, int64(subagent.Ordinal), string(subagent.SubagentSessionID), string(subagent.ParentUUID),
@@ -1049,6 +1072,27 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
 			return fmt.Errorf("store: install diagnostic %d for generation %s of session %s: %w; no generation was activated", diagnostic.Ordinal, generationID, sessionID, err)
 		}
 	}
+	for i, relationship := range children.Relationships {
+		if err := sqlitex.Execute(conn, `INSERT INTO session_relationship_evidence(session_id, generation_id, ordinal, kind, target_state, target_local_id, evidence, anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
+			string(sessionID), generationID, int64(i), string(relationship.Kind), string(relationship.TargetState),
+			optSessionID(relationship.TargetLocalID), optString(relationship.Evidence),
+			optAnchorKind(relationship.AnchorKind), optEntryRef(relationship.AnchorSourceEntryRef),
+			optString(relationship.AnchorSourceRevisionRef),
+		}}); err != nil {
+			return fmt.Errorf("store: install %s relationship evidence for generation %s of session %s: %w; no generation was activated", relationship.Kind, generationID, sessionID, err)
+		}
+	}
+	return nil
+}
+
+// insertGenerationMappingOnConn writes one generation's parsed rows: the
+// title refs, the entry mapping, the non-emitted content descriptors, the
+// aliases, the sections and their native metadata, and the context segments
+// and their refs. Only a generation that owns its parsed rows has them.
+func insertGenerationMappingOnConn(conn *sqlite.Conn, prepared *preparedHarmonized) error {
+	sessionID := prepared.sessionID
+	generationID := prepared.generation.ID
+	children := prepared.children
 	for i, ref := range children.TitleRefs {
 		if err := sqlitex.Execute(conn, `INSERT INTO session_generation_title_refs(session_id, generation_id, ordinal, source_entry_ref) VALUES (?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
 			string(sessionID), generationID, int64(i), string(ref),
@@ -1123,16 +1167,6 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
 			string(sessionID), generationID, int64(ref.SegmentOrdinal), int64(ref.Ordinal), string(ref.SourceEntryRef),
 		}}); err != nil {
 			return fmt.Errorf("store: install segment ref %d of segment %d for generation %s of session %s: %w; no generation was activated", ref.Ordinal, ref.SegmentOrdinal, generationID, sessionID, err)
-		}
-	}
-	for i, relationship := range children.Relationships {
-		if err := sqlitex.Execute(conn, `INSERT INTO session_relationship_evidence(session_id, generation_id, ordinal, kind, target_state, target_local_id, evidence, anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
-			string(sessionID), generationID, int64(i), string(relationship.Kind), string(relationship.TargetState),
-			optSessionID(relationship.TargetLocalID), optString(relationship.Evidence),
-			optAnchorKind(relationship.AnchorKind), optEntryRef(relationship.AnchorSourceEntryRef),
-			optString(relationship.AnchorSourceRevisionRef),
-		}}); err != nil {
-			return fmt.Errorf("store: install %s relationship evidence for generation %s of session %s: %w; no generation was activated", relationship.Kind, generationID, sessionID, err)
 		}
 	}
 	return nil
