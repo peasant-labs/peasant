@@ -16,6 +16,7 @@ requiredNames:
   - owner-changed-between-plan-and-install
   - annotated-reference-keeps-anchors-on-parse
   - chained-reference-flattens-to-owner
+  - blobs-and-partitions-seal-parity
 cases:
   - name: project-rename-references-the-set
     given: G_golden is active and owns its parsed rows; the captured project is renamed
@@ -65,3 +66,8 @@ cases:
     then: G_later reports G_golden as its owner, carries mapping_set_id G_golden, sets content_sweep_pending = 1, and every harvest-path reader matches a plain parse
     kind: chained-reference
     secondRenamedProject: reader-corpus-renamed-twice
+  - name: blobs-and-partitions-seal-parity
+    given: an owner generation with two partitions and three content blobs with distinct source_entry_ref values
+    when: a twin store parses the renamed context and the first store installs a reference
+    then: both G_reference rows carry the exact same candidate_digest
+    kind: blobs-and-partitions-parity

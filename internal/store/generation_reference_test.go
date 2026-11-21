@@ -3,7 +3,9 @@ package store_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	_ "embed"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"maps"
@@ -14,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
@@ -50,6 +53,7 @@ const (
 	referenceKindMoved          = "moved"
 	referenceKindAnnotatedParse = "annotated-parse"
 	referenceKindChained        = "chained-reference"
+	referenceKindBlobPartParity = "blobs-and-partitions-parity"
 )
 
 // The changes a refusal case applies.
@@ -521,6 +525,138 @@ func TestGenerationReference(t *testing.T) {
 					if len(want[entry]) == 0 || !bytes.Equal(want[entry], got[entry]) {
 						t.Errorf("%s differs between the plain parse and chained reference:\nparse     %s\nreference %s", entry, want[entry], got[entry])
 					}
+				}
+			case referenceKindBlobPartParity:
+				// Build an owner with 2 partitions and >= 2 content blobs so
+				// ownerDigestsOnConn's partition and blob-ref ordering is non-vacuous.
+				buildWithBlobsAndPartitions := func(genID string, recorded schema.UnifiedMetadata) (indexformat.V2, map[schema.SourceEntryRef][]byte) {
+					cand, err := w.seeded.builder.BuildGeneration(t.Context(), ingest.GenerationBuildInput{
+						Session: w.seeded.session, GenerationID: genID, RecordedMetadata: &recorded,
+						CapturedTranscript: w.seeded.transcript, Allocator: &countingRefAllocator{},
+					})
+					if err != nil {
+						t.Fatalf("build candidate: %v", err)
+					}
+					v2 := cand.Result
+					blobs := maps.Clone(cand.Blobs)
+					if blobs == nil {
+						blobs = map[schema.SourceEntryRef][]byte{}
+					}
+					partText := "partition one entry"
+					v2.Generation.Earlier = []indexformat.EarlierPartition{{
+						State: schema.EarlierHistoryUncertainMigrated,
+						Content: indexformat.Partition{
+							Entries: []schema.SessionEntry{{
+								SessionID: sid, EntryIndex: 0, Harness: w.seeded.harness, EntryType: ingest.EntryTypeText,
+								Role: ingest.RoleAssistant, ContentPreview: &partText, SourceEntryRef: "e_golden_part1_0",
+							}},
+						},
+					}}
+					blobRefs := []schema.SourceEntryRef{"e_golden_blob_0", "e_golden_blob_1", "e_golden_blob_2"}
+					for i, ref := range blobRefs {
+						payload := []byte(fmt.Sprintf("synthetic blob payload %d for %s", i, ref))
+						sum := sha256.Sum256(payload)
+						blobs[ref] = payload
+						v2.Generation.Content = append(v2.Generation.Content, indexformat.ContentRecord{
+							Ref:          ref,
+							RelativeBlob: "c_" + hex.EncodeToString(sum[:]) + ".blob",
+							ByteLength:   int64(len(payload)),
+							Digest:       hex.EncodeToString(sum[:]),
+						})
+					}
+					v2.Generation.Segments = append(v2.Generation.Segments, indexformat.ContextSegment{
+						Ordinal:          len(v2.Generation.Segments),
+						PhysicalSourceID: "source-0",
+						Coordinates:      indexformat.SegmentCoordinates{Kind: indexformat.CoordinateKindSnapshotOnly},
+						Inclusion:        indexformat.SegmentInclusionInherited,
+						CapturedRefs:     blobRefs,
+					})
+					return v2, blobs
+				}
+				v2Owner, ownerBlobs := buildWithBlobsAndPartitions(w.corpus.GenerationID, w.seeded.recorded)
+				if err := v2Owner.Generation.Validate(); err != nil {
+					t.Fatalf("v2Owner.Validate: %v", err)
+				}
+				v2Renamed, renamedBlobs := buildWithBlobsAndPartitions(referenceGenerationID, w.renamed)
+				storeR := openReaderEntrypointStore(t, t.TempDir())
+				storeP := openReaderEntrypointStore(t, t.TempDir())
+				activateWithProof := func(st *store.Store, v2 indexformat.V2, blobs map[schema.SourceEntryRef][]byte) {
+					t.Helper()
+					if v2.Generation.Metadata.AdapterVersion == nil {
+						v := w.seeded.target.AdapterVersion
+						v2.Generation.Metadata.AdapterVersion = &v
+					}
+					assessment, err := ingest.AssessCapture(ingest.CaptureFacts{Harness: w.seeded.harness, Result: v2, Policy: ingest.CaptureFreshCandidate, Authoritative: true})
+					if err != nil {
+						t.Fatal(err)
+					}
+					capture, err := assessment.ContentCapture(ingest.ContentSourceProviderSource, w.seeded.session.TranscriptOrigin, w.corpus.ClockMs)
+					if err != nil {
+						t.Fatal(err)
+					}
+					state, err := st.ReadIndexState(t.Context(), sid)
+					if err != nil {
+						t.Fatal(err)
+					}
+					act := store.GenerationActivation{
+						Generation: v2, Blobs: blobs,
+						IndexerVersion: w.seeded.target.IndexerVersion, IndexedAtMs: w.corpus.ClockMs,
+						ContentCapture: capture, ExpectedState: state, IndexedInputHash: &referenceInputHash,
+					}
+					if state == nil || state.ArtifactHash == nil {
+						artifact := strings.Repeat("a", 64)
+						act.ArtifactIdentity = &artifact
+					}
+					if _, err := st.ActivateGeneration(t.Context(), act); err != nil {
+						t.Fatalf("activate %s: %v", v2.Generation.ID, err)
+					}
+				}
+				for _, st := range []*store.Store{storeR, storeP} {
+					if _, err := st.InsertSessionsWithRevisions(t.Context(), []ingest.StoreEntry{{
+						Metadata: &w.seeded.recorded, PublicationCapture: true, CWDProvenance: ingest.CWDSourceExact, Session: w.seeded.session,
+					}}); err != nil {
+						t.Fatalf("seed session: %v", err)
+					}
+					activateWithProof(st, v2Owner, ownerBlobs)
+				}
+				if got := referenceQuery(t, storeR, `SELECT COUNT(DISTINCT partition_id) FROM session_generation_entries WHERE session_id = ? AND generation_id = ?`, string(sid), w.corpus.GenerationID); !slices.Equal(got, []string{"1:2"}) {
+					t.Fatalf("partition count = %v, want [1:2]", got)
+				}
+				if got := referenceQuery(t, storeR, `SELECT COUNT(DISTINCT source_entry_ref), COUNT(DISTINCT digest) FROM session_generation_content WHERE session_id = ? AND generation_id = ?`, string(sid), w.corpus.GenerationID); !slices.Equal(got, []string{"1:3|1:3"}) {
+					t.Fatalf("blob count = %v, want [1:3|1:3]", got)
+				}
+				activateWithProof(storeP, v2Renamed, renamedBlobs)
+				state, err := storeR.ReadIndexState(t.Context(), sid)
+				if err != nil || state == nil {
+					t.Fatalf("read index state: %+v %v", state, err)
+				}
+				candMeta := v2Renamed.Generation.Metadata
+				if candMeta.AdapterVersion == nil {
+					v := w.seeded.target.AdapterVersion
+					candMeta.AdapterVersion = &v
+				}
+				plan, err := storeR.PlanManagedGenerationReference(t.Context(), ingest.ManagedGenerationReferenceRequest{
+					Proof: ingest.ManagedGenerationUnchangedProof{
+						SessionID: sid, Metadata: w.renamed, InputDigest: referenceInputHash,
+						IndexerTarget: w.seeded.target.IndexerVersion, FormatTarget: w.seeded.target.IndexVersion, Expected: state,
+					},
+					Candidate: ingest.GenerationMetadataCandidate{
+						Metadata: candMeta, Completeness: v2Renamed.Generation.Completeness,
+						SourceEvidenceDigest: v2Renamed.Generation.SourceEvidenceDigest,
+					},
+					GenerationID: referenceGenerationID,
+				})
+				if err != nil {
+					t.Fatalf("plan reference with blobs and partitions: %v", err)
+				}
+				if _, err := storeR.InstallManagedGenerationReference(t.Context(), plan); err != nil {
+					t.Fatalf("install reference with blobs and partitions: %v", err)
+				}
+				sealQuery := `SELECT candidate_digest FROM session_generations WHERE session_id = ? AND generation_id = ?`
+				parsed := referenceQuery(t, storeP, sealQuery, string(sid), referenceGenerationID)
+				referenced := referenceQuery(t, storeR, sealQuery, string(sid), referenceGenerationID)
+				if len(parsed) != 1 || !slices.Equal(parsed, referenced) {
+					t.Fatalf("parse seal %v, reference seal %v; want equal seals", parsed, referenced)
 				}
 			default:
 				t.Fatalf("reference case %s has unknown kind %q", c.Name, c.Kind)
