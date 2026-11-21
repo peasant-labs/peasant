@@ -59,6 +59,11 @@ func (p *ProgressiveProvider) isMocked(section defaults.MockSection) bool {
 	return slices.Contains(sections, section)
 }
 
+// Mocked reports whether the section reads from the mock provider.
+func (p *ProgressiveProvider) Mocked(section defaults.MockSection) bool {
+	return p.isMocked(section)
+}
+
 func (p *ProgressiveProvider) getProvider(section defaults.MockSection) (DataProvider, error) {
 	if p.isMocked(section) {
 		if p.mock == nil {
