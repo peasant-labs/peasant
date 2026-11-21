@@ -1,0 +1,61 @@
+# What `export sessions --stdout` writes on each stream. `session` is the shape
+# of the one stored session the run names (see seedRefusedCapture; `missing`
+# names a session that was never stored). `args` follow `export sessions`;
+# {session} is that session's id and {outdir} a directory the run must not create.
+#   outcome exported: stdout is the transcript document, stderr is empty
+#   outcome refused:  stdout is empty, stderr names the reason, exit 1
+#   outcome usage:    stdout is empty, a usage refusal before the store opens
+requiredNames:
+  - exports-one-transcript
+  - exports-last-good
+  - refused-capture-writes-nothing
+  - legacy-capture-writes-nothing
+  - missing-session-writes-nothing
+  - needs-session
+  - refuses-sessions-from
+  - refuses-output-dir
+  - refuses-json
+cases:
+  - name: exports-one-transcript
+    session: ok
+    args: [--session, "{session}", --stdout]
+    outcome: exported
+  - name: exports-last-good
+    session: ok
+    args: [--session, "{session}", --stdout, --last-good]
+    outcome: exported
+  - name: refused-capture-writes-nothing
+    session: refused-strict
+    args: [--session, "{session}", --stdout]
+    outcome: refused
+    wantStderr: strict_capture_refused
+  - name: legacy-capture-writes-nothing
+    session: refused-legacy
+    args: [--session, "{session}", --stdout]
+    outcome: refused
+    wantStderr: legacy_preview_only
+  - name: missing-session-writes-nothing
+    session: missing
+    args: [--session, "{session}", --stdout]
+    outcome: refused
+    wantStderr: "warning: session {session}:"
+  - name: needs-session
+    session: ok
+    args: [--stdout]
+    outcome: usage
+    wantError: --stdout needs --session
+  - name: refuses-sessions-from
+    session: ok
+    args: [--sessions-from, "{list}", --stdout]
+    outcome: usage
+    wantError: conflicting flags --stdout and --sessions-from
+  - name: refuses-output-dir
+    session: ok
+    args: [--session, "{session}", --stdout, --output-dir, "{outdir}"]
+    outcome: usage
+    wantError: conflicting flags --stdout and --output-dir
+  - name: refuses-json
+    session: ok
+    args: [--session, "{session}", --stdout, --json]
+    outcome: usage
+    wantError: conflicting flags --stdout and --json

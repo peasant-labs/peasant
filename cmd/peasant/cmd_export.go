@@ -630,6 +630,7 @@ func buildExportSessionsCommand() *cobra.Command {
 		outputDir  string
 		lastGood   bool
 		jsonOutput bool
+		toStdout   bool
 	)
 
 	cmd := &cobra.Command{
@@ -656,21 +657,38 @@ command that repairs it, and a run over more than one session ends with a
 one-line summary on stderr: exported, refused, and why.
 
 The command exits 1 when it refuses any session. The sessions it did export
-stay written.`,
+stay written.
+
+With --stdout and --session, the one session's transcript is written to stdout
+instead of a file: the same JSON document the file would hold, followed by a
+newline, and nothing else. No file or directory is created. The document is
+built and checked in full before the first byte is written, so a refused,
+stale, incomplete, or missing session writes nothing to stdout; its reason and
+repair go to stderr and the command exits 1. Only a failure to write stdout
+itself, such as a closed pipe, can leave a partial document, and it also exits
+1, so treat stdout as a transcript only when the command exits 0. --stdout
+cannot be combined with --sessions-from, --output-dir, or --json.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if toStdout {
+				if err := validateExportStdout(cmd); err != nil {
+					return err
+				}
+			}
 			sessionList, err := resolveExportSessionIDs(cmd)
 			if err != nil {
 				return err
 			}
 			sessionIDs := sessionList.IDs
 
-			if err := ensureOutputDir(outputDir); err != nil {
-				return fmt.Errorf(
-					"export sessions: create output directory %q: %w\n"+
-						"What went wrong: could not create the output directory.\n"+
-						"Fix: check that the parent directory exists and is writable.",
-					outputDir, err,
-				)
+			if !toStdout {
+				if err := ensureOutputDir(outputDir); err != nil {
+					return fmt.Errorf(
+						"export sessions: create output directory %q: %w\n"+
+							"What went wrong: could not create the output directory.\n"+
+							"Fix: check that the parent directory exists and is writable.",
+						outputDir, err,
+					)
+				}
 			}
 
 			db, cleanup, err := openDB(cmd)
@@ -720,13 +738,24 @@ stay written.`,
 					continue
 				}
 
-				outPath := filepath.Join(outputDir, sid+".json")
 				data, marshalErr := json.MarshalIndent(exported, "", "  ")
 				if marshalErr != nil {
 					refuse(sid, exportRefusalWrite, fmt.Sprintf("marshal JSON: %v", marshalErr))
 					failed++
 					continue
 				}
+
+				if toStdout {
+					if writeErr := writeExportStdout(cmd.OutOrStdout(), data); writeErr != nil {
+						refuse(sid, exportRefusalWrite, fmt.Sprintf("write stdout: %v", writeErr))
+						failed++
+						continue
+					}
+					succeeded++
+					continue
+				}
+
+				outPath := filepath.Join(outputDir, sid+".json")
 
 				// Atomic-write boundary: a failed export leaves an existing
 				// target untouched. Marshal and redaction already validated
@@ -800,9 +829,41 @@ stay written.`,
 	clicontract.AliasSessionsFrom(cmd, "session-from-file")
 	cmd.Flags().StringVar(&outputDir, "output-dir", ".", "Directory to write exported session JSON files")
 	cmd.Flags().BoolVar(&jsonOutput, defaults.JSONFlagName, false, "Print one JSON document of the exported sessions and warnings on stdout")
+	cmd.Flags().BoolVar(&toStdout, "stdout", false, "Write the one --session transcript JSON document to stdout instead of a file; nothing else is written to stdout")
 	cmd.Flags().BoolVar(&lastGood, "last-good", false, "Export the last-good full transcript when a newer incomplete attempt is kept beside it. Without it such a session is refused rather than exporting the incomplete attempt; the store resolves the last-good authority server-side, so no session or generation identifier is accepted")
 
 	return cmd
+}
+
+// validateExportStdout refuses --stdout unless it names exactly one session
+// through --session and asks for no file or summary document.
+func validateExportStdout(cmd *cobra.Command) error {
+	for _, conflict := range []string{clicontract.SessionsFromFlag, "output-dir", defaults.JSONFlagName} {
+		if cmd.Flags().Changed(conflict) {
+			return clicontract.NewUsageError(fmt.Sprintf(
+				"%s: conflicting flags --stdout and --%s\n"+
+					"What went wrong: both --stdout and --%s were provided.\n"+
+					"Why: --stdout writes one transcript document as the whole of stdout, so it takes no file, no list, and no summary document.\n"+
+					"Fix: drop --%s, or drop --stdout to export files.",
+				cmd.CommandPath(), conflict, conflict, conflict))
+		}
+	}
+	if !cmd.Flags().Changed("session") {
+		return clicontract.NewUsageError(fmt.Sprintf(
+			"%s: --stdout needs --session\n"+
+				"What went wrong: --stdout was provided without --session.\n"+
+				"Why: stdout holds exactly one transcript document, so it exports exactly one session.\n"+
+				"Fix: provide --session <session-id>.",
+			cmd.CommandPath()))
+	}
+	return nil
+}
+
+// writeExportStdout writes one marshaled transcript and its newline in a
+// single write, so stdout is never begun before the document is complete.
+func writeExportStdout(w io.Writer, data []byte) error {
+	_, err := w.Write(append(data, '\n'))
+	return err
 }
 
 // exportedSession is one session in the export sessions --json document.
