@@ -143,6 +143,13 @@ func TestProcStatStartTimeTokenIndex(t *testing.T) {
 	}
 }
 
+func TestProcStatReadOfAnExitingProcessMeansGone(t *testing.T) {
+	err := &os.PathError{Op: "read", Path: "/proc/1/stat", Err: syscall.ESRCH}
+	if !procStatReadMeansGone(err) {
+		t.Fatalf("procStatReadMeansGone(%v) = false; a read that races the exit returns ESRCH and must count as gone", err)
+	}
+}
+
 func TestProcStatSnapshotDeadZombieOrReused(t *testing.T) {
 	const originalStartTime = 42
 	tests := []struct {
@@ -238,13 +245,20 @@ type procStatSnapshot struct {
 
 func processDeadZombieOrReused(pid int, originalStartTime uint64) (bool, error) {
 	snapshot, err := readProcStatSnapshot(pid)
-	if errors.Is(err, os.ErrNotExist) {
+	if procStatReadMeansGone(err) {
 		return true, nil
 	}
 	if err != nil {
 		return false, err
 	}
 	return procStatSnapshotDeadZombieOrReused(snapshot, originalStartTime), nil
+}
+
+// procStatReadMeansGone reports whether a failed /proc/<pid>/stat read means
+// the process no longer exists. A process that exits while the read is in
+// flight returns ESRCH rather than ENOENT.
+func procStatReadMeansGone(err error) bool {
+	return errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ESRCH)
 }
 
 func procStatSnapshotDeadZombieOrReused(snapshot procStatSnapshot, originalStartTime uint64) bool {
