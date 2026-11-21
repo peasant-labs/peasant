@@ -420,6 +420,9 @@ func (v *audienceVillage) publish(t *testing.T, w http.ResponseWriter, r *http.R
 	receipt.Applied.NormalizedValues.Visibility = v.visibility
 	receipt.Applied.License = v.license
 	if v.loseAnswer {
+		// Retry-After: 0 keeps the client's bounded retries of the lost answer
+		// from adding real backoff time to the run.
+		w.Header().Set("Retry-After", "0")
 		http.Error(w, "upstream answer lost", http.StatusGatewayTimeout)
 		return
 	}
@@ -498,8 +501,8 @@ func (v *audienceVillage) expect(t *testing.T, label string, want audienceExpect
 	if got := len(published) > 0; got != *want.Published {
 		t.Fatalf("%s: the Village received %d publish request(s); want published=%v", label, len(published), *want.Published)
 	}
-	if *want.Published && (len(published) != 1 || published[0] != want.License.license()) {
-		t.Errorf("%s: publish requests carried licenses %q; want exactly one carrying %q", label, published, want.License.license())
+	if *want.Published && slices.ContainsFunc(published, func(l schema.License) bool { return l != want.License.license() }) {
+		t.Errorf("%s: publish requests carried licenses %q; want one operation carrying %q, re-sent unchanged by any transient-failure retry", label, published, want.License.license())
 	}
 	if !slices.Equal(updates, want.VisibilityUpdates) {
 		t.Errorf("%s: the Village received owner visibility updates %v; want %v", label, updates, want.VisibilityUpdates)

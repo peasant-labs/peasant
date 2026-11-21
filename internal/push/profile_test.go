@@ -64,6 +64,7 @@ type pushProfileCase struct {
 	ExpectedHighWater          int64             `yaml:"expectedHighWater"`
 	ExpectedPatches            int64             `yaml:"expectedPatches"`
 	ExpectedAnnotationRequests int64             `yaml:"expectedAnnotationRequests"`
+	ExpectedRetries            int64             `yaml:"expectedRetries"`
 	Retryable                  bool              `yaml:"retryable"`
 	FailedStage                perf.StageID      `yaml:"failedStage"`
 	SkippedStage               perf.StageID      `yaml:"skippedStage"`
@@ -308,6 +309,9 @@ func runPushProfileFixture(t *testing.T, tc pushProfileCase) pushProfileEvidence
 	creds := baseCreds()
 	creds.VillageURL = server.URL
 	client := village.NewVillageClient(server.URL, testAPIKey, server.Client())
+	retryPolicy := village.DefaultRetryPolicy()
+	retryPolicy.Sleep = func(context.Context, time.Duration) error { return nil }
+	client.SetRetryPolicy(retryPolicy)
 	var output, trace bytes.Buffer
 	collector := perf.NewCollectorWithOptions(profileClock{}, perf.NewJSONLTraceSink(&trace), perf.Options{Enabled: true})
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -379,7 +383,7 @@ func runPushProfileFixture(t *testing.T, tc pushProfileCase) pushProfileEvidence
 	assertCount(perf.CounterPushSessionsPublished, int64(tc.ExpectedPublished))
 	assertCount(perf.CounterPushSessionsFailed, int64(tc.ExpectedFailed))
 	assertCount(perf.CounterPushSessionsSkipped, int64(tc.ExpectedSkipped))
-	assertCount(perf.CounterPushHTTPRetries, 0)
+	assertCount(perf.CounterPushHTTPRetries, tc.ExpectedRetries)
 	assertCount(perf.CounterPushPayloadBytes, requestBytes.Load())
 	assertCount(perf.CounterPushResponseBytes, responseBytes.Load())
 	assertCount(perf.CounterPushConcurrencyHighWater, tc.ExpectedHighWater)
@@ -405,7 +409,7 @@ func runPushProfileFixture(t *testing.T, tc pushProfileCase) pushProfileEvidence
 			evidence.subjects = append(evidence.subjects, span.SafeSubjectID)
 		}
 		if span.Stage == perf.StagePushRetry && span.Outcome != perf.OutcomeSkipped {
-			t.Error("no retry loop exists: retry must be skipped")
+			t.Error("a failed attempt records its own no-retry decision as skipped")
 		}
 	}
 	if stages[perf.StagePushRun] {
@@ -558,8 +562,8 @@ func assertPushProfileRelationships(t *testing.T, tc pushProfileCase, doc perf.P
 	if tc.DryRun {
 		wantUploads = 0
 	}
-	if publishes != wantUploads {
-		t.Errorf("uploads = %d for %d valid sessions", publishes, wantUploads)
+	if publishes != wantUploads+tc.ExpectedRetries {
+		t.Errorf("uploads = %d for %d valid sessions and %d retries", publishes, wantUploads, tc.ExpectedRetries)
 	}
 	if valid > candidates {
 		t.Errorf("%d sessions were prepared for upload from %d candidates", valid, candidates)

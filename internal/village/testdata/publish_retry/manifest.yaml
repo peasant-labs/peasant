@@ -1,0 +1,14 @@
+requiredNames:
+  - connection_reset_is_retried
+  - request_timeout_is_retried
+  - rate_limit_honors_retry_after_seconds
+  - rate_limit_honors_retry_after_date
+  - bad_gateway_is_retried
+  - unavailable_is_retried
+  - gateway_timeout_is_retried
+  - bad_request_is_not_retried
+  - payload_too_large_is_not_retried
+  - unprocessable_is_not_retried
+  - internal_error_is_not_retried
+  - retry_after_beyond_cap_is_not_retried
+  - persistent_unavailable_backs_off_then_gives_up

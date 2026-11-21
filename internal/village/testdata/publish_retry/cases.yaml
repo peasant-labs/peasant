@@ -1,0 +1,76 @@
+cases:
+  - name: connection_reset_is_retried
+    reset: true
+    failures: 2
+    wantAttempts: 3
+    wantSleeps: [500ms, 1s]
+  - name: request_timeout_is_retried
+    status: 408
+    failures: 1
+    wantAttempts: 2
+    wantSleeps: [500ms]
+  - name: rate_limit_honors_retry_after_seconds
+    status: 429
+    retryAfter: "3"
+    failures: 1
+    wantAttempts: 2
+    wantSleeps: [3s]
+  - name: rate_limit_honors_retry_after_date
+    status: 429
+    retryAfter: "Sat, 14 Nov 2026 08:00:07 GMT"
+    failures: 1
+    wantAttempts: 2
+    wantSleeps: [7s]
+  - name: bad_gateway_is_retried
+    status: 502
+    failures: 1
+    wantAttempts: 2
+    wantSleeps: [500ms]
+  - name: unavailable_is_retried
+    status: 503
+    failures: 2
+    wantAttempts: 3
+    wantSleeps: [500ms, 1s]
+  - name: gateway_timeout_is_retried
+    status: 504
+    failures: 1
+    wantAttempts: 2
+    wantSleeps: [500ms]
+  - name: bad_request_is_not_retried
+    status: 400
+    failures: 1
+    wantAttempts: 1
+    wantStatus: 400
+    wantError: true
+  - name: payload_too_large_is_not_retried
+    status: 413
+    failures: 1
+    wantAttempts: 1
+    wantStatus: 413
+    wantError: true
+  - name: unprocessable_is_not_retried
+    status: 422
+    failures: 1
+    wantAttempts: 1
+    wantStatus: 422
+    wantError: true
+  - name: internal_error_is_not_retried
+    status: 500
+    failures: 1
+    wantAttempts: 1
+    wantStatus: 500
+    wantError: true
+  - name: retry_after_beyond_cap_is_not_retried
+    status: 503
+    retryAfter: "120"
+    failures: 1
+    wantAttempts: 1
+    wantStatus: 503
+    wantError: true
+  - name: persistent_unavailable_backs_off_then_gives_up
+    status: 503
+    failures: 10
+    wantAttempts: 4
+    wantSleeps: [500ms, 1s, 2s]
+    wantStatus: 503
+    wantError: true

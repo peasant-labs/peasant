@@ -43,8 +43,9 @@ func (t *profileTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	attrs := perf.Attributes{perf.AttrOperation: string(t.operation)}
 	t.rec.Count(perf.CounterPushHTTPRequests, 1, perf.UnitRequests, attrs)
 	t.rec.Count(perf.CounterPushHTTPResponses, 0, perf.UnitRequests, attrs)
-	// VillageClient never automatically retries. Retry eligibility is not an
-	// attempt; keep zero explicit rather than claiming an unobserved retry.
+	// One RoundTrip is one attempt and never retries itself. Retry eligibility
+	// is not an attempt; keep zero explicit here. The publish retry loop counts
+	// each retry it actually sends.
 	t.rec.Count(perf.CounterPushHTTPRetries, 0, perf.UnitRequests, attrs)
 	t.rec.Count(perf.CounterPushPayloadBytes, 0, perf.UnitBytes, attrs)
 	t.rec.Count(perf.CounterPushResponseBytes, 0, perf.UnitBytes, attrs)
@@ -75,7 +76,7 @@ func (t *profileTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 			code = "transport"
 		}
 		t.rec.Error(t.operation.stage(), perf.SafeError{Code: code, Retryable: retryable, SafeMessage: "Village request failed; inspect command diagnostics and service availability before retrying"}, attrs)
-		// This is the no-retry policy decision, not a fabricated timed attempt.
+		// This is the attempt's own no-retry decision, not a fabricated timed attempt.
 		t.rec.StartChildSpan(perf.StagePushRetry, perf.ParentSpanFromContext(req.Context()), perf.Attributes{perf.AttrOperation: string(t.operation), perf.AttrHTTPStatusClass: status}).End(perf.OutcomeSkipped, nil)
 	}
 	return resp, err
