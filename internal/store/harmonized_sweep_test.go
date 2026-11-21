@@ -78,6 +78,45 @@ func TestSweepSessionUnknownSession(t *testing.T) {
 	}
 }
 
+// TestSweepBoundedSearchRollback forces a failure after the body delete.
+// The retry must remove only the superseded postings without a rebuild.
+func TestSweepBoundedSearchRollback(t *testing.T) {
+	s, _ := openGenerationStore(t)
+	ctx := context.Background()
+	sid := gcSession(t, s, "b1b1b1b1-b1b1-41b1-81b1-b1b1b1b1b1b2")
+	const obsolete = "gcboundedobsolete"
+	const current = "gcboundedcurrent"
+	gcActivate(t, s, sid, "gc_bounded_old", []string{obsolete + " first", obsolete + " second", obsolete + " third"}, nil)
+	gcActivate(t, s, sid, "gc_bounded_active", []string{current, "gcboundedkeepsecond", "gcboundedkeepthird"}, nil)
+	execute := func(statement string) {
+		t.Helper()
+		conn, err := s.pool.Take(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer s.pool.Put(conn)
+		if err := sqlitex.Execute(conn, statement, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	execute(`CREATE TRIGGER reject_sweep_clear BEFORE UPDATE OF content_sweep_pending ON sessions
+		WHEN new.content_sweep_pending = 0 BEGIN SELECT RAISE(ABORT, 'test refuses sweep flag clear'); END`)
+	if _, err := s.SweepSession(ctx, sid); err == nil || !strings.Contains(err.Error(), "test refuses sweep flag clear") {
+		t.Fatalf("sweep error = %v, want injected flag-clear failure", err)
+	}
+	if !readSweepFlag(t, s, sid) || gcMatchCount(t, s, obsolete) != 3 || gcMatchCount(t, s, current) != 1 {
+		t.Fatal("rollback did not retain the sweep flag and both generations' search postings")
+	}
+	execute(`DROP TRIGGER reject_sweep_clear`)
+	got, err := s.SweepSession(ctx, sid)
+	if err != nil || got.BodiesDeleted != 3 || got.Rebuilt {
+		t.Fatalf("retry = %+v, %v, want three body deletes and no rebuild", got, err)
+	}
+	if readSweepFlag(t, s, sid) || gcMatchCount(t, s, obsolete) != 0 || gcMatchCount(t, s, current) != 1 {
+		t.Fatal("retry did not clear the flag and remove only obsolete search postings")
+	}
+}
+
 // TestSweepFlaggedSessions proves the harvest-start recovery pass: every
 // flagged session is swept under its own lock, an unflagged session with
 // rows is never touched, and the pass reports what it swept.
