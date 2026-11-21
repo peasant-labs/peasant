@@ -1487,9 +1487,13 @@ func repairNeedsHarmonized(conn *sqlite.Conn, sessionID schema.SessionID) (bool,
 // error inside one chunk count, or a torn chunk row all count as failing.
 // This gate and the read path can never disagree about corruption.
 func activeObjectsNeedRepair(conn *sqlite.Conn, sessionID schema.SessionID, activeID string) (bool, error) {
+	rowsGenID, err := rowsGenerationIDOnConn(conn, sessionID, activeID)
+	if err != nil {
+		return false, err
+	}
 	var digests []string
 	if err := sqlitex.Execute(conn, `SELECT body_digest FROM session_generation_entries WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
-		Args: []any{string(sessionID), activeID},
+		Args: []any{string(sessionID), rowsGenID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			digests = append(digests, stmt.ColumnText(0))
 			return nil
@@ -1519,7 +1523,7 @@ func activeObjectsNeedRepair(conn *sqlite.Conn, sessionID schema.SessionID, acti
 	}
 	var blobDigests []string
 	if err := sqlitex.Execute(conn, `SELECT digest FROM session_generation_content WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
-		Args: []any{string(sessionID), activeID},
+		Args: []any{string(sessionID), rowsGenID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			blobDigests = append(blobDigests, stmt.ColumnText(0))
 			return nil
@@ -1645,15 +1649,20 @@ func repairHarmonizedObjects(ctx context.Context, s *Store, prepared *preparedHa
 			return txnErr
 		}
 	}
+	rowsGenID, err := rowsGenerationIDOnConn(conn, prepared.sessionID, activeID)
+	if err != nil {
+		txnErr = err
+		return txnErr
+	}
 	for _, blob := range prepared.blobs {
 		if err := sqlitex.Execute(conn, `DELETE FROM session_generation_content WHERE session_id = ? AND generation_id = ? AND source_entry_ref = ?`, &sqlitex.ExecOptions{
-			Args: []any{string(prepared.sessionID), activeID, string(blob.ref)},
+			Args: []any{string(prepared.sessionID), rowsGenID, string(blob.ref)},
 		}); err != nil {
 			txnErr = fmt.Errorf("store: delete descriptor %q of session %s for repair: %w", blob.ref, prepared.sessionID, err)
 			return txnErr
 		}
 		if err := sqlitex.Execute(conn, `INSERT INTO session_generation_content(session_id, generation_id, source_entry_ref, digest) VALUES (?, ?, ?, ?)`, &sqlitex.ExecOptions{
-			Args: []any{string(prepared.sessionID), activeID, string(blob.ref), string(blob.digest)},
+			Args: []any{string(prepared.sessionID), rowsGenID, string(blob.ref), string(blob.digest)},
 		}); err != nil {
 			txnErr = fmt.Errorf("store: rewrite descriptor %q of session %s for repair: %w", blob.ref, prepared.sessionID, err)
 			return txnErr

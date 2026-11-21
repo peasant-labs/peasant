@@ -169,4 +169,9 @@ cases:
     when: the repair path runs
     then: g1's rows are repaired; g2 reads clean; verify passes
     action: repair
-    pending: the repair path does not yet resolve a reference to its owner's parsed rows; this case runs once repair reads through the resolver
+    generations:
+      - {id: g1, text: shared owner text}
+      - {id: g2, references: g1, activate: true}
+    wantActive: g2
+    wantKept: [g1, g2]
+    wantResolves: {g2: g1}

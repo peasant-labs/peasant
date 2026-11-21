@@ -135,10 +135,7 @@ func TestMappingSetReclaim(t *testing.T) {
 			case mappingSetActionRepresentation, mappingSetActionPrune:
 				runMappingSetRemoval(t, c)
 			case mappingSetActionRepair:
-				if len(strings.Fields(c.Pending)) < 3 {
-					t.Fatal("the repair case runs only once repair resolves references; until then it states why it is pending")
-				}
-				t.Skip(c.Pending)
+				runMappingSetRepair(t, c)
 			default:
 				t.Fatalf("mapping-set reclaim case %s has unknown action %q", c.Name, c.Action)
 			}
@@ -570,4 +567,43 @@ func runMappingSetRemoval(t *testing.T, c mappingSetReclaimCase) {
 			t.Errorf("%s keeps %d rows of the session after %s", table, count, c.Action)
 		}
 	}
+}
+
+func runMappingSetRepair(t *testing.T, c mappingSetReclaimCase) {
+	w := buildMappingSetWorld(t, c)
+	before := w.rowSnapshot(t, c)
+	damageBodyPreview(t, w.s, w.sid, 0)
+	if err := verifyAllBodies(t, w.s, w.sid); err == nil {
+		t.Fatal("verifyAllBodies succeeded after body damage")
+	}
+	execGenerationSQL(t, w.s, fmt.Sprintf(`UPDATE sessions SET artifact_hash = '%s', indexed_input_hash = NULL WHERE session_id = '%s';`, strings.Repeat("a", 64), mappingSetSession))
+
+	v2, blobs := buildTestGeneration(t, w.sid, "g3", w.ownerTexts["g1"], w.ownerTexts["g1"]+" input", w.ownerTexts["g1"]+" output")
+	inputHash := strings.Repeat("c", 64)
+	if _, err := w.s.ActivateGeneration(context.Background(), GenerationActivation{
+		Generation:       filledCandidateForValidation(t, v2, blobs),
+		Blobs:            blobs,
+		IndexerVersion:   1,
+		IndexedAtMs:      2,
+		IndexedInputHash: &inputHash,
+	}); err != nil {
+		t.Fatalf("activate repair candidate: %v", err)
+	}
+	if got := generationRowCounts(t, w.s, w.sid, "g3").Total(); got != 0 {
+		t.Fatalf("repair inserted %d rows for g3 instead of repairing g1 in place", got)
+	}
+	w.assertMappingSetOutcome(t, c, before)
+	if err := verifyAllBodies(t, w.s, w.sid); err != nil {
+		t.Fatalf("verifyAllBodies after repair: %v", err)
+	}
+	entries, err := w.s.ListEntries(context.Background(), w.sid)
+	if err != nil {
+		t.Fatalf("read entries after repair: %v", err)
+	}
+	for _, entry := range entries {
+		if entry.ContentPreview != nil && *entry.ContentPreview == "corrupt bytes" {
+			t.Fatalf("entry %d still carries corrupted content after repair", entry.EntryIndex)
+		}
+	}
+	assertReclaimIntegrity(t, w.s)
 }
