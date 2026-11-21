@@ -1,0 +1,23 @@
+# Claude Code isMeta classification cases for claude_indexer_test.go.
+#
+# reclassified: user-role entries carrying "isMeta":true. Each content string
+# is wrapped in {"type":"user","uuid":"u1","isMeta":true,"message":{...}} and
+# must index as role=system, entry_type=system. None of these shapes carry a
+# <system-reminder>/<task-notification> wrapper or the "Base directory for this
+# skill:" prefix, so only the isMeta marker can classify them.
+#
+# staysUser: complete transcript lines with isMeta absent or false. Each must
+# index as role=user, even when the text resembles a harness note. Both lines
+# carry a human quoting the harness's own image note back at the agent.
+reclassified:
+  - name: image coordinate note for an image the agent rendered
+    content: "[Image: original 2880x1960, displayed at 2000x1361. Multiply coordinates by 1.44 to map to original image.]"
+  - name: skill body with no Base-directory prefix
+    content: "Draw as the engineer who has to live with the decision, not as a decorator."
+  - name: usage limit notice
+    content: "Your claude.ai usage limit has reset. Continue the task you were working on."
+staysUser:
+  - name: isMeta absent
+    line: '{"type":"user","uuid":"u1","message":{"role":"user","content":"[Image: original 100x100] — why does this keep showing up as my message?"}}'
+  - name: isMeta explicitly false
+    line: '{"type":"user","uuid":"u1","isMeta":false,"message":{"role":"user","content":"[Image: original 100x100] — why does this keep showing up as my message?"}}'
