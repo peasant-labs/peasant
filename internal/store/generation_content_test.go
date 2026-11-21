@@ -336,7 +336,9 @@ func runMappingSetSweep(t *testing.T, c mappingSetReclaimCase) {
 		contentSweepSeam = nil
 	case mappingSetActionConcurrent:
 		runMappingSetConcurrentReference(t, w, c)
-		before = w.rowSnapshot(t, c)
+		if c.ConcurrentReference != nil {
+			before[c.ConcurrentReference.ID] = ReclaimTableCounts{SessionGenerations: 1}
+		}
 		w.assertMappingSetOutcome(t, c, before)
 		return
 	}
