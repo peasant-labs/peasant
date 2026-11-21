@@ -19,7 +19,7 @@ A failed step prints one line on stderr and exits 1:
 
 The steps are "session check", "harvest", "session lookup", "dashboard start" and "dashboard check". open never opens the dashboard root in place of the session.
 
-With --hook, open prints the Claude Code hook response {"continue":false,"stopReason":"..."} as one line on stdout instead, with the same lines in stopReason, writes nothing to stderr, and exits 0 on every outcome.
+With --hook, open prints the Claude Code hook response {"continue":false,"stopReason":"..."} as one line on stdout instead, with the same lines in stopReason, writes nothing to stderr, and exits 0 on every outcome of the run. A flag or argument error, such as an extra argument, stops the command before it runs: it exits 1 with the usage on stderr, as for every command.
 
 ```
 peasant open [flags]
@@ -29,7 +29,7 @@ peasant open [flags]
 
 ```
   -h, --help             help for open
-      --hook             Print the Claude Code hook response JSON instead of plain lines, and exit 0 on every outcome
+      --hook             Print the Claude Code hook response JSON instead of plain lines, and exit 0 on every outcome of the run (a flag error still exits 1)
       --no-related       Process only the named sessions. By default a session-scoped run also processes each named session's child sessions and its ancestors that are not recorded yet.
       --port int         Port of the web dashboard (1-65535) (default 8690)
       --session string   ID of the session to record and open (required)

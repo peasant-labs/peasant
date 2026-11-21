@@ -1163,7 +1163,7 @@ rules:
     cmd/peasant/cmd_harvest_scope_test.go: 1
     cmd/peasant/cmd_memory.go: 1
     cmd/peasant/cmd_migrate.go: 6
-    cmd/peasant/cmd_open_test.go: 2
+    cmd/peasant/cmd_open_test.go: 1
     cmd/peasant/cmd_prune.go: 4
     cmd/peasant/cmd_push_prompt_requests_test.go: 2
     cmd/peasant/cmd_push_selected_sessions_test.go: 1

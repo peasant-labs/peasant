@@ -778,10 +778,10 @@ type spaHandler struct {
 	fs http.FileSystem
 }
 
-type spaRoutePrefix string
+type spaRoutePrefix = defaults.SPARoutePrefix
 
 const (
-	spaProjectsRoute spaRoutePrefix = "/projects/"
+	spaProjectsRoute                = defaults.SPARouteProjects
 	spaMapRoute      spaRoutePrefix = "/map/"
 	spaReviewRoute   spaRoutePrefix = "/review/"
 )

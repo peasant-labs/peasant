@@ -457,11 +457,16 @@ func (s *scopeSandbox) executeOpen(t *testing.T, args ...string) (string, string
 	server := newScopeDashboard(t)
 	port := server.port
 	deps := openDependencies{
-		startServer: func(webServerSpawn) (string, error) {
+		startServer: func(webServerSpawn) (int, string, error) {
 			t.Error("open started a server while the test dashboard answered")
-			return "", nil
+			return 0, "", nil
+		},
+		stopServer: func(int) error {
+			t.Error("open stopped a server it never started")
+			return nil
 		},
 		openBrowser:   func(string) error { return nil },
+		muteLoggers:   keepOpenLoggers,
 		client:        &http.Client{Timeout: defaults.ServerClientTimeout},
 		readyWait:     time.Second,
 		readyInterval: 10 * time.Millisecond,

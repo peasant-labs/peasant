@@ -486,11 +486,16 @@ func (w *commitRefreshWorld) run(t *testing.T, command string) (string, string, 
 	switch command {
 	case "open":
 		return w.execute(t, buildOpenCommand(openDependencies{
-			startServer: func(webServerSpawn) (string, error) {
+			startServer: func(webServerSpawn) (int, string, error) {
 				t.Fatal("open started a dashboard while the test server was already answering")
-				return "", nil
+				return 0, "", nil
+			},
+			stopServer: func(int) error {
+				t.Fatal("open stopped a dashboard it never started")
+				return nil
 			},
 			openBrowser:   func(string) error { return nil },
+			muteLoggers:   keepOpenLoggers,
 			client:        &http.Client{Timeout: defaults.ServerClientTimeout},
 			readyWait:     openTestReadyWait,
 			readyInterval: openTestReadyInterval,

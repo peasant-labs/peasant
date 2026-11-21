@@ -5,17 +5,18 @@
 # whose cwd is that repository and that runs `git commit`, a config that
 # points the claude-code source at it, and a migrated empty database. The
 # command runs through the production harvest, store, and output path. Only
-# the web server fork and the browser are replaced; the health probe and the
-# served-session check are the production HTTP calls against a local test
-# server.
+# the web server fork and stop, the browser, and the logger mute are replaced;
+# the health probe and the served-session check are the production HTTP calls
+# against a local test server or a real in-process api.NewServer.
 #
 # Every run of every case also asserts the contract that holds for all
 # outcomes: at most two output lines, never the dashboard root, exit 0 with a
 # {"continue":false,"stopReason":...} object and empty stderr in hook mode,
-# success on stdout with empty stderr and a failure as one stderr line with a
-# non-zero exit in plain mode, the browser opened with the transcript address
-# only after the dashboard serves the session, and the forked server reading
-# this run's configuration and directories.
+# success on stdout with empty stderr and a failure as one stderr line with
+# exit 1 in plain mode, the browser opened with the transcript address only
+# after the dashboard serves the session, the loggers muted once and restored
+# once, and the forked server reading this run's configuration and
+# directories.
 #
 # Placeholders in expected output: {session_id}, {port}, {project_hash}, and
 # {peasant} (the peasant command with this run's --config, --config-dir,
@@ -23,7 +24,12 @@
 #
 # Case fields:
 #   session            known (the source holds the transcript) | unknown |
-#                      missing (no --session value)
+#                      missing (no --session value) |
+#                      malformed (a non-empty value that is not a session id)
+#   dashboard          fake (a local test server playing the server state) |
+#                      api (a real in-process api.NewServer; running reads this
+#                      run's database, other-data a separate empty one, and
+#                      summaries-error has no data provider)
 #   prompt             the first user prompt; the stored title is generated from it
 #   transcript         valid | malformed-record (its second record is broken JSON)
 #   recorded_before    harvest the session once before the measured run
@@ -34,7 +40,10 @@
 #   config             valid | invalid-source-path (the harvest warns about an
 #                      extra relative path) | refused-redaction-level
 #   server             running | starts | start-error | never-ready |
-#                      other-data (healthy, but does not serve the session)
+#                      never-ready-unstoppable (never answers, and the stop
+#                      fails) | other-data (healthy, but does not serve the
+#                      session) | summaries-error (healthy, but the summaries
+#                      route answers with an error; api dashboard only)
 #   start_error        the error the replaced server start returns (start-error)
 #   modes              hook and/or plain; each mode runs in a fresh world
 #   want.failed        the run fails; lines then holds the one failure line
@@ -45,6 +54,10 @@
 #                      otherwise it holds none
 #   want.started       the command started the web server; a failed start
 #                      also removes the PID file it wrote
+#   want.stopped       the command stopped the server it started, while the PID
+#                      file still named it
+#   want.pid_file_kept a failed start kept its PID file, because the server
+#                      could not be stopped
 
 # Every case is named here; a case missing from either list fails the load.
 requiredNames:
@@ -60,9 +73,14 @@ requiredNames:
   - malformed-transcript
   - server-start-failure
   - server-never-ready
+  - server-never-ready-unstoppable
   - server-on-other-data
+  - api-dashboard-session
+  - api-dashboard-other-data
+  - api-dashboard-summaries-error
   - unknown-session
   - missing-session
+  - malformed-session
   - hook-mode
   - plain-mode
 
@@ -75,6 +93,7 @@ publication:
 cases:
   - name: new-session
     session: known
+    dashboard: fake
     prompt: Fix the login redirect
     transcript: valid
     config: valid
@@ -89,6 +108,7 @@ cases:
 
   - name: refreshed-session
     session: known
+    dashboard: fake
     prompt: Fix the login redirect
     transcript: valid
     recorded_before: true
@@ -103,6 +123,7 @@ cases:
 
   - name: published-session
     session: known
+    dashboard: fake
     prompt: Fix the login redirect
     transcript: valid
     recorded_before: true
@@ -118,6 +139,7 @@ cases:
 
   - name: published-then-reattributed
     session: known
+    dashboard: fake
     prompt: Fix the login redirect
     transcript: valid
     recorded_before: true
@@ -134,6 +156,7 @@ cases:
 
   - name: title-with-quotes
     session: known
+    dashboard: fake
     prompt: 'Rename the "open" flag to "view" & back'
     transcript: valid
     config: valid
@@ -148,6 +171,7 @@ cases:
 
   - name: title-with-control-characters
     session: known
+    dashboard: fake
     prompt: "Fix the‮ login‬\tredirect\u001B[31m"
     transcript: valid
     config: valid
@@ -161,6 +185,7 @@ cases:
 
   - name: untitled-session
     session: known
+    dashboard: fake
     prompt: '<local-command-caveat>Caveat: the messages below were generated while running local commands.</local-command-caveat>'
     transcript: valid
     config: valid
@@ -174,6 +199,7 @@ cases:
 
   - name: noisy-harvest
     session: known
+    dashboard: fake
     prompt: Fix the login redirect
     transcript: valid
     config: invalid-source-path
@@ -187,6 +213,7 @@ cases:
 
   - name: harvest-failure
     session: known
+    dashboard: fake
     prompt: Fix the login redirect
     transcript: valid
     config: refused-redaction-level
@@ -195,10 +222,11 @@ cases:
     want:
       failed: true
       lines:
-        - 'peasant: harvest failed: peasant open refused to run: the maximum redaction level is not supported in this version; fix: run `{peasant} harvest --session {session_id} --detect-commits --refresh-commits` to see the full report'
+        - 'peasant: harvest failed: peasant open refused to run: the maximum redaction level is not supported in this version; fix: run `{peasant} harvest --session {session_id} --detect-commits --refresh-commits --json` to see the reason for each session'
 
   - name: malformed-transcript
     session: known
+    dashboard: fake
     prompt: Fix the login redirect
     transcript: malformed-record
     config: valid
@@ -207,10 +235,11 @@ cases:
     want:
       failed: true
       lines:
-        - 'peasant: harvest failed: record session {session_id}: capture transcript source for {session_id}: capture JSONL record 2: malformed complete JSON; prior stored snapshot was retained; repair this record and retry ingest; prior stored state remains unchanged; restore source readability and retry; fix: run `{peasant} harvest --session {session_id} --detect-commits --refresh-commits` to see the full report'
+        - 'peasant: harvest failed: record session {session_id}: capture transcript source for {session_id}: capture JSONL record 2: malformed complete JSON; prior stored snapshot was retained; repair this record and retry ingest; prior stored state remains unchanged; restore source readability and retry; fix: run `{peasant} harvest --session {session_id} --detect-commits --refresh-commits --json` to see the reason for each session'
 
   - name: server-start-failure
     session: known
+    dashboard: fake
     prompt: Fix the login redirect
     transcript: valid
     config: valid
@@ -225,6 +254,7 @@ cases:
 
   - name: server-never-ready
     session: known
+    dashboard: fake
     prompt: Fix the login redirect
     transcript: valid
     config: valid
@@ -236,9 +266,28 @@ cases:
         - 'peasant: dashboard start failed: no Peasant server answered http://localhost:{port}/api/v1/health within 1s of the start, and another program may hold port {port}; fix: run `{peasant} web start --foreground --port {port}` to see why, or pass --port with a free port'
       commits: true
       started: true
+      stopped: true
+
+  - name: server-never-ready-unstoppable
+    session: known
+    dashboard: fake
+    prompt: Fix the login redirect
+    transcript: valid
+    config: valid
+    server: never-ready-unstoppable
+    modes: [plain]
+    want:
+      failed: true
+      lines:
+        - 'peasant: dashboard start failed: no Peasant server answered http://localhost:{port}/api/v1/health within 1s of the start, and another program may hold port {port}; the started server (PID 4242) could not be stopped (operation not permitted), so its PID file was kept; fix: run `{peasant} web start --foreground --port {port}` to see why, or pass --port with a free port'
+      commits: true
+      started: true
+      stopped: true
+      pid_file_kept: true
 
   - name: server-on-other-data
     session: known
+    dashboard: fake
     prompt: Fix the login redirect
     transcript: valid
     config: valid
@@ -250,8 +299,51 @@ cases:
         - 'peasant: dashboard check failed: the dashboard on port {port} does not serve session {session_id}, so it reads another data directory or mock data; fix: stop it with `{peasant} web stop --port {port}` and run open again, or pass --port with a free port'
       commits: true
 
+  - name: api-dashboard-session
+    session: known
+    dashboard: api
+    prompt: Fix the login redirect
+    transcript: valid
+    config: valid
+    server: running
+    modes: [plain]
+    want:
+      lines:
+        - 'peasant: opened "Fix the login redirect" · not published'
+        - 'http://localhost:{port}/projects/{project_hash}/{session_id}'
+      commits: true
+
+  - name: api-dashboard-other-data
+    session: known
+    dashboard: api
+    prompt: Fix the login redirect
+    transcript: valid
+    config: valid
+    server: other-data
+    modes: [plain]
+    want:
+      failed: true
+      lines:
+        - 'peasant: dashboard check failed: the dashboard on port {port} does not serve session {session_id}, so it reads another data directory or mock data; fix: stop it with `{peasant} web stop --port {port}` and run open again, or pass --port with a free port'
+      commits: true
+
+  - name: api-dashboard-summaries-error
+    session: known
+    dashboard: api
+    prompt: Fix the login redirect
+    transcript: valid
+    config: valid
+    server: summaries-error
+    modes: [hook]
+    want:
+      failed: true
+      lines:
+        - 'peasant: dashboard check failed: the dashboard on port {port} did not answer the session lookup: /api/v1/session-summaries answered 503 Service Unavailable; fix: stop it with `{peasant} web stop --port {port}` and run open again, or pass --port with a free port'
+      commits: true
+
   - name: unknown-session
     session: unknown
+    dashboard: fake
     prompt: Fix the login redirect
     transcript: valid
     config: valid
@@ -264,6 +356,7 @@ cases:
 
   - name: missing-session
     session: missing
+    dashboard: fake
     prompt: Fix the login redirect
     transcript: valid
     config: valid
@@ -272,10 +365,24 @@ cases:
     want:
       failed: true
       lines:
-        - 'peasant: session check failed: no session id was given; fix: pass the session to open as `peasant open --session <id>`'
+        - 'peasant: session check failed: no session id was given; fix: pass the session to open as `{peasant} open --session <id>`'
+
+  - name: malformed-session
+    session: malformed
+    dashboard: fake
+    prompt: Fix the login redirect
+    transcript: valid
+    config: valid
+    server: running
+    modes: [hook, plain]
+    want:
+      failed: true
+      lines:
+        - 'peasant: session check failed: "not/a-session" is not a session id: contains path separator or traversal; fix: pass the session to open as `{peasant} open --session <id>`'
 
   - name: hook-mode
     session: known
+    dashboard: fake
     prompt: Fix the login redirect
     transcript: valid
     config: valid
@@ -290,6 +397,7 @@ cases:
 
   - name: plain-mode
     session: known
+    dashboard: fake
     prompt: Fix the login redirect
     transcript: valid
     config: valid

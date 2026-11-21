@@ -153,6 +153,29 @@ func TestFixture_AllBuildersHaveFixtures(t *testing.T) {
 	}
 }
 
+// TestFixture_RootRegistersEveryCommand finds every commands.yaml entry in the
+// real root command tree, so a builder that exists and matches its fixture
+// but is never added to the root, or to the group that owns it (as `village`
+// owns `push`), fails here.
+func TestFixture_RootRegistersEveryCommand(t *testing.T) {
+	t.Parallel()
+	fixture := loadFixture(t)
+	registered := map[string]bool{}
+	var walk func(cmd *cobra.Command)
+	walk = func(cmd *cobra.Command) {
+		for _, sub := range cmd.Commands() {
+			registered[sub.Name()] = true
+			walk(sub)
+		}
+	}
+	walk(buildRootCommand())
+	for _, entry := range fixture.Commands {
+		if !registered[entry.Use] {
+			t.Errorf("the real root does not register %q (fixture %s) anywhere in its command tree", entry.Use, entry.Name)
+		}
+	}
+}
+
 // TestFixture_CommandStructure validates each command's Use field, aliases,
 // flags, and subcommand tree against the YAML fixture.
 func TestFixture_CommandStructure(t *testing.T) {
