@@ -59,19 +59,27 @@ type StoredOriginRow struct {
 
 // ResolveReport is what one resolve pass did.
 //
-// Degraded counts the rows that had to be resolved without their transcript.
-// Those rows keep their verdict but stay below the version line, so a later run
-// revisits them. The set does NOT necessarily shrink to zero: a transcript can
-// be permanently gone, and such a row is re-examined on every run forever, at a
-// cost of one bulk query and no file reads. That is deliberate, and it is the
-// price of never marking a store final on evidence that might still improve.
+// Degraded counts the rows that had to be resolved without their transcript
+// by a harness this build can re-mine: the harness has a miner, but the read
+// failed or the file is gone, so a later run may succeed. A harness with no
+// miner also resolves without a transcript, but the stored entries are already
+// its complete evidence from this build, so those rows finalise and are not
+// degraded.
+//
+// Degraded rows keep their verdict but stay below the version line, so a later
+// run revisits them. The set does NOT necessarily shrink to zero: a transcript
+// can be permanently gone, and such a row is re-examined on every run forever,
+// at a cost of one bulk query and no file reads. That is deliberate, and it is
+// the price of never marking a store final on evidence that might still
+// improve.
 type ResolveReport struct {
 	// Examined is how many stored rows the pass judged.
 	Examined int
 	// Written is how many of them it actually persisted a change for.
 	Written int
-	// Degraded is how many were resolved without their transcript and so were
-	// left retryable.
+	// Degraded is how many were resolved without their transcript by a harness
+	// that has a miner, so better evidence may arrive and the row was left
+	// retryable. Rows of a harness with no miner finalise and are not counted.
 	Degraded int
 }
 
