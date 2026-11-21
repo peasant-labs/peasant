@@ -369,7 +369,7 @@ const drivePage = async (theme, spec, seen) => {
 
   // stopped: the notice at the top of the page, saying the right thing, the page under it
   await stopServer()
-  await waitFor(page, (s) => s.shown && s.noticeHeight !== '' && s.clearance.failures.length === 0, OFFLINE_WITHIN_MS, `the ${where} offline notice (placed at the top of the page, <main> under it)`)
+  await waitFor(page, (s) => s.shown && s.noticeHeight !== '' && s.clearance.failures.length === 0, OFFLINE_WITHIN_MS, `the ${where} offline notice (placed at the top of <main>, the page body under it)`)
   // The live region is written by a passive effect after the notice paints; give it that render.
   const state = await waitFor(page, (s) => s.live !== '', 2000, `the ${where} live region announcing the stop`)
   const failures = []
@@ -439,7 +439,7 @@ const drivePage = async (theme, spec, seen) => {
       captured.push(await capture(page, gate, theme, spec.name))
   }
   const c = state.clearance
-  console.log(`OK offline ${where}: notice ${c.notice}px under the ${c.header}px chrome (${c.noticePinned ? 'pinned' : 'in the page flow'}), <main> starts at ${c.mainTop}px, scroll padding ${c.scrollPaddingTop}px, command "${state.command}"${note}`)
+  console.log(`OK offline ${where}: notice ${c.notice}px under the ${c.header}px chrome (${c.noticePinned ? 'pinned' : 'in the page flow'}), <main> starts at ${c.mainTop}px, the page body at ${c.bodyTop}px, scroll padding ${c.scrollPaddingTop}px, command "${state.command}"${note}`)
 
   // still down: a failed `try again` is announced, with the time of the check
   if (!await pressRetry(page)) throw new Error(`the ${where} notice has no \`try again\` to press`)
