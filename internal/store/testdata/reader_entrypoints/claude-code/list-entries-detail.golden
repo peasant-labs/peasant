@@ -36,20 +36,6 @@
       "sessionId": "abc00000-0000-4000-8000-0000000000c1",
       "entryIndex": 2,
       "harness": "claude-code",
-      "entryType": "text",
-      "role": "assistant",
-      "contentPreview": "synthetic plan",
-      "hasToolUse": false,
-      "hasThinking": false,
-      "isError": false,
-      "depth": 1,
-      "parentIndex": 1,
-      "partType": "text"
-    },
-    {
-      "sessionId": "abc00000-0000-4000-8000-0000000000c1",
-      "entryIndex": 3,
-      "harness": "claude-code",
       "entryType": "tool_use",
       "role": "assistant",
       "contentPreview": "{\"file_path\":\"/synthetic/reader-corpus/file.txt\"}",
@@ -58,7 +44,7 @@
       "toolNamesCsv": "Read",
       "hasThinking": false,
       "isError": false,
-      "toolCallId": "e_golden_0004",
+      "toolCallId": "e_golden_0003",
       "depth": 1,
       "parentIndex": 1,
       "toolInput": "{\"file_path\":\"/synthetic/reader-corpus/file.txt\"}",
@@ -66,7 +52,7 @@
     },
     {
       "sessionId": "abc00000-0000-4000-8000-0000000000c1",
-      "entryIndex": 4,
+      "entryIndex": 3,
       "harness": "claude-code",
       "entryType": "tool_result",
       "role": "tool",
@@ -79,7 +65,7 @@
     },
     {
       "sessionId": "abc00000-0000-4000-8000-0000000000c1",
-      "entryIndex": 5,
+      "entryIndex": 4,
       "harness": "claude-code",
       "entryType": "tool_result",
       "role": "tool",
@@ -87,15 +73,15 @@
       "hasToolUse": false,
       "hasThinking": false,
       "isError": false,
-      "toolCallId": "e_golden_0004",
+      "toolCallId": "e_golden_0003",
       "depth": 1,
-      "parentIndex": 4,
+      "parentIndex": 3,
       "toolOutput": "synthetic file body",
       "partType": "tool_result"
     },
     {
       "sessionId": "abc00000-0000-4000-8000-0000000000c1",
-      "entryIndex": 6,
+      "entryIndex": 5,
       "harness": "claude-code",
       "entryType": "text",
       "role": "assistant",
@@ -112,21 +98,7 @@
     },
     {
       "sessionId": "abc00000-0000-4000-8000-0000000000c1",
-      "entryIndex": 7,
-      "harness": "claude-code",
-      "entryType": "text",
-      "role": "assistant",
-      "contentPreview": "synthetic reader answer",
-      "hasToolUse": false,
-      "hasThinking": false,
-      "isError": false,
-      "depth": 1,
-      "parentIndex": 6,
-      "partType": "text"
-    },
-    {
-      "sessionId": "abc00000-0000-4000-8000-0000000000c1",
-      "entryIndex": 8,
+      "entryIndex": 6,
       "harness": "claude-code",
       "entryType": "text",
       "role": "user",
@@ -166,7 +138,7 @@
         "content": "synthetic plan",
         "toolCalls": [
           {
-            "id": "e_golden_0004",
+            "id": "e_golden_0003",
             "name": "Read",
             "arguments": "{\"file_path\":\"/synthetic/reader-corpus/file.txt\"}",
             "result": "synthetic file body",
@@ -182,7 +154,7 @@
         "tokensOut": 8
       },
       {
-        "index": 6,
+        "index": 5,
         "role": "assistant",
         "content": "synthetic reader answer",
         "timestamp": "2026-01-02T00:00:03Z",
@@ -193,7 +165,7 @@
         "tokensOut": 6
       },
       {
-        "index": 8,
+        "index": 6,
         "role": "user",
         "content": "second synthetic request",
         "timestamp": "2026-01-02T00:00:04Z",

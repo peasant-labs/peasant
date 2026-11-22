@@ -3,6 +3,7 @@ package ingest
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -210,6 +211,11 @@ func (idx *ClaudeIndexer) parseClaudeSourceEntries(ctx context.Context, sessionI
 	// assistant entry carries the level that governed it.
 	var levelState claudeThinkingLevelState
 
+	type replyRecordIdentity struct {
+		uuid   string
+		digest [sha256.Size]byte
+	}
+	seenReplyRecords := make(map[replyRecordIdentity]struct{})
 	for scanner.Scan() {
 		if strict {
 			if err := ctx.Err(); err != nil {
@@ -302,6 +308,13 @@ func (idx *ClaudeIndexer) parseClaudeSourceEntries(ctx context.Context, sessionI
 			return nil, err
 		}
 		if id, reply := claudeReplyMessageID(entry, line); reply {
+			if id != "" && line.UUID != "" {
+				key := replyRecordIdentity{uuid: line.UUID, digest: sha256.Sum256(raw)}
+				if _, seen := seenReplyRecords[key]; seen {
+					continue
+				}
+				seenReplyRecords[key] = struct{}{}
+			}
 			messageIDs[entry.EntryIndex] = id
 		}
 		entries = append(entries, entry)

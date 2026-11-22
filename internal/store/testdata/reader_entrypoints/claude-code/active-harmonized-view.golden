@@ -26,18 +26,18 @@
     "CWD": "/synthetic/reader-corpus",
     "DerivedAtMs": null,
     "ContentHash": "479c2558895b2332bffbc3cf5a15431a8e4907cb2988ea209a2ab41301b6e014",
-    "MetadataHash": "8e1019c4b7b51fc6d24a56ee719f69c1e8829581de3b1ca6deb505b798fb8fdf",
+    "MetadataHash": "e64563b26484b4e1c20e98ea779b59e2d72548e7d29ea9dfb373494f4d7f3297",
     "RedactionApplied": false,
     "RedactionLevel": null,
     "RedactionRuleSetVersion": null,
     "RedactionAtMs": null,
     "RedactionContentHashAtRedact": null,
-    "AdapterVersion": 4,
+    "AdapterVersion": 5,
     "DiagnosticsPartial": null,
     "Completeness": "complete",
     "SourceEvidenceDigest": "479c2558895b2332bffbc3cf5a15431a8e4907cb2988ea209a2ab41301b6e014",
     "IndexFormatVersion": 2,
-    "CandidateDigest": "03b6117b5fb37091b23f00957de47f8aeaa3e6e34370a3c9d655107688fb47f5",
+    "CandidateDigest": "3e332f5ee0e458c7653f9155ea288cf6e2e98f60ebd590d223ffcb1d7ca88910",
     "PriorEvidence": null,
     "InstalledAtMs": 0,
     "ActivatedAtMs": null
@@ -49,7 +49,7 @@
     "Diagnostics": null,
     "TitleRefs": [
       "e_golden_0001",
-      "e_golden_0009"
+      "e_golden_0007"
     ],
     "Relationships": null,
     "Segments": null,
@@ -76,51 +76,39 @@
     {
       "Partition": 0,
       "Index": 2,
-      "Digest": "9b1f7738761f53b5ff3b7d23495696a758dcdfb6ff552eb7f8b2f625ed43941a"
+      "Digest": "a6a2c1915af9b81999e10a3345ac0c68ae25cdf7420b17c1b92d5e2ed6fdbb8e"
     },
     {
       "Partition": 0,
       "Index": 3,
-      "Digest": "5833d973e640c5b3755579f79dba7372cae52c28fca9e5129091acec4b81146a"
+      "Digest": "b8f36bbe9ac87672961dfc8a796c43359cedcf517993d4758a3e59b777cd4d5c"
     },
     {
       "Partition": 0,
       "Index": 4,
-      "Digest": "db89a9179af74a268118819bc0fad0ae6fbf3e2f114e75781af03cdff6b0dab5"
+      "Digest": "ab4cb3f5e275ce30f32ae79963f1da050122a6d4fc8eb6e536f6481eecb24cb9"
     },
     {
       "Partition": 0,
       "Index": 5,
-      "Digest": "ad911cb6d2f5e72005bd091990cc45e9f6f8f10b6f95d16d426ed353160e1a37"
+      "Digest": "c1e8022b09dcc5ed0a5f648c169b267130456fdd113c3708cf2add7eab76f745"
     },
     {
       "Partition": 0,
       "Index": 6,
-      "Digest": "79e9dca8143fb8fd44e85349057c4817c0376035147031ad517f104f660e7c5a"
-    },
-    {
-      "Partition": 0,
-      "Index": 7,
-      "Digest": "4c92bb3a7f0b9e08039476edc46528a5a9503fcd6bafad51180499f7508ec8a9"
-    },
-    {
-      "Partition": 0,
-      "Index": 8,
-      "Digest": "78a1697b29db00411e05078a674c0c9f660731bffff9b62f906ec9f280737d45"
+      "Digest": "500bab4105bd7337babbb067a25c197330b9fb0ef729e33f7521aec380bd0c92"
     }
   ],
   "Descriptors": {},
   "Aliases": {
     "accept:claude:abc00000-0000-4000-8000-0000000000c1:u1": "e_golden_0001",
-    "accept:claude:abc00000-0000-4000-8000-0000000000c1:u3": "e_golden_0009",
+    "accept:claude:abc00000-0000-4000-8000-0000000000c1:u3": "e_golden_0007",
     "block:claude:abc00000-0000-4000-8000-0000000000c1:a1": "e_golden_0002",
-    "block:claude:abc00000-0000-4000-8000-0000000000c1:a1:0": "e_golden_0003",
-    "block:claude:abc00000-0000-4000-8000-0000000000c1:a1:1": "e_golden_0004",
-    "block:claude:abc00000-0000-4000-8000-0000000000c1:a2": "e_golden_0007",
-    "block:claude:abc00000-0000-4000-8000-0000000000c1:a2:0": "e_golden_0008",
+    "block:claude:abc00000-0000-4000-8000-0000000000c1:a1:1": "e_golden_0003",
+    "block:claude:abc00000-0000-4000-8000-0000000000c1:a2": "e_golden_0006",
     "block:claude:abc00000-0000-4000-8000-0000000000c1:u1": "e_golden_0001",
-    "block:claude:abc00000-0000-4000-8000-0000000000c1:u2": "e_golden_0005",
-    "block:claude:abc00000-0000-4000-8000-0000000000c1:u2:0": "e_golden_0006",
-    "block:claude:abc00000-0000-4000-8000-0000000000c1:u3": "e_golden_0009"
+    "block:claude:abc00000-0000-4000-8000-0000000000c1:u2": "e_golden_0004",
+    "block:claude:abc00000-0000-4000-8000-0000000000c1:u2:0": "e_golden_0005",
+    "block:claude:abc00000-0000-4000-8000-0000000000c1:u3": "e_golden_0007"
   }
 }
