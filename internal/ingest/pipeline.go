@@ -2312,6 +2312,11 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 	recordIndexProfileMax(maxActiveParses, active)
 	parseStart := time.Now()
 	input, err := p.captureIndexInput(ctx, im, indexer)
+	defer func() {
+		if input != nil {
+			input.openCodeSnapshot = nil
+		}
+	}()
 	var output indexformat.Result
 	parsed := false
 	// The effective declared format follows the session's own captured layout:
@@ -2342,12 +2347,24 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 		// generation active until that parse commits.
 		forceParse := false
 		_, canProve := p.metricsStore.(ManagedGenerationUnchangedProver)
-		if input.managedGenerationRefresh && canProve && input.metadata != nil && input.expected != nil && p.adapterSupportsStoredExtraction(input.session.Harness) {
+		if input.managedGenerationRefresh && canProve && input.metadata != nil && input.expected != nil && p.supportsManagedGenerationRefresh(input.session.Harness) {
 			// Once the proof is attempted the session parses, unless the
 			// proof holds or a context mismatch is validated and settled.
 			forceParse = true
+			requiresValidation := !p.adapterSupportsStoredExtraction(input.session.Harness)
 			proofStart := time.Now()
 			proof, proofErr := p.proveManagedGenerationUnchanged(ctx, input)
+			originallyProven := proofErr == nil && proof.Proven
+			if requiresValidation && originallyProven {
+				// Cheap stored-digest proof never settles a native-only source
+				// whose projection is lossy; downgrade before telemetry/logging so
+				// StageRefreshProof records Done=0 and output_preserving_proof_failed
+				// always carries a non-empty mismatch if validation later falls through.
+				proof.Proven = false
+				if proof.Mismatch == UnchangedMismatchNone {
+					proof.Mismatch = UnchangedNotProvenMetadata
+				}
+			}
 			proven := 0
 			if proofErr == nil && proof.Proven {
 				proven = 1
@@ -2355,7 +2372,8 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 			p.config.IndexProfiler.RecordStage(StageRefreshProof, time.Since(proofStart), proven, 1)
 			slog.Info(logPrefix+": refresh proof", "session_id", im.session.SessionID, "proven", proof.Proven, "mismatch", proof.Mismatch, "error", proofErr)
 			var validated *ValidatedContext
-			if proofErr == nil && !proof.Proven && proof.Mismatch.IsContext() {
+			needsValidation := proofErr == nil && ((!proof.Proven && proof.Mismatch.IsContext()) || (requiresValidation && originallyProven))
+			if needsValidation {
 				var validation ManagedGenerationValidationResult
 				var compared *GenerationMetadataCandidate
 				validation, validated, compared = p.validateRefresh(ctx, input, indexer)
@@ -4009,6 +4027,15 @@ func (p *Pipeline) captureSession(ctx context.Context, session DiscoveredSession
 // processSession atomically writes the accepted capture and carries its bytes
 // and evidence into the existing store and streamed indexing path.
 func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry, writeLane *storeWriteLane) workerResult {
+	var existingMeta *UnifiedMetadata
+	var existingMetaErr error
+	if !entry.pairRepair {
+		existingMeta, existingMetaErr = p.metadataForRewrite(ctx, entry.Session)
+	}
+	return p.processNativeSessionWithMeta(ctx, entry, existingMeta, existingMetaErr, writeLane)
+}
+
+func (p *Pipeline) processNativeSessionWithMeta(ctx context.Context, entry DiffEntry, existingMeta *UnifiedMetadata, existingMetaErr error, writeLane *storeWriteLane) workerResult {
 	session := entry.Session
 	result := SessionResult{
 		SessionID:  session.SessionID,
@@ -4028,12 +4055,10 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry, wr
 		result.Status = DiffUnchanged
 		return workerResult{result: result}
 	}
-	if !entry.pairRepair {
-		if _, err := p.metadataForRewrite(ctx, session); err != nil {
-			p.reportMetadataRefusal(string(session.SessionID), err)
-			result.Status = DiffUnchanged
-			return workerResult{result: result}
-		}
+	if !entry.pairRepair && existingMetaErr != nil {
+		p.reportMetadataRefusal(string(session.SessionID), existingMetaErr)
+		result.Status = DiffUnchanged
+		return workerResult{result: result}
 	}
 	// Refuse to overwrite a pair a newer adapter than this build produced,
 	// before the capture spends any work: the check reads the header of the
@@ -4392,6 +4417,26 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry, wr
 		meta.Redaction = RedactionInfo{Applied: false}
 	}
 
+	// Preserve Timestamp.Ingested and matching Redaction.RedactedAtMs by value
+	// across unchanged-transcript managed-generation adapter refreshes so
+	// validated settle matches the active generation regardless of
+	// DisableRefreshSkips.
+	if kept.transcript && existingMeta != nil && p.isManagedGenerationAdapterRefresh(session, result.Decision) {
+		if existingMeta.Timestamp.Ingested != nil {
+			v := *existingMeta.Timestamp.Ingested
+			meta.Timestamp.Ingested = &v
+		}
+		if p.redactor != nil &&
+			existingMeta.Redaction.Applied &&
+			existingMeta.Redaction.Level == p.redactor.Level() &&
+			existingMeta.Redaction.RuleSetVersion == p.redactor.RuleSetVersion() &&
+			existingMeta.Redaction.ContentHashAtRedact == meta.ContentHash &&
+			existingMeta.Redaction.RedactedAtMs != nil {
+			v := *existingMeta.Redaction.RedactedAtMs
+			meta.Redaction.RedactedAtMs = &v
+		}
+	}
+
 	// DerivedAt is absent on the saved pair: the database is the source of
 	// truth for it, and the file is stored input the parsers read. Compute
 	// MetadataHash after every content-bearing field is set.
@@ -4467,8 +4512,9 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry, wr
 	}
 
 	return workerResult{
-		transcriptKept:        kept.transcript,
-		commitCaptureComplete: commitCaptureComplete,
+		transcriptKept:           kept.transcript,
+		managedGenerationRefresh: kept.transcript && p.managedGenerationRefreshLane(session, result.Decision),
+		commitCaptureComplete:    commitCaptureComplete,
 		result:                result,
 		capturedSource:        capturedSource,
 		cwdProvenance:         publicationCWDProvenance(meta, session),

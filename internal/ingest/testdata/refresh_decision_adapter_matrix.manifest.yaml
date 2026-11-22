@@ -1,0 +1,13 @@
+requiredNames:
+  - can-extract-declared-stamped
+  - can-extract-declared-unstamped
+  - can-extract-undeclared-stamped
+  - can-extract-undeclared-unstamped
+  - native-only-declared-stamped
+  - native-only-declared-unstamped
+  - native-only-undeclared-stamped
+  - native-only-undeclared-unstamped
+  - stored-extraction-with-metadata-half
+  - stored-extraction-without-metadata-half
+  - native-only-with-metadata-half
+  - native-only-without-metadata-half

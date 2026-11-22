@@ -66,7 +66,12 @@ func (p *Pipeline) generationBuildInput(input *CapturedIndexInput) GenerationBui
 	}
 	buildInput.GenerationID = p.generationIdentity(session)
 	buildInput.Prior = generationPriorAccess{p: p, session: session}
-	buildInput.OpenCode = openCodeSnapshotAccess{p: p, session: session}
+	if input.openCodeSnapshot == nil {
+		input.openCodeSnapshot = &memoizedOpenCodeSnapshotAccess{
+			base: openCodeSnapshotAccess{p: p, session: session},
+		}
+	}
+	buildInput.OpenCode = input.openCodeSnapshot
 	return buildInput
 }
 
@@ -130,6 +135,16 @@ func (a generationPriorAccess) ReadStoredCaptureAuthority(ctx context.Context) (
 	return authority, nil
 }
 
+// openCodeProvenanceSnapshotter is the narrow capability openCodeSnapshotAccess
+// needs from the registered OpenCode adapter. Using an interface instead of a
+// concrete *OpenCodeAdapter assertion lets adapter wrappers
+// (ChangeScopeWithholder, counting test doubles) preserve snapshot access.
+type openCodeProvenanceSnapshotter interface {
+	SnapshotOpenCodeProvenance(ctx context.Context, dbPath string, sessionID string, opts OpenCodeSnapshotOptions) (OpenCodeHistorySnapshot, error)
+}
+
+var _ openCodeProvenanceSnapshotter = (*OpenCodeAdapter)(nil)
+
 // openCodeSnapshotAccess is the per-attempt OpenCodeSourceAccess. It performs no
 // I/O until Snapshot is called and issues SELECTs only. A missing adapter, a
 // non-OpenCode adapter, or an empty locator refuses instead of reading an
@@ -145,7 +160,7 @@ func (a openCodeSnapshotAccess) Snapshot(ctx context.Context, locator string) (O
 	if !ok {
 		return OpenCodeHistorySnapshot{}, fmt.Errorf("snapshot recorded OpenCode source for session %s: no OpenCode adapter is registered; the stored generation is unchanged; register the adapter before refreshing", a.session.SessionID)
 	}
-	adapter, ok := factory(a.p.fs, a.p.git, a.p.salt).(*OpenCodeAdapter)
+	adapter, ok := factory(a.p.fs, a.p.git, a.p.salt).(openCodeProvenanceSnapshotter)
 	if !ok {
 		return OpenCodeHistorySnapshot{}, fmt.Errorf("snapshot recorded OpenCode source for session %s: the registered adapter is not an OpenCode adapter; the stored generation is unchanged", a.session.SessionID)
 	}
@@ -153,6 +168,39 @@ func (a openCodeSnapshotAccess) Snapshot(ctx context.Context, locator string) (O
 		return OpenCodeHistorySnapshot{}, fmt.Errorf("snapshot recorded OpenCode source for session %s: the committed metadata records no source locator; the stored generation is unchanged; restore the recorded source and retry", a.session.SessionID)
 	}
 	return adapter.SnapshotOpenCodeProvenance(ctx, locator, a.session.SessionID.String(), OpenCodeSnapshotOptions{})
+}
+
+// memoizedOpenCodeSnapshotAccess caches one successful OpenCodeHistorySnapshot
+// for the lifetime of a single CapturedIndexInput so validateRefresh and any
+// fallback BuildGeneration read the native SQLite database at most once and
+// observe identical bytes. Errors and cancellations are never cached.
+type memoizedOpenCodeSnapshotAccess struct {
+	base    OpenCodeSourceAccess
+	mu      sync.Mutex
+	loaded  bool
+	locator string
+	snap    OpenCodeHistorySnapshot
+}
+
+var _ OpenCodeSourceAccess = (*memoizedOpenCodeSnapshotAccess)(nil)
+
+func (a *memoizedOpenCodeSnapshotAccess) Snapshot(ctx context.Context, locator string) (OpenCodeHistorySnapshot, error) {
+	if err := ctx.Err(); err != nil {
+		return OpenCodeHistorySnapshot{}, err
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.loaded && a.locator == locator {
+		return a.snap, nil
+	}
+	snap, err := a.base.Snapshot(ctx, locator)
+	if err != nil {
+		return OpenCodeHistorySnapshot{}, err
+	}
+	a.loaded = true
+	a.locator = locator
+	a.snap = snap
+	return snap, nil
 }
 
 // managedActivationCapture builds the publication-capture agreement a managed
