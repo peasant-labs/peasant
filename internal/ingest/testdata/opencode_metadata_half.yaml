@@ -1,0 +1,393 @@
+rows:
+  - name: ordinary-current-session
+    sessionId: ses_3cd91f52effeXd3QAJ54jHalf1
+    rows:
+      - id: msg_half_user_1
+        type: user
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 1000
+        data: '{"id":"msg_half_user_1","type":"user","text":"ordinary question","time":{"created":1000}}'
+      - id: msg_half_asst_1
+        type: assistant
+        seq: 1
+        timeCreated: 1000
+        timeUpdated: 2000
+        data: '{"id":"msg_half_asst_1","type":"assistant","agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"text","id":"prt_half_1","text":"ordinary answer"}],"time":{"created":1000,"completed":2000}}'
+
+  - name: subagent-started-by
+    sessionId: ses_3cd91f52effeXd3QAJ54jHalf2
+    parentId: ses_halfParent1
+    recordedRelationships:
+      - kind: started_by
+        targetState: target_known
+        targetLocalId: ses_halfParent1
+        evidence: existing_adapter
+    rows:
+      - id: msg_half_sub_1
+        type: user
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 1000
+        data: '{"id":"msg_half_sub_1","type":"user","text":"subagent prompt","time":{"created":1000}}'
+      - id: msg_half_sub_2
+        type: assistant
+        seq: 1
+        timeCreated: 1000
+        timeUpdated: 2000
+        data: '{"id":"msg_half_sub_2","type":"assistant","agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"text","id":"prt_half_sub_2","text":"subagent reply"}],"time":{"created":1000,"completed":2000}}'
+
+  - name: native-fork-context-from
+    sessionId: ses_3cd91f52effeXd3QAJ54jHalf3
+    nativeForkSourceId: ses_halfForkSrc1
+    rows:
+      - id: msg_half_nf_1
+        type: user
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 1000
+        data: '{"id":"msg_half_nf_1","type":"user","text":"forked question","time":{"created":1000}}'
+
+  - name: subagent-plus-native-fork
+    sessionId: ses_3cd91f52effeXd3QAJ54jHalf4
+    parentId: ses_halfParent2
+    nativeForkSourceId: ses_halfForkSrc2
+    recordedRelationships:
+      - kind: started_by
+        targetState: target_known
+        targetLocalId: ses_halfParent2
+        evidence: existing_adapter
+    rows:
+      - id: msg_half_snf_1
+        type: user
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 1000
+        data: '{"id":"msg_half_snf_1","type":"user","text":"subagent fork question","time":{"created":1000}}'
+
+  - name: recorded-context-from-no-duplicate
+    sessionId: ses_3cd91f52effeXd3QAJ54jHalf5
+    nativeForkSourceId: ses_halfForkSrc3
+    recordedRelationships:
+      - kind: context_from
+        targetState: target_known
+        targetLocalId: ses_halfForkSrc3
+        evidence: existing_adapter
+    rows:
+      - id: msg_half_rcf_1
+        type: user
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 1000
+        data: '{"id":"msg_half_rcf_1","type":"user","text":"already has context_from","time":{"created":1000}}'
+
+  - name: native-fork-omitted-unrepresentable
+    sessionId: ses_3cd91f52effeXd3QAJ54jHalf6
+    nativeForkSourceId: "<empty>"
+    rows:
+      - id: msg_half_nfo_1
+        type: user
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 1000
+        data: '{"id":"msg_half_nfo_1","type":"user","text":"unrepresentable fork","time":{"created":1000}}'
+
+  - name: retained-prefix-deleted-parent
+    sessionId: ses_3cd91f52effeXd3QAJ54jHalf7
+    fork:
+      sourceSessionId: ses_halfDeletedParent
+      throughSeq: 1
+      throughCompleted: true
+    hasCapturedPrefix: true
+    rows:
+      - id: msg_half_rp_1
+        type: user
+        seq: 0
+        timeCreated: 2000
+        timeUpdated: 2000
+        data: '{"id":"msg_half_rp_1","type":"user","text":"child follow-up","time":{"created":2000}}'
+
+  - name: committed-revert-drops-own-rows
+    sessionId: ses_3cd91f52effeXd3QAJ54jHalf8
+    revert:
+      targetSeq: 1
+      committed: true
+    rows:
+      - id: msg_half_rev_1
+        type: user
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 1000
+        data: '{"id":"msg_half_rev_1","type":"user","text":"kept before revert","time":{"created":1000}}'
+      - id: msg_half_rev_2
+        type: user
+        seq: 1
+        timeCreated: 2000
+        timeUpdated: 2000
+        data: '{"id":"msg_half_rev_2","type":"user","text":"reverted message","time":{"created":2000}}'
+
+  - name: incomplete-first-discovery
+    sessionId: ses_3cd91f52effeXd3QAJ54jHalf9
+    rows:
+      - id: msg_half_inc_1
+        type: user
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 1000
+        data: '{"id":"msg_half_inc_1","type":"user","text":"initial prompt","time":{"created":1000}}'
+      - id: msg_half_inc_2
+        type: assistant
+        seq: 1
+        timeCreated: 1000
+        timeUpdated: 1500
+        data: '{"id":"msg_half_inc_2","type":"assistant","agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"tool","id":"call_inc_streaming","name":"read","state":{"status":"streaming","input":"partial"},"time":{"created":1000}}],"time":{"created":1000}}'
+
+  - name: incomplete-over-complete-generation
+    sessionId: ses_3cd91f52effeXd3QAJ54jHalf10
+    hasCompleteGeneration: true
+    rows:
+      - id: msg_half_inc_c1
+        type: user
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 1000
+        data: '{"id":"msg_half_inc_c1","type":"user","text":"initial prompt","time":{"created":1000}}'
+      - id: msg_half_inc_c2
+        type: assistant
+        seq: 1
+        timeCreated: 1000
+        timeUpdated: 1500
+        data: '{"id":"msg_half_inc_c2","type":"assistant","agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"tool","id":"call_inc_c_streaming","name":"read","state":{"status":"streaming","input":"partial"},"time":{"created":1000}}],"time":{"created":1000}}'
+
+  - name: incomplete-over-capture-authority
+    sessionId: ses_3cd91f52effeXd3QAJ54jHalf11
+    hasCaptureAuthority: true
+    rows:
+      - id: msg_half_inc_a1
+        type: user
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 1000
+        data: '{"id":"msg_half_inc_a1","type":"user","text":"initial prompt","time":{"created":1000}}'
+      - id: msg_half_inc_a2
+        type: assistant
+        seq: 1
+        timeCreated: 1000
+        timeUpdated: 1500
+        data: '{"id":"msg_half_inc_a2","type":"assistant","agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"tool","id":"call_inc_a_streaming","name":"read","state":{"status":"streaming","input":"partial"},"time":{"created":1000}}],"time":{"created":1000}}'
+
+  - name: refusal-missing-session
+    sessionId: ses_3cd91f52effeXd3QAJ54jHalfMiss
+    skipSeed: true
+
+  - name: refusal-nil-opencode
+    sessionId: ses_3cd91f52effeXd3QAJ54jHalf12
+    nilOpenCode: true
+    rows:
+      - id: msg_half_nil_oc
+        type: user
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 1000
+        data: '{"id":"msg_half_nil_oc","type":"user","text":"hello","time":{"created":1000}}'
+
+  - name: refusal-mismatched-session-id
+    sessionId: ses_3cd91f52effeXd3QAJ54jHalf13
+    mismatchSnapshotSessionId: ses_otherSession
+    rows:
+      - id: msg_half_mis_1
+        type: user
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 1000
+        data: '{"id":"msg_half_mis_1","type":"user","text":"hello","time":{"created":1000}}'
+
+  - name: refusal-nil-recorded-metadata
+    sessionId: ses_3cd91f52effeXd3QAJ54jHalf14
+    nilRecordedMetadata: true
+    rows:
+      - id: msg_half_nil_meta
+        type: user
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 1000
+        data: '{"id":"msg_half_nil_meta","type":"user","text":"hello","time":{"created":1000}}'
+
+  - name: refusal-wrong-harness
+    sessionId: ses_3cd91f52effeXd3QAJ54jHalf15
+    modelHarness: claude_code
+    rows:
+      - id: msg_half_wh
+        type: user
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 1000
+        data: '{"id":"msg_half_wh","type":"user","text":"hello","time":{"created":1000}}'
+
+  - name: refusal-cancelled-ctx
+    sessionId: ses_3cd91f52effeXd3QAJ54jHalf16
+    cancelCtx: true
+    rows:
+      - id: msg_half_ctx
+        type: user
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 1000
+        data: '{"id":"msg_half_ctx","type":"user","text":"hello","time":{"created":1000}}'
+
+  - name: refusal-prior-read-error
+    sessionId: ses_3cd91f52effeXd3QAJ54jHalf17
+    priorReadError: true
+    rows:
+      - id: msg_half_prior_err
+        type: user
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 1000
+        data: '{"id":"msg_half_prior_err","type":"user","text":"hello","time":{"created":1000}}'
+
+  - name: non-positive-schema-version
+    sessionId: ses_3cd91f52effeXd3QAJ54jHalf18
+    schemaVersion: 0
+    rows:
+      - id: msg_half_sv
+        type: user
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 1000
+        data: '{"id":"msg_half_sv","type":"user","text":"hello","time":{"created":1000}}'
+
+  - name: malformed-root-session-id
+    sessionId: ses_3cd91f52effeXd3QAJ54jHalf19
+    rootSessionId: ../bad-root-id
+    rows:
+      - id: msg_half_root
+        type: user
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 1000
+        data: '{"id":"msg_half_root","type":"user","text":"hello","time":{"created":1000}}'
+
+  - name: invalid-purpose
+    sessionId: ses_3cd91f52effeXd3QAJ54jHalf20
+    purpose: invalid-purpose-value
+    rows:
+      - id: msg_half_purpose
+        type: user
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 1000
+        data: '{"id":"msg_half_purpose","type":"user","text":"hello","time":{"created":1000}}'
+
+  - name: invalid-recorded-relationships
+    sessionId: ses_3cd91f52effeXd3QAJ54jHalf21
+    recordedRelationships:
+      - kind: invalid_relationship_kind
+        targetState: target_known
+        targetLocalId: ses_halfParent1
+        evidence: existing_adapter
+    rows:
+      - id: msg_half_rel
+        type: user
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 1000
+        data: '{"id":"msg_half_rel","type":"user","text":"hello","time":{"created":1000}}'
+
+  - name: unknown-part-kind-opaque
+    sessionId: ses_3cd91f52effeXd3QAJ54jHalf22
+    rows:
+      - id: msg_half_unk_1
+        type: assistant
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 2000
+        data: '{"id":"msg_half_unk_1","type":"assistant","agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"future_unknown_part","id":"prt_unk_1","payload":{"key":"val"}}],"time":{"created":1000,"completed":2000}}'
+
+  - name: builder-refuses-after-half-invalid-allocator
+    sessionId: ses_3cd91f52effeXd3QAJ54jHalf23
+    invalidAllocator: true
+    rows:
+      - id: msg_half_alloc
+        type: user
+        seq: 0
+        timeCreated: 1000
+        timeUpdated: 1000
+        data: '{"id":"msg_half_alloc","type":"user","text":"hello","time":{"created":1000}}'
+
+branches:
+  ordinary-current-session: half/ordinary-current-session
+  subagent-started-by: half/subagent-started-by
+  native-fork-context-from: half/native-fork-context-from
+  subagent-plus-native-fork: half/subagent-plus-native-fork
+  recorded-context-from-no-duplicate: half/recorded-context-from-no-duplicate
+  native-fork-omitted-unrepresentable: half/native-fork-omitted-unrepresentable
+  retained-prefix-deleted-parent: half/retained-prefix-deleted-parent
+  committed-revert-drops-own-rows: half/committed-revert-drops-own-rows
+  incomplete-first-discovery: half/incomplete-first-discovery
+  incomplete-over-complete-generation: half/incomplete-over-complete-generation
+  incomplete-over-capture-authority: half/incomplete-over-capture-authority
+  refusal-missing-session: half/refusal-missing-session
+  refusal-nil-opencode: half/refusal-nil-opencode
+  refusal-mismatched-session-id: half/refusal-mismatched-session-id
+  refusal-nil-recorded-metadata: half/refusal-nil-recorded-metadata
+  refusal-wrong-harness: half/refusal-wrong-harness
+  refusal-cancelled-ctx: half/refusal-cancelled-ctx
+  refusal-prior-read-error: half/refusal-prior-read-error
+  non-positive-schema-version: half/non-positive-schema-version
+  malformed-root-session-id: half/malformed-root-session-id
+  invalid-purpose: half/invalid-purpose
+  invalid-recorded-relationships: half/invalid-recorded-relationships
+  unknown-part-kind-opaque: half/unknown-part-kind-opaque
+  builder-refuses-after-half-invalid-allocator: half/builder-refuses-after-half-invalid-allocator
+
+outcomes:
+  sqlite/empty-valid: both-refuse
+  sqlite/legacy-message-part: both-refuse
+  sqlite/legacy-reader-pages: both-refuse
+  sqlite/legacy-reader-wal: both-refuse
+  sqlite/hybrid-catalog: both-refuse
+  sqlite/current-missing-seq: both-refuse
+  sqlite/unsupported-schema: both-refuse
+  sqlite/current-nullable-seq: both-refuse
+  sqlite/corrupt-non-sqlite: both-refuse
+  sqlite/wal-capable: both-refuse
+  sqlite/missing-parent: both-refuse
+  sqlite/truncated-sqlite-header: both-refuse
+  sqlite/catalog-table-overflow: both-refuse
+  sqlite/catalog-column-overflow: both-refuse
+  sqlite/catalog-index-overflow: both-refuse
+  sqlite/legacy-mounted-projection: both-refuse
+  sqlite/current-reader-pages: both-refuse
+  sqlite/current-reader-wal: both-refuse
+  sqlite/current-partial-ordering-index: both-refuse
+  sqlite/semantic-parity-legacy: both-refuse
+  sqlite/legacy-orphan-tolerance: both-refuse
+  sqlite/session-records-degrade: both-refuse
+  sqlite/session-parent-no-clock: both-refuse
+  sqlite/session-clock-present-and-absent: both-refuse
+  sqlite/session-clock-absent-floor: both-refuse
+  sqlite/session-clock-lagging: both-refuse
+  sqlite/extended-attribution: both-refuse
+  sqlite/legacy-unknown-part-vocabulary: both-refuse
+  sqlite/legacy-scrollable-session: both-refuse
+  sqlite/legacy-out-of-order-parts: both-refuse
+  flow/opencode-native-authority-bridge-names-unsettled: both-refuse
+  flow/opencode-native-decode-refusal-sanitized: both-refuse
+  half/incomplete-over-complete-generation: both-refuse
+  half/incomplete-over-capture-authority: both-refuse
+  half/refusal-missing-session: both-refuse
+  half/refusal-nil-opencode: both-refuse
+  half/refusal-mismatched-session-id: both-refuse
+  half/refusal-nil-recorded-metadata: both-refuse
+  half/refusal-wrong-harness: both-refuse
+  half/refusal-cancelled-ctx: both-refuse
+  half/refusal-prior-read-error: both-refuse
+  half/non-positive-schema-version: both-refuse
+  half/malformed-root-session-id: both-refuse
+  half/invalid-purpose: both-refuse
+  half/invalid-recorded-relationships: both-refuse
+  half/builder-refuses-after-half-invalid-allocator: builder-refuses-after-half
+
+afterHalfClasses:
+  half/builder-refuses-after-half-invalid-allocator: invalid-allocator-ref

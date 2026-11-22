@@ -328,29 +328,51 @@ func hasOpenCodeContextFrom(relationships []schema.SessionRelationship) bool {
 	return false
 }
 
-// BuildOpenCodeProvenanceCapture resolves one snapshot into the shared
-// classified-capture contract: materialized copy proof and emission plan,
-// per-message native classification with delivery correlation applied, ordered
-// segments, and the declared earlier section for uncertain copies.
-// The caller supplies the generation identity, the session metadata the
-// pipeline owns, and the prior alias/captured-prefix evidence an earlier
-// candidate or activation left behind; the builder verifies the metadata
-// agrees with the snapshot and reuses the prior identities. Proven inherited
-// copies are handed to the shared builder as inherited segment evidence, so they
-// never become child-owned main chat.
-func BuildOpenCodeProvenanceCapture(snapshot OpenCodeHistorySnapshot, generationID string, metadata schema.UnifiedMetadata, prior OpenCodeProvenancePrior) (ClassifiedCapture, error) {
-	if strings.TrimSpace(generationID) == "" {
-		return ClassifiedCapture{}, &OpenCodeSnapshotError{SessionID: snapshot.SessionID, Step: "build provenance capture", Reason: "generation identity is empty", Recovery: "assign the installed generation id before building the capture"}
-	}
+// openCodeProvenancePrepared is the pre-classification state shared by
+// BuildOpenCodeProvenanceCapture and BuildGenerationMetadata.
+type openCodeProvenancePrepared struct {
+	sessionID    SessionID
+	metadata     schema.UnifiedMetadata
+	snapshot     OpenCodeHistorySnapshot
+	materialized OpenCodeMaterializedHistory
+	diagnostics  []string
+}
+
+// prepareOpenCodeProvenanceMetadata runs the pure pre-classification half of
+// BuildOpenCodeProvenanceCapture: identity/harness checks, non-stats
+// UnifiedMetadata validation (SchemaVersion > 0, valid RootSessionID, valid
+// Purpose, valid Relationships), native fork context_from relationship
+// derivation, retained fork-prefix restoration, SourceEvidenceDigest
+// calculation, and MaterializeOpenCodeHistory.
+// It never mutates metadata's caller-owned slices or snapshot's backing arrays.
+func prepareOpenCodeProvenanceMetadata(
+	snapshot OpenCodeHistorySnapshot,
+	metadata schema.UnifiedMetadata,
+	prior OpenCodeProvenancePrior,
+) (openCodeProvenancePrepared, error) {
 	sessionID, err := NewSessionID(snapshot.SessionID)
 	if err != nil {
-		return ClassifiedCapture{}, &OpenCodeSnapshotError{SessionID: snapshot.SessionID, Step: "build provenance capture", Reason: "session identity is invalid", Recovery: "snapshot a concrete native session id"}
+		return openCodeProvenancePrepared{}, &OpenCodeSnapshotError{SessionID: snapshot.SessionID, Step: "build provenance capture", Reason: "session identity is invalid", Recovery: "snapshot a concrete native session id"}
 	}
 	if metadata.SessionID != sessionID {
-		return ClassifiedCapture{}, &OpenCodeSnapshotError{SessionID: snapshot.SessionID, Step: "build provenance capture", Reason: "supplied metadata names another session", Recovery: "build the capture from the session the metadata describes"}
+		return openCodeProvenancePrepared{}, &OpenCodeSnapshotError{SessionID: snapshot.SessionID, Step: "build provenance capture", Reason: "supplied metadata names another session", Recovery: "build the capture from the session the metadata describes"}
 	}
 	if metadata.ModelHarness != schema.HarnessOpenCode {
-		return ClassifiedCapture{}, &OpenCodeSnapshotError{SessionID: snapshot.SessionID, Step: "build provenance capture", Reason: "supplied metadata names another harness", Recovery: "build the capture with the OpenCode harness metadata"}
+		return openCodeProvenancePrepared{}, &OpenCodeSnapshotError{SessionID: snapshot.SessionID, Step: "build provenance capture", Reason: "supplied metadata names another harness", Recovery: "build the capture with the OpenCode harness metadata"}
+	}
+	if metadata.SchemaVersion <= 0 {
+		return openCodeProvenancePrepared{}, &OpenCodeSnapshotError{SessionID: snapshot.SessionID, Step: "build provenance capture", Reason: "supplied metadata schema version is not positive", Recovery: "record a positive schema version in metadata before building the capture"}
+	}
+	if metadata.RootSessionID != nil {
+		if _, err := schema.NewSessionID(string(*metadata.RootSessionID)); err != nil {
+			return openCodeProvenancePrepared{}, &OpenCodeSnapshotError{SessionID: snapshot.SessionID, Step: "build provenance capture", Reason: "supplied metadata root session identity is invalid", Recovery: "record a valid root session id or omit it before building the capture"}
+		}
+	}
+	if !metadata.Purpose.IsValid() {
+		return openCodeProvenancePrepared{}, &OpenCodeSnapshotError{SessionID: snapshot.SessionID, Step: "build provenance capture", Reason: "supplied metadata purpose is outside the closed set", Recovery: "use a published purpose or omit it before building the capture"}
+	}
+	if err := schema.ValidateSessionRelationships(metadata.Relationships); err != nil {
+		return openCodeProvenancePrepared{}, &OpenCodeSnapshotError{SessionID: snapshot.SessionID, Step: "build provenance capture", Reason: "supplied metadata relationships are invalid", Recovery: "repair the session relationships before building the capture"}
 	}
 	nativeForkOmitted := false
 	if snapshot.NativeFork != nil && !hasOpenCodeContextFrom(metadata.Relationships) {
@@ -384,36 +406,49 @@ func BuildOpenCodeProvenanceCapture(snapshot OpenCodeHistorySnapshot, generation
 	}
 	materialized, err := MaterializeOpenCodeHistory(snapshot)
 	if err != nil {
-		return ClassifiedCapture{}, err
+		return openCodeProvenancePrepared{}, err
 	}
+	diagnostics := append([]string(nil), materialized.Diagnostics...)
+	if nativeForkOmitted {
+		diagnostics = append(diagnostics, "native fork pointer names a source session that cannot be represented as a local relationship; the fork link was omitted")
+	}
+	return openCodeProvenancePrepared{
+		sessionID:    sessionID,
+		metadata:     metadata,
+		snapshot:     snapshot,
+		materialized: materialized,
+		diagnostics:  diagnostics,
+	}, nil
+}
+
+// classifyOpenCodeProvenanceCapture runs the entry classification loop over
+// prepared pre-classification state into the shared ClassifiedCapture contract.
+func classifyOpenCodeProvenanceCapture(prepared openCodeProvenancePrepared, generationID string, prior OpenCodeProvenancePrior) (ClassifiedCapture, error) {
 	capture := ClassifiedCapture{
 		ID:                   generationID,
-		SessionID:            sessionID,
+		SessionID:            prepared.sessionID,
 		Harness:              HarnessOpenCode,
-		Metadata:             metadata,
-		SourceEvidenceDigest: snapshot.SourceEvidenceDigest,
-		Completeness:         materialized.Completeness,
-		Segments:             materialized.Segments,
+		Metadata:             prepared.metadata,
+		SourceEvidenceDigest: prepared.snapshot.SourceEvidenceDigest,
+		Completeness:         prepared.materialized.Completeness,
+		Segments:             prepared.materialized.Segments,
 		Prior:                prior.Aliases.clone(),
-		Diagnostics:          append([]string(nil), materialized.Diagnostics...),
+		Diagnostics:          append([]string(nil), prepared.diagnostics...),
 	}
-	if nativeForkOmitted {
-		capture.Diagnostics = append(capture.Diagnostics, "native fork pointer names a source session that cannot be represented as a local relationship; the fork link was omitted")
-	}
-	if needsOpenCodeUncertainSection(materialized.Messages) {
+	if needsOpenCodeUncertainSection(prepared.materialized.Messages) {
 		capture.EarlierStates = []schema.EarlierHistoryState{schema.EarlierHistoryUncertainUnresolved}
 	}
-	for _, msg := range materialized.Messages {
+	for _, msg := range prepared.materialized.Messages {
 		decoded := msg.Row.Message
-		decoded.SessionID = snapshot.SessionID
-		decoded.ParentNullProven = snapshot.ParentNullProven
-		decoded.HasParent = snapshot.HasParent
-		if snapshot.AgentDeliveredIDs[msg.Row.MessageID] {
+		decoded.SessionID = prepared.snapshot.SessionID
+		decoded.ParentNullProven = prepared.snapshot.ParentNullProven
+		decoded.HasParent = prepared.snapshot.HasParent
+		if prepared.snapshot.AgentDeliveredIDs[msg.Row.MessageID] {
 			decoded.AgentDelivered = true
 		}
 		blocks, err := ClassifyOpenCodeMessage(decoded, msg.Attribution)
 		if err != nil {
-			return ClassifiedCapture{}, &OpenCodeSnapshotError{SessionID: snapshot.SessionID, Step: "classify message row", Reason: "a captured message row failed section 3.2 classification", Recovery: "verify the source row and retry; no partial capture is certified"}
+			return ClassifiedCapture{}, &OpenCodeSnapshotError{SessionID: prepared.snapshot.SessionID, Step: "classify message row", Reason: "a captured message row failed section 3.2 classification", Recovery: "verify the source row and retry; no partial capture is certified"}
 		}
 		section := ProjectionSection{}
 		if msg.Attribution.UncertainCopy {
@@ -431,6 +466,27 @@ func BuildOpenCodeProvenanceCapture(snapshot OpenCodeHistorySnapshot, generation
 		}
 	}
 	return capture, nil
+}
+
+// BuildOpenCodeProvenanceCapture resolves one snapshot into the shared
+// classified-capture contract: materialized copy proof and emission plan,
+// per-message native classification with delivery correlation applied, ordered
+// segments, and the declared earlier section for uncertain copies.
+// The caller supplies the generation identity, the session metadata the
+// pipeline owns, and the prior alias/captured-prefix evidence an earlier
+// candidate or activation left behind; the builder verifies the metadata
+// agrees with the snapshot and reuses the prior identities. Proven inherited
+// copies are handed to the shared builder as inherited segment evidence, so they
+// never become child-owned main chat.
+func BuildOpenCodeProvenanceCapture(snapshot OpenCodeHistorySnapshot, generationID string, metadata schema.UnifiedMetadata, prior OpenCodeProvenancePrior) (ClassifiedCapture, error) {
+	if strings.TrimSpace(generationID) == "" {
+		return ClassifiedCapture{}, &OpenCodeSnapshotError{SessionID: snapshot.SessionID, Step: "build provenance capture", Reason: "generation identity is empty", Recovery: "assign the installed generation id before building the capture"}
+	}
+	prepared, err := prepareOpenCodeProvenanceMetadata(snapshot, metadata, prior)
+	if err != nil {
+		return ClassifiedCapture{}, err
+	}
+	return classifyOpenCodeProvenanceCapture(prepared, generationID, prior)
 }
 
 // OpenCodeIncompleteProvenanceError refuses an incomplete provenance candidate
@@ -542,6 +598,99 @@ type OpenCodeProvenancePrior struct {
 	CaptureAuthority *StoredCaptureAuthority
 }
 
+// openCodeCandidateMetadataResult is the live-acquisition + pre-classification
+// state shared by OpenCodeIndexer.BuildGeneration and BuildGenerationMetadata.
+type openCodeCandidateMetadataResult struct {
+	prior    OpenCodeProvenancePrior
+	prepared openCodeProvenancePrepared
+}
+
+// openCodeCandidateMetadata runs the shared live-acquisition and
+// pre-classification sequence in exact BuildGeneration error order:
+//  1. openCodeGenerationPrior(ctx, session, in.Prior)
+//  2. ctx.Err()
+//  3. in.OpenCode == nil
+//  4. if requireGenerationID && in.GenerationID == ""
+//  5. in.OpenCode.Snapshot(ctx, recordedSourceLocator(in.RecordedMetadata))
+//  6. snapshot.SessionID != session.SessionID.String()
+//  7. openCodeAttemptMetadata(in.RecordedMetadata, session)
+//  8. prepareOpenCodeProvenanceMetadata(snapshot, metadata, prior)
+// Every failure exits through the exact same sanitizeOpenCodeRefusal boundary.
+func (idx *OpenCodeIndexer) openCodeCandidateMetadata(
+	ctx context.Context,
+	in GenerationBuildInput,
+	requireGenerationID bool,
+) (openCodeCandidateMetadataResult, error) {
+	session := in.Session
+	prior, err := openCodeGenerationPrior(ctx, session, in.Prior)
+	if err != nil {
+		return openCodeCandidateMetadataResult{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return openCodeCandidateMetadataResult{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "run candidate before the snapshot", "the candidate was cancelled before it started", "retry the candidate with a live context", err)
+	}
+	if in.OpenCode == nil {
+		return openCodeCandidateMetadataResult{}, &OpenCodeSnapshotError{SessionID: session.SessionID.String(), Step: "resolve candidate configuration", Reason: "the candidate path misses its recorded-source access", Recovery: "wire the recorded-source access before requesting a generation"}
+	}
+	if requireGenerationID && in.GenerationID == "" {
+		return openCodeCandidateMetadataResult{}, &OpenCodeSnapshotError{SessionID: session.SessionID.String(), Step: "resolve candidate configuration", Reason: "the candidate path misses its generation identity", Recovery: "assign the installed generation identity before requesting a generation"}
+	}
+	snapshot, err := in.OpenCode.Snapshot(ctx, recordedSourceLocator(in.RecordedMetadata))
+	if err != nil {
+		return openCodeCandidateMetadataResult{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "snapshot recorded history", "the read-only recorded-source snapshot failed", "verify the recorded source and retry; no candidate was produced", err)
+	}
+	if snapshot.SessionID != session.SessionID.String() {
+		return openCodeCandidateMetadataResult{}, &OpenCodeSnapshotError{SessionID: session.SessionID.String(), Step: "snapshot recorded history", Reason: "the snapshot names a different session", Recovery: "snapshot the session the attempt describes; no candidate was produced"}
+	}
+	metadata, err := openCodeAttemptMetadata(in.RecordedMetadata, session)
+	if err != nil {
+		return openCodeCandidateMetadataResult{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "read session metadata", "the session metadata could not be read", "repair the metadata input and retry; no candidate was produced", err)
+	}
+	prepared, err := prepareOpenCodeProvenanceMetadata(snapshot, metadata, prior)
+	if err != nil {
+		return openCodeCandidateMetadataResult{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "build provenance capture", "the captured rows could not be classified into the managed capture contract", "verify the captured source rows and retry; no candidate was produced", err)
+	}
+	return openCodeCandidateMetadataResult{prior: prior, prepared: prepared}, nil
+}
+
+// openCodeIncompleteProvenanceRefusal returns *OpenCodeIncompleteProvenanceError
+// when completeness is not complete and prior holds full authority
+// (HasCompleteGeneration || CaptureAuthority != nil), or nil otherwise.
+func openCodeIncompleteProvenanceRefusal(
+	snapshot OpenCodeHistorySnapshot,
+	completeness indexformat.GenerationCompleteness,
+	diagnostics []string,
+	prior OpenCodeProvenancePrior,
+) error {
+	if completeness == indexformat.GenerationCompletenessComplete {
+		return nil
+	}
+	if !prior.HasCompleteGeneration && prior.CaptureAuthority == nil {
+		return nil
+	}
+	// An incomplete candidate is refused EARLY, before activation, when any
+	// last-good full authority already exists: a complete V2 generation, or
+	// the stored content-capture certificate the writer's own guard would
+	// protect. The refusal names the unfinished message and sequence from
+	// the capture's own diagnostics, so the held session reads as an
+	// actionable last-good-held result instead of a later opaque store
+	// refusal. The transactional guard stays in place for the race the
+	// prior read cannot close.
+	outDiagnostics := append([]string(nil), diagnostics...)
+	outDiagnostics = append(outDiagnostics, "the capture proves no full generation")
+	if prior.HasCompleteGeneration {
+		outDiagnostics = append(outDiagnostics, "a complete last-good generation stays active")
+	}
+	if prior.CaptureAuthority != nil {
+		authority := prior.CaptureAuthority
+		outDiagnostics = append(outDiagnostics, fmt.Sprintf("a stored %s capture certificate of format %q (origin %s, source %s, failure code %q) holds last-good full authority and stays active", authority.Status, authority.CaptureFormat, authority.TranscriptOrigin, authority.SourceAuthority, authority.FailureCode))
+	}
+	if len(snapshot.SourceEvidenceDigest) == 0 {
+		outDiagnostics = append(outDiagnostics, "the snapshot carries no evidence digest")
+	}
+	return &OpenCodeIncompleteProvenanceError{SessionID: snapshot.SessionID, Completeness: completeness, Diagnostics: outDiagnostics}
+}
+
 // BuildGeneration is the OpenCode producer exit. It reads one recorded snapshot
 // through the typed classification and fork proof into the shared validated
 // generation contract, and returns the full captured bytes and the prior
@@ -557,34 +706,13 @@ type OpenCodeProvenancePrior struct {
 // and every internal failure leaves through the fixed-shape refusal with no
 // source locator, raw dependency cause, or native identifier.
 func (idx *OpenCodeIndexer) BuildGeneration(ctx context.Context, in GenerationBuildInput) (GenerationCandidate, error) {
-	session := in.Session
-	prior, err := openCodeGenerationPrior(ctx, session, in.Prior)
+	half, err := idx.openCodeCandidateMetadata(ctx, in, true)
 	if err != nil {
 		return GenerationCandidate{}, err
 	}
-	if err := ctx.Err(); err != nil {
-		return GenerationCandidate{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "run candidate before the snapshot", "the candidate was cancelled before it started", "retry the candidate with a live context", err)
-	}
-	if in.OpenCode == nil {
-		return GenerationCandidate{}, &OpenCodeSnapshotError{SessionID: session.SessionID.String(), Step: "resolve candidate configuration", Reason: "the candidate path misses its recorded-source access", Recovery: "wire the recorded-source access before requesting a generation"}
-	}
-	if in.GenerationID == "" {
-		return GenerationCandidate{}, &OpenCodeSnapshotError{SessionID: session.SessionID.String(), Step: "resolve candidate configuration", Reason: "the candidate path misses its generation identity", Recovery: "assign the installed generation identity before requesting a generation"}
-	}
-	snapshot, err := in.OpenCode.Snapshot(ctx, recordedSourceLocator(in.RecordedMetadata))
+	capture, err := classifyOpenCodeProvenanceCapture(half.prepared, in.GenerationID, half.prior)
 	if err != nil {
-		return GenerationCandidate{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "snapshot recorded history", "the read-only recorded-source snapshot failed", "verify the recorded source and retry; no candidate was produced", err)
-	}
-	if snapshot.SessionID != session.SessionID.String() {
-		return GenerationCandidate{}, &OpenCodeSnapshotError{SessionID: session.SessionID.String(), Step: "snapshot recorded history", Reason: "the snapshot names a different session", Recovery: "snapshot the session the attempt describes; no candidate was produced"}
-	}
-	metadata, err := openCodeAttemptMetadata(in.RecordedMetadata, session)
-	if err != nil {
-		return GenerationCandidate{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "read session metadata", "the session metadata could not be read", "repair the metadata input and retry; no candidate was produced", err)
-	}
-	capture, err := BuildOpenCodeProvenanceCapture(snapshot, in.GenerationID, metadata, prior)
-	if err != nil {
-		return GenerationCandidate{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "build provenance capture", "the captured rows could not be classified into the managed capture contract", "verify the captured source rows and retry; no candidate was produced", err)
+		return GenerationCandidate{}, sanitizeOpenCodeRefusal(in.Session.SessionID.String(), "build provenance capture", "the captured rows could not be classified into the managed capture contract", "verify the captured source rows and retry; no candidate was produced", err)
 	}
 	allocator := in.Allocator
 	if allocator == nil {
@@ -592,41 +720,54 @@ func (idx *OpenCodeIndexer) BuildGeneration(ctx context.Context, in GenerationBu
 	}
 	built, content, err := BuildV2WithContent(capture, allocator)
 	if err != nil {
-		return GenerationCandidate{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "validate managed generation", "the classified capture failed shared managed-generation validation", "correct the capture or the allocator and retry; no candidate was produced and the last good generation stays active", err)
+		return GenerationCandidate{}, sanitizeOpenCodeRefusal(in.Session.SessionID.String(), "validate managed generation", "the classified capture failed shared managed-generation validation", "correct the capture or the allocator and retry; no candidate was produced and the last good generation stays active", err)
 	}
-	if built.Generation.Completeness != indexformat.GenerationCompletenessComplete {
-		// An incomplete candidate is refused EARLY, before activation, when any
-		// last-good full authority already exists: a complete V2 generation, or
-		// the stored content-capture certificate the writer's own guard would
-		// protect. The refusal names the unfinished message and sequence from
-		// the capture's own diagnostics, so the held session reads as an
-		// actionable last-good-held result instead of a later opaque store
-		// refusal. The transactional guard stays in place for the race the
-		// prior read cannot close.
-		if prior.HasCompleteGeneration || prior.CaptureAuthority != nil {
-			diagnostics := append([]string(nil), capture.Diagnostics...)
-			diagnostics = append(diagnostics, "the capture proves no full generation")
-			if prior.HasCompleteGeneration {
-				diagnostics = append(diagnostics, "a complete last-good generation stays active")
-			}
-			if prior.CaptureAuthority != nil {
-				authority := prior.CaptureAuthority
-				diagnostics = append(diagnostics, fmt.Sprintf("a stored %s capture certificate of format %q (origin %s, source %s, failure code %q) holds last-good full authority and stays active", authority.Status, authority.CaptureFormat, authority.TranscriptOrigin, authority.SourceAuthority, authority.FailureCode))
-			}
-			if len(snapshot.SourceEvidenceDigest) == 0 {
-				diagnostics = append(diagnostics, "the snapshot carries no evidence digest")
-			}
-			return GenerationCandidate{}, &OpenCodeIncompleteProvenanceError{SessionID: snapshot.SessionID, Completeness: built.Generation.Completeness, Diagnostics: diagnostics}
-		}
-		// First discovery: return the validated incomplete candidate to
-		// activation without success stamps. Activation refuses to overwrite a
-		// complete generation; a first install exposes the readable evidence.
+	if err := openCodeIncompleteProvenanceRefusal(half.prepared.snapshot, built.Generation.Completeness, capture.Diagnostics, half.prior); err != nil {
+		return GenerationCandidate{}, err
 	}
-	priorEvidence, err := nextOpenCodeProvenancePrior(built, snapshot)
+	priorEvidence, err := nextOpenCodeProvenancePrior(built, half.prepared.snapshot)
 	if err != nil {
-		return GenerationCandidate{}, sanitizeOpenCodeRefusal(session.SessionID.String(), "persist prior evidence", "the prior document for the validated candidate could not be encoded", "correct the capture or the allocator and retry; no candidate was produced", err)
+		return GenerationCandidate{}, sanitizeOpenCodeRefusal(in.Session.SessionID.String(), "persist prior evidence", "the prior document for the validated candidate could not be encoded", "correct the capture or the allocator and retry; no candidate was produced", err)
 	}
 	return GenerationCandidate{Result: built, Blobs: content, PriorEvidence: priorEvidence}, nil
+}
+
+// openCodeMetadataHalfMutationForTest is nil in production. A test sets it to
+// change the candidate or incomplete-provenance refusal BuildGenerationMetadata
+// returns, so a mutation of the metadata half can be shown to fail the parity
+// and validation tests. Only BuildGenerationMetadata reads it; BuildGeneration
+// never does, and no production file assigns it (a source guard enforces both).
+var openCodeMetadataHalfMutationForTest func(in GenerationBuildInput, candidate *GenerationMetadataCandidate, incompleteErr *error)
+
+// BuildGenerationMetadata runs the metadata half of BuildGeneration: the prior
+// evidence load, the read-only native snapshot, the non-stats UnifiedMetadata
+// validation, native fork relationship derivation, retained fork-prefix
+// restoration, SourceEvidenceDigest calculation, MaterializeOpenCodeHistory,
+// and the incomplete-over-complete refusal, with no entry classification or
+// projection.
+func (idx *OpenCodeIndexer) BuildGenerationMetadata(ctx context.Context, in GenerationBuildInput) (GenerationMetadataCandidate, error) {
+	half, err := idx.openCodeCandidateMetadata(ctx, in, false)
+	if err != nil {
+		return GenerationMetadataCandidate{}, err
+	}
+	candidate := GenerationMetadataCandidate{
+		Metadata:             half.prepared.metadata,
+		Completeness:         half.prepared.materialized.Completeness,
+		SourceEvidenceDigest: half.prepared.snapshot.SourceEvidenceDigest,
+	}
+	incompleteErr := openCodeIncompleteProvenanceRefusal(
+		half.prepared.snapshot,
+		half.prepared.materialized.Completeness,
+		half.prepared.diagnostics,
+		half.prior,
+	)
+	if openCodeMetadataHalfMutationForTest != nil {
+		openCodeMetadataHalfMutationForTest(in, &candidate, &incompleteErr)
+	}
+	if incompleteErr != nil {
+		return GenerationMetadataCandidate{}, incompleteErr
+	}
+	return candidate, nil
 }
 
 // openCodeGenerationPrior resolves one attempt's prior evidence into the
@@ -708,6 +849,7 @@ func openCodeAttemptMetadata(metadata *schema.UnifiedMetadata, session Discovere
 }
 
 var _ GenerationBuilder = (*OpenCodeIndexer)(nil)
+var _ GenerationMetadataBuilder = (*OpenCodeIndexer)(nil)
 
 // nextOpenCodeProvenancePrior builds the prior document the activation persists
 // beside the new generation: the new aliases, the stored captured prefix the
