@@ -1,0 +1,5 @@
+# Corpus rows whose OpenCode metadata half refuses while the full builder
+# succeeds. Such a session has no metadata candidate and parses. Expected
+# empty: every refusal before the entry parse is the half's own, and every
+# refusal after it is deterministic in the snapshot and indexer version.
+erroringBranches: []

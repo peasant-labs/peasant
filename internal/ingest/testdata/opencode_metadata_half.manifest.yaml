@@ -1,0 +1,25 @@
+requiredNames:
+  - ordinary-current-session
+  - subagent-started-by
+  - native-fork-context-from
+  - subagent-plus-native-fork
+  - recorded-context-from-no-duplicate
+  - native-fork-omitted-unrepresentable
+  - retained-prefix-deleted-parent
+  - committed-revert-drops-own-rows
+  - incomplete-first-discovery
+  - incomplete-over-complete-generation
+  - incomplete-over-capture-authority
+  - refusal-missing-session
+  - refusal-nil-opencode
+  - refusal-mismatched-session-id
+  - refusal-nil-recorded-metadata
+  - refusal-wrong-harness
+  - refusal-cancelled-ctx
+  - refusal-prior-read-error
+  - non-positive-schema-version
+  - malformed-root-session-id
+  - invalid-purpose
+  - invalid-recorded-relationships
+  - unknown-part-kind-opaque
+  - builder-refuses-after-half-invalid-allocator

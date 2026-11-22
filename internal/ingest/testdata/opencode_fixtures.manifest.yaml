@@ -1,0 +1,118 @@
+# Every OpenCode fixture in the repository, partitioned into raw directories,
+# corpus YAML documents read by the metadata-half differential, and non-corpus
+# YAML documents with explicit reasons. Manifest files (*.manifest.yaml) are
+# excluded from the walk.
+directories:
+  - internal/store/testdata/content_model_parity_goldens
+
+documents:
+  - internal/ingest/testfixture/testdata/opencode_sqlite.yaml
+  - internal/ingest/testdata/opencode_provenance.yaml
+  - internal/ingest/testdata/opencode_provenance_flow.yaml
+  - internal/ingest/testdata/opencode_metadata_half.yaml
+
+nonCorpusDocuments:
+  - path: cmd/peasant/testdata/opencode_canonical_persistence.yaml
+    reason: CLI persistence end-to-end test fixture, not an OpenCode provenance corpus
+  - path: cmd/peasant/testdata/opencode_current_cli_wiring.yaml
+    reason: CLI wiring test fixture, not an OpenCode provenance corpus
+  - path: cmd/peasant/testdata/opencode_legacy_sqlite_mount.yaml
+    reason: CLI mount test fixture for legacy SQLite layout
+  - path: cmd/peasant/testdata/opencode_legacy_sqlite_recovery.yaml
+    reason: CLI recovery test fixture for legacy SQLite layout
+  - path: cmd/peasant/testdata/opencode_session_clock_mount.yaml
+    reason: CLI mount clock test fixture
+  - path: internal/ingest/testdata/discovery_opencode_sqlite_progress.yaml
+    reason: discovery progress test fixture
+  - path: internal/ingest/testdata/opencode_absent_parent_assembly.yaml
+    reason: parent assembly test fixture
+  - path: internal/ingest/testdata/opencode_acquired_cursor.yaml
+    reason: adapter acquisition cursor test fixture
+  - path: internal/ingest/testdata/opencode_cancel_unmarked.yaml
+    reason: cancellation test fixture
+  - path: internal/ingest/testdata/opencode_candidates.yaml
+    reason: discovery candidate selection test fixture
+  - path: internal/ingest/testdata/opencode_canonical_selection.yaml
+    reason: canonical selection test fixture
+  - path: internal/ingest/testdata/opencode_canonical_tiebreak.yaml
+    reason: canonical tiebreak test fixture
+  - path: internal/ingest/testdata/opencode_change_cursor.yaml
+    reason: change cursor test fixture
+  - path: internal/ingest/testdata/opencode_cleanup.yaml
+    reason: cleanup test fixture
+  - path: internal/ingest/testdata/opencode_content_aware_selection.yaml
+    reason: content-aware selection test fixture
+  - path: internal/ingest/testdata/opencode_current_control_rows.yaml
+    reason: current control-row materializer test fixture
+  - path: internal/ingest/testdata/opencode_current_mounted.yaml
+    reason: current mounted projection test fixture
+  - path: internal/ingest/testdata/opencode_current_projection_format.yaml
+    reason: current projection format test fixture
+  - path: internal/ingest/testdata/opencode_cursor_presence.yaml
+    reason: cursor presence test fixture
+  - path: internal/ingest/testdata/opencode_diagnostic_meaning.yaml
+    reason: diagnostic meaning test fixture
+  - path: internal/ingest/testdata/opencode_double_encoded_text.yaml
+    reason: double-encoded text projection test fixture
+  - path: internal/ingest/testdata/opencode_graph_cycles.yaml
+    reason: graph cycle handling test fixture
+  - path: internal/ingest/testdata/opencode_history_projection.yaml
+    reason: history projection test fixture
+  - path: internal/ingest/testdata/opencode_index_completion.yaml
+    reason: index completion test fixture
+  - path: internal/ingest/testdata/opencode_metadata_half_mutations.yaml
+    reason: mutation definitions for the OpenCode metadata-half tests
+  - path: internal/ingest/testdata/opencode_model_observations.yaml
+    reason: model observation test fixture
+  - path: internal/ingest/testdata/opencode_native_cli.yaml
+    reason: native CLI test fixture
+  - path: internal/ingest/testdata/opencode_native_rows.yaml
+    reason: native row decoding test fixture
+  - path: internal/ingest/testdata/opencode_payload_size.yaml
+    reason: payload size test fixture
+  - path: internal/ingest/testdata/opencode_preview_bound.yaml
+    reason: preview bound test fixture
+  - path: internal/ingest/testdata/opencode_projection_branch_attribution.yaml
+    reason: projection branch attribution test fixture
+  - path: internal/ingest/testdata/opencode_projection_cap.yaml
+    reason: projection cap test fixture
+  - path: internal/ingest/testdata/opencode_review_boundaries.yaml
+    reason: review boundaries test fixture
+  - path: internal/ingest/testdata/opencode_semantic_parity.yaml
+    reason: semantic parity test fixture
+  - path: internal/ingest/testdata/opencode_session_authority.yaml
+    reason: session authority test fixture
+  - path: internal/ingest/testdata/opencode_session_locator.yaml
+    reason: session locator test fixture
+  - path: internal/ingest/testdata/opencode_session_record_columns.yaml
+    reason: session record columns test fixture
+  - path: internal/ingest/testdata/opencode_slice_continuation.yaml
+    reason: slice continuation test fixture
+  - path: internal/ingest/testdata/opencode_sqlite_current_reader.yaml
+    reason: SQLite current reader test fixture
+  - path: internal/ingest/testdata/opencode_sqlite_freshness.yaml
+    reason: SQLite freshness test fixture
+  - path: internal/ingest/testdata/opencode_sqlite_reader.yaml
+    reason: SQLite reader test fixture
+  - path: internal/ingest/testdata/opencode_sqlite_source.yaml
+    reason: SQLite source test fixture
+  - path: internal/ingest/testdata/opencode_thinking_levels.yaml
+    reason: thinking levels test fixture
+  - path: internal/ingest/testdata/opencode_tool_turn_rendering.yaml
+    reason: tool turn rendering test fixture
+  - path: internal/ingest/testdata/opencode_topology_cleanup.yaml
+    reason: topology cleanup test fixture
+  - path: internal/ingest/testdata/opencode_unknown_legacy.yaml
+    reason: unknown legacy test fixture
+  - path: internal/ingest/testdata/opencode_unknown_part_vocabulary.yaml
+    reason: unknown part vocabulary test fixture
+  - path: internal/ingest/testdata/opencode_unknown.yaml
+    reason: unknown record test fixture
+  - path: internal/ingest/testdata/opencode_v2_rows.yaml
+    reason: v2 row decoding test fixture
+  - path: internal/ingest/testfixture/testdata/opencode_native_mutations.yaml
+    reason: native SQLite mutation specifications for testfixture
+  - path: internal/store/testdata/migrations/v45_opencode_seq_cursor.yaml
+    reason: store migration v45 test fixture
+  - path: internal/store/testdata/opencode_provenance_durability.yaml
+    reason: store provenance durability test fixture

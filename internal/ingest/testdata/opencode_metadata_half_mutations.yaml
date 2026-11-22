@@ -1,0 +1,10 @@
+# Mutations of the OpenCode metadata half, applied through its test hook only.
+# Each must fail the differential and the validator oracle.
+mutations:
+  # Drop the context_from relationship derived from snapshot.NativeFork.
+  - name: skip-native-fork-context-from
+  # Omit prior.CapturedPrefix restoration when computing SourceEvidenceDigest.
+  - name: skip-retained-prefix-digest
+  # Clear incompleteErr in BuildGenerationMetadata so an incomplete capture over
+  # complete authority is not refused by the half.
+  - name: skip-incomplete-refusal
