@@ -843,7 +843,7 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry, writeLan
 		result.result = SessionResult{SessionID: entry.Session.SessionID, Harness: entry.Session.Harness, ParentUUID: entry.Session.ParentUUID, Status: entry.Status,
 			Error: &adapterAcquisitionError{cause: fmt.Errorf("refresh stored session %s from native input: required original discovery context is unavailable or redacted; no native attribution or child paths were guessed; restore native discovery and retry harvest", entry.Session.SessionID)}}
 	} else {
-		result = p.processNativeSession(ctx, entry, writeLane)
+		result = p.processNativeSessionWithMeta(ctx, entry, metadata, metadataErr, writeLane)
 	}
 	var acquisition *adapterAcquisitionError
 	if !errors.As(result.result.Error, &acquisition) || metadataPath == "" || pathErr != nil {

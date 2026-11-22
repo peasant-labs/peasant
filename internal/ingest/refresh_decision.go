@@ -254,13 +254,15 @@ func decideRefresh(in refreshEvidence) (decision RefreshDecision) {
 	case in.PublicationCaptureMissing:
 		return RefreshDecision{Reason: RefreshReasonPublicationCaptureMissing, Lane: RefreshLaneNative}
 	case in.AdapterVersion < in.AdapterTarget:
-		if !in.AdapterCanExtract {
-			return RefreshDecision{Reason: RefreshReasonAdapterBehindNativeOnly, Lane: RefreshLaneNative}
-		}
-		if in.AdapterUndeclared {
-			// The stored lane's skip rests on the adapter's declaration. Without
-			// it the full step runs, on the path a native-only adapter takes.
-			return RefreshDecision{Reason: RefreshReasonAdapterBehindNativeOnly, Lane: RefreshLaneNative, AdapterUndeclared: true}
+		if !in.AdapterCanExtract || in.AdapterUndeclared {
+			// A native-only adapter or an undeclared adapter runs the full
+			// native capture step; preserve AdapterUndeclared so downstream
+			// skip gates know whether the change scope was declared.
+			return RefreshDecision{
+				Reason:            RefreshReasonAdapterBehindNativeOnly,
+				Lane:              RefreshLaneNative,
+				AdapterUndeclared: in.AdapterUndeclared,
+			}
 		}
 		if !in.AdapterStampPresent {
 			return RefreshDecision{Reason: RefreshReasonAdapterStampAbsent, Lane: RefreshLaneStoredMetadata}

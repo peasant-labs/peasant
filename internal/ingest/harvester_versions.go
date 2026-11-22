@@ -196,8 +196,7 @@ func (p *Pipeline) versionTargets() map[Harness]HarvesterVersions {
 // returned unchanged.
 func (p *Pipeline) sessionVersionTarget(session DiscoveredSession) HarvesterVersions {
 	target := p.versionTargets()[session.Harness]
-	native, declared := GenerationRepairTargets[session.Harness]
-	if declared && target == native && !generationTargetApplicable(session) {
+	if target.IndexVersion != strictIndexFormat && !generationTargetApplicable(session) {
 		if baseline, ok := HarvesterVersionRegistry[session.Harness]; ok {
 			return baseline
 		}

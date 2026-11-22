@@ -19,7 +19,7 @@ callSites:
   symbols: ["schema.ComputeTranscriptHash", "bytes.Clone"]
   allowed:
     # The one hash of the transcript bytes on the ingest path.
-    - {name: worker-content-hash, file: pipeline.go, function: Pipeline.processNativeSession, symbol: schema.ComputeTranscriptHash}
+    - {name: worker-content-hash, file: pipeline.go, function: Pipeline.processNativeSessionWithMeta, symbol: schema.ComputeTranscriptHash}
     # Store-free harvest compares the retained file with its metadata.
     - {name: store-free-diff-content-hash, file: pipeline.go, function: Pipeline.classifyCapturedSession, symbol: schema.ComputeTranscriptHash}
     # A pair read back from disk is validated by hashing it once.
