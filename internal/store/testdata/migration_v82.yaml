@@ -1,0 +1,74 @@
+# Cases for migration 82, which adds session_generations.mapping_set_id.
+# Each case states its Given, When and Then; kind selects the driver.
+requiredNames:
+  - existing-generations-read-null
+  - harvest-reader-goldens-survive-the-upgrade
+  - immutability-trigger-survives
+  - check-rejects-self-reference
+  - check-rejects-empty-reference
+  - check-accepts-another-generation
+  - empty-store
+  - plan-names-a-quick-step
+  - fresh-equals-migrated
+  - older-build-refuses
+cases:
+  - name: existing-generations-read-null
+    kind: seeded-predecessor
+    given: a schema-81 store built by the real migration chain, holding one session with an active, a latest-attempt and a superseded generation
+    when: the store is upgraded
+    then: every mapping_set_id is NULL and every other cell of every generation row is unchanged
+    generations:
+      - {id: g_active, role: active}
+      - {id: g_latest, role: latest-attempt}
+      - {id: g_superseded, role: superseded}
+  - name: harvest-reader-goldens-survive-the-upgrade
+    kind: corpus-predecessor
+    given: each harness's harvest-path corpus session written by the production writers, in a store whose session_generations table is put back to its schema-81 definition and whose version is 81
+    when: the store is upgraded and opened
+    then: every harvest-path reader returns its committed golden byte for byte
+  - name: immutability-trigger-survives
+    kind: update-refused
+    given: an upgraded store with one generation row
+    when: an UPDATE sets that row's mapping_set_id
+    then: the immutability trigger aborts it
+    wantError: generation rows are immutable
+  - name: check-rejects-self-reference
+    kind: insert
+    given: an upgraded store with one generation row
+    when: a second row is inserted whose mapping_set_id equals its own generation_id
+    then: the CHECK constraint refuses it
+    mappingSetID: self
+    wantError: CHECK constraint failed
+  - name: check-rejects-empty-reference
+    kind: insert
+    given: an upgraded store with one generation row
+    when: a second row is inserted whose mapping_set_id is empty
+    then: the CHECK constraint refuses it
+    mappingSetID: empty
+    wantError: CHECK constraint failed
+  - name: check-accepts-another-generation
+    kind: insert
+    given: an upgraded store with one generation row
+    when: a second row is inserted whose mapping_set_id names the first row
+    then: the insert succeeds; the column takes a reference to another generation
+    mappingSetID: owner
+  - name: empty-store
+    kind: empty-predecessor
+    given: a schema-81 store with no sessions
+    when: the store is upgraded
+    then: the upgrade succeeds and the store is at schema 82
+  - name: plan-names-a-quick-step
+    kind: plan
+    given: a schema-81 store
+    when: the upgrade is planned
+    then: the plan has exactly one step, 82, which is quick and owes no session effect
+  - name: fresh-equals-migrated
+    kind: fresh-vs-migrated
+    given: a store created from the baseline schema and a store migrated through every migration
+    when: their schema catalogs are read
+    then: the two catalogs are equal, and both carry the mapping_set_id column
+  - name: older-build-refuses
+    kind: older-build
+    given: a closed schema-82 store whose user_version is set one past the head, as an older build would find a newer store
+    when: the store is opened
+    then: the open refuses with the newer-schema error and no byte of the file changes; the head schema is 82

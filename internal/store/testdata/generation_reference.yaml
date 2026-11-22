@@ -1,0 +1,73 @@
+# Installing a context change as a generation that references the stored
+# parse. Every case starts from the Claude session of the reader corpus
+# (reader_entrypoints.yaml), parsed and activated as G_golden by the
+# production builder and activation, with its input proof recorded. The
+# captured metadata then renames the project (renamedProject), the metadata
+# half builds the candidate from it, and the store plans and installs the
+# reference G_reference unless a case says otherwise.
+renamedProject: reader-corpus-renamed
+requiredNames:
+  - project-rename-references-the-set
+  - context-only-writes
+  - relationships-written-from-the-candidate
+  - reference-seal-equals-parse-seal
+  - a-later-identical-parse-takes-the-skip
+  - crash-before-commit-leaves-the-old-authority
+  - owner-changed-between-plan-and-install
+  - annotated-reference-keeps-anchors-on-parse
+  - chained-reference-flattens-to-owner
+  - blobs-and-partitions-seal-parity
+cases:
+  - name: project-rename-references-the-set
+    given: G_golden is active and owns its parsed rows; the captured project is renamed
+    when: the reference is planned and installed
+    then: G_reference is active with mapping_set_id G_golden and the renamed project; it holds no parsed row; its context rows equal the candidate's; the stored parse counts are carried; the install leaves the sweep flag as it was, because G_golden stays live as the owner and nothing became collectable
+    kind: install
+  - name: context-only-writes
+    given: the same session and candidate
+    when: the reference is installed
+    then: the row count of every generation-scoped table changes only by the new catalog row and its context rows; no parsed row and no stats row is added
+    kind: row-deltas
+  - name: relationships-written-from-the-candidate
+    given: the captured metadata also records a started_by parent the stored generation does not hold
+    when: the reference is installed
+    then: the new generation's relationship row names that parent; the owner's relationship rows are unchanged
+    kind: relationship
+    parent: abc00000-0000-4000-8000-0000000000ab
+  - name: reference-seal-equals-parse-seal
+    given: a twin store that parses the renamed input and activates it as G_reference
+    when: the reference is installed in the first store
+    then: both G_reference rows carry the same candidate_digest, and every harvest-path reader returns the same bytes in both stores
+    kind: parse-parity
+  - name: a-later-identical-parse-takes-the-skip
+    given: the reference is installed
+    when: the renamed input is parsed again and activated as G_later
+    then: the activation reports a skip and G_reference stays active
+    kind: later-parse
+  - name: crash-before-commit-leaves-the-old-authority
+    given: the install fails inside its transaction, before its first write
+    when: the reference is installed
+    then: the install returns the failure; G_golden is still active; no G_reference row exists; every harvest-path reader returns its golden
+    kind: crash
+  - name: owner-changed-between-plan-and-install
+    given: after the plan, a parse of the renamed input activates G_other
+    when: the planned reference is installed
+    then: the install refuses with source-moved and writes nothing
+    kind: moved
+  - name: annotated-reference-keeps-anchors-on-parse
+    given: G_golden has an entry annotation on the last user entry, G_reference is installed for a project rename, and a twin control store parses the same rename
+    when: a new assistant reply is inserted before that user entry and both stores force a parse as G_later
+    then: the annotation remaps to the shifted entry span just like the control store (no anchor loss) and every harvest-path reader matches the control
+    kind: annotated-parse
+    appendedLine: '{"type":"assistant","sessionId":"abc00000-0000-4000-8000-0000000000c1","uuid":"a3","parentUuid":"a2","cwd":"/synthetic/reader-corpus","timestamp":"2026-01-02T00:00:03.500Z","message":{"role":"assistant","model":"claude-synthetic","content":[{"type":"text","text":"inserted synthetic reply"}],"usage":{"input_tokens":10,"output_tokens":5}}}'
+  - name: chained-reference-flattens-to-owner
+    given: G_reference is active and references G_golden; the captured project is renamed a second time
+    when: a second reference G_later is planned and installed from G_reference
+    then: G_later reports G_golden as its owner, carries mapping_set_id G_golden, sets content_sweep_pending = 1, and every harvest-path reader matches a plain parse
+    kind: chained-reference
+    secondRenamedProject: reader-corpus-renamed-twice
+  - name: blobs-and-partitions-seal-parity
+    given: an owner generation with two partitions and three content blobs with distinct source_entry_ref values
+    when: a twin store parses the renamed context and the first store installs a reference
+    then: both G_reference rows carry the exact same candidate_digest
+    kind: blobs-and-partitions-parity

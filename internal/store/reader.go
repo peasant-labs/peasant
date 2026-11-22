@@ -955,6 +955,10 @@ WHERE s.session_id IN (` +
 //
 // Tag filtering (f.Tag) uses SQLite json_each() over the sessions.tags JSON array.
 func buildSessionListFilterWhere(f SessionListFilter) (conditions []string, args []any) {
+	return buildSessionListFilterWhereForSchema(f, true)
+}
+
+func buildSessionListFilterWhereForSchema(f SessionListFilter, hasMappingSet bool) (conditions []string, args []any) {
 	// Exact session id — the most selective filter (primary key).
 	if f.SessionID != nil {
 		conditions = append(conditions, "s.session_id = ?")
@@ -1015,7 +1019,7 @@ func buildSessionListFilterWhere(f SessionListFilter) (conditions []string, args
 
 	// Workflow facets: every named facet must hold.
 	for _, facet := range f.Facets {
-		conditions = append(conditions, sessionFacetSQL(facet))
+		conditions = append(conditions, sessionFacetSQL(facet, hasMappingSet))
 	}
 
 	// Turn bounds read the turns column a row shows, which prints a missing
@@ -1040,7 +1044,14 @@ func (s *Store) ListSessionsFiltered(ctx context.Context, f SessionListFilter) (
 	}
 	defer s.pool.Put(conn)
 
-	conditions, args := buildSessionListFilterWhere(f)
+	hasMappingSet := true
+	if len(f.Facets) > 0 {
+		hasMappingSet, err = mappingSetColumnOnConn(conn)
+		if err != nil {
+			return nil, fmt.Errorf("store: ListSessionsFiltered inspect schema: %w", err)
+		}
+	}
+	conditions, args := buildSessionListFilterWhereForSchema(f, hasMappingSet)
 
 	// Build ORDER BY clause.
 	sortCol := sortFieldToColumn(f.SortField)
@@ -1083,7 +1094,14 @@ func (s *Store) CountSessionsFiltered(ctx context.Context, f SessionListFilter) 
 	}
 	defer s.pool.Put(conn)
 
-	conditions, args := buildSessionListFilterWhere(f)
+	hasMappingSet := true
+	if len(f.Facets) > 0 {
+		hasMappingSet, err = mappingSetColumnOnConn(conn)
+		if err != nil {
+			return 0, fmt.Errorf("store: CountSessionsFiltered inspect schema: %w", err)
+		}
+	}
+	conditions, args := buildSessionListFilterWhereForSchema(f, hasMappingSet)
 
 	// COUNT(*) over the same JOIN as sqlAllSessions. We omit session_metrics columns
 	// because COUNT only needs the FK join for WHERE predicates that reference metric cols.

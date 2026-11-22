@@ -90,7 +90,7 @@ func (s *Store) readSessionsWithoutEntriesChunk(conn *sqlite.Conn, chunk []inges
 UNION SELECT DISTINCT m.session_id FROM session_generation_entries m
 JOIN sessions s ON s.session_id = m.session_id
 WHERE m.session_id IN (` + strings.Join(placeholders, ",") + `)
-AND m.generation_id = s.active_generation_id AND m.partition_id = 0`
+AND ` + activeRowsOfM(conn) + ` AND m.partition_id = 0`
 	args = append(args, args...)
 	return sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
 		Args: args,

@@ -56,7 +56,7 @@ const (
 	childModeRunUnknownCause childMode = "run-unknown-reason"
 	childModeRunTwoSamples   childMode = "run-two-samples"
 	// childModeRunRefusingStore runs the sample against a store that refuses
-	// every settle as stale work.
+	// every settle as stale work and every reference install as moved.
 	childModeRunRefusingStore childMode = "run-refusing-store"
 	// childModeRunUnequalArms runs the sample, then changes one session's
 	// state digest in the skip arm only.
@@ -302,7 +302,7 @@ func testRunSamples(t *testing.T, c smokeSampleCase) {
 		t.Fatalf("report holds %d samples, want both arms of %d rounds", len(all), rounds)
 	}
 	if caseSpecs()[id].equivalent {
-		assertHashDriftBreakdown(t, report, rounds)
+		assertSkipBreakdown(t, id, report, rounds)
 	}
 	pids := map[int]bool{os.Getpid(): true}
 	for _, s := range all {
@@ -313,16 +313,34 @@ func testRunSamples(t *testing.T, c smokeSampleCase) {
 	}
 }
 
-// assertHashDriftBreakdown requires the skip arm's breakdown to name every
-// session of every round as validated, with a measured validation time.
-func assertHashDriftBreakdown(t *testing.T, report caseReport, rounds int) {
+// skipBreakdownOutcome is the one outcome every skip-arm session of an
+// equivalence case reaches.
+var skipBreakdownOutcome = map[upgrade.MeasurementCase]sessionOutcome{
+	upgrade.MeasurementCaseHashDrift:        outcomeValidated,
+	upgrade.MeasurementCaseContextReference: outcomeReferenced,
+}
+
+// assertSkipBreakdown requires the skip arm's breakdown to name every session
+// of every round with the case's one outcome, with a measured validation time
+// and no parse; a reference also has a measured reference time.
+func assertSkipBreakdown(t *testing.T, id upgrade.MeasurementCase, report caseReport, rounds int) {
 	t.Helper()
+	want, ok := skipBreakdownOutcome[id]
+	if !ok {
+		t.Fatalf("case %s checks arm equivalence but names no skip outcome", id)
+	}
 	if len(report.Breakdown) != 1 {
-		t.Fatalf("breakdown %+v, want only validated sessions", report.Breakdown)
+		t.Fatalf("breakdown %+v, want only %s sessions", report.Breakdown, want)
 	}
 	row := report.Breakdown[0]
-	if row.Outcome != outcomeValidated || row.Sessions != smokeSessions*rounds || row.MedianValidateMs <= 0 || row.MedianParseMs != 0 {
-		t.Fatalf("breakdown row %+v, want %d validated sessions with a validation time and no parse", row, smokeSessions*rounds)
+	everySession := row.Outcome == want && row.Sessions == smokeSessions*rounds
+	timedWithoutParse := row.MedianValidateMs > 0 && row.MedianParseMs == 0
+	if !everySession || !timedWithoutParse {
+		t.Fatalf("breakdown row %+v, want %d %s sessions with a validation time and no parse", row, smokeSessions*rounds, want)
+	}
+	referenceTimed := row.MedianReferenceMs > 0 && report.Skip.MedianReferenceMs > 0
+	if want == outcomeReferenced && (!referenceTimed || report.Baseline.MedianReferenceMs != 0) {
+		t.Fatalf("reference ms row %v skip %v baseline %v, want skip-arm times and none in the baseline", row.MedianReferenceMs, report.Skip.MedianReferenceMs, report.Baseline.MedianReferenceMs)
 	}
 	if report.Skip.MedianValidateMs <= 0 || report.Baseline.MedianValidateMs != 0 {
 		t.Fatalf("median validate ms skip %v baseline %v, want a skip-arm time and none in the baseline", report.Skip.MedianValidateMs, report.Baseline.MedianValidateMs)

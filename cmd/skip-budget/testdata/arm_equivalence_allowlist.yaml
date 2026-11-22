@@ -6,3 +6,5 @@ columns:
     reason: the wall-clock stamp of the stats write; each arm runs at its own instant
   - column: sessions.indexed_at
     reason: the wall-clock stamp of the index bookkeeping; each arm runs at its own instant
+  - column: session_metrics.computed_at
+    reason: the wall-clock stamp of the metric computation; each arm computes at its own instant

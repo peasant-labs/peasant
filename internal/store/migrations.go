@@ -292,6 +292,7 @@ var migrationV24 = createSessionCommands + ";\n" +
 // lookup tables. See schema_v79.go.
 // migrationV80 adds the missing-publication-capture outcome. See schema_v80.go.
 // migrationV81 separates source-unavailability diagnostics by lane. See schema_v81.go.
+// migrationV82 lets a generation name the generation whose parsed rows it reads. See schema_v82.go.
 
 // dbSchema is the sqlitemigration schema applied on Open().
 var dbSchema = sqlitemigration.Schema{
@@ -377,6 +378,7 @@ var dbSchema = sqlitemigration.Schema{
 		migrationV79,
 		migrationV80,
 		migrationV81,
+		migrationV82,
 	},
 	// V16 rebuilds annotation tables with new FKs; disable FK checking during
 	// the migration transaction so renamed/recreated tables don't cause violations.
@@ -452,5 +454,6 @@ var dbSchema = sqlitemigration.Schema{
 		nil,                        // V79: import profile tables and the run-outcome rebuild (the rebuilt table is a leaf; FKs stay on so the copy is checked)
 		nil,                        // V80: add one run-outcome reason
 		{DisableForeignKeys: true}, // V81: rebuild source-unavailability evidence by diagnostic lane
+		nil,                        // V82: one nullable column on session_generations (no rebuild; FKs stay on)
 	},
 }

@@ -453,9 +453,13 @@ FROM session_relationship_evidence WHERE session_id = ? AND generation_id = ? OR
 // harmonizedTitleRefsOnConn reads the ordered title refs for one generation.
 func harmonizedTitleRefsOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) ([]schema.SourceEntryRef, error) {
 	var refs []schema.SourceEntryRef
-	err := sqlitex.Execute(conn, `SELECT source_entry_ref FROM session_generation_title_refs
+	rowsID, err := rowsGenerationIDOnConn(conn, sessionID, generationID)
+	if err != nil {
+		return nil, err
+	}
+	err = sqlitex.Execute(conn, `SELECT source_entry_ref FROM session_generation_title_refs
 WHERE session_id = ? AND generation_id = ? ORDER BY ordinal`, &sqlitex.ExecOptions{
-		Args: []any{string(sessionID), generationID},
+		Args: []any{string(sessionID), rowsID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			ref, err := schema.NewSourceEntryRef(stmt.ColumnText(0))
 			if err != nil {
@@ -499,8 +503,15 @@ func harmonizedPartitionsOnConn(conn *sqlite.Conn, sessionID schema.SessionID, g
 	return harmonizedPartitionsModeOnConn(conn, sessionID, generationID, false)
 }
 
+// The sections, the mapping and the native metadata are parsed rows, read
+// under the id the resolver names; generationID still names the generation in
+// errors.
 func harmonizedPartitionsModeOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string, authoritative bool) (generationPartitions, []indexformat.ContentRecord, error) {
 	partitions := generationPartitions{}
+	rowsID, err := rowsGenerationIDOnConn(conn, sessionID, generationID)
+	if err != nil {
+		return partitions, nil, err
+	}
 	type section struct {
 		partitionID int
 		state       string
@@ -508,7 +519,7 @@ func harmonizedPartitionsModeOnConn(conn *sqlite.Conn, sessionID schema.SessionI
 	var sections []section
 	if err := sqlitex.Execute(conn, `SELECT partition_id, COALESCE(earlier_state, '') FROM session_projection_sections
 WHERE session_id = ? AND generation_id = ? ORDER BY partition_id`, &sqlitex.ExecOptions{
-		Args: []any{string(sessionID), generationID},
+		Args: []any{string(sessionID), rowsID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			sections = append(sections, section{stmt.ColumnInt(0), stmt.ColumnText(1)})
 			return nil
@@ -534,7 +545,7 @@ LEFT JOIN session_entry_bodies b
   ON b.session_id = m.session_id AND b.body_digest = m.body_digest
 WHERE m.session_id = ? AND m.generation_id = ?
 ORDER BY m.partition_id, m.entry_index`, &sqlitex.ExecOptions{
-		Args: []any{string(sessionID), generationID},
+		Args: []any{string(sessionID), rowsID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			partitionID := stmt.ColumnInt(0)
 			if stmt.ColumnType(1) == sqlite.TypeNull {
@@ -565,7 +576,7 @@ ORDER BY m.partition_id, m.entry_index`, &sqlitex.ExecOptions{
 	}
 	var content []indexformat.ContentRecord
 	for _, s := range sections {
-		native, err := harmonizedNativeMetadataOnConn(conn, sessionID, generationID, s.partitionID)
+		native, err := harmonizedNativeMetadataOnConn(conn, sessionID, rowsID, s.partitionID)
 		if err != nil {
 			return partitions, nil, err
 		}
@@ -791,10 +802,15 @@ func harmonizedContentField(entry schema.SessionEntry) string {
 func readHarmonizedBodyOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string, ref schema.SourceEntryRef, digest string) (EntryRecord, error) {
 	// The mapping binds the read to the generation; the digest addresses the
 	// exact body, so a superseded generation's identical entry can never leak
-	// into this generation's hydration.
+	// into this generation's hydration. The mapping is a parsed row, read
+	// under the id the resolver names.
 	var row EntryRecord
 	found := false
-	err := sqlitex.Execute(conn, `SELECT
+	rowsID, err := rowsGenerationIDOnConn(conn, sessionID, generationID)
+	if err != nil {
+		return EntryRecord{}, err
+	}
+	err = sqlitex.Execute(conn, `SELECT
     b.body_id, b.session_id, b.body_digest, b.entry_index, b.harness, b.entry_type, b.role,
     b.timestamp_ms, b.content_preview, b.tokens_in, b.tokens_out,
     b.has_tool_use, b.tool_kind, b.tool_names_csv,
@@ -809,7 +825,7 @@ FROM session_generation_entries m
 JOIN session_entry_bodies b
   ON b.session_id = m.session_id AND b.body_digest = m.body_digest
 WHERE m.session_id = ? AND m.generation_id = ? AND m.source_entry_ref = ? AND m.body_digest = ?`, &sqlitex.ExecOptions{
-		Args: []any{string(sessionID), generationID, string(ref), digest},
+		Args: []any{string(sessionID), rowsID, string(ref), digest},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			scanned, err := scanBodyRow(stmt, 0)
 			if err != nil {

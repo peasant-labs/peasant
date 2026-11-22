@@ -45,6 +45,12 @@ const (
 	outcomeParsedSettleRefused sessionOutcome = "parsed:settle-refused"
 	// outcomeParsedSkipsDisabled: no proof was attempted (the baseline arm).
 	outcomeParsedSkipsDisabled sessionOutcome = "parsed:refresh-skips-disabled"
+	// outcomeReferenced: the validator found only a context difference and
+	// the store installed a reference to the stored parse.
+	outcomeReferenced sessionOutcome = "referenced"
+	// outcomeParsedReferenceError: the reference failed with an error that
+	// is not a refusal.
+	outcomeParsedReferenceError sessionOutcome = "parsed:reference-error"
 	// outcomeParsedTermPrefix prefixes a parse after a non-context term.
 	outcomeParsedTermPrefix = "parsed:"
 )
@@ -59,6 +65,8 @@ type sessionTrace struct {
 	// SecondScanMs is set for a session that built a candidate and then
 	// parsed: the measured metadata half, which BuildGeneration runs again.
 	SecondScanMs float64 `json:"secondScanMs,omitempty"`
+	// ReferenceMs is the reference plan plus its install.
+	ReferenceMs float64 `json:"referenceMs,omitempty"`
 }
 
 // outcomeRow is one outcome of the skip arm over every round.
@@ -66,6 +74,7 @@ type outcomeRow struct {
 	Outcome            sessionOutcome `json:"outcome"`
 	Sessions           int            `json:"sessions"`
 	MedianValidateMs   float64        `json:"medianValidateMs"`
+	MedianReferenceMs  float64        `json:"medianReferenceMs"`
 	MedianParseMs      float64        `json:"medianParseMs"`
 	MedianSecondScanMs float64        `json:"medianSecondScanMs,omitempty"`
 }
@@ -81,6 +90,13 @@ type runTrace struct {
 	validatorMs map[ingest.SessionID]time.Duration
 	validateErr map[ingest.SessionID]bool
 	settle      map[ingest.SessionID]error
+	// plan and install hold each reference step's error; a session the
+	// step never saw has no key.
+	plan    map[ingest.SessionID]error
+	install map[ingest.SessionID]error
+	// referenceTook is the time the plan and the install took together.
+	referenceTook map[ingest.SessionID]time.Duration
+	planStart     map[ingest.SessionID]time.Time
 }
 
 func newRunTrace() *runTrace {
@@ -89,7 +105,34 @@ func newRunTrace() *runTrace {
 		half: map[ingest.SessionID]time.Duration{}, halfOK: map[ingest.SessionID]bool{},
 		validation: map[ingest.SessionID]ingest.ManagedGenerationValidationResult{}, validatorMs: map[ingest.SessionID]time.Duration{},
 		validateErr: map[ingest.SessionID]bool{}, settle: map[ingest.SessionID]error{},
+		plan: map[ingest.SessionID]error{}, install: map[ingest.SessionID]error{},
+		referenceTook: map[ingest.SessionID]time.Duration{}, planStart: map[ingest.SessionID]time.Time{},
 	}
+}
+
+func (r *runTrace) planning(sid ingest.SessionID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.planStart[sid] = time.Now()
+}
+
+func (r *runTrace) planned(sid ingest.SessionID, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.plan[sid] = err
+	r.referenceTook[sid] += time.Since(r.planStart[sid])
+}
+
+func (r *runTrace) addReferenceTime(sid ingest.SessionID, took time.Duration) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.referenceTook[sid] += took
+}
+
+func (r *runTrace) installed(sid ingest.SessionID, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.install[sid] = err
 }
 
 func (r *runTrace) proved(sid ingest.SessionID, proof ingest.UnchangedProof, err error) {
@@ -144,6 +187,16 @@ func (r *runTrace) count(e *executed, unsupported *int) {
 			e.Settles++
 		}
 	}
+	for _, err := range r.plan {
+		if err == nil {
+			e.Plans++
+		}
+	}
+	for _, err := range r.install {
+		if err == nil {
+			e.References++
+		}
+	}
 	for sid, proof := range r.proof {
 		if r.proofErr[sid] || proof.Proven || !proof.Mismatch.IsContext() {
 			continue
@@ -173,11 +226,22 @@ func (r *runTrace) sessions(result *ingest.PipelineResult) []sessionTrace {
 		proof, proved := r.proof[sid]
 		settleErr, settleRan := r.settle[sid]
 		validation, answered := r.validation[sid]
+		planErr, planned := r.plan[sid]
+		installErr, installRan := r.install[sid]
+		if planned {
+			trace.ReferenceMs = ms(r.referenceTook[sid])
+		}
 		switch {
 		case settleRan && settleErr == nil && proof.Proven:
 			trace.Outcome = outcomeSettled
 		case settleRan && settleErr == nil:
 			trace.Outcome = outcomeValidated
+		case installRan && installErr == nil:
+			trace.Outcome = outcomeReferenced
+		case planned && planErr != nil:
+			trace.Outcome = referenceFailureOutcome(planErr)
+		case installRan:
+			trace.Outcome = referenceFailureOutcome(installErr)
 		case !proved || r.proofErr[sid]:
 			trace.Outcome = outcomeParsedSkipsDisabled
 		case settleRan:
@@ -195,9 +259,19 @@ func (r *runTrace) sessions(result *ingest.PipelineResult) []sessionTrace {
 	return traces
 }
 
+// referenceFailureOutcome names a parse after a refused or failed reference:
+// parsed:<refusal reason>, or parsed:reference-error.
+func referenceFailureOutcome(err error) sessionOutcome {
+	var refusal ingest.ReferenceRefusal
+	if errors.As(err, &refusal) {
+		return sessionOutcome(outcomeParsedTermPrefix + string(refusal.RefusalReason()))
+	}
+	return outcomeParsedReferenceError
+}
+
 // breakdown groups the skip arm's sessions by outcome over every sample.
 func breakdown(samples []sample) []outcomeRow {
-	type values struct{ validate, parse, second []float64 }
+	type values struct{ validate, reference, parse, second []float64 }
 	grouped := map[sessionOutcome]*values{}
 	for _, s := range samples {
 		for _, trace := range s.Traces {
@@ -207,6 +281,7 @@ func breakdown(samples []sample) []outcomeRow {
 				grouped[trace.Outcome] = v
 			}
 			v.validate = append(v.validate, trace.ValidateMs)
+			v.reference = append(v.reference, trace.ReferenceMs)
 			v.parse = append(v.parse, trace.ParseMs)
 			if trace.SecondScanMs > 0 {
 				v.second = append(v.second, trace.SecondScanMs)
@@ -224,7 +299,7 @@ func breakdown(samples []sample) []outcomeRow {
 	var rows []outcomeRow
 	for outcome, v := range grouped {
 		rows = append(rows, outcomeRow{Outcome: outcome, Sessions: len(v.validate),
-			MedianValidateMs: median(v.validate), MedianParseMs: median(v.parse), MedianSecondScanMs: median(v.second)})
+			MedianValidateMs: median(v.validate), MedianReferenceMs: median(v.reference), MedianParseMs: median(v.parse), MedianSecondScanMs: median(v.second)})
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].Outcome < rows[j].Outcome })
 	return rows

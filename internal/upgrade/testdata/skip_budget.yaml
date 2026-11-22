@@ -59,6 +59,29 @@
 #   maintainer accepted a busy machine for this row, so its spreads are wider
 #   than C1's and C3's.
 #
+# reference-install (C8, adapter bump with a context change — project rename —
+#   over managed generations; every session's cheap proof and context
+#   validator fail on the context, and the reference plan and install run):
+#   (80.798 + 1661.265) / 37839.409 = 0.046. All 1,200 session runs (240 x 5)
+#   referenced; zero parses. Wall medians: 11864.310 ms against 48100.032 ms
+#   (ratio 0.247).
+#   Wall min–max: skip 11752.294–13275.309 ms; baseline 46744.170–50055.020 ms.
+#   INDEX min–max: skip 1541.244–1892.018 ms; baseline 36532.441–39261.357 ms.
+#   Skip proof min–max: 70.166–94.135 ms.
+#   What the ratio covers: the metadata candidate, the validator, and the
+#   reference plan and install all run inside the INDEX stage, so settle
+#   (skip INDEX) already holds both the validation and the reference
+#   plan/install; proof is added on top and may be counted twice (keeping the
+#   ratio conservative). The report's medianValidateMs (5965.912 ms; per
+#   session median 23.368 ms) and medianReferenceMs (33967.666 ms; per session
+#   median 3.948 ms) are per-session sums across parallel workers, not wall
+#   time, so they are larger than INDEX wall and are not added again.
+#   Measured at head ea7c73a06 with that head as base, shape 240 x 1000
+#   (240 sessions, 1000 entries per session, 230,694,000 corpusBytes,
+#   360,000 importedEntries, 240 activeGenerations), five rounds, one process
+#   per arm sample, dirtyWorktree false, start/end load averages
+#   4.78/5.85/7.24 and 4.26/4.93/6.32.
+#
 # Any other failed proof parses, so the stored-metadata lane has no further
 # skip to budget; the copy refresh that once filled that gap was measured
 # slower than the parse when metadata changed and removed.
@@ -67,6 +90,7 @@ requiredNames:
   - proven-settle
   - stored-index
   - validated-settle
+  - reference-install
 budgets:
   - name: proven-settle
     lane: stored-metadata
@@ -107,7 +131,20 @@ budgets:
       command: 'nix develop --command env GOTOOLCHAIN=go1.26.0 go run -tags skipbudget ./cmd/skip-budget -case C7 -base 5c5e62e55 -root /tmp/opencode/c7 -sessions 240 -entries 1000 -rounds 5'
       date: '2026-11-20T11:01:03Z'
       samples: 5
-dispositions: [proven, validated, index]
+  - name: reference-install
+    lane: stored-metadata
+    disposition: referenced
+    cases: [C8]
+    proof: 80.798
+    settle: 1661.265
+    avoided: 37839.409
+    provenance:
+      head: ea7c73a06e74a20501c108a027e20bcf1788d940
+      base: ea7c73a06
+      command: 'nix develop --command env GOTOOLCHAIN=go1.26.0 go run -tags skipbudget ./cmd/skip-budget -case C8 -base ea7c73a06 -root /tmp/opencode/c8 -sessions 240 -entries 1000 -rounds 5'
+      date: '2026-11-21T16:51:06Z'
+      samples: 5
+dispositions: [proven, validated, referenced, index]
 unknownDispositions: [copied, ""]
 cases:
   - name: winning-ratio

@@ -3,8 +3,9 @@
 #   sample:    new-session-import drives the new-session smoke runner;
 #              case-arm drives 2 x 10 rounds of a corpus case, both arms.
 #   case:      the corpus case of a case-arm row; default C1 (stamp-only).
-#              C7 (stale stored metadata hash) also checks arm equivalence
-#              after every round and reports the outcome breakdown.
+#              C7 (stale stored metadata hash) and C8 (renamed project,
+#              installed as a reference) also check arm equivalence after
+#              every round and report the outcome breakdown.
 #   child:     import imports a sessions x 10 corpus; run runs the case-arm
 #              sample it is given; garbage prints a line that is not a
 #              sample result. Every other run-* mode runs the sample and
@@ -12,7 +13,7 @@
 #              other arm, the parent's pid, a census reason id this build
 #              does not define (it prints an empty code), or the sample
 #              printed twice. run-refusing-store runs against a store that
-#              refuses every settle; run-unequal-arms changes one session's
+#              refuses every settle and every reference install; run-unequal-arms changes one session's
 #              state digest in the skip arm only.
 #   rounds:    case-arm rounds; default 1.
 #   wantOrder: the arms the children ran, in launch order.
@@ -35,6 +36,9 @@ requiredNames:
   - run-hash-drift-arms
   - run-hash-drift-refusing-store
   - run-hash-drift-unequal-arms
+  - run-context-reference-arms
+  - run-context-reference-refusing-store
+  - run-context-reference-unequal-arms
 cases:
   - name: smoke-shape
     sample: new-session-import
@@ -103,5 +107,21 @@ cases:
   - name: run-hash-drift-unequal-arms
     sample: case-arm
     case: C7
+    child: run-unequal-arms
+    wantError: "arm equivalence: the skip and baseline arms left different state"
+  - name: run-context-reference-arms
+    sample: case-arm
+    case: C8
+    child: run
+    rounds: 2
+    wantOrder: [skip, baseline, baseline, skip]
+  - name: run-context-reference-refusing-store
+    sample: case-arm
+    case: C8
+    child: run-refusing-store
+    wantError: skip arm executed
+  - name: run-context-reference-unequal-arms
+    sample: case-arm
+    case: C8
     child: run-unequal-arms
     wantError: "arm equivalence: the skip and baseline arms left different state"

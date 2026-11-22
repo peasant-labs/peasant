@@ -435,44 +435,20 @@ func (s *Store) releaseLatestAttemptSavepoint(conn *sqlite.Conn, write ingest.Se
 // pointer behind.
 const clearLatestAttemptPointer = `latest_attempt_generation_id = NULL, latest_attempt_artifact_hash = NULL, latest_attempt_indexer_version = NULL, latest_attempt_failure_code = NULL, latest_attempt_failure_message = NULL, latest_attempt_captured_at_ms = NULL, latest_attempt_stats_json = NULL`
 
-// supersededGenerationPredicate excludes the two live generations from a
-// superseded-row predicate: the active read authority and the latest attempt.
-// Both parameters are bound positionally (active then latest attempt), and
-// IS NOT is NULL-safe, so a session with no latest attempt keeps every
-// non-active generation as superseded.
-const supersededGenerationPredicate = `generation_id IS NOT ? AND generation_id IS NOT ?`
-
-// generationKeepSetOnConn reads the two generation identifiers a sweep or
-// reclaim must keep for one session: the active read authority and the latest
-// attempt. Both are live; every other committed generation is superseded.
-func generationKeepSetOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (active, latestAttempt string, err error) {
-	found := false
-	if err := sqlitex.Execute(conn, `SELECT active_generation_id, latest_attempt_generation_id FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
-		Args: []any{string(sessionID)},
-		ResultFunc: func(stmt *sqlite.Stmt) error {
-			found = true
-			if stmt.ColumnType(0) != sqlite.TypeNull {
-				active = stmt.ColumnText(0)
-			}
-			if stmt.ColumnType(1) != sqlite.TypeNull {
-				latestAttempt = stmt.ColumnText(1)
-			}
-			return nil
-		},
-	}); err != nil {
-		return "", "", fmt.Errorf("store: read the generation keep set for session %s: %w", sessionID, err)
-	}
-	if !found {
-		return "", "", fmt.Errorf("store: session %s has no metadata row; import the session before sweeping or reclaiming its generations", sessionID)
-	}
-	return active, latestAttempt, nil
-}
+// supersededGenerationPredicate is the one superseded-row predicate the
+// sweep, the bounded sweep and the reclaim plan and apply share. It excludes
+// the session's keep set: the active read authority, the latest attempt, and
+// the owner whose parsed rows each of them reads. Every caller binds the four
+// slots with supersededGenerationArgs; IS NOT is NULL-safe, so an empty
+// member keeps nothing and a session with no latest attempt and no reference
+// keeps exactly its active generation.
+const supersededGenerationPredicate = `generation_id IS NOT ? AND generation_id IS NOT ? AND generation_id IS NOT ? AND generation_id IS NOT ?`
 
 // generationKeepSet takes a pooled connection and reads the session's keep set.
-func (s *Store) generationKeepSet(ctx context.Context, sessionID schema.SessionID) (string, string, error) {
+func (s *Store) generationKeepSet(ctx context.Context, sessionID schema.SessionID) (generationKeepSet, error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
-		return "", "", fmt.Errorf("store: take connection to read the generation keep set for session %s: %w", sessionID, err)
+		return generationKeepSet{}, fmt.Errorf("store: take connection to read the generation keep set for session %s: %w", sessionID, err)
 	}
 	defer s.pool.Put(conn)
 	return generationKeepSetOnConn(conn, sessionID)
@@ -481,6 +457,6 @@ func (s *Store) generationKeepSet(ctx context.Context, sessionID schema.SessionI
 // latestAttemptGenerationID returns the session's latest-attempt generation
 // identifier, or the empty string when no attempt exists.
 func (s *Store) latestAttemptGenerationID(ctx context.Context, sessionID schema.SessionID) (string, error) {
-	_, latestAttempt, err := s.generationKeepSet(ctx, sessionID)
-	return latestAttempt, err
+	keep, err := s.generationKeepSet(ctx, sessionID)
+	return keep.latest, err
 }

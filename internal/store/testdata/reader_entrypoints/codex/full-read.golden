@@ -1,0 +1,91 @@
+{
+  "entries": [
+    {
+      "sessionId": "abc00000-0000-4000-8000-0000000000c2",
+      "entryIndex": 0,
+      "harness": "codex",
+      "entryType": "text",
+      "role": "user",
+      "timestampMs": 1767312001000,
+      "contentPreview": "synthetic codex request",
+      "hasToolUse": false,
+      "hasThinking": false,
+      "isError": false,
+      "depth": 0
+    },
+    {
+      "sessionId": "abc00000-0000-4000-8000-0000000000c2",
+      "entryIndex": 1,
+      "harness": "codex",
+      "entryType": "tool_use",
+      "role": "assistant",
+      "timestampMs": 1767312002000,
+      "hasToolUse": false,
+      "hasThinking": false,
+      "isError": false,
+      "depth": 0
+    },
+    {
+      "sessionId": "abc00000-0000-4000-8000-0000000000c2",
+      "entryIndex": 2,
+      "harness": "codex",
+      "entryType": "tool_use",
+      "role": "assistant",
+      "timestampMs": 1767312002000,
+      "contentPreview": "{\"command\":[\"ls\"]}",
+      "hasToolUse": true,
+      "toolNamesCsv": "shell",
+      "hasThinking": false,
+      "isError": false,
+      "toolCallId": "e_golden_0003",
+      "depth": 1,
+      "parentIndex": 1,
+      "toolInput": "{\"command\":[\"ls\"]}",
+      "partType": "function_call"
+    },
+    {
+      "sessionId": "abc00000-0000-4000-8000-0000000000c2",
+      "entryIndex": 3,
+      "harness": "codex",
+      "entryType": "tool_result",
+      "role": "tool",
+      "timestampMs": 1767312003000,
+      "contentPreview": "synthetic listing",
+      "hasToolUse": false,
+      "hasThinking": false,
+      "isError": false,
+      "toolCallId": "e_golden_0003",
+      "depth": 1,
+      "parentIndex": 1,
+      "toolOutput": "synthetic listing",
+      "partType": "function_call_output"
+    },
+    {
+      "sessionId": "abc00000-0000-4000-8000-0000000000c2",
+      "entryIndex": 4,
+      "harness": "codex",
+      "entryType": "text",
+      "role": "assistant",
+      "timestampMs": 1767312004000,
+      "contentPreview": "synthetic codex answer",
+      "hasToolUse": false,
+      "hasThinking": false,
+      "isError": false,
+      "depth": 0
+    }
+  ],
+  "capture": {
+    "PublicationCaptureRevision": 1,
+    "SessionID": "abc00000-0000-4000-8000-0000000000c2",
+    "Status": "complete",
+    "SourceAuthority": "provider_source",
+    "TranscriptOrigin": 0,
+    "CaptureFormat": "full",
+    "EntryCount": 5,
+    "ContentRowCount": 4,
+    "FullCaptureSHA256": "0e1e876479014c2f74057ee7159fa967071e19e25564b3a24b50904a25bab8e7",
+    "CapturedAtMs": 1767312000000,
+    "FailureCode": "",
+    "FailureMessage": ""
+  }
+}

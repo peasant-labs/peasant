@@ -502,3 +502,15 @@
   fallback: run-migrations
   reason: none
   lane: none
+
+- id: store-schema-82
+  kind: store-schema
+  from: 81
+  to: 82
+  change_scope: store-shape
+  input: store-rows
+  output_proof: []
+  precheck: none
+  fallback: run-migrations
+  reason: none
+  lane: none

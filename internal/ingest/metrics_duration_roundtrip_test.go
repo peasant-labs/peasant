@@ -85,12 +85,13 @@ func TestManagedMetricsDurationRoundtrip(t *testing.T) {
 				if err := os.Rename(source, source+"-unavailable"); err != nil {
 					t.Fatal(err)
 				}
-				// The changed project fails the unchanged proof, so the
-				// refresh parses the stored transcript (the source is gone)
-				// and installs the new generation.
+				// The changed project fails the unchanged proof on the
+				// context only, so the refresh installs the new context as a
+				// generation that references the stored parse (the source is
+				// gone); the metrics are computed again for it.
 				result, err = pipeline.Run(t.Context())
-				if err != nil || result.Summary.Indexed != 1 {
-					t.Fatalf("adapter refresh did not parse the stored transcript once: %+v %v", result, err)
+				if err != nil || len(result.IndexLog) != 1 || result.Summary.Computed != 1 {
+					t.Fatalf("adapter refresh did not install the changed context once: %+v %v", result, err)
 				}
 				input, err = db.ReadMetricInput(t.Context(), sid, true)
 				if err != nil || input == nil || input.GenerationID == old {

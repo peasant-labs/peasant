@@ -193,7 +193,8 @@ const (
 SELECT ?1, ?2, ?3, ?4
  WHERE EXISTS (SELECT 1 FROM sessions s
                  JOIN session_generation_entries m
-                   ON m.session_id = s.session_id AND m.generation_id = s.active_generation_id
+                   ON m.session_id = s.session_id
+                  AND m.generation_id = COALESCE((SELECT g.mapping_set_id FROM session_generations g WHERE g.session_id = s.session_id AND g.generation_id = s.active_generation_id), s.active_generation_id)
                   AND m.partition_id = 0 AND m.entry_index = ?3
                 WHERE s.session_id = ?2)
     OR EXISTS (SELECT 1 FROM session_entries e
@@ -733,13 +734,30 @@ func (s *Store) CreateAnnotation(ctx context.Context, params CreateAnnotationPar
 	return newID, nil
 }
 
+func insertTargetEntrySQL(conn *sqlite.Conn) (string, error) {
+	hasMappingSet, err := mappingSetColumnOnConn(conn)
+	if err != nil {
+		return "", err
+	}
+	if !hasMappingSet {
+		return strings.Replace(sqlInsertTargetEntry,
+			`COALESCE((SELECT g.mapping_set_id FROM session_generations g WHERE g.session_id = s.session_id AND g.generation_id = s.active_generation_id), s.active_generation_id)`,
+			`s.active_generation_id`, 1), nil
+	}
+	return sqlInsertTargetEntry, nil
+}
+
 // insertAnnotationTargetEntryOnConn executes the guarded entry-target
 // insert and refuses when the target start entry does not exist: zero rows
 // change, so the check is the affected count, not an error. The refusal
 // carries all six actionable parts; the caller's transaction rolls the
 // parent annotation row back with it.
 func insertAnnotationTargetEntryOnConn(conn *sqlite.Conn, site, annotationID, sessionID string, entryIndex, endIndex int) error {
-	if err := sqlitex.ExecuteTransient(conn, sqlInsertTargetEntry, &sqlitex.ExecOptions{
+	query, err := insertTargetEntrySQL(conn)
+	if err != nil {
+		return fmt.Errorf("store: %s: insert entry annotation target: %w", site, err)
+	}
+	if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
 		Args: []any{annotationID, sessionID, entryIndex, endIndex},
 	}); err != nil {
 		return fmt.Errorf("store: %s: insert entry annotation target: %w", site, err)

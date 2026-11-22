@@ -1,0 +1,55 @@
+# The harvest-path reader corpus: one synthetic session per harness. Every
+# value is invented; no transcript, path or identity comes from a real store.
+#
+# The golden generator builds each managed session through its harness's
+# production generation builder (the indexer registry the pipeline uses), with
+# the fixed generation id below, a counting reference allocator and fixed
+# clocks, and activates it through the store's production activation. Pi has
+# no managed generation and is written through the production entry batch.
+#
+# The goldens under reader_entrypoints/<harness>/<entry>.golden are the bytes
+# the readers returned at the commit that added them. They never change; a
+# reader that is rerouted must keep returning these bytes.
+generationID: G_golden
+clockMs: 1767312000000
+harnesses:
+  - harness: claude-code
+    sessionID: abc00000-0000-4000-8000-0000000000c1
+    cwd: /synthetic/reader-corpus
+    projectName: reader-corpus
+    hostSlug: reader-host
+    source: |
+      {"type":"user","sessionId":"abc00000-0000-4000-8000-0000000000c1","uuid":"u1","cwd":"/synthetic/reader-corpus","timestamp":"2026-01-02T00:00:00Z","message":{"role":"user","content":"synthetic reader request"}}
+      {"type":"assistant","sessionId":"abc00000-0000-4000-8000-0000000000c1","uuid":"a1","parentUuid":"u1","cwd":"/synthetic/reader-corpus","timestamp":"2026-01-02T00:00:01Z","message":{"role":"assistant","model":"claude-synthetic","content":[{"type":"text","text":"synthetic plan"},{"type":"tool_use","id":"toolu_reader_1","name":"Read","input":{"file_path":"/synthetic/reader-corpus/file.txt"}}],"usage":{"input_tokens":12,"output_tokens":8}}}
+      {"type":"user","sessionId":"abc00000-0000-4000-8000-0000000000c1","uuid":"u2","parentUuid":"a1","cwd":"/synthetic/reader-corpus","timestamp":"2026-01-02T00:00:02Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_reader_1","content":"synthetic file body"}]}}
+      {"type":"assistant","sessionId":"abc00000-0000-4000-8000-0000000000c1","uuid":"a2","parentUuid":"u2","cwd":"/synthetic/reader-corpus","timestamp":"2026-01-02T00:00:03Z","message":{"role":"assistant","model":"claude-synthetic","content":[{"type":"text","text":"synthetic reader answer"}],"usage":{"input_tokens":20,"output_tokens":6}}}
+      {"type":"user","sessionId":"abc00000-0000-4000-8000-0000000000c1","uuid":"u3","parentUuid":"a2","cwd":"/synthetic/reader-corpus","timestamp":"2026-01-02T00:00:04Z","message":{"role":"user","content":"second synthetic request"}}
+  - harness: codex
+    sessionID: abc00000-0000-4000-8000-0000000000c2
+    cwd: /synthetic/reader-corpus
+    projectName: reader-corpus
+    hostSlug: reader-host
+    sourcePath: /synthetic/codex/rollout-reader.jsonl
+    source: |
+      {"timestamp":"2026-01-02T00:00:00Z","type":"session_meta","payload":{"id":"abc00000-0000-4000-8000-0000000000c2","cwd":"/synthetic/reader-corpus"}}
+      {"timestamp":"2026-01-02T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"m1","content":[{"type":"input_text","text":"synthetic codex request"}]}}
+      {"timestamp":"2026-01-02T00:00:02Z","type":"response_item","payload":{"type":"function_call","name":"shell","arguments":"{\"command\":[\"ls\"]}","call_id":"call_reader_1"}}
+      {"timestamp":"2026-01-02T00:00:03Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_reader_1","output":"synthetic listing"}}
+      {"timestamp":"2026-01-02T00:00:04Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"m2","content":[{"type":"output_text","text":"synthetic codex answer"}]}}
+  - harness: opencode
+    sessionID: ses_3cd91f52effeXd3QAJ54jOyzn1
+    cwd: /fixtures/native-project
+    projectName: reader-corpus
+    hostSlug: reader-host
+    # The synthetic native database materialized by internal/ingest/testfixture.
+    nativeFixture: native-current-rows
+  - harness: pi
+    sessionID: abc00000-0000-4000-8000-0000000000c4
+    cwd: /synthetic/reader-corpus
+    projectName: reader-corpus
+    hostSlug: reader-host
+    sourcePath: /synthetic/pi/session-reader.jsonl
+    source: |
+      {"type":"session","version":3,"id":"abc00000-0000-4000-8000-0000000000c4","cwd":"/synthetic/reader-corpus","timestamp":"2026-01-02T00:00:00Z"}
+      {"type":"message","id":"u1","parentId":null,"timestamp":"2026-01-02T00:00:01Z","message":{"role":"user","content":"synthetic pi request","timestamp":1767312001000}}
+      {"type":"message","id":"a1","parentId":"u1","timestamp":"2026-01-02T00:00:02Z","message":{"role":"assistant","content":[{"type":"text","text":"synthetic pi answer"}],"usage":{"input":12}}}

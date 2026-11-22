@@ -61,6 +61,11 @@ const (
 	// another non-zero value, so the cheap proof fails on the metadata
 	// context while the stored context is unchanged.
 	mutateStaleMetadataHash
+	// mutateContextChange moves the adapter stamp back by one, as
+	// mutateAdapterStamp does, and renames the project in every managed
+	// metadata file, so the refreshed capture carries a changed context over
+	// unchanged transcript bytes.
+	mutateContextChange
 	// mutateNone leaves the imported base as it is. Only the new-session
 	// smoke case uses it: it times the import itself.
 	mutateNone
@@ -134,6 +139,9 @@ func caseSpecs() map[upgrade.MeasurementCase]caseSpec {
 	validatesAll := func(n int) executed {
 		return executed{Proofs: n, Candidates: n, Validations: n, Validated: n, Settles: n}
 	}
+	referencesAll := func(n int) executed {
+		return executed{Proofs: n, Candidates: n, Validations: n, Plans: n, References: n}
+	}
 	stampOnly := func(n int, a arm, s sample) error {
 		if a == armSkip {
 			return expect(a, s, settlesAll(n))
@@ -192,6 +200,18 @@ func caseSpecs() map[upgrade.MeasurementCase]caseSpec {
 				return expect(a, s, parsesAll(n))
 			},
 		},
+		upgrade.MeasurementCaseContextReference: {
+			id: upgrade.MeasurementCaseContextReference, mutation: mutateContextChange,
+			skipLabel:     "renamed project, as shipped: cheap proof and validator fail on the context, metadata candidate, reference planned and installed",
+			baselineLabel: "stored-metadata lane with the refresh skips disabled: parse and install the changed generation",
+			baseline:      disableSkips, wantLane: ingest.RefreshLaneStoredMetadata, equivalent: true,
+			check: func(n int, a arm, s sample) error {
+				if a == armSkip {
+					return expect(a, s, referencesAll(n))
+				}
+				return expect(a, s, parsesAll(n))
+			},
+		},
 	}
 }
 
@@ -206,7 +226,11 @@ type executed struct {
 	Validated   int `json:"validated"`
 	// Settles counts settles the store accepted.
 	Settles int `json:"settles"`
-	Parses  int `json:"parses"`
+	// Plans counts reference plans the store accepted, and References the
+	// references it installed.
+	Plans      int `json:"plans"`
+	References int `json:"references"`
+	Parses     int `json:"parses"`
 }
 
 // sample is one timed pipeline run over a fresh copy of the prepared base.
@@ -223,6 +247,9 @@ type sample struct {
 	// ValidateMs is the refresh_validate stage: the metadata half and the
 	// validator, summed over sessions.
 	ValidateMs float64 `json:"validateMs"`
+	// ReferenceMs is the refresh_reference stage: the plan and the install,
+	// summed over sessions.
+	ReferenceMs float64 `json:"referenceMs"`
 	executed
 	// Unsupported counts sessions whose validation was unsupported: no
 	// candidate, or a validator that could not answer.
@@ -290,6 +317,8 @@ type armSummary struct {
 	MedianIndexMs float64  `json:"medianIndexStageMs"`
 	// MedianValidateMs is the median refresh_validate stage time.
 	MedianValidateMs float64 `json:"medianValidateMs"`
+	// MedianReferenceMs is the median refresh_reference stage time.
+	MedianReferenceMs float64 `json:"medianReferenceMs"`
 }
 
 type caseShape struct {
@@ -477,6 +506,7 @@ func summarize(a *armSummary) {
 	a.MedianParseMs = median(pick(func(s sample) float64 { return s.ParseMs }))
 	a.MedianIndexMs = median(pick(func(s sample) float64 { return s.IndexStageMs }))
 	a.MedianValidateMs = median(pick(func(s sample) float64 { return s.ValidateMs }))
+	a.MedianReferenceMs = median(pick(func(s sample) float64 { return s.ReferenceMs }))
 }
 
 // countingStore records, per session, the cheap proof, the validator's
@@ -490,12 +520,33 @@ type countingStore struct {
 var (
 	_ ingest.ManagedGenerationUnchangedProver = (*countingStore)(nil)
 	_ ingest.ManagedGenerationValidator       = (*countingStore)(nil)
+	_ ingest.ManagedGenerationReferencer      = (*countingStore)(nil)
 )
 
-// refuseSettlesForTest makes every settle refuse as stale work, so a test can
-// show a case whose skip arm cannot settle fails its executed counts. Only a
-// test child sets it.
+// refuseSettlesForTest makes every settle refuse as stale work and every
+// reference install refuse as moved, so a test can show a case whose skip arm
+// cannot skip fails its executed counts. Only a test child sets it.
 var refuseSettlesForTest bool
+
+func (s *countingStore) PlanManagedGenerationReference(ctx context.Context, request ingest.ManagedGenerationReferenceRequest) (ingest.ManagedGenerationReferencePlan, error) {
+	s.trace.planning(request.Proof.SessionID)
+	plan, err := s.Store.PlanManagedGenerationReference(ctx, request)
+	s.trace.planned(request.Proof.SessionID, err)
+	return plan, err
+}
+
+func (s *countingStore) InstallManagedGenerationReference(ctx context.Context, plan ingest.ManagedGenerationReferencePlan) (ingest.ManagedGenerationReferenceOutcome, error) {
+	if refuseSettlesForTest {
+		err := &store.ManagedGenerationReferenceError{SessionID: plan.SessionID(), SourceGenerationID: plan.SourceGenerationID(), Reason: ingest.ReferenceRefusalSourceMoved, Detail: "refused by the test store", Where: "skip-budget test store"}
+		s.trace.installed(plan.SessionID(), err)
+		return ingest.ManagedGenerationReferenceOutcome{}, err
+	}
+	start := time.Now()
+	outcome, err := s.Store.InstallManagedGenerationReference(ctx, plan)
+	s.trace.installed(plan.SessionID(), err)
+	s.trace.addReferenceTime(plan.SessionID(), time.Since(start))
+	return outcome, err
+}
 
 func (s *countingStore) ProveCapturedGenerationUnchanged(ctx context.Context, request ingest.ManagedGenerationUnchangedProof) (ingest.UnchangedProof, error) {
 	proof, err := s.Store.ProveCapturedGenerationUnchanged(ctx, request)
@@ -531,6 +582,9 @@ func openStore(dbPath, output string) (*store.Store, error) {
 
 // newPipeline wires the pipeline as `peasant harvest` does for one harness,
 // with the metrics engine and classifier.
+//
+// A traced run (an arm sample) installs its generations under
+// armGenerationID; the untraced initial import keeps the random identities.
 func newPipeline(db *store.Store, metricsStore ingest.MetricsStore, adapters map[ingest.Harness]ingest.AdapterFactory, source, output string, profiler *ingest.IndexProfiler, configure func(*ingest.PipelineConfig), trace *runTrace) (*ingest.Pipeline, error) {
 	fsys := &ingest.OSFileSystem{}
 	indexers := ingest.NewIndexerRegistry(fsys, ingest.IndexerRegistryOptions{})
@@ -540,6 +594,10 @@ func newPipeline(db *store.Store, metricsStore ingest.MetricsStore, adapters map
 			return nil, fmt.Errorf("the registered claude-code indexer is %T, not the Claude indexer the trace wraps", indexers[ingest.HarnessClaudeCode])
 		}
 		indexers[ingest.HarnessClaudeCode] = tracingClaudeIndexer{ClaudeIndexer: claude, trace: trace}
+	}
+	var generationIDs func(ingest.DiscoveredSession) string
+	if trace != nil {
+		generationIDs = armGenerationID
 	}
 	cfg := ingest.PipelineConfig{
 		Sources: map[ingest.Harness]ingest.SourceConfig{
@@ -553,7 +611,7 @@ func newPipeline(db *store.Store, metricsStore ingest.MetricsStore, adapters map
 	}
 	return ingest.NewPipeline(fsys, testutil.NoGitResolver(), adapters, cfg,
 		ingest.WithStore(db), ingest.WithMetricsStore(metricsStore), ingest.WithSalt(db.InstallationSalt()),
-		ingest.WithIndexers(indexers),
+		ingest.WithIndexers(indexers), ingest.WithGenerationID(generationIDs),
 		ingest.WithLogger(db), ingest.WithIndexLogger(db),
 		ingest.WithAnalyzer(metrics.NewEngineWithModels(db, db)),
 		ingest.WithClassifier(metrics.NewClassifierAnnotator(db, db)))
@@ -603,7 +661,7 @@ func prepareBase(ctx context.Context, baseDir string, sessions, entries int, m m
 	target := ingest.GenerationTargets(ingest.HarvesterVersionRegistry)[ingest.HarnessClaudeCode]
 	switch m {
 	case mutateNone:
-	case mutateAdapterStamp, mutateStaleMetadataHash:
+	case mutateAdapterStamp, mutateStaleMetadataHash, mutateContextChange:
 		if err := execSQL(ctx, db, `UPDATE sessions SET adapter_version = ?`, target.AdapterVersion-1); err != nil {
 			return caseShape{}, err
 		}
@@ -613,6 +671,15 @@ func prepareBase(ctx context.Context, baseDir string, sessions, entries int, m m
 		}
 		if stamped != sessions {
 			return caseShape{}, fmt.Errorf("stamped %d metadata files, want %d", stamped, sessions)
+		}
+		if m == mutateContextChange {
+			renamed, err := renameProject(output, contextChangeProjectName)
+			if err != nil {
+				return caseShape{}, err
+			}
+			if renamed != sessions {
+				return caseShape{}, fmt.Errorf("renamed the project in %d metadata files, want %d", renamed, sessions)
+			}
 		}
 		if m == mutateStaleMetadataHash {
 			forged, err := forgeStoredMetadataHashes(ctx, db)
@@ -733,6 +800,8 @@ func runRound(ctx context.Context, spec caseSpec, baseDir, roundDir string, roun
 			s.IndexStageMs = float64(stage.Duration.Microseconds()) / 1000
 		case ingest.StageRefreshValidate:
 			s.ValidateMs = float64(stage.Duration.Microseconds()) / 1000
+		case ingest.StageRefreshReference:
+			s.ReferenceMs = float64(stage.Duration.Microseconds()) / 1000
 		}
 	}
 	for _, session := range result.Sessions {
@@ -828,9 +897,33 @@ func writeCorpus(root string, sessions, entries int) (int64, error) {
 	return total, nil
 }
 
+// contextChangeProjectName is the project name mutateContextChange writes.
+const contextChangeProjectName = "skip-budget-renamed-project"
+
+// armGenerationID names the generation an arm installs for a session. Both
+// arms of a round install under the same identity, so the session row they
+// leave compares equal; the prepared base's generations keep the random
+// identities the import minted, so the names never collide.
+func armGenerationID(session ingest.DiscoveredSession) string {
+	return "g_arm_" + strings.ReplaceAll(string(session.SessionID), "-", "")
+}
+
+// renameProject rewrites the project name of every managed metadata file,
+// then recomputes the metadata hash, as a renamed repository leaves the
+// recorded context.
+func renameProject(output, name string) (int, error) {
+	return rewriteMetadata(output, func(meta *schema.UnifiedMetadata) { meta.Project.Name = name })
+}
+
 // stampMetadata rewrites every managed metadata file's adapter revision, then
 // recomputes the metadata hash, as an older build would have left the pair.
 func stampMetadata(output string, revision int) (int, error) {
+	return rewriteMetadata(output, func(meta *schema.UnifiedMetadata) { meta.AdapterVersion = &revision })
+}
+
+// rewriteMetadata applies change to every managed metadata file, then
+// recomputes its metadata hash and replaces the file atomically.
+func rewriteMetadata(output string, change func(*schema.UnifiedMetadata)) (int, error) {
 	count := 0
 	err := filepath.WalkDir(output, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(d.Name(), defaults.MetadataSuffix) {
@@ -844,7 +937,7 @@ func stampMetadata(output string, revision int) (int, error) {
 		if err := json.Unmarshal(data, &meta); err != nil {
 			return fmt.Errorf("decode managed metadata %s: %w", path, err)
 		}
-		meta.AdapterVersion = &revision
+		change(&meta)
 		meta.MetadataHash = schema.ComputeMetadataHash(&meta)
 		encoded, err := json.Marshal(&meta)
 		if err != nil {

@@ -31,8 +31,9 @@ func (p *Pipeline) proveManagedGenerationUnchanged(ctx context.Context, input *C
 // the store's proof could not. It answers unsupported for any unavailable or
 // invalid result; only a proven answer settles, and every other answer leaves
 // the proof not proven so the session parses. A proven answer comes with the
-// validated context the settle must carry.
-func (p *Pipeline) validateRefresh(ctx context.Context, input *CapturedIndexInput, indexer TranscriptIndexer) (result ManagedGenerationValidationResult, validated *ValidatedContext) {
+// validated context the settle must carry. A not-proven answer comes with the
+// candidate the validator compared, for the reference step.
+func (p *Pipeline) validateRefresh(ctx context.Context, input *CapturedIndexInput, indexer TranscriptIndexer) (result ManagedGenerationValidationResult, validated *ValidatedContext, compared *GenerationMetadataCandidate) {
 	unsupported := ManagedGenerationValidationResult{Outcome: ValidationUnsupported}
 	start := time.Now()
 	defer func() {
@@ -51,21 +52,21 @@ func (p *Pipeline) validateRefresh(ctx context.Context, input *CapturedIndexInpu
 	}
 	builder, ok := indexer.(GenerationMetadataBuilder)
 	if validator == nil || !ok || input == nil || input.expected == nil || input.metadata == nil {
-		return unsupported, nil
+		return unsupported, nil, nil
 	}
 	target := p.sessionVersionTarget(input.session)
 	if target.IndexVersion == strictIndexFormat || input.expected.IndexVersion == nil ||
 		*input.expected.IndexVersion != target.IndexVersion || input.expected.ActiveGenerationID == "" || input.metadata.ContentHash == "" {
-		return unsupported, nil
+		return unsupported, nil, nil
 	}
 	proof, err := p.unchangedProofRequest(input)
 	if err != nil {
-		return unsupported, nil
+		return unsupported, nil, nil
 	}
 	candidate, err := builder.BuildGenerationMetadata(ctx, p.generationBuildInput(input))
 	if err != nil {
 		slog.Debug("ingest: refresh metadata unavailable; the session parses", "error", err)
-		return unsupported, nil
+		return unsupported, nil, nil
 	}
 	// The validator's frozen request extends the proof request with a generation
 	// identity and budget; copy the common fields at this single boundary.
@@ -78,17 +79,20 @@ func (p *Pipeline) validateRefresh(ctx context.Context, input *CapturedIndexInpu
 	answer, err := validator.ValidateManagedGenerationUnchanged(ctx, request)
 	if err != nil {
 		slog.Debug("ingest: refresh validation failed; the session parses", "error", err)
-		return unsupported, nil
+		return unsupported, nil, nil
 	}
 	answer, err = NewManagedGenerationValidationResult(answer.Outcome, answer.Mismatch, answer.Detail)
 	if err != nil {
 		slog.Debug("ingest: invalid refresh validation; the session parses", "error", err)
-		return unsupported, nil
+		return unsupported, nil, nil
 	}
 	if answer.Outcome == ValidationProven {
-		return answer, &ValidatedContext{GenerationID: proof.Expected.ActiveGenerationID, Candidate: candidate}
+		return answer, &ValidatedContext{GenerationID: proof.Expected.ActiveGenerationID, Candidate: candidate}, nil
 	}
-	return answer, nil
+	if answer.Outcome == ValidationNotProven {
+		return answer, nil, &candidate
+	}
+	return answer, nil, nil
 }
 
 func (p *Pipeline) settleManagedGenerationUnchanged(ctx context.Context, input *CapturedIndexInput, lane *storeWriteLane, validated *ValidatedContext) (ManagedGenerationUnchangedSettleOutcome, time.Duration, error) {

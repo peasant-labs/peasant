@@ -7,7 +7,7 @@
 # classed: terminal and piped come from the one terminal check, hook from
 # the flag `village push` declares for generated hooks (--non-interactive),
 # server is fixed. store names the fixture: quick is a schema-78 store with
-# no sessions (quick steps 79 and 80 and an empty-ledger step 81; every store below 78 also plans step 78,
+# no sessions (quick steps 79 and 80, an empty-ledger step 81 and the quick step 82; every store below 78 also plans step 78,
 # which copies the session tables and is long), long is a schema-75 store
 # with stale search results (long steps), current is at the head schema,
 # missing has no file, and owed-recount is at the head schema with one
@@ -454,7 +454,7 @@ pushCases:
 # entryCases run the real entry functions with no terminal. store: affected
 # is the minimal schema-75 fixture with stale search results (a long plan);
 # clean and real-quick are the schema-78 store with no sessions (a quick
-# plan, 79 through 81 with an empty source ledger, that a real upgrade finishes); current is a real head store;
+# plan, 79 through 82 with an empty source ledger, that a real upgrade finishes); current is a real head store;
 # real-v75-long is a real schema-75 store whose search repair rebuilds.
 # wantOpened requires the entry point to upgrade the store and open it at
 # the head schema.

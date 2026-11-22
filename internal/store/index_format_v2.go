@@ -192,6 +192,21 @@ func bindNullableInt64Value(stmt *sqlite.Stmt, param int, value *int64) {
 }
 
 func pointSessionAtGenerationOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generation indexformat.Generation) error {
+	return pointSessionOnConn(conn, sessionID, generation, true)
+}
+
+// pointSessionAtReferenceOnConn points the session at a generation that reads
+// another generation's parsed rows. The display title derives from the parsed
+// rows, which did not change, so the stored title stays; generation carries
+// only its identity and metadata.
+func pointSessionAtReferenceOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generation indexformat.Generation) error {
+	return pointSessionOnConn(conn, sessionID, generation, false)
+}
+
+// pointSessionOnConn moves the active pointer and writes the session's mirror
+// columns. deriveTitle writes the title derived from the generation's title
+// refs and main entries; otherwise the stored title stays.
+func pointSessionOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generation indexformat.Generation, deriveTitle bool) error {
 	var root any
 	if generation.Metadata.RootSessionID != nil {
 		root = string(*generation.Metadata.RootSessionID)
@@ -290,14 +305,20 @@ func pointSessionAtGenerationOnConn(conn *sqlite.Conn, sessionID schema.SessionI
 	// generation's TitleRefs so ordinary list reads agree with the snapshot
 	// without a separate metadata upsert. INSERT ... ON CONFLICT keeps a
 	// session without a metrics row valid.
-	title := deriveGenerationTitle(generation)
+	metricsSQL := `INSERT INTO session_metrics (session_id, turn_count, tool_calls, title) VALUES (?, ?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET turn_count = excluded.turn_count, tool_calls = excluded.tool_calls, title = excluded.title`
 	var titleValue any
-	if title != "" {
-		titleValue = title
+	if deriveTitle {
+		if title := deriveGenerationTitle(generation); title != "" {
+			titleValue = title
+		}
+	} else {
+		metricsSQL = `INSERT INTO session_metrics (session_id, turn_count, tool_calls) VALUES (?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET turn_count = excluded.turn_count, tool_calls = excluded.tool_calls`
 	}
-	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO session_metrics (session_id, turn_count, tool_calls, title) VALUES (?, ?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET turn_count = excluded.turn_count, tool_calls = excluded.tool_calls, title = excluded.title`, &sqlitex.ExecOptions{Args: []any{
-		string(sessionID), generation.Metadata.Stats.TurnCount, generation.Metadata.Stats.ToolCallCount, titleValue,
-	}}); err != nil {
+	args := []any{string(sessionID), generation.Metadata.Stats.TurnCount, generation.Metadata.Stats.ToolCallCount}
+	if deriveTitle {
+		args = append(args, titleValue)
+	}
+	if err := sqlitex.ExecuteTransient(conn, metricsSQL, &sqlitex.ExecOptions{Args: args}); err != nil {
 		return fmt.Errorf("store: derive turn_count mirror for session %s generation %s: %w; no generation was activated", sessionID, generation.ID, err)
 	}
 	return nil

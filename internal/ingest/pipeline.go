@@ -382,6 +382,9 @@ type Pipeline struct {
 	// managed generation candidate. Production leaves it nil and mints a fresh
 	// opaque identity per attempt; a deterministic caller injects its own.
 	generationIDs func(DiscoveredSession) string
+	// parseInputContextFieldsOverride replaces the per-harness list of
+	// captured metadata fields the parsed rows depend on. Only a test sets it.
+	parseInputContextFieldsOverride func(Harness) []string
 
 	// resolvedVersions caches the effective harness targets once, after the
 	// store capability gate has decided whether managed generations are enabled.
@@ -2054,8 +2057,12 @@ type indexParseResult struct {
 	// generation spent on the serialized write lane. It is the write half of a
 	// result that settled a generation and parsed nothing.
 	managedUnchangedSettleDuration time.Duration
-	parseDuration                  time.Duration
-	bytes                          int64
+	// managedReferenceDuration is the time the install of a context change
+	// as a reference spent on the serialized write lane. It is the write
+	// half of a result that installed a reference and parsed nothing.
+	managedReferenceDuration time.Duration
+	parseDuration            time.Duration
+	bytes                    int64
 }
 
 // permanentRefusalCode names the refusal when this build can never clear it,
@@ -2355,13 +2362,28 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 			var validated *ValidatedContext
 			if proofErr == nil && !proof.Proven && proof.Mismatch.IsContext() {
 				var validation ManagedGenerationValidationResult
-				validation, validated = p.validateRefresh(ctx, input, indexer)
+				var compared *GenerationMetadataCandidate
+				validation, validated, compared = p.validateRefresh(ctx, input, indexer)
 				switch validation.Outcome {
 				case ValidationProven:
 					proof.Proven = true
 					proof.Mismatch = UnchangedMismatchNone
 				case ValidationNotProven:
 					proof.Mismatch = validation.Mismatch
+				}
+				// Every term but the context held and the context differs:
+				// install the new context as a generation that references the
+				// stored parse. Any refusal or error parses below.
+				if validation.Outcome == ValidationNotProven && validation.Mismatch.IsContext() {
+					if installed, duration := p.referenceManagedGeneration(ctx, input, writeLane, compared); installed {
+						reason := indexManagedReferenceReason
+						result.managedReferenceDuration = duration
+						result.logEntry = p.makeIndexLogEntry(im, IndexOutcomeSkipped, 0, result.startedAt, &reason, nil)
+						result.bytes = 0
+						input.transcript, input.tree = nil, nil
+						activeParses.Add(-1)
+						return result
+					}
 				}
 			}
 			if proofErr == nil && !proof.Proven && p.adapterDeclaresOutputPreserving(input.session.Harness) {
@@ -2381,6 +2403,7 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 					result.logEntry = p.makeIndexLogEntry(im, IndexOutcomeSkipped, 0, result.startedAt, &reason, nil)
 					result.bytes = 0
 					input.transcript, input.tree = nil, nil
+					activeParses.Add(-1)
 					return result
 				}
 				slog.Warn(logPrefix+": unchanged generation settlement refused", "session_id", im.session.SessionID, "error", settleErr)
@@ -2751,7 +2774,7 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 			continue
 		}
 		if result.output == nil || p.metricsStore == nil {
-			record(i, indexedMeta{session: result.im.session, startMs: result.im.startMs}, result.logEntry, p.makeIndexProfileSession(result, result.logEntry, result.managedUnchangedSettleDuration))
+			record(i, indexedMeta{session: result.im.session, startMs: result.im.startMs}, result.logEntry, p.makeIndexProfileSession(result, result.logEntry, result.managedUnchangedSettleDuration+result.managedReferenceDuration))
 			continue
 		}
 		if result.generationCandidate != nil {
@@ -2969,7 +2992,7 @@ func (p *Pipeline) writeIndexParseResult(ctx context.Context, result indexParseR
 	im := result.im
 	ok := false
 	logEntry := result.logEntry
-	writeDuration := result.managedUnchangedSettleDuration
+	writeDuration := result.managedUnchangedSettleDuration + result.managedReferenceDuration
 	entriesCount := result.entryCount
 	if result.output != nil && p.metricsStore != nil {
 		// A split entries/stamp fallback could overwrite last-good output and

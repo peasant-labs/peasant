@@ -26,6 +26,7 @@
 //	go run -tags skipbudget ./cmd/skip-budget -case C1,C3,C6 -base "$(git merge-base HEAD origin/develop)"
 //	go run -tags skipbudget ./cmd/skip-budget -case C1 -base <rev> -sessions 2 -entries 10
 //	go run -tags skipbudget ./cmd/skip-budget -case C7 -base <rev> -sessions 2 -entries 10
+//	go run -tags skipbudget ./cmd/skip-budget -case C8 -base <rev> -sessions 2 -entries 10
 package main
 
 import (
@@ -68,7 +69,7 @@ const defaultRoot = "/tmp/opencode/peasant-1034"
 
 func main() {
 	list := flag.Bool("list", false, "print the planned cases without running them")
-	caseList := flag.String("case", "", "comma-separated cases to run: C1, C3, C4, C6, C7")
+	caseList := flag.String("case", "", "comma-separated cases to run: C1, C3, C4, C6, C7, C8")
 	base := flag.String("base", "", "comparison base revision")
 	root := flag.String("root", defaultRoot, "directory that holds one directory per case")
 	sessions := flag.Int("sessions", matrixSessions, "synthetic sessions per case (C4 always uses 2)")
@@ -150,6 +151,7 @@ func matrixCases(root string) []matrixCase {
 		{Name: upgrade.MeasurementCaseNewSession, Shape: "new session: 2 x 10"},
 		{Name: upgrade.MeasurementCaseUndeclaredProducer, Shape: "undeclared producer: the full step the plan names"},
 		{Name: upgrade.MeasurementCaseHashDrift, Shape: "stale stored metadata hash: metadata candidate, validation and settle vs parse"},
+		{Name: upgrade.MeasurementCaseContextReference, Shape: "renamed project: metadata candidate, validation, reference plan and install vs parse"},
 	}
 	for i := range cases {
 		cases[i].DataDir = filepath.Join(root, string(cases[i].Name))

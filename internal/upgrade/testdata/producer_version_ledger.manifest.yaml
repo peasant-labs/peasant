@@ -41,3 +41,4 @@ requiredNames:
   - content-model-tool-namespace-v1
   - redaction-rules-3-1-1
   - store-schema-81
+  - store-schema-82

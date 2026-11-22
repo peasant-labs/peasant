@@ -42,19 +42,9 @@ WHERE session_id = ? AND entry_index >= ? AND entry_index < ?
 ORDER BY entry_index
 LIMIT 1`
 
-	// sqlSelectShimAnchorEntryForSpan reads the same anchor source through
+	// selectShimAnchorEntryForSpanSQL reads the same anchor source through
 	// the shim: the active generation's main-partition body rows. The anchor
 	// carries the entry row's own entry_type, role, and part_type columns.
-	sqlSelectShimAnchorEntryForSpan = `SELECT m.entry_index, b.entry_id, b.tool_call_id, b.entry_type, b.role, b.part_type, b.content_preview
-FROM session_generation_entries m
-JOIN session_entry_bodies b
-  ON b.session_id = m.session_id AND b.body_digest = m.body_digest
-JOIN sessions s ON s.session_id = m.session_id
-WHERE m.session_id = ? AND m.generation_id = s.active_generation_id AND m.partition_id = 0
-AND m.entry_index >= ? AND m.entry_index < ?
-ORDER BY m.entry_index
-LIMIT 1`
-
 	sqlListUnresolvedAnnotationTargetAnchors = `SELECT
 	    ata.annotation_id, ata.session_id, ata.entry_index, ata.end_index, ata.state,
 	    ann.name, ak.name, t.type_id, a.content_hash
@@ -70,6 +60,18 @@ WHERE ata.state = 'unresolved'
 ORDER BY ata.session_id, ata.annotation_id`
 )
 
+func selectShimAnchorEntryForSpanSQL(conn *sqlite.Conn) string {
+	return `SELECT m.entry_index, b.entry_id, b.tool_call_id, b.entry_type, b.role, b.part_type, b.content_preview
+FROM session_generation_entries m
+JOIN session_entry_bodies b
+  ON b.session_id = m.session_id AND b.body_digest = m.body_digest
+JOIN sessions s ON s.session_id = m.session_id
+WHERE m.session_id = ? AND ` + activeRowsOfM(conn) + ` AND m.partition_id = 0
+AND m.entry_index >= ? AND m.entry_index < ?
+ORDER BY m.entry_index
+LIMIT 1`
+}
+
 func upsertAnnotationTargetAnchorOnConn(conn *sqlite.Conn, annotationID, sessionID string, start, end int, state AnnotationTargetAnchorState) error {
 	var anchor entryTargetAnchor
 	if state == AnnotationTargetAnchorResolved {
@@ -83,7 +85,7 @@ func upsertAnnotationTargetAnchorOnConn(conn *sqlite.Conn, annotationID, session
 			return fmt.Errorf("store: resolve anchor representation for annotation %s: %w", annotationID, shimErr)
 		}
 		if shimmed {
-			anchorQuery = sqlSelectShimAnchorEntryForSpan
+			anchorQuery = selectShimAnchorEntryForSpanSQL(conn)
 		}
 		if err := sqlitex.ExecuteTransient(conn, anchorQuery, &sqlitex.ExecOptions{
 			Args: []any{sessionID, start, end},
