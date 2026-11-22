@@ -1,4 +1,5 @@
 requiredNames:
   - append-refresh-alias-reuse
+  - append-joins-open-reply
   - append-duplicate-existing-uuid
   - changed-boundary-new-refs

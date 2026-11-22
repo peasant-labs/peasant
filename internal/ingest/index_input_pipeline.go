@@ -156,8 +156,9 @@ func CaptureIndexInput(ctx context.Context, indexer TranscriptIndexer, session D
 	input := &CapturedIndexInput{session: session, artifactHash: artifact.ArtifactHash, transcript: artifact.Transcript, metadata: &artifact.Metadata}
 	input.session.SourceFormat = artifact.Metadata.Source.Format
 	input.session.ParentUUID = artifact.Metadata.ParentUUID
+	input.session.openCodeRecognition = nil
 	if session.Harness == HarnessOpenCode {
-		origin, err := recognizeManagedOpenCodeProjection(artifact.Transcript, session.SessionID)
+		origin, err := session.openCodeRecognition.recognize(artifact.Transcript, session.SessionID)
 		if err != nil {
 			return nil, err
 		}

@@ -1,0 +1,20 @@
+# Which harnesses serve a reply's thinking child as a turn. A reply carrier
+# (depth 0) with a tool call and a thinking child (depth 1) is folded with
+# EntriesToTurns. Claude Code and OpenCode store each reply as one entry with
+# its thinking as children, so the thinking is a depth-1 turn under the reply.
+# Every other harness keeps the shape its stored sessions were indexed under:
+# the thinking child of a reply that called tools stays hidden until that
+# harness is re-indexed for the reply shape.
+#
+# Pi is not a case: the Pi indexer emits no thinking children (a Pi reply records
+# only its thinking flag), and the fold drops a Pi thinking or text child by
+# its typed evidence before this rule is reached.
+#
+# Every case folds the same three entries; only the harness differs. `turns`
+# lists the folded turns as entryIndex:depth:entryType.
+cases:
+  - {name: claude-code-serves-reply-thinking, harness: claude-code, turns: ["0:0:text", "1:1:thinking"]}
+  - {name: opencode-serves-reply-thinking, harness: opencode, turns: ["0:0:text", "1:1:thinking"]}
+  - {name: codex-keeps-reply-thinking-hidden, harness: codex, turns: ["0:0:text"]}
+  - {name: cursor-keeps-reply-thinking-hidden, harness: cursor, turns: ["0:0:text"]}
+  - {name: strike-keeps-reply-thinking-hidden, harness: strike, turns: ["0:0:text"]}

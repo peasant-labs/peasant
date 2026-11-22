@@ -578,8 +578,16 @@ func (idx *OpenCodeIndexer) indexRetainedSemanticMessages(sessionID SessionID, m
 				pendingObservedModel = observed
 			}
 		}
+		// An assistant message whose own content is empty is one reply: its
+		// text parts, all of them in order, are the reply's prose, and they
+		// are not repeated as children below it.
+		foldText := entry.Role == RoleAssistant && extractOpenCodePreview(message.Data.Content) == ""
 		if entry.ContentPreview == nil {
-			if preview := firstOpenCodeSemanticText(message.Parts); preview != "" {
+			preview := firstOpenCodeSemanticText(message.Parts)
+			if foldText {
+				preview = joinedOpenCodeSemanticText(message.Parts)
+			}
+			if preview != "" {
 				if !idx.fullContent {
 					preview = truncateString(preview, defaults.ContentPreviewLimit)
 				}
@@ -611,6 +619,9 @@ func (idx *OpenCodeIndexer) indexRetainedSemanticMessages(sessionID SessionID, m
 			parentContent = firstOpenCodeSemanticText(message.Parts)
 		}
 		for _, part := range message.Parts {
+			if foldText && !part.UnknownType && part.Data.Type == openCodePartKindText {
+				continue
+			}
 			partEntry, include := idx.openCodePartEntry(sessionID, part, parentIndex, entryIndex, entry.Role, &parentContent)
 			if !include {
 				continue
@@ -943,6 +954,18 @@ func firstOpenCodeSemanticText(parts []openCodeSemanticPart) string {
 		}
 	}
 	return ""
+}
+
+// joinedOpenCodeSemanticText is a reply's prose: every non-empty text part,
+// in order, one paragraph each.
+func joinedOpenCodeSemanticText(parts []openCodeSemanticPart) string {
+	var texts []string
+	for _, part := range parts {
+		if !part.UnknownType && part.Data.Type == openCodePartKindText && part.Data.Text != "" {
+			texts = append(texts, part.Data.Text)
+		}
+	}
+	return strings.Join(texts, replyProseSeparator)
 }
 
 func (idx *OpenCodeIndexer) openCodePartEntry(sessionID SessionID, part openCodeSemanticPart, parentIndex, entryIndex int, parentRole schema.Role, parentContent *string) (schema.SessionEntry, bool) {

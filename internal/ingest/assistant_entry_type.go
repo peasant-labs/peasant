@@ -30,3 +30,8 @@ func assistantEntryType(hasProse, hasToolUse, hasThinking bool) schema.EntryType
 // with no countable tool use of its own: no call key, no tool name, no
 // content.
 var toolOnlyCarrierEntryType = assistantEntryType(false, true, false)
+
+// replyProseSeparator joins the text blocks of one agent reply into the
+// reply's prose: each block is a paragraph of its own. Every harness that
+// stores a reply as one entry joins its text with it.
+const replyProseSeparator = "\n\n"

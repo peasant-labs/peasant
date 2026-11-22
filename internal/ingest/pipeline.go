@@ -2346,6 +2346,11 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 			// Once the proof is attempted the session parses, unless the
 			// proof holds or a context mismatch is validated and settled.
 			forceParse = true
+		}
+		// Settlement cannot accept a different indexer revision. Keep the
+		// parse mandatory, but do not ask the store to prove a snapshot it
+		// cannot settle. Adapter-only refreshes still take the proof path.
+		if forceParse && input.expected.IndexerVersion == p.sessionVersionTarget(input.session).IndexerVersion {
 			proofStart := time.Now()
 			proof, proofErr := p.proveManagedGenerationUnchanged(ctx, input)
 			proven := 0
@@ -5485,13 +5490,14 @@ func (p *Pipeline) readSessionMetadata(hostDir string, sid SessionID, logPrefix 
 			slog.Warn(logPrefix+": managed transcript unreadable", "session_id", sid, "error", readErr)
 			return nil, readErr
 		}
-		origin, recognitionErr := recognizeManagedOpenCodeProjection(transcriptData, sid)
+		recognition, recognitionErr := captureOpenCodeProjectionRecognition(transcriptData, sid)
 		if recognitionErr != nil {
 			p.reportMetadataRefusal(string(sid), recognitionErr)
 			slog.Warn(logPrefix+": managed OpenCode projection is corrupt", "session_id", sid, "transcript_path", transcriptPath, "error", recognitionErr, "impact", "recovery stopped before legacy fallback so existing index state is not replaced with an empty corpus", "fix", "re-run harvest to regenerate the managed transcript")
 			return nil, recognitionErr
 		}
-		ds.TranscriptOrigin = origin
+		ds.TranscriptOrigin = recognition.origin
+		ds.openCodeRecognition = recognition
 	}
 	if meta.ParentUUID != nil {
 		ds.ParentUUID = meta.ParentUUID

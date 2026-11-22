@@ -122,8 +122,9 @@ func sweepBoundedOnConn(ctx context.Context, conn *sqlite.Conn, sid schema.Sessi
 		}
 		result.RowsDeleted += int64(conn.Changes())
 	}
+	const orphanBodies = `session_id = ? AND NOT EXISTS (SELECT 1 FROM session_generation_entries m WHERE m.session_id = b.session_id AND m.body_digest = b.body_digest)`
 	var digests []string
-	if err := sqlitex.Execute(conn, `SELECT b.body_digest FROM session_entry_bodies b WHERE b.session_id = ? AND NOT EXISTS (SELECT 1 FROM session_generation_entries m WHERE m.session_id = b.session_id AND m.body_digest = b.body_digest)`, &sqlitex.ExecOptions{
+	if err := sqlitex.Execute(conn, `SELECT b.body_digest FROM session_entry_bodies b WHERE `+orphanBodies, &sqlitex.ExecOptions{
 		Args: []any{string(sid)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			digests = append(digests, stmt.ColumnText(0))
@@ -143,10 +144,14 @@ func sweepBoundedOnConn(ctx context.Context, conn *sqlite.Conn, sid schema.Sessi
 		if !trusted {
 			return errSweepNeedsBatches
 		}
-		if err := sqlitex.Execute(conn, `DELETE FROM session_entry_bodies WHERE session_id = ? AND body_digest = ?`, &sqlitex.ExecOptions{Args: []any{string(sid), digest}}); err != nil {
+	}
+	// The immediate transaction keeps the verified set stable. Delete it
+	// together so FTS5 does not flush pending postings between body deletes.
+	if len(digests) > 0 {
+		if err := sqlitex.Execute(conn, `DELETE FROM session_entry_bodies AS b WHERE `+orphanBodies, &sqlitex.ExecOptions{Args: []any{string(sid)}}); err != nil {
 			return err
 		}
-		result.BodiesDeleted += int64(conn.Changes())
+		result.BodiesDeleted = int64(conn.Changes())
 	}
 	if err := sqlitex.Execute(conn, `DELETE FROM session_content WHERE session_id = ? AND NOT EXISTS (SELECT 1 FROM session_generation_content d WHERE d.session_id = session_content.session_id AND d.digest = session_content.digest)`, &sqlitex.ExecOptions{Args: []any{string(sid)}}); err != nil {
 		return err

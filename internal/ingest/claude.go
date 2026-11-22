@@ -141,6 +141,8 @@ type claudeJSONLLine struct {
 	Attachment       json.RawMessage `json:"attachment"`
 	ThinkingMetadata json.RawMessage `json:"thinkingMetadata"`
 	Message          struct {
+		// ID is the API message id; the records of one message share it.
+		ID      string          `json:"id"`
 		Role    string          `json:"role"`
 		Model   string          `json:"model"`
 		Content json.RawMessage `json:"content"` // string or []contentBlock
@@ -1277,8 +1279,8 @@ func parseClaudeTranscriptMetadataWithIdentity(data []byte, meta *UnifiedMetadat
 		lastTimestamp  string // latest non-empty timestamp across all lines
 		turnCount      int
 		toolCount      int
-		tokensIn       int
-		tokensOut      int
+		// usage counts each API message's token usage once.
+		usage claudeMessageUsage
 		// levelState tracks the ultracode session mode in source order.
 		levelState claudeThinkingLevelState
 		// modernEffortSeen records any non-empty top-level effort anywhere;
@@ -1388,11 +1390,12 @@ func parseClaudeTranscriptMetadataWithIdentity(data []byte, meta *UnifiedMetadat
 			// Accumulate token usage from assistant messages.
 			// input_tokens in Claude's JSONL is only the non-cached portion;
 			// the bulk of input tokens are in cache_creation and cache_read fields.
+			// Every record of one message carries that message's usage, so
+			// it is counted once per message id.
 			if line.Message.Usage != nil {
-				tokensIn += line.Message.Usage.InputTokens +
-					line.Message.Usage.CacheCreationInputTokens +
-					line.Message.Usage.CacheReadInputTokens
-				tokensOut += line.Message.Usage.OutputTokens
+				usage.observe(line.Message.ID, line.Message.Usage.InputTokens+
+					line.Message.Usage.CacheCreationInputTokens+
+					line.Message.Usage.CacheReadInputTokens, line.Message.Usage.OutputTokens)
 			}
 		}
 	}
@@ -1440,8 +1443,7 @@ func parseClaudeTranscriptMetadataWithIdentity(data []byte, meta *UnifiedMetadat
 	meta.CWD = literalCWD
 	meta.Stats.TurnCount = turnCount
 	meta.Stats.ToolCallCount = toolCount
-	meta.Stats.TokensIn = tokensIn
-	meta.Stats.TokensOut = tokensOut
+	meta.Stats.TokensIn, meta.Stats.TokensOut = usage.totals()
 
 	if hasFirst {
 		return &firstLine, nil

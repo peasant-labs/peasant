@@ -22,6 +22,7 @@ requiredNames:
   - claude-thinking-only
   - claude-blank-text-and-tool-use
   - claude-blocks-as-separate-records
+  - claude-one-message-across-records
   - claude-image-only-prompt
   - opencode-unmanaged-text-part-and-tool-part
   - opencode-unmanaged-tool-parts-only
@@ -117,20 +118,8 @@ cases:
         - role: assistant
           entry_type: thinking
           content: 'only thinking here'
-    # The managed build keeps the carrier and its thinking child as two
-    # turns; the stored indexer folds the record to one.
-    want_managed:
-      turnCount: 2
-      conversationTurnCount: 0
-      entries:
-        - {role: assistant, entry_type: thinking, has_tool_use: false, has_thinking: true}
-      turns:
-        - role: assistant
-          entry_type: thinking
-          content: 'only thinking here'
-        - role: assistant
-          entry_type: thinking
-          content: 'only thinking here'
+    # Both paths store a thinking-only reply as one entry whose content is the
+    # thinking, so they fold to the same one turn.
 
   - name: claude-blank-text-and-tool-use
     paths: [indexer, managed]
@@ -201,37 +190,67 @@ cases:
         - role: system
           entry_type: system
           content: 'context compacted'
-    want_managed:
-      turnCount: 6
+    # Records without a message id are replies of their own. Both paths store
+    # the thinking-only record as one entry, so they fold to the same turns.
+
+  # One API message written as four records that share message.id, with a
+  # tool result between two of them: one reply at the first record, holding
+  # the prose, with the thinking and both tool calls as its children. Usage is
+  # the last record's snapshot, counted once.
+  - name: claude-one-message-across-records
+    paths: [indexer, managed]
+    harness: claude-code
+    jsonl:
+      - '{"type":"user","uuid":"u1","timestamp":"2026-01-02T10:00:00Z","message":{"role":"user","content":"read the config"}}'
+      - '{"type":"assistant","uuid":"a1","timestamp":"2026-01-02T10:00:01Z","message":{"id":"msg_1","role":"assistant","content":[{"type":"thinking","thinking":"the config is small"}],"usage":{"input_tokens":5,"output_tokens":2}}}'
+      - '{"type":"assistant","uuid":"a2","timestamp":"2026-01-02T10:00:02Z","message":{"id":"msg_1","role":"assistant","content":[{"type":"text","text":"Reading it now."}],"usage":{"input_tokens":5,"output_tokens":6}}}'
+      - '{"type":"assistant","uuid":"a3","timestamp":"2026-01-02T10:00:03Z","message":{"id":"msg_1","role":"assistant","content":[{"type":"tool_use","id":"toolu_r","name":"Read","input":{"path":"config.yaml"}}],"usage":{"input_tokens":5,"output_tokens":9}}}'
+      - '{"type":"user","uuid":"t1","timestamp":"2026-01-02T10:00:04Z","message":{"role":"tool","content":[{"type":"tool_result","tool_use_id":"toolu_r","content":"debug: true"}]}}'
+      - '{"type":"assistant","uuid":"a4","timestamp":"2026-01-02T10:00:05Z","message":{"id":"msg_1","role":"assistant","content":[{"type":"tool_use","id":"toolu_b","name":"Bash","input":{"command":"ls"}}],"usage":{"input_tokens":5,"output_tokens":12}}}'
+      - '{"type":"user","uuid":"t2","timestamp":"2026-01-02T10:00:06Z","message":{"role":"tool","content":[{"type":"tool_result","tool_use_id":"toolu_b","content":"config.yaml"}]}}'
+    want:
+      turnCount: 3
       conversationTurnCount: 2
       entries:
         - {role: user, entry_type: text, has_tool_use: false, has_thinking: false}
-        - {role: assistant, entry_type: thinking, has_tool_use: false, has_thinking: true}
-        - {role: assistant, entry_type: tool_use, has_tool_use: true, has_thinking: false}
+        - {role: assistant, entry_type: text, has_tool_use: true, has_thinking: true}
         - {role: tool, entry_type: tool_result, has_tool_use: false, has_thinking: false}
-        - {role: assistant, entry_type: text, has_tool_use: false, has_thinking: false}
-        - {role: system, entry_type: system, has_tool_use: false, has_thinking: false}
+        - {role: tool, entry_type: tool_result, has_tool_use: false, has_thinking: false}
       turns:
         - role: user
           entry_type: text
-          content: 'what changed?'
-        - role: assistant
-          entry_type: thinking
-          content: 'pondering the diff'
-        - role: assistant
-          entry_type: thinking
-          content: 'pondering the diff'
-        - role: assistant
-          entry_type: tool_use
-          content: ''
-          tools:
-            - {name: Read, input: '{"path":"diff.go"}', output: 'changed lines'}
+          content: 'read the config'
         - role: assistant
           entry_type: text
-          content: 'The diff looks good.'
-        - role: system
-          entry_type: system
-          content: 'context compacted'
+          content: 'Reading it now.'
+          tools:
+            - {name: Read, input: '{"path":"config.yaml"}', output: 'debug: true'}
+            - {name: Bash, input: '{"command":"ls"}', output: 'config.yaml'}
+        - role: assistant
+          entry_type: thinking
+          content: 'the config is small'
+    # As for one record, the managed carrier carries no tool-use flag.
+    want_managed:
+      turnCount: 3
+      conversationTurnCount: 2
+      entries:
+        - {role: user, entry_type: text, has_tool_use: false, has_thinking: false}
+        - {role: assistant, entry_type: text, has_tool_use: false, has_thinking: true}
+        - {role: tool, entry_type: tool_result, has_tool_use: false, has_thinking: false}
+        - {role: tool, entry_type: tool_result, has_tool_use: false, has_thinking: false}
+      turns:
+        - role: user
+          entry_type: text
+          content: 'read the config'
+        - role: assistant
+          entry_type: text
+          content: 'Reading it now.'
+          tools:
+            - {name: Read, input: '{"path":"config.yaml"}', output: 'debug: true'}
+            - {name: Bash, input: '{"command":"ls"}', output: 'config.yaml'}
+        - role: assistant
+          entry_type: thinking
+          content: 'the config is small'
 
   - name: claude-image-only-prompt
     paths: [indexer, managed]
@@ -436,18 +455,24 @@ cases:
         timeCreated: 1000
         timeUpdated: 2000
         data: '{"id":"msg_rt","type":"assistant","agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"reasoning","id":"prt_reason","text":"Weighing it."},{"type":"tool","id":"prt_tool","name":"read","state":{"status":"completed","input":{"path":"a.go"},"content":[{"type":"text","text":"body"}]},"time":{"created":1000,"completed":2000}}],"time":{"created":1000,"completed":2000}}'
-    allocator: {entries: [e_reason, e_call, e_result], submissions: []}
+    # The reply has no prose, so its carrier is the tool-only carrier with the
+    # thinking flag; the reasoning part is a depth-1 thinking child, folded to
+    # its own turn after the reply.
+    allocator: {entries: [e_carrier, e_reason, e_call, e_result], submissions: []}
     want:
-      turnCount: 1
+      turnCount: 2
       conversationTurnCount: 0
       entries:
-        - {role: assistant, entry_type: thinking, has_tool_use: false, has_thinking: false}
+        - {role: assistant, entry_type: tool_use, has_tool_use: false, has_thinking: true}
       turns:
+        - role: assistant
+          entry_type: tool_use
+          content: ''
+          tools:
+            - {name: read, input: '{"path":"a.go"}', output: '"body"'}
         - role: assistant
           entry_type: thinking
           content: 'Weighing it.'
-          tools:
-            - {name: read, input: '{"path":"a.go"}', output: '"body"'}
 
   - name: opencode-managed-blank-text-then-tool
     paths: [managed]

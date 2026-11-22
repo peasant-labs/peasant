@@ -10,7 +10,8 @@ import (
 )
 
 // TestClaudeIndexer_FullDepthDecomposition verifies that with fullDepth=true,
-// content blocks are decomposed into depth=1 child entries.
+// a reply's thinking and tool blocks are decomposed into depth=1 child entries
+// and its text is the reply's own content, not a child.
 func TestClaudeIndexer_FullDepthDecomposition(t *testing.T) {
 	t.Parallel()
 
@@ -33,9 +34,9 @@ func TestClaudeIndexer_FullDepthDecomposition(t *testing.T) {
 		t.Fatalf("IndexTranscript: %v", err)
 	}
 
-	// Expect: 1 depth=0 (message summary) + 3 depth=1 (thinking, text, tool_use) = 4 entries.
-	if len(entries) != 4 {
-		t.Fatalf("expected 4 entries (1 depth=0 + 3 depth=1), got %d", len(entries))
+	// Expect: 1 depth=0 reply holding the text + 2 depth=1 (thinking, tool_use) = 3 entries.
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries (1 depth=0 + 2 depth=1), got %d", len(entries))
 	}
 
 	// Verify depth=0 parent entry.
@@ -75,40 +76,33 @@ func TestClaudeIndexer_FullDepthDecomposition(t *testing.T) {
 		t.Errorf("thinking entry PartType: got %v, want \"thinking\"", thinking.PartType)
 	}
 
-	// Verify depth=1 text entry.
-	text := entries[2]
-	if text.Depth != 1 {
-		t.Errorf("entry[2] Depth: expected 1, got %d", text.Depth)
+	// The text block is the reply's content, not a child.
+	if parent.EntryType != ingest.EntryTypeText {
+		t.Errorf("entry[0] EntryType: expected %s, got %s", ingest.EntryTypeText, parent.EntryType)
 	}
-	if text.EntryType != ingest.EntryTypeText {
-		t.Errorf("entry[2] EntryType: expected %s, got %s", ingest.EntryTypeText, text.EntryType)
-	}
-	if text.ContentPreview == nil || *text.ContentPreview != "I'll help you with that." {
-		t.Errorf("entry[2] ContentPreview: got %v", text.ContentPreview)
-	}
-	if text.PartType == nil || *text.PartType != "text" {
-		t.Errorf("text entry PartType: got %v, want \"text\"", text.PartType)
+	if parent.ContentPreview == nil || *parent.ContentPreview != "I'll help you with that." {
+		t.Errorf("entry[0] ContentPreview: got %v", parent.ContentPreview)
 	}
 
 	// Verify depth=1 tool_use entry.
-	toolUse := entries[3]
+	toolUse := entries[2]
 	if toolUse.Depth != 1 {
-		t.Errorf("entry[3] Depth: expected 1, got %d", toolUse.Depth)
+		t.Errorf("entry[2] Depth: expected 1, got %d", toolUse.Depth)
 	}
 	if toolUse.EntryType != ingest.EntryTypeToolUse {
-		t.Errorf("entry[3] EntryType: expected %s, got %s", ingest.EntryTypeToolUse, toolUse.EntryType)
+		t.Errorf("entry[2] EntryType: expected %s, got %s", ingest.EntryTypeToolUse, toolUse.EntryType)
 	}
 	if !toolUse.HasToolUse {
-		t.Error("entry[3] HasToolUse: expected true")
+		t.Error("entry[2] HasToolUse: expected true")
 	}
 	if toolUse.ToolNamesCSV == nil || *toolUse.ToolNamesCSV != "Read" {
-		t.Errorf("entry[3] ToolNamesCSV: got %v", toolUse.ToolNamesCSV)
+		t.Errorf("entry[2] ToolNamesCSV: got %v", toolUse.ToolNamesCSV)
 	}
 	if toolUse.ToolCallID == nil || *toolUse.ToolCallID != "toolu_abc" {
-		t.Errorf("entry[3] ToolCallID: got %v", toolUse.ToolCallID)
+		t.Errorf("entry[2] ToolCallID: got %v", toolUse.ToolCallID)
 	}
 	if toolUse.ToolInput == nil {
-		t.Error("entry[3] ToolInput: expected non-nil")
+		t.Error("entry[2] ToolInput: expected non-nil")
 	}
 	if toolUse.PartType == nil || *toolUse.PartType != "tool_use" {
 		t.Errorf("tool_use entry PartType: got %v, want \"tool_use\"", toolUse.PartType)
