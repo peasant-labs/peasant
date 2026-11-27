@@ -1,0 +1,37 @@
+name: "In-app problem report (UI/UX)"
+description: "Report a visual, layout, or interaction problem from inside the peasant web app"
+title: "bug(ui): "
+labels: ["bug", "ui/ux"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting this from inside peasant.
+        **This repository is public.** Review your description, context, and screenshot for private prompts, file paths, or tokens before submitting.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe what went wrong and what you expected to see.
+      placeholder: What looks wrong or behaved unexpectedly?
+    validations:
+      required: true
+  - type: textarea
+    id: element
+    attributes:
+      label: Picked element (optional)
+      description: Auto-filled when you pick an element on the page.
+      placeholder: No element selected
+      render: text
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot (optional)
+      description: Paste your copied screenshot here (Ctrl+V / Cmd+V), or drag and drop the downloaded PNG.
+      placeholder: Paste or drop screenshot here...
+  - type: textarea
+    id: environment
+    attributes:
+      label: App context
+      description: Auto-filled from the page (route, viewport, theme, peasant version, browser).
+      render: text
