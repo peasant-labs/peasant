@@ -1,0 +1,81 @@
+matchCases:
+  requiredNames:
+    - transcript-turn-matched-when-masked
+    - transcript-turn-unmatched-when-unmasked
+    - password-input-always-masked
+    - explicit-mask-always-matched-when-unmasked
+    - shiki-descendant-inside-txn-body-masked
+    - source-entry-ref-masked
+    - sidebar-chrome-never-masked
+  cases:
+    - name: transcript-turn-matched-when-masked
+      html: '<div data-turn="1"><div class="txn-body"><p>hello</p></div></div>'
+      target: 'p'
+      mode: masked
+      expectedMasked: true
+    - name: transcript-turn-unmatched-when-unmasked
+      html: '<div data-turn="1"><div class="txn-body"><p>hello</p></div></div>'
+      target: 'p'
+      mode: unmasked
+      expectedMasked: false
+    - name: password-input-always-masked
+      html: '<form><input id="pw" type="password" value="secret" /></form>'
+      target: '#pw'
+      mode: unmasked
+      expectedMasked: true
+    - name: explicit-mask-always-matched-when-unmasked
+      html: '<div data-feedback-mask="always"><span id="tok">tok_123</span></div>'
+      target: '#tok'
+      mode: unmasked
+      expectedMasked: true
+    - name: shiki-descendant-inside-txn-body-masked
+      html: '<div class="txn-turn"><div class="txn-body"><pre class="shiki"><code id="code"><span style="color:#ff0000">const secret = 1</span></code></pre></div></div>'
+      target: '#code > span'
+      mode: masked
+      expectedMasked: true
+    - name: source-entry-ref-masked
+      html: '<div data-source-entry-ref="entry-1"><span id="raw">raw text</span></div>'
+      target: '#raw'
+      mode: masked
+      expectedMasked: true
+    - name: sidebar-chrome-never-masked
+      html: '<nav class="asb"><a id="home" href="/">home</a></nav>'
+      target: '#home'
+      mode: masked
+      expectedMasked: false
+
+cssCases:
+  requiredNames:
+    - mask-css-contains-important-override
+    - mask-css-hides-media-descendants
+    - unmasked-css-omits-transcript-selectors
+  cases:
+    - name: mask-css-contains-important-override
+      mode: masked
+      mustContain:
+        - 'color: transparent !important;'
+        - '-webkit-text-fill-color: transparent !important;'
+        - 'text-shadow: none !important;'
+        - 'background: var(--surface-2) !important;'
+        - '[data-turn]'
+        - '.txn-body'
+        - 'input[type="password"]'
+      mustNotContain: []
+    - name: mask-css-hides-media-descendants
+      mode: masked
+      mustContain:
+        - 'visibility: hidden !important;'
+        - 'img'
+        - 'svg'
+        - 'canvas'
+        - 'video'
+      mustNotContain: []
+    - name: unmasked-css-omits-transcript-selectors
+      mode: unmasked
+      mustContain:
+        - 'input[type="password"]'
+        - '[data-feedback-mask="always"]'
+        - 'color: transparent !important;'
+      mustNotContain:
+        - '[data-turn]'
+        - '.txn-body'
