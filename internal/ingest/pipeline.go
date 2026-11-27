@@ -4808,7 +4808,8 @@ func (p *Pipeline) runStreamedDownstream(ctx context.Context, indexedCh <-chan i
 		flushTimer = time.NewTimer(flushInterval)
 		flushTimerC = flushTimer.C
 	}
-	recordAnnotationResult := func(batchResult SessionAnnotationBatchResult) {
+	recordAnnotationResult := func(batchResult SessionAnnotationBatchResult, outcome AnnotationSessionOutcome) {
+		p.recordAnnotationOutcome(ctx, outcome)
 		if batchResult.Err != nil {
 			slog.Warn(logPrefix+": annotate indexed session",
 				"session_id", batchResult.SessionID,
@@ -4835,15 +4836,16 @@ func (p *Pipeline) runStreamedDownstream(ctx context.Context, indexedCh <-chan i
 		if len(flushed) > len(bufferedPending) {
 			flushed = flushed[:len(bufferedPending)]
 		}
-		for _, batchResult := range flushed {
-			recordAnnotationResult(batchResult)
+		for i, batchResult := range flushed {
+			recordAnnotationResult(batchResult, flushedAnnotationOutcome(bufferedPending[i], batchResult))
 		}
 		if len(flushed) < len(bufferedPending) {
 			for _, batch := range bufferedPending[len(flushed):] {
-				recordAnnotationResult(SessionAnnotationBatchResult{
+				missing := SessionAnnotationBatchResult{
 					SessionID: batch.SessionID,
 					Err:       fmt.Errorf("%s: annotation batch flush returned %d result(s) for %d session batch(es)", logPrefix, len(flushed), len(bufferedPending)),
-				})
+				}
+				recordAnnotationResult(missing, flushedAnnotationOutcome(batch, missing))
 			}
 		}
 		bufferedPending = bufferedPending[:0]
@@ -4885,6 +4887,7 @@ func (p *Pipeline) runStreamedDownstream(ctx context.Context, indexedCh <-chan i
 		emitAdvance(prog, StageCompute, len(batch), total)
 
 		if p.classifier != nil {
+			p.config.IndexProfiler.RecordAnnotationCandidates(len(ids))
 			if ctx.Err() != nil {
 				return false
 			}
@@ -4898,14 +4901,14 @@ func (p *Pipeline) runStreamedDownstream(ctx context.Context, indexedCh <-chan i
 					batch, err := buffered.PrepareAnnotations(ctx, sid, profiler)
 					annotateDuration += time.Since(annotateStarted)
 					if err != nil {
-						recordAnnotationResult(SessionAnnotationBatchResult{SessionID: sid, Err: err})
+						recordAnnotationResult(SessionAnnotationBatchResult{SessionID: sid, Err: err}, AnnotationSessionPreparationFailed)
 						continue
 					}
 					if batch.SessionID == "" {
 						batch.SessionID = sid
 					}
-					if batch.Skipped || (len(batch.Writes) == 0 && batch.RunState == nil) {
-						recordAnnotationResult(SessionAnnotationBatchResult{SessionID: batch.SessionID})
+					if outcome, done := preparedAnnotationOutcome(batch); done {
+						recordAnnotationResult(SessionAnnotationBatchResult{SessionID: batch.SessionID}, outcome)
 						continue
 					}
 					bufferedPending = append(bufferedPending, batch)
@@ -4932,6 +4935,7 @@ func (p *Pipeline) runStreamedDownstream(ctx context.Context, indexedCh <-chan i
 					}
 				})
 				annotateDuration += time.Since(annotateStarted)
+				p.recordAnnotationOutcome(ctx, unbufferedAnnotationOutcome(err))
 				if err != nil {
 					slog.Warn(logPrefix+": annotate indexed session",
 						"session_id", sid,
@@ -6460,6 +6464,7 @@ func (p *Pipeline) stageAnnotate(ctx context.Context, sessionIDs []SessionID, pr
 	}
 	workers := parallelWorkers(p.config)
 	total := len(sessionIDs)
+	p.config.IndexProfiler.RecordAnnotationCandidates(total)
 	profiled, useProfile := p.classifier.(ProfiledSessionClassifier)
 	profiler := p.config.IndexProfiler
 
@@ -6478,6 +6483,7 @@ func (p *Pipeline) stageAnnotate(ctx context.Context, sessionIDs []SessionID, pr
 				} else {
 					err = p.classifier.Annotate(ctx, sid)
 				}
+				p.recordAnnotationOutcome(ctx, unbufferedAnnotationOutcome(err))
 				if err != nil {
 					slog.Warn("pipeline: annotate session",
 						"session_id", sid,
@@ -6508,6 +6514,7 @@ func (p *Pipeline) stageAnnotateBuffered(ctx context.Context, sessionIDs []Sessi
 		return nil
 	}
 	profiler := p.config.IndexProfiler
+	profiler.RecordAnnotationCandidates(total)
 
 	sessions := make(chan SessionID, workers)
 	batches := make(chan SessionAnnotationBatch, workers)
@@ -6539,13 +6546,15 @@ func (p *Pipeline) stageAnnotateBuffered(ctx context.Context, sessionIDs []Sessi
 			for sid := range sessions {
 				batch, err := classifier.PrepareAnnotations(ctx, sid, profiler)
 				if err != nil {
+					p.recordAnnotationOutcome(ctx, AnnotationSessionPreparationFailed)
 					results <- SessionAnnotationBatchResult{SessionID: sid, Err: err}
 					continue
 				}
 				if batch.SessionID == "" {
 					batch.SessionID = sid
 				}
-				if batch.Skipped || (len(batch.Writes) == 0 && batch.RunState == nil) {
+				if outcome, done := preparedAnnotationOutcome(batch); done {
+					p.recordAnnotationOutcome(ctx, outcome)
 					results <- SessionAnnotationBatchResult{SessionID: batch.SessionID}
 					continue
 				}
@@ -6573,15 +6582,18 @@ func (p *Pipeline) stageAnnotateBuffered(ctx context.Context, sessionIDs []Sessi
 			if len(flushed) > len(pending) {
 				flushed = flushed[:len(pending)]
 			}
-			for _, result := range flushed {
+			for i, result := range flushed {
+				p.recordAnnotationOutcome(ctx, flushedAnnotationOutcome(pending[i], result))
 				results <- result
 			}
 			if len(flushed) < len(pending) {
 				for _, batch := range pending[len(flushed):] {
-					results <- SessionAnnotationBatchResult{
+					missing := SessionAnnotationBatchResult{
 						SessionID: batch.SessionID,
 						Err:       fmt.Errorf("pipeline: annotation batch flush returned %d result(s) for %d session batch(es)", len(flushed), len(pending)),
 					}
+					p.recordAnnotationOutcome(ctx, flushedAnnotationOutcome(batch, missing))
+					results <- missing
 				}
 			}
 			pending = pending[:0]

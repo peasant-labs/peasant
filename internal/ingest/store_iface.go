@@ -1076,13 +1076,17 @@ type SessionAnnotationWrite struct {
 
 // SessionAnnotationBatch is the prepared annotation work for one session.
 // Skipped means state proved the session current and no store flush is needed.
+// PreparationFailed means at least one result's write could not be prepared;
+// the remaining writes still flush best-effort, but the session's ANNOTATE
+// outcome is a preparation failure.
 type SessionAnnotationBatch struct {
-	SessionID SessionID
-	Writes    []SessionAnnotationWrite
-	RunState  *AnnotationRunState
-	Input     *MetricInput
-	Owners    []ClassifierAnnotationOwner
-	Skipped   bool
+	SessionID         SessionID
+	Writes            []SessionAnnotationWrite
+	RunState          *AnnotationRunState
+	Input             *MetricInput
+	Owners            []ClassifierAnnotationOwner
+	Skipped           bool
+	PreparationFailed bool
 }
 
 // ClassifierAnnotationOwner declares output responsibility even for empty results.

@@ -183,6 +183,7 @@ func (ca *ClassifierAnnotator) prepareAnnotations(ctx context.Context, sessionID
 			ClassifierTime: classifierResultProfileTime(resultTimes, result),
 		})
 	}
+	batch.PreparationFailed = prepareFailed
 	if stateUsable && !prepareFailed {
 		state := classifierAnnotationRunState(sessionID, entriesHash, computeVersion)
 		batch.RunState = &state
