@@ -1,0 +1,65 @@
+submitCases:
+  requiredNames:
+    - empty-description-disables-submit
+    - whitespace-description-disables-submit
+    - nonempty-description-enables-submit
+    - capturing-step-disables-submit
+  cases:
+    - name: empty-description-disables-submit
+      step: compose
+      description: ""
+      expectedEnabled: false
+    - name: whitespace-description-disables-submit
+      step: compose
+      description: "   \n\t  "
+      expectedEnabled: false
+    - name: nonempty-description-enables-submit
+      step: compose
+      description: "Sidebar button clips on narrow viewport"
+      expectedEnabled: true
+    - name: capturing-step-disables-submit
+      step: capturing
+      description: "Sidebar button clips on narrow viewport"
+      expectedEnabled: false
+
+kindCases:
+  requiredNames:
+    - problem-to-feature-switch
+    - feature-to-problem-switch
+  cases:
+    - name: problem-to-feature-switch
+      initialKind: problem
+      targetKind: feature
+      expectedTitle: report a problem
+    - name: feature-to-problem-switch
+      initialKind: feature
+      targetKind: problem
+      expectedTitle: request a feature
+
+submittedOutcomeCases:
+  requiredNames:
+    - copied-outcome-with-fallback-link
+    - downloaded-outcome-with-fallback-link
+    - not-needed-outcome-without-captures
+    - failed-outcome-shows-recovery-buttons
+  cases:
+    - name: copied-outcome-with-fallback-link
+      outcome: copied
+      expectedLabel: "image copied; paste it into the issue"
+      submittedUrl: "https://github.com/peasant-labs/peasant/issues/new?template=in-app-problem.yml"
+      hasCapture: true
+    - name: downloaded-outcome-with-fallback-link
+      outcome: downloaded
+      expectedLabel: "image downloaded; drop it into the issue"
+      submittedUrl: "https://github.com/peasant-labs/peasant/issues/new?template=in-app-feature.yml"
+      hasCapture: true
+    - name: not-needed-outcome-without-captures
+      outcome: not-needed
+      expectedLabel: "no image attached"
+      submittedUrl: "https://github.com/peasant-labs/peasant/issues/new?template=in-app-problem.yml"
+      hasCapture: false
+    - name: failed-outcome-shows-recovery-buttons
+      outcome: failed
+      expectedLabel: "the image could not be copied or downloaded"
+      submittedUrl: "https://github.com/peasant-labs/peasant/issues/new?template=in-app-problem.yml"
+      hasCapture: true
