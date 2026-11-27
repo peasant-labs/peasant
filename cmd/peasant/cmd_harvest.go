@@ -620,7 +620,7 @@ func runHarvestWith(cmd *cobra.Command, mode harvestMode, flags *harvestFlags, f
 			// prompt. On an interactive harvest, point it at `peasant user claim`
 			// once per local owner and account scope. `open` runs this harvest
 			// internally with muted writers, so it announces after its own run.
-			if cmd.Name() != "open" {
+			if cmd.Name() != openCommandName {
 				if noticeErr := announceUnclaimedClaimOnCommand(cmd, db, configDirOverride(cmd), stateDirOverride(cmd)); noticeErr != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "warning: local ownership notice was not shown: %v\n", noticeErr)
 				}

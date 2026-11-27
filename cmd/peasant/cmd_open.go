@@ -28,6 +28,10 @@ import (
 // line says where the command stopped.
 type openStep string
 
+// openCommandName is the command name `peasant open` registers. Internal
+// callers compare against it so no other surface re-spells the literal.
+const openCommandName = "open"
+
 const (
 	openStepSession        openStep = "session check"
 	openStepHarvest        openStep = "harvest"
@@ -110,7 +114,7 @@ func buildOpenCommand(deps openDependencies) *cobra.Command {
 		noRelated bool
 	)
 	cmd := &cobra.Command{
-		Use:   "open",
+		Use:   openCommandName,
 		Short: "Record one session and open its transcript in the web dashboard",
 		Long: "Record one session and open its transcript in the local web dashboard.\n\n" +
 			"open harvests the session with commit detection, starts the web dashboard when it is not running, " +

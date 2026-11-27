@@ -218,6 +218,10 @@ func TestLocalOwnerAndClaims(t *testing.T) {
 	}
 }
 
+// localOwnerStepSeed names the fixture's seed step. It is a local constant so
+// the switch does not re-spell a value another closed vocabulary also uses.
+const localOwnerStepSeed = "seed"
+
 func runLocalOwnerClaimCase(t *testing.T, testCase localOwnerClaimCase) {
 	t.Helper()
 	s, dbPath := ownerTestOpenStore(t)
@@ -248,7 +252,7 @@ func runLocalOwnerClaimCase(t *testing.T, testCase localOwnerClaimCase) {
 				t.Fatalf("sign out fixture credentials: %v", err)
 			}
 			state.snapshot = auth.CredentialSnapshot{}
-		case "seed":
+		case localOwnerStepSeed:
 			ownerTestSeedSessions(t, ctx, s, step.Sessions...)
 			for _, sessionID := range step.Annotations {
 				state.annotations[sessionID] = ownerTestCreateSessionAnnotation(t, ctx, s, sessionID)
