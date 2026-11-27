@@ -1,0 +1,37 @@
+name: "In-app feature request (UI/UX)"
+description: "Suggest a UI or workflow improvement from inside the peasant web app"
+title: "feature(ui): "
+labels: ["enhancement", "ui/ux"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for sharing an idea from inside peasant.
+        **This repository is public.** Review your text and any screenshot for private prompts, file paths, or tokens before submitting.
+  - type: textarea
+    id: description
+    attributes:
+      label: What would you like to see?
+      description: Describe the outcome you want and the current friction.
+      placeholder: What should peasant let you do or see here?
+    validations:
+      required: true
+  - type: textarea
+    id: element
+    attributes:
+      label: Related element (optional)
+      description: Auto-filled when you point at an element on the page.
+      placeholder: No element selected
+      render: text
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot (optional)
+      description: Paste your copied screenshot here (Ctrl+V / Cmd+V), or drag and drop the downloaded PNG.
+      placeholder: Paste or drop screenshot here...
+  - type: textarea
+    id: environment
+    attributes:
+      label: App context
+      description: Auto-filled from the page (route, viewport, theme, peasant version, browser).
+      render: text
