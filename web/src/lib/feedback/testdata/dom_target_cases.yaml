@@ -1,0 +1,185 @@
+selectors:
+  requiredNames:
+    - id-short-circuits-selector
+  cases:
+    - name: id-short-circuits-selector
+      html: '<div id="panel-root"><button class="save primary">save</button></div>'
+      pick: '#panel-root'
+      selector: '#panel-root'
+      label: 'div#panel-root'
+      section: ''
+
+tooLarge:
+  requiredNames:
+    - too-big-wrapper-rejected
+    - normal-card-not-too-large
+  cases:
+    - name: too-big-wrapper-rejected
+      rect:
+        width: 980
+        height: 950
+      viewport:
+        width: 1000
+        height: 1000
+      expected: true
+    - name: normal-card-not-too-large
+      rect:
+        width: 500
+        height: 400
+      viewport:
+        width: 1000
+        height: 1000
+      expected: false
+
+snippets:
+  requiredNames:
+    - masked-element-redacts-snippet
+    - unmasked-snippet-capped
+  cases:
+    - name: masked-element-redacts-snippet
+      html: '<div data-turn="1"><p class="secret">private prompt text</p></div>'
+      pick: '.secret'
+      masked: true
+      expected: '[masked transcript content]'
+      maxLength: 120
+    - name: unmasked-snippet-capped
+      html: '<div class="note">  hello   world   REPEAT  </div>'
+      repeatToken: 'REPEAT'
+      repeatUnit: 'abcde '
+      repeatCount: 30
+      pick: '.note'
+      masked: false
+      maxLength: 120
+      expectedPrefix: 'hello world abcde abcde'
+
+switches:
+  requiredNames:
+    - fb-off-hides-widget
+    - fb-other-value-keeps-widget
+  cases:
+    - name: fb-off-hides-widget
+      search: '?theme=dark&fb=off'
+      disabled: true
+    - name: fb-other-value-keeps-widget
+      search: '?theme=dark&fb=on'
+      disabled: false
+
+ignored:
+  requiredNames:
+    - widget-element-ignored
+    - dev-overlay-ignored
+    - page-roots-ignored
+    - normal-button-selectable
+  cases:
+    - name: widget-element-ignored
+      html: '<div data-feedback-widget="launcher"><button id="target">feedback</button></div>'
+      pick: '#target'
+      ignored: true
+    - name: dev-overlay-ignored
+      html: '<div data-fb=""><button id="target">comment</button></div>'
+      pick: '#target'
+      ignored: true
+    - name: page-roots-ignored
+      html: '<div id="root"><main id="main"></main></div>'
+      pick: '#root'
+      ignored: true
+    - name: normal-button-selectable
+      html: '<main><button id="target">open</button></main>'
+      pick: '#target'
+      ignored: false
+
+stepping:
+  requiredNames:
+    - keyboard-step-parent-child-sibling
+    - keyboard-step-landmarks
+    - keyboard-step-skips-head
+  cases:
+    - name: keyboard-step-parent-child-sibling
+      html: '<div id="root"><section id="sec"><button id="b1">one</button><div data-feedback-widget="x"><button id="ignored">w</button></div><button id="b2">two</button></section></div>'
+      moves:
+        - start: '#b1'
+          direction: next-sibling
+          expected: '#b2'
+        - start: '#b2'
+          direction: prev-sibling
+          expected: '#b1'
+        - start: '#b1'
+          direction: parent
+          expected: '#sec'
+        - start: '#sec'
+          direction: child
+          expected: '#b1'
+        - start: '#sec'
+          direction: parent
+          expected: null
+    - name: keyboard-step-landmarks
+      html: '<header id="hdr"></header><nav id="nav"></nav><main id="main"><section id="sec"><div role="region" id="reg"></div></section><aside id="aside"></aside><div data-feedback-target="" id="custom"></div><section data-feedback-widget="true" id="wsec"></section></main>'
+      moves:
+        - start: null
+          direction: next-landmark
+          expected: '#hdr'
+        - start: '#hdr'
+          direction: next-landmark
+          expected: '#nav'
+        - start: '#nav'
+          direction: next-landmark
+          expected: '#main'
+        - start: '#main'
+          direction: next-landmark
+          expected: '#sec'
+        - start: '#sec'
+          direction: next-landmark
+          expected: '#reg'
+        - start: '#reg'
+          direction: next-landmark
+          expected: '#aside'
+        - start: '#aside'
+          direction: next-landmark
+          expected: '#custom'
+        - start: '#custom'
+          direction: next-landmark
+          expected: '#hdr'
+        - start: '#hdr'
+          direction: prev-landmark
+          expected: '#custom'
+    - name: keyboard-step-skips-head
+      html: '<div id="app-card"><span id="inner">hi</span></div>'
+      moves:
+        - start: null
+          direction: child
+          expected: '#app-card'
+        - start: '#app-card'
+          direction: parent
+          expected: null
+
+describe:
+  requiredNames:
+    - describe-picked-element-captures-box
+    - browser-picker-adapter-delegates
+  cases:
+    - name: describe-picked-element-captures-box
+      html: '<section aria-label="Transcript"><div data-turn="1"><p id="p1">secret prompt</p></div><button id="btn">action</button></section>'
+      pick: '#btn'
+      masked: false
+      selector: '#btn'
+      label: 'button#btn'
+      section: 'Transcript'
+      textSnippet: 'action'
+      box:
+        top: 10
+        left: 20
+        width: 120
+        height: 36
+    - name: browser-picker-adapter-delegates
+      html: '<section aria-label="Transcript"><div data-turn="1"><p id="p1">secret prompt</p></div></section>'
+      pick: '#p1'
+      masked: true
+      selector: '#p1'
+      label: 'p#p1'
+      section: 'Transcript'
+      textSnippet: '[masked transcript content]'
+      box:
+        top: 4
+        left: 8
+        width: 200
+        height: 24
