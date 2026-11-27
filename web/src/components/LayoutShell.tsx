@@ -11,6 +11,7 @@ import { AppSidebarLayout } from '@/lib/ft-ui';
 import { LocalSidebar } from '@/components/LocalSidebar';
 import { PageNotices } from '@/components/PageNotices';
 import { CommandPalette } from '@/components/command/CommandPalette';
+import { FeedbackWidget } from '@/components/feedback/FeedbackWidget';
 import { DevAnnotateOverlay } from '@/components/dev/DevAnnotateOverlay';
 import { playEnter } from '@/lib/motion/enter';
 import { parseTranscriptRoute } from '@/lib/navigation/projectRoutes';
@@ -81,6 +82,7 @@ export function LayoutShell({ children }: { children: ReactNode }) {
           </FirstRunProvider>
           <PageEnter />
           <CommandPalette />
+          <FeedbackWidget />
           {process.env.NODE_ENV === 'development' && <DevAnnotateOverlay />}
         </PublishProvider>
       </ServerCapabilitiesProvider>
