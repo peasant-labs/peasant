@@ -289,9 +289,11 @@ func splitStageBatch(cfg ingest.WriteConfig, sessions []stagedSessionObjects) []
 // sweep leaves the flag set with the old generation active, and the next
 // harvest re-selects the session while the flagged sweep clears the
 // orphans.
-func (s *Store) stageBatchTxn(conn *sqlite.Conn, batch stageBatch) error {
-	txnErr := error(nil)
-	endFn := sqlitex.Transaction(conn)
+func (s *Store) stageBatchTxn(conn *sqlite.Conn, batch stageBatch) (txnErr error) {
+	endFn, err := beginWrite(conn, fmt.Sprintf("stage a batch of %d sessions", len(batch.sessions)))
+	if err != nil {
+		return fmt.Errorf("%w; nothing was staged", err)
+	}
 	defer endFn(&txnErr)
 	for _, sessionID := range batch.sessions {
 		if err := sqlitex.Execute(conn, `UPDATE sessions SET content_sweep_pending = 1 WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{string(sessionID)}}); err != nil {
@@ -769,83 +771,30 @@ func indexFormatCompleteness(text string) indexformat.GenerationCompleteness {
 // Every collection loads in key order so the comparison is order-exact
 // where order is identity (children, mapping) and order-free where it is
 // not (descriptors, aliases).
+//
+// The context rows are the generation's own. The parsed rows (title refs,
+// segments, sections, native metadata, the mapping, the descriptors and the
+// aliases) are read under the id the resolver names: the owner's for a
+// generation that references another generation's parse.
 func loadGenerationChildrenOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string, view *activeHarmonizedView) error {
+	if err := loadGenerationContextChildrenOnConn(conn, sessionID, generationID, &view.children); err != nil {
+		return err
+	}
+	rowsID, err := rowsGenerationIDOnConn(conn, sessionID, generationID)
+	if err != nil {
+		return err
+	}
 	query := func(sql string, fn func(*sqlite.Stmt) error) error {
 		return sqlitex.Execute(conn, sql, &sqlitex.ExecOptions{
-			Args:       []any{string(sessionID), generationID},
+			Args:       []any{string(sessionID), rowsID},
 			ResultFunc: fn,
 		})
-	}
-	if err := query(`SELECT ordinal, subagent_session_id, parent_uuid FROM session_generation_subagents WHERE session_id = ? AND generation_id = ? ORDER BY ordinal`, func(stmt *sqlite.Stmt) error {
-		view.children.Subagents = append(view.children.Subagents, GenerationSubagent{
-			Ordinal: int(stmt.ColumnInt64(0)), SubagentSessionID: schema.SessionID(stmt.ColumnText(1)), ParentUUID: schema.SessionID(stmt.ColumnText(2)),
-		})
-		return nil
-	}); err != nil {
-		return fmt.Errorf("store: read generation subagents for session %s: %w", sessionID, err)
-	}
-	if err := query(`SELECT ordinal, hash, message, author_name, author_email, commit_time, author_time FROM session_generation_commits WHERE session_id = ? AND generation_id = ? ORDER BY ordinal`, func(stmt *sqlite.Stmt) error {
-		view.children.Commits = append(view.children.Commits, GenerationCommit{
-			Ordinal: int(stmt.ColumnInt64(0)), Hash: stmt.ColumnText(1), Message: stmt.ColumnText(2),
-			AuthorName: stmt.ColumnText(3), AuthorEmail: stmt.ColumnText(4),
-			CommitTime: stmt.ColumnInt64(5), AuthorTime: stmt.ColumnInt64(6),
-		})
-		return nil
-	}); err != nil {
-		return fmt.Errorf("store: read generation commits for session %s: %w", sessionID, err)
-	}
-	if err := query(`SELECT ordinal, association_id, observed_commit_hash FROM session_generation_associations WHERE session_id = ? AND generation_id = ? ORDER BY ordinal`, func(stmt *sqlite.Stmt) error {
-		view.children.Associations = append(view.children.Associations, GenerationAssociation{
-			Ordinal: int(stmt.ColumnInt64(0)), AssociationID: stmt.ColumnText(1), ObservedCommitHash: stmt.ColumnText(2),
-		})
-		return nil
-	}); err != nil {
-		return fmt.Errorf("store: read generation associations for session %s: %w", sessionID, err)
-	}
-	if err := query(`SELECT ordinal, error_type, location, message, remediation FROM session_generation_diagnostics WHERE session_id = ? AND generation_id = ? ORDER BY ordinal`, func(stmt *sqlite.Stmt) error {
-		view.children.Diagnostics = append(view.children.Diagnostics, GenerationDiagnostic{
-			Ordinal: int(stmt.ColumnInt64(0)), ErrorType: stmt.ColumnText(1), Location: stmt.ColumnText(2),
-			Message: stmt.ColumnText(3), Remediation: stmt.ColumnText(4),
-		})
-		return nil
-	}); err != nil {
-		return fmt.Errorf("store: read generation diagnostics for session %s: %w", sessionID, err)
 	}
 	if err := query(`SELECT ordinal, source_entry_ref FROM session_generation_title_refs WHERE session_id = ? AND generation_id = ? ORDER BY ordinal`, func(stmt *sqlite.Stmt) error {
 		view.children.TitleRefs = append(view.children.TitleRefs, schema.SourceEntryRef(stmt.ColumnText(1)))
 		return nil
 	}); err != nil {
 		return fmt.Errorf("store: read generation title refs for session %s: %w", sessionID, err)
-	}
-	if err := query(`SELECT kind, target_state, target_local_id, evidence, anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref FROM session_relationship_evidence WHERE session_id = ? AND generation_id = ? ORDER BY ordinal`, func(stmt *sqlite.Stmt) error {
-		relationship := GenerationRelationship{
-			Kind:        schema.SessionRelationshipKind(stmt.ColumnText(0)),
-			TargetState: schema.RelationshipTargetState(stmt.ColumnText(1)),
-		}
-		if stmt.ColumnType(2) != sqlite.TypeNull {
-			target := schema.SessionID(stmt.ColumnText(2))
-			relationship.TargetLocalID = &target
-		}
-		if stmt.ColumnType(3) != sqlite.TypeNull {
-			evidence := stmt.ColumnText(3)
-			relationship.Evidence = &evidence
-		}
-		if stmt.ColumnType(4) != sqlite.TypeNull {
-			kind := schema.PublicSourceAnchorKind(stmt.ColumnText(4))
-			relationship.AnchorKind = &kind
-		}
-		if stmt.ColumnType(5) != sqlite.TypeNull {
-			ref := schema.SourceEntryRef(stmt.ColumnText(5))
-			relationship.AnchorSourceEntryRef = &ref
-		}
-		if stmt.ColumnType(6) != sqlite.TypeNull {
-			revision := stmt.ColumnText(6)
-			relationship.AnchorSourceRevisionRef = &revision
-		}
-		view.children.Relationships = append(view.children.Relationships, relationship)
-		return nil
-	}); err != nil {
-		return fmt.Errorf("store: read relationship evidence for session %s: %w", sessionID, err)
 	}
 	if err := query(`SELECT segment_ordinal, logical_session_id, physical_source_id, coordinate_kind, start_coordinate, end_exclusive, decoded_byte_start, decoded_byte_end_exclusive, inclusion FROM session_context_segments WHERE session_id = ? AND generation_id = ? ORDER BY segment_ordinal`, func(stmt *sqlite.Stmt) error {
 		segment := GenerationSegment{
@@ -1054,16 +1003,31 @@ func generationRecordsEqual(candidate, active GenerationRecord) bool {
 // the install instant, while a latest attempt passes nil so its
 // generation row records no activation (the column already admits NULL).
 func insertHarmonizedGenerationOnConn(conn *sqlite.Conn, prepared *preparedHarmonized, priorEvidence []byte, installedAtMs int64, activatedAtMs *int64) error {
-	sessionID := prepared.sessionID
-	generationID := prepared.generation.ID
 	record := prepared.record
 	record.CandidateDigest = prepared.binding
 	record.PriorEvidence = append([]byte(nil), priorEvidence...)
 	record.InstalledAtMs = installedAtMs
 	record.ActivatedAtMs = activatedAtMs
+	if err := insertGenerationCatalogOnConn(conn, prepared.sessionID, prepared.generation.ID, record, prepared.children, ""); err != nil {
+		return err
+	}
+	return insertGenerationMappingOnConn(conn, prepared)
+}
+
+// insertGenerationCatalogOnConn writes one generation's catalog row and its
+// context rows: subagents, commits, associations, diagnostics and
+// relationship evidence. mappingSetID names the generation whose parsed rows
+// this generation reads; empty means it owns its own, written by
+// insertGenerationMappingOnConn. record carries the final seal, prior
+// evidence and stamps.
+func insertGenerationCatalogOnConn(conn *sqlite.Conn, sessionID schema.SessionID, generationID string, record GenerationRecord, children GenerationChildren, mappingSetID string) error {
+	var mappingSet any
+	if mappingSetID != "" {
+		mappingSet = mappingSetID
+	}
 	r := record
-	if err := sqlitex.Execute(conn, `INSERT INTO session_generations(session_id, generation_id, schema_version, harness, model, version, ts_start, ts_end, ts_ingested, source_file_path, source_format, git_branch, git_remote, git_worktree, git_tracking, project_hash, project_file_path, project_name, host_slug, root_session_id, purpose, cwd, derived_at, content_hash, metadata_hash, redaction_applied, redaction_level, redaction_rule_set_version, redaction_at_ms, redaction_content_hash_at_redact, adapter_version, diagnostics_partial, completeness, source_evidence_digest, index_format_version, candidate_digest, prior_evidence, installed_at_ms, activated_at_ms)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
+	if err := sqlitex.Execute(conn, `INSERT INTO session_generations(session_id, generation_id, schema_version, harness, model, version, ts_start, ts_end, ts_ingested, source_file_path, source_format, git_branch, git_remote, git_worktree, git_tracking, project_hash, project_file_path, project_name, host_slug, root_session_id, purpose, cwd, derived_at, content_hash, metadata_hash, redaction_applied, redaction_level, redaction_rule_set_version, redaction_at_ms, redaction_content_hash_at_redact, adapter_version, diagnostics_partial, completeness, source_evidence_digest, index_format_version, candidate_digest, prior_evidence, installed_at_ms, activated_at_ms, mapping_set_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
 		string(sessionID), generationID,
 		int64(r.SchemaVersion), string(r.Harness), string(r.Model), r.Version,
 		r.TimestampStartMs, r.TimestampEndMs, optInt64(r.TimestampIngestedMs),
@@ -1076,11 +1040,10 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
 		optInt64(r.RedactionAtMs), optString(r.RedactionContentHashAtRedact),
 		optInt(r.AdapterVersion), optDiagnosticsPartial(r.DiagnosticsPartial),
 		string(r.Completeness), r.SourceEvidenceDigest, int64(r.IndexFormatVersion), r.CandidateDigest,
-		optBytes(r.PriorEvidence), r.InstalledAtMs, optInt64(r.ActivatedAtMs),
+		optBytes(r.PriorEvidence), r.InstalledAtMs, optInt64(r.ActivatedAtMs), mappingSet,
 	}}); err != nil {
 		return fmt.Errorf("store: install harmonized generation %s for session %s: %w; no generation was activated", generationID, sessionID, err)
 	}
-	children := prepared.children
 	for _, subagent := range children.Subagents {
 		if err := sqlitex.Execute(conn, `INSERT INTO session_generation_subagents(session_id, generation_id, ordinal, subagent_session_id, parent_uuid) VALUES (?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
 			string(sessionID), generationID, int64(subagent.Ordinal), string(subagent.SubagentSessionID), string(subagent.ParentUUID),
@@ -1109,6 +1072,27 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
 			return fmt.Errorf("store: install diagnostic %d for generation %s of session %s: %w; no generation was activated", diagnostic.Ordinal, generationID, sessionID, err)
 		}
 	}
+	for i, relationship := range children.Relationships {
+		if err := sqlitex.Execute(conn, `INSERT INTO session_relationship_evidence(session_id, generation_id, ordinal, kind, target_state, target_local_id, evidence, anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
+			string(sessionID), generationID, int64(i), string(relationship.Kind), string(relationship.TargetState),
+			optSessionID(relationship.TargetLocalID), optString(relationship.Evidence),
+			optAnchorKind(relationship.AnchorKind), optEntryRef(relationship.AnchorSourceEntryRef),
+			optString(relationship.AnchorSourceRevisionRef),
+		}}); err != nil {
+			return fmt.Errorf("store: install %s relationship evidence for generation %s of session %s: %w; no generation was activated", relationship.Kind, generationID, sessionID, err)
+		}
+	}
+	return nil
+}
+
+// insertGenerationMappingOnConn writes one generation's parsed rows: the
+// title refs, the entry mapping, the non-emitted content descriptors, the
+// aliases, the sections and their native metadata, and the context segments
+// and their refs. Only a generation that owns its parsed rows has them.
+func insertGenerationMappingOnConn(conn *sqlite.Conn, prepared *preparedHarmonized) error {
+	sessionID := prepared.sessionID
+	generationID := prepared.generation.ID
+	children := prepared.children
 	for i, ref := range children.TitleRefs {
 		if err := sqlitex.Execute(conn, `INSERT INTO session_generation_title_refs(session_id, generation_id, ordinal, source_entry_ref) VALUES (?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
 			string(sessionID), generationID, int64(i), string(ref),
@@ -1183,16 +1167,6 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
 			string(sessionID), generationID, int64(ref.SegmentOrdinal), int64(ref.Ordinal), string(ref.SourceEntryRef),
 		}}); err != nil {
 			return fmt.Errorf("store: install segment ref %d of segment %d for generation %s of session %s: %w; no generation was activated", ref.Ordinal, ref.SegmentOrdinal, generationID, sessionID, err)
-		}
-	}
-	for i, relationship := range children.Relationships {
-		if err := sqlitex.Execute(conn, `INSERT INTO session_relationship_evidence(session_id, generation_id, ordinal, kind, target_state, target_local_id, evidence, anchor_kind, anchor_source_entry_ref, anchor_source_revision_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{
-			string(sessionID), generationID, int64(i), string(relationship.Kind), string(relationship.TargetState),
-			optSessionID(relationship.TargetLocalID), optString(relationship.Evidence),
-			optAnchorKind(relationship.AnchorKind), optEntryRef(relationship.AnchorSourceEntryRef),
-			optString(relationship.AnchorSourceRevisionRef),
-		}}); err != nil {
-			return fmt.Errorf("store: install %s relationship evidence for generation %s of session %s: %w; no generation was activated", relationship.Kind, generationID, sessionID, err)
 		}
 	}
 	return nil
@@ -1316,9 +1290,13 @@ func remapHarmonizedAnnotations(conn *sqlite.Conn, sessionID schema.SessionID, e
 // entries as anchors for the C5 remap: the mapping rows joined to their
 // body rows, reconstructed through the one row-to-struct function.
 func readHarmonizedBodyAnchors(conn *sqlite.Conn, sessionID schema.SessionID, generationID string) ([]entryTargetAnchor, error) {
+	rowsGenID, err := rowsGenerationIDOnConn(conn, sessionID, generationID)
+	if err != nil {
+		return nil, err
+	}
 	var anchors []entryTargetAnchor
-	err := sqlitex.Execute(conn, `SELECT `+sqlSelectBodyColumnsJoined+` FROM session_entry_bodies b JOIN session_generation_entries m ON m.session_id = b.session_id AND m.body_digest = b.body_digest WHERE m.session_id = ? AND m.generation_id = ? AND m.partition_id = 0 ORDER BY m.entry_index`, &sqlitex.ExecOptions{
-		Args: []any{string(sessionID), generationID},
+	err = sqlitex.Execute(conn, `SELECT `+sqlSelectBodyColumnsJoined+` FROM session_entry_bodies b JOIN session_generation_entries m ON m.session_id = b.session_id AND m.body_digest = b.body_digest WHERE m.session_id = ? AND m.generation_id = ? AND m.partition_id = 0 ORDER BY m.entry_index`, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID), rowsGenID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			entry := entryFromRow(scanEntryRecord(stmt))
 			anchors = append(anchors, entryTargetAnchorFromEntry(&entry))
@@ -1411,14 +1389,22 @@ func stampHarmonizedBookkeeping(conn *sqlite.Conn, sessionID schema.SessionID, s
 // ordinary write path), then calls the same stamping functions the
 // ordinary commit uses. The generation row keeps its older adapter_version
 // column, because generation rows are immutable; the session row advances.
-func stampSkippedHarmonized(ctx context.Context, s *Store, prepared *preparedHarmonized, comparedID string, stamps skipStamps) error {
+func stampSkippedHarmonized(ctx context.Context, s *Store, prepared *preparedHarmonized, comparedID string, stamps skipStamps) (txnErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return fmt.Errorf("store: take connection for the skip bookkeeping of session %s: %w", prepared.sessionID, err)
 	}
 	defer s.pool.Put(conn)
-	txnErr := error(nil)
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, "record the skip bookkeeping of session "+prepared.sessionID.String())
+	if err != nil {
+		return err
+	}
+	committing := false
+	defer func() {
+		if committing && txnErr != nil {
+			txnErr = fmt.Errorf("store: commit skip bookkeeping for session %s: %w", prepared.sessionID, txnErr)
+		}
+	}()
 	defer endFn(&txnErr)
 	active, err := readActiveGenerationOnConn(conn, prepared.sessionID)
 	if err != nil {
@@ -1437,6 +1423,7 @@ func stampSkippedHarmonized(ctx context.Context, s *Store, prepared *preparedHar
 	if txnErr = stampHarmonizedBookkeeping(conn, prepared.sessionID, stamps, hash); txnErr != nil {
 		return txnErr
 	}
+	committing = true
 	return nil
 }
 
@@ -1500,9 +1487,13 @@ func repairNeedsHarmonized(conn *sqlite.Conn, sessionID schema.SessionID) (bool,
 // error inside one chunk count, or a torn chunk row all count as failing.
 // This gate and the read path can never disagree about corruption.
 func activeObjectsNeedRepair(conn *sqlite.Conn, sessionID schema.SessionID, activeID string) (bool, error) {
+	rowsGenID, err := rowsGenerationIDOnConn(conn, sessionID, activeID)
+	if err != nil {
+		return false, err
+	}
 	var digests []string
 	if err := sqlitex.Execute(conn, `SELECT body_digest FROM session_generation_entries WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
-		Args: []any{string(sessionID), activeID},
+		Args: []any{string(sessionID), rowsGenID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			digests = append(digests, stmt.ColumnText(0))
 			return nil
@@ -1532,7 +1523,7 @@ func activeObjectsNeedRepair(conn *sqlite.Conn, sessionID schema.SessionID, acti
 	}
 	var blobDigests []string
 	if err := sqlitex.Execute(conn, `SELECT digest FROM session_generation_content WHERE session_id = ? AND generation_id = ?`, &sqlitex.ExecOptions{
-		Args: []any{string(sessionID), activeID},
+		Args: []any{string(sessionID), rowsGenID},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			blobDigests = append(blobDigests, stmt.ColumnText(0))
 			return nil
@@ -1607,14 +1598,22 @@ func activeObjectsNeedRepair(conn *sqlite.Conn, sessionID schema.SessionID, acti
 // Because a deleted entry row failed verification, the transaction sets
 // needs_rebuild, which the whole-index rebuild clears; the ordinary
 // bookkeeping runs, which clears the repair predicate.
-func repairHarmonizedObjects(ctx context.Context, s *Store, prepared *preparedHarmonized, activeID string, stamps skipStamps) error {
+func repairHarmonizedObjects(ctx context.Context, s *Store, prepared *preparedHarmonized, activeID string, stamps skipStamps) (txnErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return fmt.Errorf("store: take connection for the repair of session %s: %w", prepared.sessionID, err)
 	}
 	defer s.pool.Put(conn)
-	txnErr := error(nil)
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, "repair the stored objects of session "+prepared.sessionID.String())
+	if err != nil {
+		return err
+	}
+	committing := false
+	defer func() {
+		if committing && txnErr != nil {
+			txnErr = fmt.Errorf("store: commit repaired session objects for %s: %w", prepared.sessionID, txnErr)
+		}
+	}()
 	defer endFn(&txnErr)
 	if err := sqlitex.Execute(conn, `PRAGMA defer_foreign_keys = ON`, nil); err != nil {
 		txnErr = fmt.Errorf("store: defer foreign keys for the repair of session %s: %w", prepared.sessionID, err)
@@ -1650,15 +1649,20 @@ func repairHarmonizedObjects(ctx context.Context, s *Store, prepared *preparedHa
 			return txnErr
 		}
 	}
+	rowsGenID, err := rowsGenerationIDOnConn(conn, prepared.sessionID, activeID)
+	if err != nil {
+		txnErr = err
+		return txnErr
+	}
 	for _, blob := range prepared.blobs {
 		if err := sqlitex.Execute(conn, `DELETE FROM session_generation_content WHERE session_id = ? AND generation_id = ? AND source_entry_ref = ?`, &sqlitex.ExecOptions{
-			Args: []any{string(prepared.sessionID), activeID, string(blob.ref)},
+			Args: []any{string(prepared.sessionID), rowsGenID, string(blob.ref)},
 		}); err != nil {
 			txnErr = fmt.Errorf("store: delete descriptor %q of session %s for repair: %w", blob.ref, prepared.sessionID, err)
 			return txnErr
 		}
 		if err := sqlitex.Execute(conn, `INSERT INTO session_generation_content(session_id, generation_id, source_entry_ref, digest) VALUES (?, ?, ?, ?)`, &sqlitex.ExecOptions{
-			Args: []any{string(prepared.sessionID), activeID, string(blob.ref), string(blob.digest)},
+			Args: []any{string(prepared.sessionID), rowsGenID, string(blob.ref), string(blob.digest)},
 		}); err != nil {
 			txnErr = fmt.Errorf("store: rewrite descriptor %q of session %s for repair: %w", blob.ref, prepared.sessionID, err)
 			return txnErr
@@ -1676,6 +1680,7 @@ func repairHarmonizedObjects(ctx context.Context, s *Store, prepared *preparedHa
 	if txnErr = stampHarmonizedBookkeeping(conn, prepared.sessionID, stamps, hash); txnErr != nil {
 		return txnErr
 	}
+	committing = true
 	return nil
 }
 

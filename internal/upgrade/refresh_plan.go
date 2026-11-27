@@ -13,26 +13,37 @@ import (
 // RefreshPlan is a read-only estimate based on the evidence available in the store.
 type RefreshPlan struct {
 	Schema   store.UpgradePlan
-	Sessions []SessionRefresh
 	Unknown  []RefreshUnknown
 	Estimate RefreshEstimate
 	// LowerBound means pending schema work can reveal additional work.
 	LowerBound bool
 	// Approximate remains true even on a current schema: not all evidence is read.
-	Approximate      bool
-	EvidenceNotRead  []string
+	Approximate     bool
+	EvidenceNotRead []string
+	// UnappliedEffects names pending schema effects that the census cannot model.
 	UnappliedEffects []store.StampEffect
 }
 
-// SessionRefresh records the decision made for one stored session.
-type SessionRefresh struct {
-	SessionID string
-	Harness   string
-	Decision  ingest.RefreshDecision
-	Decided   bool
-	// Effects lists pending migrations that change this session's evidence.
-	// A decision with a higher-priority reason can otherwise mask an index reset.
-	Effects []store.StampEffect
+// UndeclaredProducer names a producer that is in this build's registry but
+// declares no output-preserving change scope for the stored lane its session
+// would otherwise take. The refresh decision runs the full step instead, both
+// in this plan and in a real run, and names the producer.
+//
+// It is distinct from an unknown harness, where nothing in the registry can
+// produce the session's targets: that session stays undecided and is listed in
+// RefreshPlan.Unknown.
+type UndeclaredProducer struct {
+	Kind ProducerKind
+	Name string
+	// Skipped is the stored lane the declaration would have allowed.
+	Skipped ingest.RefreshLane
+	// Required is the change scope the producer would have to declare.
+	Required ChangeScope
+}
+
+// String names the producer as kind/name, as ProducerDeclaration does.
+func (u UndeclaredProducer) String() string {
+	return ProducerDeclaration{Kind: u.Kind, Name: u.Name}.String()
 }
 
 // RefreshUnknown identifies unavailable evidence for a session.
@@ -43,12 +54,29 @@ type RefreshUnknown struct{ SessionID, Evidence string }
 type RefreshEstimate struct {
 	Sessions  int
 	Undecided int
-	ByLane    map[ingest.RefreshLane]int
-	ByReason  map[ingest.RefreshReason]int
+	// ByLane counts the decision's lane, so a session an undeclared producer
+	// sends to the full step counts as native.
+	ByLane   map[ingest.RefreshLane]int
+	ByReason map[ingest.RefreshReason]int
+	// FullStep counts the sessions each undeclared producer forced onto the
+	// full refresh step.
+	FullStep map[UndeclaredProducer]int
 }
 
 // PlanRefresh reads the store without applying schema changes or writing files.
+// It plans against the producers this build declares.
 func PlanRefresh(ctx context.Context, path string) (RefreshPlan, error) {
+	declarations, err := ProducerDeclarations()
+	if err != nil {
+		return RefreshPlan{}, fmt.Errorf("plan refresh producers: %w", err)
+	}
+	return planRefresh(ctx, path, declarations)
+}
+
+// planRefresh plans against a declaration table. PlanRefresh passes this
+// build's own; only tests and the measurement build pass another, built from
+// an adapter registry in which one adapter withholds its change scope.
+func planRefresh(ctx context.Context, path string, declarations []ProducerDeclaration) (RefreshPlan, error) {
 	if err := ctx.Err(); err != nil {
 		return RefreshPlan{}, err
 	}
@@ -60,16 +88,18 @@ func PlanRefresh(ctx context.Context, path string) (RefreshPlan, error) {
 	if err != nil {
 		return RefreshPlan{}, fmt.Errorf("plan refresh evidence: %w", err)
 	}
+	// A version-zero database with no rows has no schema work to apply: the
+	// schema planner treats it as a new store while the evidence reader reports
+	// its actual pragma value. Other mismatches can indicate concurrent upgrades.
 	if version != schema.From && !(version == 0 && len(rows) == 0 && len(schema.Steps) == 0) {
 		return RefreshPlan{}, fmt.Errorf("plan refresh %s: schema changed from %d to %d while reading; no changes were made; retry after other migrations finish", path, schema.From, version)
-	}
-	declarations, err := ProducerDeclarations()
-	if err != nil {
-		return RefreshPlan{}, fmt.Errorf("plan refresh producers: %w", err)
 	}
 	type targets struct {
 		adapter, indexer int
 		canExtract       bool
+		// undeclared is the adapter's declaration read through the table,
+		// which reads it with ingest.AdapterDeclaresChangeScope.
+		undeclared bool
 	}
 	producers := make(map[string]targets)
 	for _, d := range declarations {
@@ -83,6 +113,9 @@ func PlanRefresh(ctx context.Context, path string) (RefreshPlan, error) {
 		target := producers[d.Name]
 		if d.Kind == ProducerKindAdapter {
 			target.adapter, target.canExtract = version, d.Input == ProducerInputStoredTranscript
+			// Only adapterDeclaration builds an adapter's row, and it sets
+			// the scope from ingest.AdapterDeclaresChangeScope.
+			target.undeclared = d.ChangeScope != ChangeScopeMetadataOnly
 		} else {
 			target.indexer = version
 		}
@@ -90,12 +123,13 @@ func PlanRefresh(ctx context.Context, path string) (RefreshPlan, error) {
 	}
 	plan := RefreshPlan{Schema: schema, LowerBound: schema.From < schema.To, Approximate: true,
 		EvidenceNotRead: []string{"capture_recovery", "publication_capture", "content_pending", "publication_bound", "source_compared", "latest_attempt", "source_state", "stored_pair", "permanent_refusal"},
-		Estimate:        RefreshEstimate{ByLane: map[ingest.RefreshLane]int{}, ByReason: map[ingest.RefreshReason]int{}}}
+		Estimate:        RefreshEstimate{ByLane: map[ingest.RefreshLane]int{}, ByReason: map[ingest.RefreshReason]int{}, FullStep: map[UndeclaredProducer]int{}}}
 	for _, step := range schema.Steps {
 		if step.StampEffect == store.StampEffectSearchInvalidated || step.StampEffect == store.StampEffectRecountOwed {
 			plan.UnappliedEffects = append(plan.UnappliedEffects, step.StampEffect)
 		}
 	}
+	// Planning may process many stored rows after the evidence read completes.
 	for _, row := range rows {
 		if err := ctx.Err(); err != nil {
 			return RefreshPlan{}, err
@@ -106,7 +140,6 @@ func PlanRefresh(ctx context.Context, path string) (RefreshPlan, error) {
 		if row.IndexedInputHash == nil {
 			plan.Unknown = append(plan.Unknown, RefreshUnknown{row.SessionID, "indexed_input_hash"})
 		}
-		var effects []store.StampEffect
 		// Historical identifiers are intentionally rejected by NewHarness.
 		// Preserve them (and unknown values) until the rename step is applied.
 		historicalHarness := defaults.Harness(row.Harness)
@@ -117,16 +150,13 @@ func PlanRefresh(ctx context.Context, path string) (RefreshPlan, error) {
 				case defaults.LegacyHarnessClaude:
 					historicalHarness = defaults.HarnessClaudeCode
 					row.Harness = string(historicalHarness)
-					effects = append(effects, step.StampEffect)
 				case defaults.LegacyHarnessGemini:
 					historicalHarness = defaults.HarnessGeminiCLI
 					row.Harness = string(historicalHarness)
-					effects = append(effects, step.StampEffect)
 				}
 			case store.StampEffectIndexInvalidated:
 				row.IndexerVersion = 0
 				row.IndexedInputHash = nil
-				effects = append(effects, step.StampEffect)
 			}
 		}
 		target, found := producers[row.Harness]
@@ -134,7 +164,6 @@ func PlanRefresh(ctx context.Context, path string) (RefreshPlan, error) {
 		if !found {
 			plan.Unknown = append(plan.Unknown, RefreshUnknown{row.SessionID, "harness"})
 			plan.Estimate.Undecided++
-			plan.Sessions = append(plan.Sessions, SessionRefresh{SessionID: row.SessionID, Harness: row.Harness, Effects: effects})
 			continue
 		}
 
@@ -142,8 +171,25 @@ func PlanRefresh(ctx context.Context, path string) (RefreshPlan, error) {
 		if row.AdapterVersion != nil {
 			version = *row.AdapterVersion
 		}
-		decision := ingest.DecideRefresh(ingest.RefreshEvidence{StoredRow: true, MetadataSchemaOld: ingest.MetadataNeedsNativeRefresh(row.MetadataVersion), AdapterVersion: version, AdapterTarget: target.adapter, AdapterStampPresent: row.AdapterVersion != nil, AdapterCanExtract: target.canExtract, IndexerVersion: row.IndexerVersion, IndexerTarget: target.indexer, IndexProofPresent: row.IndexedInputHash != nil})
-		plan.Sessions = append(plan.Sessions, SessionRefresh{SessionID: row.SessionID, Harness: row.Harness, Decision: decision, Decided: true, Effects: effects})
+		// Only a registered harness reaches here (the continue above keeps an
+		// unknown harness undecided), so an undeclared adapter is never
+		// confused with a harness nothing can produce.
+		decision := ingest.DecideRefresh(ingest.RefreshEvidence{
+			StoredRow:           true,
+			MetadataSchemaOld:   ingest.MetadataNeedsNativeRefresh(row.MetadataVersion),
+			AdapterVersion:      version,
+			AdapterTarget:       target.adapter,
+			AdapterStampPresent: row.AdapterVersion != nil,
+			AdapterCanExtract:   target.canExtract,
+			AdapterUndeclared:   target.undeclared,
+			IndexerVersion:      row.IndexerVersion,
+			IndexerTarget:       target.indexer,
+			IndexProofPresent:   row.IndexedInputHash != nil,
+		})
+		if decision.AdapterUndeclared {
+			producer := UndeclaredProducer{Kind: ProducerKindAdapter, Name: row.Harness, Skipped: ingest.RefreshLaneStoredMetadata, Required: ChangeScopeMetadataOnly}
+			plan.Estimate.FullStep[producer]++
+		}
 		plan.Estimate.ByLane[decision.Lane]++
 		plan.Estimate.ByReason[decision.Reason]++
 	}

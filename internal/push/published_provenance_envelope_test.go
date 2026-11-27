@@ -30,6 +30,11 @@ var publishedProvenanceEnvelopeYAML []byte
 //go:embed testdata/published_provenance_envelope.manifest.yaml
 var publishedProvenanceEnvelopeManifestYAML []byte
 
+const ppeRelationshipKnown = "known"
+const ppeRelationshipUnknown = "unknown"
+const ppeRootPresent = "present"
+const ppePurposeInteraction = "interaction"
+
 // Closed sets for the fixture. A new axis value must be added here and handled
 // in the test, so an unknown value fails loudly instead of being skipped.
 var (
@@ -229,7 +234,7 @@ func ppeSeedCase(t *testing.T, c publishedProvenanceEnvelopeCase) (*store.Store,
 		testutil.SeedReadyPublication(t, db, built.meta, built.legacyEntries)
 		return db, built
 	}
-	if c.Relationships == "known" || c.Relationships == "known-retained" {
+	if c.Relationships == ppeRelationshipKnown || c.Relationships == "known-retained" {
 		storetest.SeedSession(t, db, ppeTargetID)
 		storetest.SeedSession(t, db, ppePreviousID)
 	}
@@ -317,14 +322,14 @@ func ppeBuild(t *testing.T, c publishedProvenanceEnvelopeCase) ppeBuilt {
 
 	target := schema.SessionID(ppeTargetID)
 	previous := schema.SessionID(ppePreviousID)
-	if c.RootIdentity == "present" {
+	if c.RootIdentity == ppeRootPresent {
 		meta.RootSessionID = &target
 	}
-	if c.Purpose == "interaction" {
+	if c.Purpose == ppePurposeInteraction {
 		meta.Purpose = schema.SessionPurposeInteraction
 	}
 	meta.Relationships = ppeRelationshipsFor(c.Relationships, target, previous)
-	if c.Relationships == "known" || c.Relationships == "known-retained" {
+	if c.Relationships == ppeRelationshipKnown || c.Relationships == "known-retained" {
 		meta.ParentUUID = &target
 	}
 
@@ -346,7 +351,7 @@ func ppeRelationshipsFor(axis string, target, previous schema.SessionID) []schem
 		SourceRevisionRef: schema.PublicRevisionRef("rev_1"),
 	}
 	switch axis {
-	case "known":
+	case ppeRelationshipKnown:
 		return []schema.SessionRelationship{
 			{Kind: schema.SessionRelationshipStartedBy, TargetState: schema.RelationshipTargetKnown, TargetLocalID: &target, Evidence: schema.EvidenceNativeTyped},
 			{Kind: schema.SessionRelationshipContextFrom, TargetState: schema.RelationshipTargetKnown, TargetLocalID: &previous, Evidence: schema.EvidenceNativeTyped, Anchor: anchor},
@@ -356,7 +361,7 @@ func ppeRelationshipsFor(axis string, target, previous schema.SessionID) []schem
 			{Kind: schema.SessionRelationshipStartedBy, TargetState: schema.RelationshipTargetKnownRetained, TargetLocalID: &target, Evidence: schema.EvidenceNativeTyped},
 			{Kind: schema.SessionRelationshipContextFrom, TargetState: schema.RelationshipTargetKnownRetained, TargetLocalID: &previous, Evidence: schema.EvidenceNativeTyped, Anchor: anchor},
 		}
-	case "unknown":
+	case ppeRelationshipUnknown:
 		return []schema.SessionRelationship{
 			{Kind: schema.SessionRelationshipContextFrom, TargetState: schema.RelationshipTargetUnknown, Evidence: schema.EvidenceNativeTyped},
 		}

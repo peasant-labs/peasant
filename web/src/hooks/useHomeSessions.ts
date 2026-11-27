@@ -1,4 +1,5 @@
 'use client';
+import { LocalSyncPublicationFilter as SchemaLocalSyncPublicationFilter } from '@peasant-labs/schema';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -134,7 +135,7 @@ export function useHomeSessions(options: HomeSessionsOptions, publicationRevisio
   const requestQuery = useCallback((parent: string, page: number, size: PageSizeValue): SyncSessionsQuery => parent
     ? { maxItems: size, page, parentSessionId: parent }
     : {
-        ...(optionsRef.current.publication !== 'all' ? { publication: optionsRef.current.publication } : {}),
+        ...(optionsRef.current.publication !== SchemaLocalSyncPublicationFilter.All ? { publication: optionsRef.current.publication } : {}),
         ...(optionsRef.current.projectHash !== null ? { projectHash: optionsRef.current.projectHash } : {}),
         maxItems: size,
         page,

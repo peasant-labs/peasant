@@ -301,8 +301,9 @@ func runUserClaimJSONParity(t *testing.T) {
 			Claims      []any `json:"claims"`
 			TotalClaims int   `json:"totalClaims"`
 			Prompt      struct {
-				State   string `json:"state"`
-				Account *struct {
+				State     string  `json:"state"`
+				DecidedAt *string `json:"decidedAt"`
+				Account   *struct {
 					VillageURL string `json:"villageUrl"`
 					UserID     string `json:"userId"`
 				} `json:"account"`

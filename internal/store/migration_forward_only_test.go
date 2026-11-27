@@ -4,6 +4,7 @@ import (
 	"bytes"
 	_ "embed"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -56,7 +57,7 @@ func TestMigrationForwardOnlyNamedCase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sqlitex.ExecuteTransient(conn, `PRAGMA user_version = 83`, nil); err != nil {
+	if err := sqlitex.ExecuteTransient(conn, `PRAGMA user_version = `+strconv.Itoa(CurrentSchemaVersion()+1), nil); err != nil {
 		_ = conn.Close()
 		t.Fatal(err)
 	}

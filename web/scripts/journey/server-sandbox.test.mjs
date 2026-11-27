@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
 import { isolatedServerSandbox } from '../visual/lib/isolated-sandbox.mjs';
 import { directoryNamedBy, ownedServerSandbox } from '../visual/lib/owned-server-sandbox.mjs';
-import { startOwnedServer } from '../visual/lib/owned-server-start.mjs';
+import { startOwnedServer, stopOwnedServer } from '../visual/lib/owned-server-start.mjs';
 import { CONFIGURED_SANDBOX_CONFIG } from './lib/configured-sandbox.mjs';
 
 const f = parse(readFileSync(new URL('./testdata/server-sandbox.yaml', import.meta.url), 'utf8'));
@@ -19,6 +19,8 @@ assert.deepEqual(new Set([...f.cases.map(c => c.name), 'every-script-that-starts
 // The child programs the cases launch; each reads its case's values from its arguments.
 const FAKE_SERVER = fileURLToPath(new URL('./lib/fake-server.mjs', import.meta.url));
 const OWNED_SANDBOX_SCRIPT = fileURLToPath(new URL('./lib/owned-sandbox-script.mjs', import.meta.url));
+const LIFECYCLE_CHILD = fileURLToPath(new URL('./lib/lifecycle-child.mjs', import.meta.url));
+const Child = Object.freeze({ Waits: 'waits', IgnoresTerm: 'ignores-term', Missing: 'missing' });
 
 // Starts `program` with `args` and kills it when the case ends, if it is still running.
 function launch(cleanups, program, args, { ipc = false } = {}) {
@@ -40,6 +42,7 @@ function runOwnedSandboxScript(root, args) {
 const namedArgs = (named) => [
   ...(named.configDir === undefined ? [] : ['--config-dir', named.configDir]),
   ...(named.dataDir === undefined ? [] : ['--data-dir', named.dataDir]),
+  ...(named.home === undefined ? [] : ['--home', named.home]),
 ];
 
 const freePort = () => new Promise((done) => { const s = createServer(); s.listen(0, 'localhost', () => { const { port } = s.address(); s.close(() => done(port)); }); });
@@ -53,6 +56,7 @@ const modes = {
     const sandbox = isolatedServerSandbox(sandboxRoot, named, row.inherited ?? {});
     const want = Object.fromEntries(Object.entries(row.expect).map(([key, value]) => [key, place(value)]));
     assert.deepEqual({ configDir: sandbox.configDir, dataDir: sandbox.dataDir, stateDir: sandbox.stateDir, home: sandbox.env.HOME, cache: sandbox.env.XDG_CACHE_HOME }, want);
+    assert.equal(sandbox.home, want.home, 'the sandbox names the same HOME it gives the binary');
     // The flags and the environment name the same three directories, so neither can fall back to the person's.
     assert.deepEqual([...sandbox.args], ['--config-dir', want.configDir, '--data-dir', want.dataDir, '--state-dir', want.stateDir]);
     assert.deepEqual(
@@ -82,15 +86,20 @@ const modes = {
     for (const end of row.ends) {
       const how = typeof end === 'number' ? ['--end', 'exit', '--status', end] : ['--end', end];
       const wantStatus = typeof end === 'number' ? end : end === 'uncaught-error' ? 1 : 0;
-      const { status, stdout, stderr } = runOwnedSandboxScript(root, ['--name', row.script, ...namedArgs(named), ...how]);
+      const { status, stdout, stderr } = runOwnedSandboxScript(root, ['--name', row.script, ...namedArgs(named), ...how, ...(row.keep ? ['--keep'] : [])]);
       assert.equal(status, wantStatus, `the script that ends by ${end}: ${stderr}`);
       const said = JSON.parse(stdout);
       assert.equal(said.existed, true);
       assert.ok(said.root.startsWith(join(root, `peasant-${row.script}-`)), `${said.root} is in the temporary directory and named for the script`);
-      assert.equal(said.home, join(said.root, 'home'));
+      assert.equal(said.home, named.home ?? join(said.root, 'home'));
       assert.equal(said.dataDir, named.dataDir ?? join(said.root, 'data'));
       assert.equal(said.configDir, named.configDir ?? join(said.root, 'config'));
-      assert.equal(existsSync(said.root), false, `the sandbox is gone after the script ends by ${end}`);
+      if (row.keep) {
+        assert.equal(existsSync(said.root), true, `the sandbox is kept for the caller after the script ends by ${end}`);
+        rmSync(said.root, { recursive: true, force: true });
+      } else {
+        assert.equal(existsSync(said.root), false, `the sandbox is gone after the script ends by ${end}`);
+      }
       for (const directory of Object.values(named)) assert.equal(readFileSync(join(directory, 'marker'), 'utf8'), 'theirs', `${directory} is the caller's and is kept after the script ends by ${end}`);
       if (named.dataDir) assert.equal(existsSync(join(named.dataDir, 'peasant', 'peasant.db')), true, 'what the server wrote in the named data directory is kept');
       if (row.config !== undefined) {
@@ -131,7 +140,8 @@ const modes = {
     assert.ok(serverArgs, `case ${row.name} has the unknown server ${row.server}`);
     let started = null;
     let answeredElsewhere = false;
-    const options = { port, portVariable: 'PEASANT_EXAMPLE_PORT', start: () => {
+    // A script that picks a free port itself on every run has no variable to name.
+    const options = { port, ...(row.pickedPort ? {} : { portVariable: 'PEASANT_EXAMPLE_PORT' }), start: () => {
       if (row.server === 'answers-elsewhere') {
         const other = launch(cleanups, FAKE_SERVER, ['answers-and-notifies', '--port', port], { ipc: true });
         other.once('message', () => { answeredElsewhere = true; started.send('exit'); });
@@ -140,7 +150,7 @@ const modes = {
     }, ...(row.withinMs ? { withinMs: row.withinMs } : {}) };
     const before = Date.now();
     if (row.error) {
-      await assert.rejects(startOwnedServer(options), (error) => [row.error, String(port), ...(row.errorNames ?? [])].every((part) => error.message.includes(part)) || assert.fail(error.message));
+      await assert.rejects(startOwnedServer(options), (error) => ([row.error, String(port), ...(row.errorNames ?? [])].every((part) => error.message.includes(part)) && !(row.errorOmits ?? []).some((part) => error.message.includes(part))) || assert.fail(error.message));
       if (row.endsWithinMs) assert.ok(Date.now() - before < row.endsWithinMs, `the wait ended after ${Date.now() - before} ms, long before the ${row.withinMs} ms allowed`);
     } else {
       const server = await startOwnedServer(options);
@@ -151,6 +161,45 @@ const modes = {
     assert.equal(started !== null, row.started, row.started ? 'the script started its server' : 'nothing was started on an occupied port');
     if (row.server === 'answers-elsewhere') assert.equal(answeredElsewhere, true, 'the other process answered health before the started server exited');
     if (row.stopped) { await new Promise((done) => (gone(started) ? done() : started.once('exit', done))); assert.equal(started.signalCode, 'SIGKILL'); }
+  },
+  async stop(row, root, cleanups) {
+    assert.ok(Object.values(Child).includes(row.child), `case ${row.name} has the unknown child ${row.child}`);
+    const program = row.child === Child.Missing ? join(root, 'no-such-program') : process.execPath;
+    const args = row.child === Child.Missing ? [] : [LIFECYCLE_CHILD, row.child, '--exit-after-ms', String(row.exitAfterMs ?? 60000), ...(row.child === Child.IgnoresTerm ? ['--status', '0'] : [])];
+    const child = spawn(program, args, { stdio: ['ignore', 'pipe', 'inherit'] });
+    const failed = new Promise((done) => child.once('error', done));
+    const realKill = child.kill.bind(child);
+    const calls = [];
+    // A kill can fail while the child is still alive (for example EPERM); the ChildProcess emits
+    // `error`. Only an actual exit may let the stop return.
+    child.kill = (signal) => {
+      calls.push(signal);
+      if (row.killError === 'both' || (row.killError === 'term' && signal === 'SIGTERM')) {
+        child.emit('error', Object.assign(new Error(`kill ${signal}: EPERM`), { code: 'EPERM' }));
+        return false;
+      }
+      return realKill(signal);
+    };
+    cleanups.push(() => { try { if (!gone(child)) realKill('SIGKILL'); } catch { /* already gone */ } });
+    // The ignoring child prints ready only after its SIGTERM handler is in place.
+    if (row.child === Child.IgnoresTerm) await new Promise((done) => child.stdout.once('data', done));
+    if (row.before === 'exited') await new Promise((done) => child.once('exit', done));
+    if (row.child === Child.Missing) await failed;
+    const before = Date.now();
+    if (row.error) {
+      await assert.rejects(stopOwnedServer(child, { termMs: row.termMs, killMs: row.killMs, what: 'the test server' }), (error) => error.message.includes(row.error) && error.message.includes('may still be alive'));
+      assert.equal(gone(child), false, 'a child that did not exit is not reported as stopped');
+      realKill('SIGKILL');
+      await new Promise((done) => child.once('exit', done));
+    } else {
+      await stopOwnedServer(child, { termMs: row.termMs, killMs: row.killMs, what: 'the test server' });
+      if (row.child === Child.Missing) assert.equal(child.pid, undefined, 'a spawn that never produced a process is already stopped');
+      else assert.equal(gone(child), true, 'the child has exited');
+      if (row.signal) assert.equal(child.signalCode, row.signal);
+      if (row.killError && row.child === Child.IgnoresTerm) assert.ok(Date.now() - before >= row.termMs - 10, 'a kill error does not count as an exit');
+    }
+    if (row.calls) assert.deepEqual(calls, row.calls);
+    assert.ok(Date.now() - before < (row.termMs ?? 3000) + (row.killMs ?? 2000) + 2000, 'the stop waits only its deadlines');
   },
 };
 
@@ -180,8 +229,9 @@ test('every-script-that-starts-the-binary-is-sandboxed-or-exempt', () => {
     assert.match(source, /\bstartOwnedServer\(/, `${path} starts its server through startOwnedServer`);
     const spawns = source.split('\n').filter((line) => startsTheBinary.test(line));
     assert.ok(spawns.length > 0, `${path}: the spawn must stay on one source line with the web start arguments, ...sandbox.args and env: sandbox.env; restore the one-line call so the sandbox check can verify it`);
+    // A journey that owns its processes through acquireLifecycle starts the binary with that lifetime's `launch`, which spawns it in its own reaped group.
     for (const line of spawns) {
-      assert.ok(/\bspawn\(/.test(line) && line.includes('...sandbox.args') && /\benv: sandbox\.env\b/.test(line), `${path}: the spawn must stay on one source line with the web start arguments, ...sandbox.args and env: sandbox.env so the sandbox check can verify it: ${line.trim()}`);
+      assert.ok(/\b(?:spawn|launch)\(/.test(line) && line.includes('...sandbox.args') && /\benv: sandbox\.env\b/.test(line), `${path}: the spawn must stay on one source line with the web start arguments, ...sandbox.args and env: sandbox.env so the sandbox check can verify it: ${line.trim()}`);
     }
   }
 });

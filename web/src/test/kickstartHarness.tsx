@@ -64,7 +64,7 @@ export interface Step {
   expectText?: string[];
   expectNoText?: string[];
   /** Assert a control by role and accessible name. */
-  expectControl?: { role: string; name: string; present?: boolean; disabled?: boolean; checked?: boolean; valueNow?: number };
+  expectControl?: { role: string; name: string; present?: boolean; disabled?: boolean; checked?: boolean; valueNow?: number; level?: number; count?: number };
   /** No control of this role has an accessible name matching the pattern. */
   expectNoControlMatching?: { role: string; pattern: string };
   /** No request was made whose `METHOD path` matches the pattern. */
@@ -79,6 +79,7 @@ export interface Step {
   expectBodyKeys?: { route: string; only: string[] };
   /** The forest rows on the page, by node id, in the order they are drawn. */
   expectRows?: string[];
+  expectTallies?: string[];
   /**
    * The structured-value blocks on the page, in order: the lines of each as
    * drawn, and whether it sits inside a collapsed `<details>`. These are all of
@@ -89,6 +90,23 @@ export interface Step {
   expectNoReload?: true;
   /** Texts that must all appear, in this order in the document. */
   expectOrder?: string[];
+  /**
+   * The wizard frame's foot. `end` is every button in its end slot, by name,
+   * in the order drawn; `primary` is the one primary button of the foot, which
+   * is the rightmost of them; `group` is the name of the group that holds the
+   * end slot's answers; `tabOrder` is every control of the foot a Tab reaches,
+   * in order.
+   */
+  expectFoot?: { end?: string[]; primary?: string; group?: string; tabOrder?: string[] };
+  /**
+   * The wizard frame's body: `text` appears in it, `alert` is the text of an
+   * alert in it, and no button of the body has a name in `noButtons`.
+   */
+  expectInBody?: { text?: string[]; alert?: string; noButtons?: string[] };
+  /** Move keyboard focus to the button with this name. */
+  focusButton?: string;
+  /** Keyboard focus is on the button with this name. */
+  expectFocus?: string;
   /** A <details> by its summary text: whether it is open. */
   expectDetails?: { summary: string; open: boolean };
 }
@@ -125,11 +143,16 @@ const STEP_KEYS = Object.freeze({
   expectBody: true,
   expectBodyKeys: true,
   expectRows: true,
+  expectTallies: true,
   expectBlocks: true,
   expectLink: true,
   expectNoReload: true,
   expectOrder: true,
   expectDetails: true,
+  expectFoot: true,
+  expectInBody: true,
+  focusButton: true,
+  expectFocus: true,
 } satisfies Record<keyof Step, true>);
 
 const STEP_KEY_NAMES: readonly string[] = Object.keys(STEP_KEYS);
@@ -421,6 +444,25 @@ export function teardown(): void {
   }
 }
 
+/** A control's name as a reader hears it: its label, or its own text. */
+function nameOf(element: Element): string {
+  return (element.getAttribute('aria-label') ?? element.textContent ?? '').trim();
+}
+
+/** The controls a Tab reaches inside an element, in document order. */
+function tabbable(root: Element): Element[] {
+  return [...root.querySelectorAll('button, a[href], input, select, textarea, [tabindex]')].filter(
+    (element) => !(element as HTMLButtonElement).disabled && element.getAttribute('tabindex') !== '-1',
+  );
+}
+
+/** One region of the wizard frame, which the step expects to be drawn. */
+function region(container: ParentNode, selector: string, at: string): HTMLElement {
+  const found = container.querySelector<HTMLElement>(selector);
+  if (found === null) throw new Error(`${at}: the wizard frame has no ${selector} here, so there is nothing to check`);
+  return found;
+}
+
 function control(q: Queries, role: string, name: string): HTMLElement {
   return q.getByRole(role as never, { name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') });
 }
@@ -459,6 +501,11 @@ export async function runSteps(steps: readonly Step[], mounted: Mounted, where?:
     if (step.click) {
       await act(async () => {
         fireEvent.click(control(q, 'button', step.click!));
+      });
+    }
+    if (step.focusButton) {
+      await act(async () => {
+        control(q, 'button', step.focusButton!).focus();
       });
     }
     if (step.focus) {
@@ -504,8 +551,9 @@ export async function runSteps(steps: readonly Step[], mounted: Mounted, where?:
       expect(q.queryAllByText(text, { exact: false }), `${at}: expected no text ${JSON.stringify(text)}`).toHaveLength(0);
     }
     if (step.expectControl) {
-      const { role, name, present = true, disabled, checked, valueNow } = step.expectControl;
-      const found = q.queryAllByRole(role as never, { name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') });
+      const { role, name, present = true, disabled, checked, valueNow, level, count } = step.expectControl;
+      const found = q.queryAllByRole(role as never, { name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'), ...(level === undefined ? {} : { level }) });
+      if (count !== undefined) expect(found, `${at}: expected exactly ${count} ${role} named ${name}`).toHaveLength(count);
       if (!present) {
         expect(found, `${at}: expected no ${role} named ${name}`).toHaveLength(0);
       } else {
@@ -551,6 +599,9 @@ export async function runSteps(steps: readonly Step[], mounted: Mounted, where?:
         expect(keys.filter((key) => !only.includes(key)), `${at}: keys sent to ${route} beyond ${only.join(', ')}`).toEqual([]);
       }
     }
+    if (step.expectTallies) {
+      await waitFor(() => expect([...container.querySelectorAll(".st-tally")].map((el) => el.textContent?.trim()), `${at}: row counts`).toEqual(step.expectTallies));
+    }
     if (step.expectRows) {
       await waitFor(() => {
         const drawn = [...container.querySelectorAll('[data-node-id]')].map((row) => row.getAttribute('data-node-id'));
@@ -589,6 +640,42 @@ export async function runSteps(steps: readonly Step[], mounted: Mounted, where?:
       const details = summary.closest('details');
       expect(details, `${at}: ${step.expectDetails.summary} is inside <details>`).not.toBeNull();
       expect(details!.open, `${at}: ${step.expectDetails.summary} open state`).toBe(step.expectDetails.open);
+    }
+    if (step.expectFoot) {
+      const { end, primary, group, tabOrder } = step.expectFoot;
+      await waitFor(() => {
+        const foot = region(container, '.swz-foot', at);
+        const slot = region(foot, '.swz-foot-end', at);
+        const buttons = [...slot.querySelectorAll('button')];
+        if (end !== undefined) expect(buttons.map(nameOf), `${at}: the buttons of the foot's end slot, in order`).toEqual(end);
+        if (primary !== undefined) {
+          const primaries = [...foot.querySelectorAll('button.btn-primary')].map(nameOf);
+          expect(primaries, `${at}: the one primary button of the foot`).toEqual([primary]);
+          expect(buttons.at(-1) === undefined ? null : nameOf(buttons.at(-1)!), `${at}: the primary button is the rightmost`).toBe(primary);
+        }
+        if (group !== undefined) {
+          expect(within(slot).getByRole('group', { name: group }), `${at}: the answers are named by the question`).toBeDefined();
+        }
+        if (tabOrder !== undefined) expect(tabbable(foot).filter((element) => !element.closest('nav')).map(nameOf), `${at}: what a Tab reaches in the foot, in order`).toEqual(tabOrder);
+      });
+    }
+    if (step.expectInBody) {
+      const { text, alert, noButtons } = step.expectInBody;
+      await waitFor(() => {
+        const body = within(region(container, '.swz-body', at));
+        for (const entry of text ?? []) expect(body.getAllByText(entry, { exact: false }).length, `${at}: the body says ${JSON.stringify(entry)}`).toBeGreaterThan(0);
+        if (alert !== undefined) {
+          expect(body.getAllByRole('alert').map((node) => node.textContent ?? '').some((said) => said.includes(alert)), `${at}: an alert in the body says ${JSON.stringify(alert)}`).toBe(true);
+        }
+        const drawn = body.queryAllByRole('button').map(nameOf);
+        for (const name of noButtons ?? []) expect(drawn, `${at}: no button named ${name} in the body`).not.toContain(name);
+      });
+    }
+    if (step.expectFocus !== undefined) {
+      await waitFor(() => {
+        const active = document.activeElement;
+        expect(active?.tagName === 'BUTTON' ? nameOf(active) : `${active?.tagName.toLowerCase() ?? 'nothing'}`, `${at}: the focused control`).toBe(step.expectFocus);
+      });
     }
     if (step.expectRedirect !== undefined) {
       const { redirect } = mounted;

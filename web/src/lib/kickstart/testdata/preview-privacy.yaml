@@ -1,0 +1,69 @@
+# Responses are synthetic. The held fetch and body readers deliberately ignore abort.
+cancellations:
+  requiredNames:
+    - row-headers-late-success
+    - row-body-late-success
+    - session-headers-late-error
+    - session-body-late-error
+    - cleared-row-headers-late-success
+    - cleared-row-body-late-error
+    - remount-headers-late-success
+    - remount-body-late-success
+    - remount-headers-late-error
+    - remount-body-late-error
+  cases:
+    - {name: row-headers-late-success, pending: headers, transition: row, outcome: success, settle: before}
+    - {name: row-body-late-success, pending: body, transition: row, outcome: success, settle: after}
+    - {name: session-headers-late-error, pending: headers, transition: session, outcome: error, settle: before}
+    - {name: session-body-late-error, pending: body, transition: session, outcome: error, settle: after}
+    - {name: cleared-row-headers-late-success, pending: headers, transition: clear, outcome: success, settle: before}
+    - {name: cleared-row-body-late-error, pending: body, transition: clear, outcome: error, settle: after}
+    - {name: remount-headers-late-success, pending: headers, transition: remount, outcome: success, settle: after}
+    - {name: remount-body-late-success, pending: body, transition: remount, outcome: success, settle: before}
+    - {name: remount-headers-late-error, pending: headers, transition: remount, outcome: error, settle: before}
+    - {name: remount-body-late-error, pending: body, transition: remount, outcome: error, settle: after}
+reentries:
+  requiredNames:
+    - return-to-row-before-old-headers
+    - return-to-row-before-old-body
+    - old-headers-after-fresh-result
+    - old-body-after-fresh-result
+    - old-header-error-before-fresh-result
+    - old-body-error-before-fresh-result
+    - old-header-error-after-fresh-result
+    - old-body-error-after-fresh-result
+  cases:
+    - {name: return-to-row-before-old-headers, pending: headers, settle: before, outcome: success}
+    - {name: return-to-row-before-old-body, pending: body, settle: before, outcome: success}
+    - {name: old-headers-after-fresh-result, pending: headers, settle: after, outcome: success}
+    - {name: old-body-after-fresh-result, pending: body, settle: after, outcome: success}
+    - {name: old-header-error-before-fresh-result, pending: headers, settle: before, outcome: error}
+    - {name: old-body-error-before-fresh-result, pending: body, settle: before, outcome: error}
+    - {name: old-header-error-after-fresh-result, pending: headers, settle: after, outcome: error}
+    - {name: old-body-error-after-fresh-result, pending: body, settle: after, outcome: error}
+visibility:
+  requiredNames:
+    - switching-row-never-renders-previous-content
+    - switching-row-never-renders-previous-error
+    - switching-session-never-renders-previous-content
+    - switching-session-never-renders-previous-error
+  cases:
+    - {name: switching-row-never-renders-previous-content, transition: row, previous: success}
+    - {name: switching-row-never-renders-previous-error, transition: row, previous: error}
+    - {name: switching-session-never-renders-previous-content, transition: session, previous: success}
+    - {name: switching-session-never-renders-previous-error, transition: session, previous: error}
+cache:
+  requiredNames:
+    - completed-preview-is-kept-in-memory
+    - failed-preview-is-retried
+    - other-route-keeps-default-fetch-cache
+    - cache-is-isolated-by-session
+    - remount-does-not-reuse-previous-memory-cache
+    - preview-client-still-accepts-no-signal
+  cases:
+    - {name: completed-preview-is-kept-in-memory, scenario: success}
+    - {name: failed-preview-is-retried, scenario: error}
+    - {name: other-route-keeps-default-fetch-cache, scenario: other-route}
+    - {name: cache-is-isolated-by-session, scenario: session}
+    - {name: remount-does-not-reuse-previous-memory-cache, scenario: remount}
+    - {name: preview-client-still-accepts-no-signal, scenario: direct-preview}

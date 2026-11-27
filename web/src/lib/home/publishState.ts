@@ -1,3 +1,4 @@
+import { LocalPublicationState as SchemaLocalPublicationState, LocalSyncPublicationFilter as SchemaLocalSyncPublicationFilter, SyncStatus as SchemaSyncStatus } from '@peasant-labs/schema';
 /**
  * The root page's session rows and their publish state, computed from two
  * answers the page already receives: the flat sync list and the publications
@@ -63,13 +64,13 @@ export function visibleRootRows(
 
 export function matchesPublishFilter(row: RootSessionRow, filter: PublishFilter): boolean {
   switch (filter) {
-    case 'all':
+    case SchemaLocalSyncPublicationFilter.All:
       return true;
-    case 'not-published':
-      return row.publication.state === 'unpublished';
-    case 'published':
-      return row.publication.state === 'published';
-    case 'auto':
+    case SchemaLocalSyncPublicationFilter.NotPublished:
+      return row.publication.state === SchemaLocalPublicationState.Unpublished;
+    case SchemaLocalSyncPublicationFilter.Published:
+      return row.publication.state === SchemaLocalPublicationState.Published;
+    case SchemaLocalSyncPublicationFilter.Auto:
       return row.publication.autoPublish;
   }
 }
@@ -91,8 +92,8 @@ export function publishFilterCounts(rows: readonly RootSessionRow[]): Record<Pub
  * yet but will be on the next push says auto-publish is on.
  */
 export function rowPublishState(row: RootSessionRow): RowPublishState {
-  if (row.publication.state === 'published') {
-    return row.sync.syncStatus === 'updated' ? 'new-turns' : 'published';
+  if (row.publication.state === SchemaLocalPublicationState.Published) {
+    return row.sync.syncStatus === SchemaSyncStatus.Updated ? 'new-turns' : 'published';
   }
   return row.publication.autoPublish ? 'auto-publish' : 'not-published';
 }

@@ -1,0 +1,123 @@
+requiredNames:
+  - qualified-bare
+  - qualified-inline
+  - qualified-options-slice
+  - local-bare
+  - local-inline
+  - alias-import
+  - raw-alias-import
+  - dot-import
+  - explicit-name
+  - unrelated-alias
+  - production-file
+  - helper-exempt
+  - cli-exempt
+  - api-exempt
+  - profiler-measurement-exempt
+cases:
+  - name: qualified-bare
+    path: internal/store/bare_test.go
+    matches: 1
+    source: |
+      package store
+      import "github.com/peasant-labs/peasant/internal/ingest"
+      func f() { _, _ = ingest.NewPipeline(nil, nil, nil, cfg) }
+  - name: qualified-inline
+    path: internal/store/inline_test.go
+    matches: 0
+    source: |
+      package store
+      import "github.com/peasant-labs/peasant/internal/ingest"
+      func f() { _, _ = ingest.NewPipeline(nil, nil, nil, cfg, ingest.WithArenaSizeBytes(64<<20)) }
+  - name: qualified-options-slice
+    path: internal/ingest/slice_test.go
+    matches: 1
+    source: |
+      package ingest_test
+      import "github.com/peasant-labs/peasant/internal/ingest"
+      func f() {
+        options := []ingest.PipelineOption{ingest.WithArenaSizeBytes(64<<20)}
+        _, _ = ingest.NewPipeline(nil, nil, nil, cfg, options...)
+      }
+  - name: local-bare
+    path: internal/ingest/bare_test.go
+    matches: 1
+    source: |
+      package ingest
+      func f() { _, _ = NewPipeline(nil, nil, nil, cfg) }
+  - name: local-inline
+    path: internal/ingest/inline_test.go
+    matches: 0
+    source: |
+      package ingest
+      func f() { _, _ = NewPipeline(nil, nil, nil, cfg, WithArenaSizeBytes(64<<20)) }
+  - name: alias-import
+    path: internal/store/alias_test.go
+    matches: 1
+    source: |
+      package store
+      import pipeline "github.com/peasant-labs/peasant/internal/ingest"
+      func f() { _, _ = pipeline.NewPipeline(nil, nil, nil, cfg) }
+  - name: dot-import
+    path: internal/store/dot_test.go
+    matches: 1
+    source: |
+      package store
+      import . "github.com/peasant-labs/peasant/internal/ingest"
+      func f() { _, _ = NewPipeline(nil, nil, nil, cfg) }
+  - name: raw-alias-import
+    path: internal/store/raw_alias_test.go
+    matches: 1
+    source: |
+      package store
+      import pipeline `github.com/peasant-labs/peasant/internal/ingest`
+      func f() { _, _ = pipeline.NewPipeline(nil, nil, nil, cfg) }
+  - name: explicit-name
+    path: internal/store/named_test.go
+    matches: 0
+    source: |
+      package store
+      import ingest "github.com/peasant-labs/peasant/internal/ingest"
+      func f() { _, _ = ingest.NewPipeline(nil, nil, nil, cfg, ingest.WithArenaSizeBytes(64<<20)) }
+  - name: unrelated-alias
+    path: internal/store/unrelated_test.go
+    matches: 0
+    source: |
+      package store
+      import other "example.com/ingest"
+      func f() { other.NewPipeline() }
+  - name: production-file
+    path: internal/store/production.go
+    matches: 0
+    source: |
+      package store
+      import pipeline "github.com/peasant-labs/peasant/internal/ingest"
+      func f() { _, _ = pipeline.NewPipeline(nil, nil, nil, cfg) }
+  - name: helper-exempt
+    path: internal/ingest/test_options_helpers_test.go
+    matches: 0
+    source: |
+      package ingest_test
+      import "github.com/peasant-labs/peasant/internal/ingest"
+      func f() { _, _ = ingest.NewPipeline(nil, nil, nil, cfg) }
+  - name: cli-exempt
+    path: cmd/peasant/example_test.go
+    matches: 0
+    source: |
+      package main
+      import "github.com/peasant-labs/peasant/internal/ingest"
+      func f() { _, _ = ingest.NewPipeline(nil, nil, nil, cfg) }
+  - name: api-exempt
+    path: internal/api/example_test.go
+    matches: 0
+    source: |
+      package api
+      import "github.com/peasant-labs/peasant/internal/ingest"
+      func f() { _, _ = ingest.NewPipeline(nil, nil, nil, cfg) }
+  - name: profiler-measurement-exempt
+    path: internal/ingest/import_profile_overhead_bench_test.go
+    matches: 0
+    source: |
+      package ingest_test
+      import "github.com/peasant-labs/peasant/internal/ingest"
+      func f() { _, _ = ingest.NewPipeline(nil, nil, nil, cfg) }

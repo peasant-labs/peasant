@@ -235,6 +235,7 @@ var (
 	// from the captured stats row; sessions without one keep the legacy
 	// metrics columns. Input tokens stay on the analysis record everywhere:
 	// they are peak context usage, not the harness-reported total.
+	// The SQL duration division mirrors ingest.DurationMsToMinutes.
 	//
 	// Column 29 is the logical-parent rule, not the raw cache: a child whose
 	// generation carries started_by evidence answers its target even while the
@@ -310,6 +311,7 @@ func sqlSessionDetailByIDQuery(latestAttemptCounts bool) string {
 	turnAuthority := sqlSessionTurnCount
 	toolAuthority := "CASE WHEN s.active_generation_id IS NOT NULL THEN c.tool_call_count ELSE m.tool_calls END"
 	outAuthority := "CASE WHEN s.active_generation_id IS NOT NULL THEN c.tokens_out ELSE m.output_tokens END"
+	// SQL duration divisions mirror ingest.DurationMsToMinutes.
 	durationAuthority := "CASE WHEN s.active_generation_id IS NOT NULL THEN CAST(c.duration_ms AS REAL) / 60000.0 ELSE m.duration_minutes END"
 	latestAttemptExpr := func(key, fallback string) string {
 		if !latestAttemptCounts {
@@ -953,6 +955,10 @@ WHERE s.session_id IN (` +
 //
 // Tag filtering (f.Tag) uses SQLite json_each() over the sessions.tags JSON array.
 func buildSessionListFilterWhere(f SessionListFilter) (conditions []string, args []any) {
+	return buildSessionListFilterWhereForSchema(f, true)
+}
+
+func buildSessionListFilterWhereForSchema(f SessionListFilter, hasMappingSet bool) (conditions []string, args []any) {
 	// Exact session id — the most selective filter (primary key).
 	if f.SessionID != nil {
 		conditions = append(conditions, "s.session_id = ?")
@@ -1013,7 +1019,7 @@ func buildSessionListFilterWhere(f SessionListFilter) (conditions []string, args
 
 	// Workflow facets: every named facet must hold.
 	for _, facet := range f.Facets {
-		conditions = append(conditions, sessionFacetSQL(facet))
+		conditions = append(conditions, sessionFacetSQL(facet, hasMappingSet))
 	}
 
 	// Turn bounds read the turns column a row shows, which prints a missing
@@ -1038,7 +1044,14 @@ func (s *Store) ListSessionsFiltered(ctx context.Context, f SessionListFilter) (
 	}
 	defer s.pool.Put(conn)
 
-	conditions, args := buildSessionListFilterWhere(f)
+	hasMappingSet := true
+	if len(f.Facets) > 0 {
+		hasMappingSet, err = mappingSetColumnOnConn(conn)
+		if err != nil {
+			return nil, fmt.Errorf("store: ListSessionsFiltered inspect schema: %w", err)
+		}
+	}
+	conditions, args := buildSessionListFilterWhereForSchema(f, hasMappingSet)
 
 	// Build ORDER BY clause.
 	sortCol := sortFieldToColumn(f.SortField)
@@ -1081,7 +1094,14 @@ func (s *Store) CountSessionsFiltered(ctx context.Context, f SessionListFilter) 
 	}
 	defer s.pool.Put(conn)
 
-	conditions, args := buildSessionListFilterWhere(f)
+	hasMappingSet := true
+	if len(f.Facets) > 0 {
+		hasMappingSet, err = mappingSetColumnOnConn(conn)
+		if err != nil {
+			return 0, fmt.Errorf("store: CountSessionsFiltered inspect schema: %w", err)
+		}
+	}
+	conditions, args := buildSessionListFilterWhereForSchema(f, hasMappingSet)
 
 	// COUNT(*) over the same JOIN as sqlAllSessions. We omit session_metrics columns
 	// because COUNT only needs the FK join for WHERE predicates that reference metric cols.

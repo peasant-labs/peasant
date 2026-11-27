@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"gopkg.in/yaml.v3"
@@ -40,8 +39,8 @@ func TestOwnerClaimReadsUseNoTemporarySort(t *testing.T) {
 	for _, testCase := range fixture.Cases {
 		names = append(names, testCase.Name)
 	}
-	if err := testutil.ValidateRequiredNames(testutil.RequiredNamesManifest{RequiredNames: fixture.RequiredNames}, names, "owner_claim_queries.yaml"); err != nil {
-		t.Fatal(err)
+	if strings.Join(names, ",") != strings.Join(fixture.RequiredNames, ",") {
+		t.Fatalf("owner_claim_queries.yaml cases = %v, want %v", names, fixture.RequiredNames)
 	}
 	ctx := t.Context()
 	db, err := Open(filepath.Join(t.TempDir(), "owner-claim-plan.db"), WithPoolSize(1))

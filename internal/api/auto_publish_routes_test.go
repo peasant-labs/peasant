@@ -125,10 +125,6 @@ func newAutoPublishWorld(t *testing.T, options autoPublishWorldOptions) *autoPub
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	// Keep the host's git configuration out of the fixture repositories: a
-	// global commit.gpgsign can block on a pinentry prompt, and host hooks or
-	// URL rewrites would change what the test observes.
-	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %s in %s: %v\n%s", strings.Join(args, " "), dir, err, out)
 	}
@@ -197,6 +193,8 @@ func TestAutoPublishInstallRoutes(t *testing.T) {
 			t.Parallel()
 			world := newAutoPublishWorld(t, autoPublishWorldOptions{remote: c.RemoteRecorded})
 			if c.ForeignHook != "" {
+				// not executed: the route inspects and preserves the foreign hook.
+				// ast-grep-ignore: no-unsafe-executable-write -- foreign hook refusal fixture.
 				if err := os.WriteFile(filepath.Join(world.recorded, ".git", "hooks", "pre-push"), []byte(c.ForeignHook), 0o755); err != nil {
 					t.Fatal(err)
 				}
@@ -487,6 +485,8 @@ func TestPublicationHookBindingFixtures(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				// not executed: publication status reads the hook to identify its binding.
+				// ast-grep-ignore: no-unsafe-executable-write -- publication status fixture.
 				if err := os.WriteFile(hookPath, []byte("#!/bin/sh\n"+snippet), 0o755); err != nil {
 					t.Fatal(err)
 				}
@@ -507,6 +507,8 @@ func TestPublicationHookBindingFixtures(t *testing.T) {
 				if moved == string(written) || !githooks.IsManaged([]byte(moved)) {
 					t.Fatal("the hook could not be pointed at a moved repository")
 				}
+				// not executed: publication status reads the altered hook binding.
+				// ast-grep-ignore: no-unsafe-executable-write -- publication status fixture.
 				if err := os.WriteFile(hookPath, []byte(moved), 0o755); err != nil {
 					t.Fatal(err)
 				}

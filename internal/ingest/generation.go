@@ -33,6 +33,21 @@ type GenerationBuilder interface {
 	BuildGeneration(ctx context.Context, in GenerationBuildInput) (GenerationCandidate, error)
 }
 
+// GenerationMetadataCandidate holds the builder's metadata before entry parsing,
+// including its stats, completeness and source-evidence digest.
+type GenerationMetadataCandidate struct {
+	Metadata             UnifiedMetadata
+	Completeness         indexformat.GenerationCompleteness
+	SourceEvidenceDigest string
+}
+
+// GenerationMetadataBuilder is an optional indexer capability for building the
+// metadata used by BuildGeneration before its entry parse. Any error means no
+// candidate is available and the session must be parsed.
+type GenerationMetadataBuilder interface {
+	BuildGenerationMetadata(ctx context.Context, in GenerationBuildInput) (GenerationMetadataCandidate, error)
+}
+
 // GenerationBuildInput carries the per-attempt evidence, identity and access
 // seams one BuildGeneration call needs. It is built per attempt by the
 // composition, so a builder never reaches back into pipeline state and no

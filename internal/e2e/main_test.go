@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/testkit/gitconfig"
 )
 
 func TestMain(m *testing.M) {
@@ -21,9 +22,7 @@ func TestMain(m *testing.M) {
 		// Runtime startup precedes TestMain; setting the env alone only affects children.
 		debug.SetMemoryLimit(2 * 1024 * 1024 * 1024)
 	}
-	code := m.Run()
-	removePeasantBuildDir()
-	os.Exit(code)
+	os.Exit(gitconfig.RunWithIsolatedGitConfig(gitconfig.WithCleanup(m, removePeasantBuildDir)))
 }
 
 func TestMemoryBudgetInheritedByChild(t *testing.T) {

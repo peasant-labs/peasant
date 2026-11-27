@@ -198,7 +198,7 @@ residual:
       column; identical inputs, guards and branches.
   - name: store-point-session-at-generation
     file: internal/store/index_format_v2.go
-    declaration: pointSessionAtGenerationOnConn
+    declaration: pointSessionOnConn
     literals: 1
     class: writers
     reason: >-

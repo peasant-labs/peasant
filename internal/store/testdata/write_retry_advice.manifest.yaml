@@ -1,0 +1,9 @@
+# Required-name manifest for write_retry_advice: deletion protection by NAME, never by count.
+requiredNames:
+  - busy-names-lock-contention
+  - locked-names-lock-contention
+  - full-names-disk-space
+  - ioerr-names-full-disk-and-permissions
+  - interrupt-names-cancellation
+  - wrapped-context-canceled-names-cancellation
+  - wrapped-context-deadline-names-cancellation

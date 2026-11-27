@@ -84,6 +84,7 @@ func TestPreviewText(t *testing.T) {
 	for _, row := range document.Cases {
 		t.Run(row.Name, func(t *testing.T) {
 			t.Parallel()
+			const fixtureCutOperation = "cut"
 			switch row.Op {
 			case "repository":
 				got := discovery.RepositoryPreviewLines(row.Context.preview(t), discovery.CleanPreviewValue)
@@ -94,7 +95,7 @@ func TestPreviewText(t *testing.T) {
 				if got := discovery.CleanPreviewValue(row.Value); got != row.Want {
 					t.Fatalf("CleanPreviewValue(%q) = %q, want %q", row.Value, got, row.Want)
 				}
-			case "cut":
+			case fixtureCutOperation:
 				if got := discovery.PreviewCutNotice(row.Consumed, row.Total, row.More, row.CanLoadMore); got != row.Want {
 					t.Fatalf("PreviewCutNotice = %q, want %q", got, row.Want)
 				}

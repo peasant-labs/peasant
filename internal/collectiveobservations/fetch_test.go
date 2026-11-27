@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -46,6 +47,17 @@ type fetchCase struct {
 	WantObservationState schema.CollectiveObservationState    `yaml:"wantObservationState"`
 }
 
+// fetchReportText renders a fetch report, domain result or summary as JSON so
+// every nested pointer is followed: a failure names each domain's issue code,
+// operation and message, and the stored revision, instead of a bare address.
+func fetchReportText(value any) string {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Sprintf("%#v (JSON rendering failed: %v)", value, err)
+	}
+	return string(data)
+}
+
 func TestFetchIndependentCompleteDomains(t *testing.T) {
 	var fixtures struct {
 		RequiredNames []string    `yaml:"requiredNames"`
@@ -70,6 +82,12 @@ func TestFetchIndependentCompleteDomains(t *testing.T) {
 	}
 	for _, c := range fixtures.Cases {
 		t.Run(c.Name, func(t *testing.T) {
+			// This runs the production write configuration, including the
+			// shipped writer hold budget: a failure of that budget is a
+			// behavior to see here, not a bound to raise past its validated
+			// maximum. A reported CI failure printed only report pointers, so
+			// the failure messages below render the report as JSON instead and
+			// leave the budget's own behavior to internal/store.
 			db := storetest.Open(t)
 			home := t.TempDir()
 			var phase atomic.Int32
@@ -90,10 +108,10 @@ func TestFetchIndependentCompleteDomains(t *testing.T) {
 				}
 			}
 			// These cases deliberately cancel AFTER actual earlier domain commits.
-			// Observe real Store rows with a two-second deadline; no production
-			// hook or SQL replacement can manufacture the committed effect.
+			// Observe real Store rows without a production hook or SQL replacement.
+			// The 30-second bound catches hangs while allowing for loaded CI runners.
 			awaitCommitted := func(request context.Context, catalogToo, historyToo bool) bool {
-				ctx, cancel := context.WithTimeout(request, 2*time.Second)
+				ctx, cancel := context.WithTimeout(request, 30*time.Second)
 				defer cancel()
 				snapshot, err := auth.CaptureCredentials(ctx, home)
 				if err != nil {
@@ -252,7 +270,7 @@ func TestFetchIndependentCompleteDomains(t *testing.T) {
 			}
 			before, err := service.Fetch(t.Context())
 			if err != nil {
-				t.Fatalf("initial full fetch: %v %#v", err, before)
+				t.Fatalf("initial full fetch: %v report=%s", err, fetchReportText(before))
 			}
 			previousCatalog, err := service.List(t.Context())
 			if err != nil {
@@ -266,21 +284,21 @@ func TestFetchIndependentCompleteDomains(t *testing.T) {
 			at = at.Add(time.Hour)
 			report, err := service.Fetch(operation)
 			if (err != nil) != (c.WantStatus != 200) {
-				t.Fatalf("report error=%v status=%d domains=%#v", err, schema.CollectiveFetchHTTPStatus(report), report.Domains)
+				t.Fatalf("report error=%v status=%d report=%s", err, schema.CollectiveFetchHTTPStatus(report), fetchReportText(report))
 			}
 			if validation := report.Validate(); validation != nil {
-				t.Fatalf("invalid typed report: %v %#v", validation, report)
+				t.Fatalf("invalid typed report: %v report=%s", validation, fetchReportText(report))
 			}
 			if c.AssociationFailure {
 				domain := report.Domains[2]
 				counts := domain.Associations.Completed == 1 && domain.Associations.Failed == 1
 				scopes := domain.Associations.Scopes[0].State == schema.CollectiveFetchStateComplete && domain.Associations.Scopes[1].State != schema.CollectiveFetchStateComplete
 				if domain.Commit != schema.CollectiveFetchCommitUpdated || !counts || !scopes {
-					t.Fatalf("per-set effects were lost: %#v", domain)
+					t.Fatalf("per-set effects were lost: %s", fetchReportText(domain))
 				}
 			}
 			if status := schema.CollectiveFetchHTTPStatus(report); status != c.WantStatus {
-				t.Fatalf("status=%d want=%d report=%#v", status, c.WantStatus, report)
+				t.Fatalf("status=%d want=%d report=%s", status, c.WantStatus, fetchReportText(report))
 			}
 			if c.RotateBeforeAuth || c.RotateDuringHistory {
 				if report.Scope.UserID.String() != creds.UserID {
@@ -337,18 +355,18 @@ func TestFetchIndependentCompleteDomains(t *testing.T) {
 					t.Fatalf("detail lookup failure changed saved catalog payload or availability: before=%#v after=%#v", previousCatalog.Collectives, catalog.Collectives)
 				}
 				if retained.Domain != c.RetainedDomain || retained.Commit != schema.CollectiveFetchCommitRetained || retained.State != schema.CollectiveFetchStateFailed || retained.CompletedAt != nil {
-					t.Fatalf("failed lookup was reported as a completed availability decision: %#v", retained)
+					t.Fatalf("failed lookup was reported as a completed availability decision: %s", fetchReportText(retained))
 				}
 				if retained.Issue == nil || retained.Issue.Code != schema.OperationIssueRemote {
-					t.Fatalf("lookup failure lost its remote issue: %#v", retained)
+					t.Fatalf("lookup failure lost its remote issue: %s", fetchReportText(retained))
 				}
 				datesRetained := reflect.DeepEqual(retained.LastCompletedAt, oldDomain.LastCompletedAt) && reflect.DeepEqual(savedDomain.LastCompletedAt, oldDomain.LastCompletedAt)
 				revisionRetained := reflect.DeepEqual(savedDomain.LastInstalledRevision, oldDomain.LastInstalledRevision)
 				if !datesRetained || savedDomain.Coverage != oldDomain.Coverage || !revisionRetained {
-					t.Fatalf("lookup failure changed last-good domain evidence: before=%#v report=%#v saved=%#v", oldDomain, retained, savedDomain)
+					t.Fatalf("lookup failure changed last-good domain evidence: before=%s report=%s saved=%s", fetchReportText(oldDomain), fetchReportText(retained), fetchReportText(savedDomain))
 				}
 				if completed.State != schema.CollectiveFetchStateComplete || completed.Commit != schema.CollectiveFetchCommitUpdated || completed.LastCompletedAt == nil || !completed.LastCompletedAt.Equal(at) {
-					t.Fatalf("independent complete domain did not commit at the injected clock: %#v", completed)
+					t.Fatalf("independent complete domain did not commit at the injected clock: %s", fetchReportText(completed))
 				}
 				if !reflect.DeepEqual(catalog.Fetch.LastCompletedFetchAt, previousCatalog.Fetch.LastCompletedFetchAt) || report.Outcome != schema.CollectiveFetchOutcomePartial {
 					t.Fatalf("lookup failure falsely advanced global completion: %#v", catalog.Fetch)

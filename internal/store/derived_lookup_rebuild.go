@@ -82,7 +82,10 @@ func (s *Store) RebuildDerivedLookups(ctx context.Context, enumeration ingest.Ro
 	}
 	defer s.pool.Put(conn)
 
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, "rebuild the derived lookups")
+	if err != nil {
+		return fmt.Errorf("store.RebuildDerivedLookups: %w; the derived lookup tables were not rebuilt", err)
+	}
 	defer endFn(&err)
 
 	if err = sqlitex.ExecuteTransient(conn, sqlClearClaudeTeammateSpawns, nil); err != nil {

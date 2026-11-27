@@ -34,6 +34,8 @@ type contentConcurrencyCase struct {
 	CrossProcess bool   `yaml:"crossProcess"`
 	FirstText    string `yaml:"firstText,omitempty"`
 	NextText     string `yaml:"nextText,omitempty"`
+	// Path is the sweep path a sweep-writer case drives.
+	Path sweepPath `yaml:"path,omitempty"`
 }
 
 func loadContentConcurrencyFixture(t *testing.T) []contentConcurrencyCase {
@@ -97,6 +99,8 @@ func TestContentConcurrency(t *testing.T) {
 					t.Fatal("unknown sweep expectation")
 				}
 				runConcurrencySweepVsStage(t)
+			case "sweep-writer":
+				runConcurrencySweepVsWriter(t, c)
 			case "reclaim":
 				if c.Expect != "settled-no-orphans" {
 					t.Fatal("unknown reclaim expectation")

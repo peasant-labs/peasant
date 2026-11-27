@@ -57,9 +57,9 @@ func TestMigrationV83AddsLocalOwnerAndClaimLog(t *testing.T) {
 		conn.Close()
 		t.Fatalf("migrate populated V75 database to V83: %v", err)
 	}
-	if got := v83UserVersion(t, conn); got != 82 {
+	if got := v83UserVersion(t, conn); got != 83 {
 		conn.Close()
-		t.Fatalf("migrated user_version = %d, want 82", got)
+		t.Fatalf("migrated user_version = %d, want 83", got)
 	}
 	for _, table := range tables {
 		after := dumpV83Rows(t, conn, table.name, table.key, preColumns[table.name])

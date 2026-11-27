@@ -263,7 +263,7 @@ func (p *Pool) open(ctx context.Context, uri string, schema Schema) (*sqlitex.Po
 			return nil, err
 		}
 
-		err = migrateDB(ctx, conn, schema, p.opts.OnStartMigrate, nil)
+		err = migrateDB(ctx, conn, schema, p.opts.OnStartMigrate, ScriptHooks{})
 		pool.Put(conn)
 		if err != nil {
 			if closeErr := pool.Close(); closeErr != nil {
@@ -278,7 +278,7 @@ func (p *Pool) open(ctx context.Context, uri string, schema Schema) (*sqlitex.Po
 
 // Migrate performs any unapplied migrations in the schema on the database.
 func Migrate(ctx context.Context, conn *sqlite.Conn, schema Schema) error {
-	return migrateDB(ctx, conn, schema, nil, nil)
+	return migrateDB(ctx, conn, schema, nil, ScriptHooks{})
 }
 
 // AfterScriptFunc is called inside a migration's transaction, after the
@@ -286,18 +286,34 @@ func Migrate(ctx context.Context, conn *sqlite.Conn, schema Schema) error {
 // version the migration produces (the 1-based position of the migration in
 // Schema.Migrations). The function may read and write through conn; its
 // writes commit with the migration. A non-nil error rolls the whole
-// migration back, and MigrateWithAfterScript returns it.
+// migration back, and MigrateWithScriptHooks returns it.
 type AfterScriptFunc func(conn *sqlite.Conn, version int32) error
 
-// MigrateWithAfterScript performs any unapplied migrations in the schema on
-// the database, as Migrate does, and calls afterScript once per applied
-// migration, after its script and before its COMMIT. A nil afterScript makes
-// it identical to Migrate.
-func MigrateWithAfterScript(ctx context.Context, conn *sqlite.Conn, schema Schema, afterScript AfterScriptFunc) error {
-	return migrateDB(ctx, conn, schema, nil, afterScript)
+// BeforeScriptFunc is called inside a migration's transaction, after its
+// BEGIN and before the migration's script runs. version is the schema
+// version the migration produces. The function may read and write through
+// conn; its writes commit with the migration, and the script sees them. A
+// non-nil error rolls the whole migration back before its script runs, and
+// MigrateWithScriptHooks returns it.
+type BeforeScriptFunc func(conn *sqlite.Conn, version int32) error
+
+// ScriptHooks are the optional callbacks MigrateWithScriptHooks calls once per
+// applied migration, inside that migration's transaction: Before ahead of its
+// script, After behind it and before its COMMIT. A nil field is skipped.
+type ScriptHooks struct {
+	Before BeforeScriptFunc
+	After  AfterScriptFunc
 }
 
-func migrateDB(ctx context.Context, conn *sqlite.Conn, schema Schema, onStart SignalFunc, afterScript AfterScriptFunc) error {
+// MigrateWithScriptHooks performs any unapplied migrations in the schema on
+// the database, as Migrate does, and calls hooks.Before and hooks.After once
+// per applied migration inside its transaction. Zero hooks make it identical
+// to Migrate.
+func MigrateWithScriptHooks(ctx context.Context, conn *sqlite.Conn, schema Schema, hooks ScriptHooks) error {
+	return migrateDB(ctx, conn, schema, nil, hooks)
+}
+
+func migrateDB(ctx context.Context, conn *sqlite.Conn, schema Schema, onStart SignalFunc, hooks ScriptHooks) error {
 	defer conn.SetInterrupt(conn.SetInterrupt(ctx.Done()))
 
 	schemaVersion, err := ensureAppID(conn, schema.AppID)
@@ -356,6 +372,12 @@ func migrateDB(ctx context.Context, conn *sqlite.Conn, schema Schema, onStart Si
 			continue
 		}
 
+		if hooks.Before != nil {
+			if err := hooks.Before(conn, schemaVersion+1); err != nil {
+				rollback(conn)
+				return fmt.Errorf("migrate database: before migrations[%d]: %w", schemaVersion, err)
+			}
+		}
 		err = sqlitex.ExecScript(conn, fmt.Sprintf("%s;\nPRAGMA user_version = %d;\n", migration, schemaVersion+1))
 		if err != nil {
 			rollback(conn)
@@ -367,8 +389,8 @@ func migrateDB(ctx context.Context, conn *sqlite.Conn, schema Schema, onStart Si
 				return fmt.Errorf("migrate database: apply repeatable migration: %w", err)
 			}
 		}
-		if afterScript != nil {
-			if err := afterScript(conn, schemaVersion+1); err != nil {
+		if hooks.After != nil {
+			if err := hooks.After(conn, schemaVersion+1); err != nil {
 				rollback(conn)
 				return fmt.Errorf("migrate database: after migrations[%d]: %w", schemaVersion, err)
 			}

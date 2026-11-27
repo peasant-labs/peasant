@@ -167,10 +167,9 @@ selectionStates:
     wantContains: ["harness: claude code", scrubbed-source-body, read in place]
   - key: source-budget-preview
     query: ""
-    # The 8 MiB budget stops at the last complete JSONL line. With 128 KiB
-    # content plus JSON envelopes this prefix is just below 8 MiB; the notice
-    # deliberately reports whole MiB loaded, not the requested budget.
-    wantContains: ["inspect the bounded", "showing the first 7 MiB", "bottom to load more"]
+    # A small fixture-only cumulative source cap reaches the same cut state
+    # as the terminal cap without allocating a large synthetic transcript.
+    wantContains: ["the preview stopped", "full session ingests normally"]
   - key: origin-hidden
     query: ""
     # Every marker here is a PREFIX, because the narrower capture splits its

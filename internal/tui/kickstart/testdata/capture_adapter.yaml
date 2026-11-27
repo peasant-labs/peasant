@@ -1,0 +1,18 @@
+required_names:
+  - terminal-options-are-not-web-options
+  - terminal-source-cap-cuts-with-notice
+  - lru-eviction-closes-capture
+  - source-changed-sentence
+  - late-result-sentence
+  - grown-sentence
+  - unavailable-sentence
+  - oversized-record-sentence
+cases:
+  - {name: terminal-options-are-not-web-options, source_cap: 33554432, turn_cap: 0}
+  - {name: terminal-source-cap-cuts-with-notice, notice: 'the most one preview reads'}
+  - {name: lru-eviction-closes-capture}
+  - {name: source-changed-sentence, notice: 'transcript changed after part of it was shown'}
+  - {name: late-result-sentence, notice: 'answers a tool call in a turn already shown'}
+  - {name: grown-sentence, notice: 'session has grown since the preview opened'}
+  - {name: unavailable-sentence, notice: 'no transcript preview is available'}
+  - {name: oversized-record-sentence, notice: 'the preview stopped at'}

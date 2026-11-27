@@ -1,0 +1,11 @@
+# A registered adapter that withholds its change scope takes the full native
+# step in a real run, as the upgrade planner says it will; the shipped
+# declaration keeps the stored-metadata lane and its skips. Counts are per run
+# over one session after a stamp-only adapter bump.
+cases:
+  - name: declared-adapter-settles-on-the-stored-lane
+    undeclared: false
+    want: {reason: adapter_behind, lane: stored-metadata, proofs: 1, settles: 1, builds: 0}
+  - name: undeclared-adapter-parses-on-the-full-step
+    undeclared: true
+    want: {reason: adapter_behind_native_only, lane: native, proofs: 0, settles: 0, builds: 1}

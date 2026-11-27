@@ -4,31 +4,51 @@
 # a catalogue that drops or repeats one.
 requiredNames:
   - fresh-install-redirects-to-setup
+  - answers-sit-where-continue-sits
   - scan-progress-and-tree-selection
   - second-tab-converges-without-reload
   - every-stop-the-server-shows
   - review-summary-and-collapsed-diff
   - save-finish-and-ingest-end
+  - focus-burst-reads-sign-in-once
   - config-holds-only-the-chosen-selection
   - concurrent-change-offers-mine-or-theirs
   - selection-page-saves-only-selection
   - selection-page-names-the-chosen-branch
   - import-honours-the-recorded-branch
   - stored-remote-matches-the-tree
+  - preview-session-in-the-viewer
+  - preview-scroll-to-end-loads-nothing
+  - preview-position-reads-loaded-so-far
+  - preview-load-more-appends-one-segment
+  - preview-end-says-final
+  - preview-cut-shows-the-server-sentence
+  - preview-grown-session-notice
+  - preview-leaves-no-trace
   - computed-styles-and-themes
 cases:
   - {name: fresh-install-redirects-to-setup}
+  - {name: answers-sit-where-continue-sits}
   - {name: scan-progress-and-tree-selection}
   - {name: second-tab-converges-without-reload}
   - {name: every-stop-the-server-shows}
   - {name: review-summary-and-collapsed-diff}
   - {name: save-finish-and-ingest-end}
+  - {name: focus-burst-reads-sign-in-once}
   - {name: config-holds-only-the-chosen-selection}
   - {name: concurrent-change-offers-mine-or-theirs}
   - {name: selection-page-saves-only-selection}
   - {name: selection-page-names-the-chosen-branch}
   - {name: import-honours-the-recorded-branch}
   - {name: stored-remote-matches-the-tree}
+  - {name: preview-session-in-the-viewer}
+  - {name: preview-scroll-to-end-loads-nothing}
+  - {name: preview-position-reads-loaded-so-far}
+  - {name: preview-load-more-appends-one-segment}
+  - {name: preview-end-says-final}
+  - {name: preview-cut-shows-the-server-sentence}
+  - {name: preview-grown-session-notice}
+  - {name: preview-leaves-no-trace}
   - {name: computed-styles-and-themes}
 # The only requests the journey provokes the server to refuse: the deep links to a
 # project and a transcript that were never recorded, and the save that found a
@@ -55,8 +75,14 @@ railScreens:
   09-finish: 10
   10-selection-page: 3
   11-rerun-prefilled: 10
+  13-preview-open: 3
+  14-preview-loading: 3
+  15-preview-end: 3
+  16-preview-cut: 3
 # Every screen that is captured and probed, in both themes (one file per theme
-# and name: <theme>-<name>.png under review-capture/).
+# and name: <theme>-<name>.png under review-capture/). `12-answers-narrow` is
+# the connection stop's foot at 320 px, where the answers take their own line;
+# its rail draws numbers alone, so it is not in railScreens.
 screens:
   - 01-village
   - 02-scan-progress
@@ -69,18 +95,29 @@ screens:
   - 09-finish
   - 10-selection-page
   - 11-rerun-prefilled
+  - 12-answers-narrow
+  - 13-preview-open
+  - 14-preview-loading
+  - 15-preview-end
+  - 16-preview-cut
+  - 17-preview-labels-continue
+  - 18-preview-source-cap
 projects:
   - {name: dark-desktop, theme: dark, width: 1280, height: 900}
   - {name: light-desktop, theme: light, width: 1280, height: 900}
 # The commit the branch was cut from. A provenance marker must be absent from
 # its web sources, or it proves nothing about this branch.
-baseCommit: 15cf2d0be79715b8e91e96c314c33ac619cdb16f
+baseCommit: 890032faef0aea693c9d76d2b90c60d35b6db78a
 provenance:
-  # Strings only this branch introduces, found in the bundle the binary serves.
+  # Strings only this branch introduces, found in the bundle the binary serves:
+  # the classes of the session preview's slot, of the state that fills it
+  # before the viewer, and of the error notice. They are in the route's
+  # stylesheet; the viewer's script is a chunk loaded on the first preview,
+  # which the route's own assets do not list.
   markers:
-    - wizard-host
-    - set up peasant
-    - your selection is saved
+    - ks-session-preview
+    - ks-session-preview-state
+    - ks-preview-notice-error
   routes: [/kickstart/, /selection/]
 # The recordings: the ingest end-to-end fixture's Claude root session is the
 # template. Sessions name a prompt (the first is what the tree shows).
@@ -99,6 +136,24 @@ recordings:
         - {name: hero-copy, branch: main, startedAt: "2026-02-06T09:00:00Z", prompts: ["Tighten the hero copy on the pricing page.", "Keep it to one sentence."]}
         # Recorded on a branch the main clone has since moved off: the clone is on main now.
         - {name: stray, branch: feature/stray, sharedClone: true, startedAt: "2026-02-07T09:00:00Z", prompts: ["Try a darker footer on the pricing page.", "Compare it with the light one."]}
+    # The raw preview's sessions, never chosen. `exchanges` more prompt and reply
+    # pairs follow the template's, each reply about `replyBytes` long with a Go
+    # code block; `oversizedReplyBytes` ends the session with one reply larger
+    # than a web preview reads in all (16 MiB).
+    - name: preview-lab
+      remote: https://github.com/acme/preview-lab.git
+      sessions:
+        # About 3 MiB: a short first segment, then 1 MiB segments to its end.
+        - {name: long-read, branch: main, startedAt: "2026-02-08T09:00:00Z", prompts: ["Read the long ledger history.", "Keep going."], exchanges: 130, replyBytes: 24000}
+        # About 480 KiB: more than the first read, so lines appended after the
+        # preview opens lie beyond the extent it fixed.
+        - {name: growing, branch: main, startedAt: "2026-02-09T09:00:00Z", prompts: ["Watch the ledger grow.", "Keep going."], exchanges: 20, replyBytes: 24000}
+        # One reply of 17 MiB after a short start: more than the 16 MiB a web
+        # preview reads, so the capture stops before it with the server's sentence.
+        - {name: oversized, branch: main, startedAt: "2026-02-10T09:00:00Z", prompts: ["Paste the ledger export.", "Keep going."], exchanges: 4, replyBytes: 24000, oversizedReplyBytes: 17825792}
+        # About 18 MiB of ordinary replies: the capture reads to the 16 MiB a web
+        # preview reads in all and stops there, a designed limit, not an error.
+        - {name: capped, branch: main, startedAt: "2026-02-11T09:00:00Z", prompts: ["Read the whole ledger archive.", "Keep going."], exchanges: 90, replyBytes: 200000}
   # Generated sessions that a scan reads but the journey never selects: enough that
   # the scan's progress is on screen long enough to be seen.
   filler: {repositories: 4, sessions: 80}
@@ -117,6 +172,18 @@ chosen:
 selectionPage:
   session: tax-report
   imported: 1
+# The raw preview's sessions and what the server says at their end. `grown` is
+# the sentence the server sends when a session grew after its preview opened.
+preview:
+  long: long-read
+  # The long session's exchanges; its last reply opens with this step number.
+  longExchanges: 130
+  growing: growing
+  oversized: oversized
+  capped: capped
+  grownNotice: this session has grown since the preview opened
+  cutNotice: the preview stopped at
+  appendExchanges: 3
 # The selection page's own case: one branch of a project whose clone has since
 # moved off the branch an older session recorded. `imported` is the sessions
 # that branch adds to what is stored (new; none already stored is updated).

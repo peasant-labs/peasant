@@ -1,0 +1,4 @@
+required:
+  - verify-reference-damaged-owner-body
+  - verify-reference-damaged-owner-blob
+  - reference-active-readers-parity

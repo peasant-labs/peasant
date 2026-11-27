@@ -60,7 +60,8 @@ type ServerConfig struct {
 	// Nil disables annotation endpoints (returns 503).
 	Store *store.Store
 	// SegmentReader reads stored entries for the transcript segment producer.
-	// Nil falls back to Store; when both are nil the segment reads answer 503.
+	// Nil falls back to the mock store when Provider mocks the sessions
+	// section, then to Store; when none is set the segment reads answer 503.
 	// It is an interface so a focused test can drive the cut, the short-page
 	// arm, and the single-flight guard without a real database.
 	SegmentReader SegmentReader
@@ -168,6 +169,12 @@ func NewServer(cfg ServerConfig) *Server {
 		s.groupedRevision = provider.GroupedScopeRevision()
 	}
 	segmentReader := cfg.SegmentReader
+	if source, ok := cfg.Provider.(mockSegmentSource); ok && segmentReader == nil {
+		// A mocked sessions section serves its sessions' transcripts too:
+		// the analytics store does not hold the mock sessions the detail
+		// read names, so reading it would answer an empty transcript.
+		segmentReader = source.MockSegmentReader()
+	}
 	if segmentReader == nil && cfg.Store != nil {
 		segmentReader = cfg.Store
 	}
@@ -354,7 +361,7 @@ func (s *Server) Listen(ctx context.Context) error {
 	}
 
 	s.server = &http.Server{
-		Handler: requestLogger(localRequestGuard(mux)),
+		Handler: requestLogger(localRequestGuard(mux), mux),
 	}
 
 	lns, err := listenLoopback(s.cfg.Port)
@@ -951,16 +958,51 @@ func pathExt(p string) string {
 	return path.Ext(p)
 }
 
+// diagnosticPathKey lets the pre-mux local guard use the same private route
+// description as the request logger. It is set only for sensitive paths.
+type diagnosticPathKey struct{}
+
+// requestDiagnosticPath uses the actual mux to identify preview requests even
+// before the guard runs. Unknown or unclean paths under the setup-session route
+// are conservatively masked: a malformed preview may not match any mux route.
+// Other registered, canonical routes retain their existing path diagnostics.
+func requestDiagnosticPath(mux *http.ServeMux, r *http.Request) string {
+	prefix := defaults.RouteKickstartSessions.String() + "/"
+	if !strings.HasPrefix(r.URL.Path, prefix) && !strings.HasPrefix(path.Clean(r.URL.Path), prefix) {
+		return r.URL.Path
+	}
+	_, pattern := mux.Handler(r)
+	if pattern == "GET "+defaults.RouteKickstartPreview.String() {
+		return defaults.RouteKickstartPreview.String()
+	}
+	if pattern != "" && pattern != "/" && path.Clean(r.URL.EscapedPath()) == r.URL.EscapedPath() {
+		return r.URL.Path
+	}
+	return defaults.RouteKickstartSessions.String() + "/{path omitted}"
+}
+
+// diagnosticPath returns the safe route description supplied before the guard,
+// or the ordinary path for unrelated requests such as WebSocket handshakes.
+func diagnosticPath(r *http.Request) string {
+	if description, ok := r.Context().Value(diagnosticPathKey{}).(string); ok {
+		return description
+	}
+	return r.URL.Path
+}
+
 // requestLogger wraps an http.Handler with slog-based request logging.
 // Logs method, path, status, and duration for every request.
-func requestLogger(next http.Handler) http.Handler {
+func requestLogger(next http.Handler, mux *http.ServeMux) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		if description := requestDiagnosticPath(mux, r); description != r.URL.Path {
+			r = r.WithContext(context.WithValue(r.Context(), diagnosticPathKey{}, description))
+		}
 		rw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rw, r)
 		slog.Info("http",
 			"method", r.Method,
-			"path", r.URL.Path,
+			"path", diagnosticPath(r),
 			"status", rw.status,
 			"dur", time.Since(start).Round(time.Millisecond),
 		)

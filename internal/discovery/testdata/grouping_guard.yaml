@@ -1,0 +1,61 @@
+# The grouping guard's module boundary, scanned over small fixture trees. Each
+# root here is itself a nested module, so the real guard walking the repository
+# skips these fixtures; this test scans each root directly. The declarations
+# live in real files under grouping_guard/, not in strings in the test.
+requiredNames:
+  - valid-root
+  - own-tree-buildforest-duplicate
+  - own-tree-lowercase-duplicate
+  - nested-worktree-is-outside-the-module
+  - own-worktree-directory-without-a-module-is-scanned
+  - hidden-and-test-copies-are-ignored
+  - missing-root-fails-loudly
+cases:
+  - name: valid-root
+    root: valid-root
+    wantDeclarations: [internal/discovery/forest.go]
+    wantDuplicates: []
+    wantViolation: false
+
+  - name: own-tree-buildforest-duplicate
+    root: own-tree-buildforest-duplicate
+    wantDeclarations:
+      - internal/discovery/forest.go
+      - internal/discovery/second.go
+    wantDuplicates: []
+    wantViolation: true
+
+  - name: own-tree-lowercase-duplicate
+    root: own-tree-lowercase-duplicate
+    wantDeclarations: [internal/discovery/forest.go]
+    wantDuplicates: [internal/discovery/second.go]
+    wantViolation: true
+
+  # The nested worktree is a module of its own; its forest.go is not part of
+  # this module and must not be counted as a second implementation.
+  - name: nested-worktree-is-outside-the-module
+    root: nested-worktree-is-outside-the-module
+    wantDeclarations: [internal/discovery/forest.go]
+    wantDuplicates: []
+    wantViolation: false
+
+  # A directory named worktree without a go.mod is ordinary source: the guard
+  # must scan it and flag the second declaration, not skip it by path name.
+  - name: own-worktree-directory-without-a-module-is-scanned
+    root: own-worktree-directory-without-a-module-is-scanned
+    wantDeclarations:
+      - internal/discovery/forest.go
+      - worktree/legit-source/forest.go
+    wantDuplicates: []
+    wantViolation: true
+
+  - name: hidden-and-test-copies-are-ignored
+    root: hidden-and-test-copies-are-ignored
+    wantDeclarations: [internal/discovery/forest.go]
+    wantDuplicates: []
+    wantViolation: false
+
+  # A missing root is a traversal error, not an empty tree.
+  - name: missing-root-fails-loudly
+    root: missing-root
+    wantErrorContains: missing-root

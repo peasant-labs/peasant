@@ -1,7 +1,40 @@
+# Routes of the index stage after an adapter bump on the stored-metadata lane.
+# proven settles; every other route parses the stored transcript once and never
+# copies the stored generation.
+#
+# metadata-context:          the metadata context changed, so the proof fails
+#                            on the metadata; the parse installs the change.
+# unproven-unchanged-parses: the metadata did not change but the proof still
+#                            fails (an unsealed legacy row) and no validator
+#                            answers; the parse runs.
+#
+# Context validation on the real store, each compared byte for byte with a
+# plain parse (skips disabled) of the same snapshot through session_detail:
+# validated-settles-with-the-real-store: a stale stored metadata hash; the
+#     pipeline builds the Claude candidate, the store validates and settles;
+#     no parse; refresh_validate total 1, done 1.
+# unsupported-harness-parses: Codex with a stale hash has no candidate;
+#     refresh_validate_unsupported counts every session and each parses.
+# validator-error-parses-on-the-real-store: the validator fails with an I/O
+#     error; the session parses.
+# validated-settle-refused-parses-on-the-real-store: a context row lands
+#     between validation and settle; the settle refuses with stale work and
+#     the session parses.
+# claude-without-candidate-parses: the fork's parent source disappears after
+#     the capture; the metadata half refuses, unsupported is counted, the
+#     parse refuses too, and the active generation stays.
 cases:
   - name: proven
   - name: index-not-current
   - name: metadata-context
-  - name: copy-refused
+  - name: unproven-unchanged-parses
   - name: proof-error
   - name: settle-refused
+  - name: disable-refresh-skips-never-validates
+  - name: force-never-validates
+  - name: reindex-never-validates
+  - name: validated-settles-with-the-real-store
+  - name: unsupported-harness-parses
+  - name: validator-error-parses-on-the-real-store
+  - name: validated-settle-refused-parses-on-the-real-store
+  - name: claude-without-candidate-parses

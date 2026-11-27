@@ -80,13 +80,15 @@ func (s *Store) SweepSession(ctx context.Context, sessionID schema.SessionID) (S
 // cannot deadlock against a non-reentrant file lock.
 func (s *Store) sweepSessionLocked(ctx context.Context, sessionID schema.SessionID) (SweepResult, error) {
 	var result SweepResult
-	active, latestAttempt, err := s.generationKeepSet(ctx, sessionID)
+	keep, err := s.generationKeepSet(ctx, sessionID)
 	if err != nil {
 		return result, err
 	}
-	// A session with no active generation keeps nothing: the non-active
-	// predicate below is NULL-safe, so every catalog row counts as
-	// superseded. A latest attempt is live too, so it is kept.
+	// The keep set is the active generation, the latest attempt, and the
+	// owner whose parsed rows each reads; an owner of a live set is kept
+	// whole. A session with no active generation keeps nothing else: the
+	// predicate below is NULL-safe, so every other catalog row counts as
+	// superseded.
 	if err := reportContentSweepSeam(contentSweepSeamAfterCommit); err != nil {
 		return result, fmt.Errorf("store: sweep session %s interrupted before any delete: %w; no row was deleted and the sweep flag is unchanged", sessionID, err)
 	}
@@ -94,20 +96,20 @@ func (s *Store) sweepSessionLocked(ctx context.Context, sessionID schema.Session
 	if limit < 1 {
 		limit = 1
 	}
-	if bounded, applied, err := s.sweepBoundedSession(ctx, sessionID, active, latestAttempt, limit); applied || err != nil {
+	if bounded, applied, err := s.sweepBoundedSession(ctx, sessionID, limit); applied || err != nil {
 		return bounded, err
 	}
 	if err := reportContentSweepSeam(contentSweepSeamFirstWrite); err != nil {
-		return result, fmt.Errorf("store: sweep session %s failed at its first delete: %w; no rows were deleted and the sweep flag remains set; free disk space and retry harvest or reclaim", sessionID, err)
+		return result, fmt.Errorf("store: sweep session %s failed at its first delete: %w; no rows were deleted and the sweep flag remains set; %s", sessionID, err, sweepRetryAdvice(err))
 	}
 
-	rows, err := s.deleteSupersededGenerationRows(ctx, sessionID, active, latestAttempt)
+	rows, err := s.deleteSupersededGenerationRows(ctx, sessionID, keep)
 	if err != nil {
 		return result, err
 	}
 	result.RowsDeleted = rows.Total()
 
-	dirs, err := s.removeLeftoverGenerationDirs(ctx, sessionID, active, latestAttempt)
+	dirs, err := s.removeLeftoverGenerationDirs(ctx, sessionID, keep)
 	if err != nil {
 		return result, err
 	}
@@ -225,15 +227,21 @@ func (s *Store) unreferencedBodyDigests(ctx context.Context, sessionID schema.Se
 // before deleting the row anyway. A referenced body aborts the batch through
 // its foreign key: the transaction rolls back and the error names the
 // session, so a stray delete is never silent.
-func (s *Store) deleteVerifiedBodies(ctx context.Context, sessionID schema.SessionID, digests []string) (int64, error) {
+func (s *Store) deleteVerifiedBodies(ctx context.Context, sessionID schema.SessionID, digests []string) (count int64, txnErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("store: take connection to delete %d bodies for session %s: %w; no row was deleted", len(digests), sessionID, err)
 	}
 	defer s.pool.Put(conn)
 	var deleted int64
-	txnErr := error(nil)
-	endFn := sqlitex.Transaction(conn)
+	// The batch verifies each body before deleting it, so it reads first.
+	// IMMEDIATE takes the writer before that read: a deferred transaction's
+	// later upgrade fails with BUSY at once, without waiting on busy_timeout,
+	// when another connection writes meanwhile.
+	endFn, err := sqlitex.ImmediateTransaction(conn)
+	if err != nil {
+		return 0, fmt.Errorf("store: begin the delete of %d bodies for session %s: %w; no row was deleted and the sweep flag remains set; %s", len(digests), sessionID, err, sweepRetryAdvice(err))
+	}
 	defer endFn(&txnErr)
 	for _, digest := range digests {
 		if err := ctx.Err(); err != nil {
@@ -250,6 +258,10 @@ func (s *Store) deleteVerifiedBodies(ctx context.Context, sessionID schema.Sessi
 				txnErr = err
 				return deleted, txnErr
 			}
+		}
+		if err := reportContentSweepSeam(contentSweepSeamBodyDelete); err != nil {
+			txnErr = fmt.Errorf("store: sweep session %s interrupted before a body delete: %w; the batch rolled back and every body row is unchanged; %s", sessionID, err, sweepRetryAdvice(err))
+			return deleted, txnErr
 		}
 		if err := sqlitex.Execute(conn, `DELETE FROM session_entry_bodies WHERE session_id = ? AND body_digest = ?`, &sqlitex.ExecOptions{
 			Args: []any{string(sessionID), digest},
@@ -301,15 +313,24 @@ func (s *Store) unreferencedBlobDigests(ctx context.Context, sessionID schema.Se
 // objects in one transaction. The chunks cascade from the header, so one
 // statement per object removes the whole object. A referenced blob aborts
 // the batch through its foreign key, like a referenced body.
-func (s *Store) deleteUnreferencedBlobs(ctx context.Context, sessionID schema.SessionID, digests []string) (int64, error) {
+func (s *Store) deleteUnreferencedBlobs(ctx context.Context, sessionID schema.SessionID, digests []string) (count int64, txnErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("store: take connection to delete %d blobs for session %s: %w; no row was deleted", len(digests), sessionID, err)
 	}
 	defer s.pool.Put(conn)
 	var deleted int64
-	txnErr := error(nil)
-	endFn := sqlitex.Transaction(conn)
+	// The batch's first statement is a DELETE, which would take the writer
+	// from an idle deferred transaction and wait on busy_timeout too. It
+	// begins IMMEDIATE anyway so every store write follows one rule (see
+	// beginWrite) and a read added before the delete cannot reopen the race.
+	// It calls ImmediateTransaction directly, like deleteVerifiedBodies,
+	// because a refused sweep reports the kept flag and the sweep's own
+	// retry step, which beginWrite's generic wording would not.
+	endFn, err := sqlitex.ImmediateTransaction(conn)
+	if err != nil {
+		return 0, fmt.Errorf("store: begin the delete of %d blobs for session %s: %w; no row was deleted and the sweep flag remains set; %s", len(digests), sessionID, err, sweepRetryAdvice(err))
+	}
 	defer endFn(&txnErr)
 	for _, digest := range digests {
 		if err := ctx.Err(); err != nil {
@@ -363,7 +384,8 @@ func (s *Store) rebuildSearchIndexWhenFlagged(ctx context.Context, sessionID sch
 }
 
 // removeLeftoverGenerationDirs removes every generation directory of the
-// session that no live file-backed generation row requires (design §4.5
+// session that no kept generation names and no live file-backed generation
+// row requires (design §4.5
 // step 2, Release N only). A file-backed active generation keeps its
 // directory; a harmonized session keeps none, including the directory named
 // after its moved generation. Removal runs through the ownership-verified
@@ -373,7 +395,7 @@ func (s *Store) rebuildSearchIndexWhenFlagged(ctx context.Context, sessionID sch
 // Unlike reclaim's standalone contract, the harvest path takes no pending
 // intent guard: a leftover intent is an orphan the sweep discards (the
 // migration drain owns the intent files themselves).
-func (s *Store) removeLeftoverGenerationDirs(ctx context.Context, sessionID schema.SessionID, active, latestAttempt string) (int64, error) {
+func (s *Store) removeLeftoverGenerationDirs(ctx context.Context, sessionID schema.SessionID, keep generationKeepSet) (int64, error) {
 	if s.generationArtifacts == nil {
 		return 0, nil
 	}
@@ -386,10 +408,10 @@ func (s *Store) removeLeftoverGenerationDirs(ctx context.Context, sessionID sche
 		if err := ctx.Err(); err != nil {
 			return removed, err
 		}
-		if generationID == active || (latestAttempt != "" && generationID == latestAttempt) {
+		if keep.contains(generationID) {
 			continue
 		}
-		if err := s.removeLeftoverGenerationDir(ctx, sessionID, generationID, active, latestAttempt); err != nil {
+		if err := s.removeLeftoverGenerationDir(ctx, sessionID, generationID, keep); err != nil {
 			return removed, err
 		}
 		removed++
@@ -397,29 +419,34 @@ func (s *Store) removeLeftoverGenerationDirs(ctx context.Context, sessionID sche
 	return removed, nil
 }
 
-// removeLeftoverGenerationDir removes one non-active, non-latest-attempt generation
-// directory with the lock already held: it re-checks the read authority and the
-// latest attempt, proves ownership (a committed file-backed row or a valid
+// removeLeftoverGenerationDir removes one generation directory outside the keep
+// set with the lock already held: it re-checks the keep set, proves ownership (a committed file-backed row or a valid
 // staged manifest naming this exact session and generation), and removes the
 // directory through the root-confined no-follow path. An unowned directory
 // refuses instead of deleting: the error names the session and generation, what
 // blocked the removal, and that the next pass retries it.
-func (s *Store) removeLeftoverGenerationDir(ctx context.Context, sessionID schema.SessionID, generationID, active, latestAttempt string) error {
-	if generationID == active {
+func (s *Store) removeLeftoverGenerationDir(ctx context.Context, sessionID schema.SessionID, generationID string, keep generationKeepSet) error {
+	if generationID == keep.active {
 		return fmt.Errorf("store: refuse to remove generation %s for session %s while sweeping: it is the active read authority; select an inactive generation or leave managed recovery to replace it", generationID, sessionID)
 	}
-	if latestAttempt != "" && generationID == latestAttempt {
+	if generationID == keep.latest && keep.latest != "" {
 		return fmt.Errorf("store: refuse to remove generation %s for session %s while sweeping: it is the latest attempt; re-index the source or finalize the active authority to release it", generationID, sessionID)
 	}
-	current, currentLatestAttempt, err := s.generationKeepSet(ctx, sessionID)
+	if keep.contains(generationID) {
+		return fmt.Errorf("store: refuse to remove generation %s for session %s while sweeping: a live generation reads its parsed rows; supersede that generation first and the next pass collects both", generationID, sessionID)
+	}
+	current, err := s.generationKeepSet(ctx, sessionID)
 	if err != nil {
 		return err
 	}
-	if current == generationID {
+	if current.active == generationID {
 		return fmt.Errorf("store: refuse to remove generation %s for session %s while sweeping: it became the active read authority during the sweep; the directory was left in place", generationID, sessionID)
 	}
-	if currentLatestAttempt == generationID {
+	if current.latest == generationID {
 		return fmt.Errorf("store: refuse to remove generation %s for session %s while sweeping: it became the latest attempt during the sweep; the directory was left in place", generationID, sessionID)
+	}
+	if current.contains(generationID) {
+		return fmt.Errorf("store: refuse to remove generation %s for session %s while sweeping: a live generation began reading its parsed rows during the sweep; the directory was left in place", generationID, sessionID)
 	}
 	if err := s.verifyOwnedInactiveGeneration(ctx, sessionID, generationID); err != nil {
 		return err

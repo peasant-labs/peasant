@@ -167,6 +167,12 @@ func TestOriginGuardFixture(t *testing.T) {
 			if c.Code == "" {
 				return
 			}
+			// Every refusal from the shared local-request guard names the path or
+			// a private route description, including WebSocket refusals. It must
+			// not be cached.
+			if got := response.Header.Values("Cache-Control"); len(got) != 1 || got[0] != "no-store" {
+				t.Errorf("refusal Cache-Control = %q, want exactly [no-store]", got)
+			}
 			var envelope errorEnvelope
 			if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
 				t.Fatalf("decode refusal body: %v", err)

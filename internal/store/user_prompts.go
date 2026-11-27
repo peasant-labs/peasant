@@ -23,12 +23,14 @@ type UserPrompt struct {
 // PromptCommand is the command a prompt invoked. Name carries no leading slash.
 type PromptCommand struct{ Name, Args string }
 
-const (
-	sqlUserPromptBodies = sqlShimBodyRows + `
-WHERE m.session_id = ? AND m.partition_id = 0 AND m.generation_id = s.active_generation_id
+func userPromptBodiesSQL(conn *sqlite.Conn) string {
+	return sqlShimBodyRows + `
+WHERE m.session_id = ? AND m.partition_id = 0 AND ` + activeRowsOfM(conn) + `
 AND b.role = 'user' AND b.depth = 0 AND b.entry_type = 'text'
 ORDER BY m.entry_index`
+}
 
+const (
 	sqlUserPromptMirrorRows = `SELECT
     session_id, entry_index, provider, entry_type, role,
     timestamp_ms, content_preview, tokens_in, tokens_out,
@@ -91,7 +93,7 @@ func (s *Store) ListUserPrompts(ctx context.Context, sid schema.SessionID) (_ []
 // bound is left off.
 func userPromptBodiesOnConn(conn *sqlite.Conn, sid schema.SessionID) ([]schema.SessionEntry, error) {
 	var records []EntryRecord
-	if err := sqlitex.ExecuteTransient(conn, sqlUserPromptBodies, &sqlitex.ExecOptions{
+	if err := sqlitex.ExecuteTransient(conn, userPromptBodiesSQL(conn), &sqlitex.ExecOptions{
 		Args: []any{string(sid)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			record, err := scanBodyRow(stmt, 0)

@@ -193,7 +193,8 @@ const (
 SELECT ?1, ?2, ?3, ?4
  WHERE EXISTS (SELECT 1 FROM sessions s
                  JOIN session_generation_entries m
-                   ON m.session_id = s.session_id AND m.generation_id = s.active_generation_id
+                   ON m.session_id = s.session_id
+                  AND m.generation_id = COALESCE((SELECT g.mapping_set_id FROM session_generations g WHERE g.session_id = s.session_id AND g.generation_id = s.active_generation_id), s.active_generation_id)
                   AND m.partition_id = 0 AND m.entry_index = ?3
                 WHERE s.session_id = ?2)
     OR EXISTS (SELECT 1 FROM session_entries e
@@ -682,7 +683,10 @@ func (s *Store) CreateAnnotation(ctx context.Context, params CreateAnnotationPar
 	nowMs := time.Now().UnixMilli()
 
 	// Transaction: parent + TPT child must succeed or fail together.
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, "create an annotation")
+	if err != nil {
+		return "", err
+	}
 	defer endFn(&err)
 	if params.EntryTarget != nil {
 		if err := s.validateIndexFormatIDsOnConn(conn, []string{params.EntryTarget.SessionID}); err != nil {
@@ -730,13 +734,30 @@ func (s *Store) CreateAnnotation(ctx context.Context, params CreateAnnotationPar
 	return newID, nil
 }
 
+func insertTargetEntrySQL(conn *sqlite.Conn) (string, error) {
+	hasMappingSet, err := mappingSetColumnOnConn(conn)
+	if err != nil {
+		return "", err
+	}
+	if !hasMappingSet {
+		return strings.Replace(sqlInsertTargetEntry,
+			`COALESCE((SELECT g.mapping_set_id FROM session_generations g WHERE g.session_id = s.session_id AND g.generation_id = s.active_generation_id), s.active_generation_id)`,
+			`s.active_generation_id`, 1), nil
+	}
+	return sqlInsertTargetEntry, nil
+}
+
 // insertAnnotationTargetEntryOnConn executes the guarded entry-target
 // insert and refuses when the target start entry does not exist: zero rows
 // change, so the check is the affected count, not an error. The refusal
 // carries all six actionable parts; the caller's transaction rolls the
 // parent annotation row back with it.
 func insertAnnotationTargetEntryOnConn(conn *sqlite.Conn, site, annotationID, sessionID string, entryIndex, endIndex int) error {
-	if err := sqlitex.ExecuteTransient(conn, sqlInsertTargetEntry, &sqlitex.ExecOptions{
+	query, err := insertTargetEntrySQL(conn)
+	if err != nil {
+		return fmt.Errorf("store: %s: insert entry annotation target: %w", site, err)
+	}
+	if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
 		Args: []any{annotationID, sessionID, entryIndex, endIndex},
 	}); err != nil {
 		return fmt.Errorf("store: %s: insert entry annotation target: %w", site, err)
@@ -1334,7 +1355,10 @@ func (s *Store) CreateAnnotationAndSupersede(ctx context.Context, p ingest.Creat
 
 	// Defers run LIFO: endFn (transaction commit/rollback) defers before pool.Put,
 	// so the transaction closes before the connection returns to the pool.
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, "create an annotation superseding "+oldID)
+	if err != nil {
+		return "", err
+	}
 	defer endFn(&err)
 	if p.EntryTarget != nil {
 		if err := s.validateIndexFormatIDsOnConn(conn, []string{p.EntryTarget.SessionID}); err != nil {
@@ -1446,7 +1470,13 @@ func (s *Store) applyClassifierAnnotations(ctx context.Context, writes []ingest.
 	defer s.pool.Put(conn)
 
 	txnErr := error(nil)
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, fmt.Sprintf("apply %d classifier annotations", len(writes)))
+	if err != nil {
+		for i := range results {
+			results[i].Err = err
+		}
+		return results
+	}
 	txnOpen := true
 	defer func() {
 		if txnOpen {
@@ -2211,14 +2241,23 @@ func (s *Store) CountAnnotationsByAnnotator(ctx context.Context, annotatorName s
 //
 // Cleanup collects direct roots, then atomically deletes their full recursive
 // meta-annotation closure. The returned count includes direct roots only.
-func (s *Store) DeleteAnnotationsByAnnotator(ctx context.Context, annotatorName string, sessionIDs []string) (int64, error) {
+func (s *Store) DeleteAnnotationsByAnnotator(ctx context.Context, annotatorName string, sessionIDs []string) (count int64, err error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("store: DeleteAnnotationsByAnnotator %s: take connection: %w", annotatorName, err)
 	}
 	defer s.pool.Put(conn)
 
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, "delete the annotations of annotator "+annotatorName)
+	if err != nil {
+		return 0, err
+	}
+	// Run after the transaction finalizer, so rolled-back deletes report no count.
+	defer func() {
+		if err != nil {
+			count = 0
+		}
+	}()
 	defer endFn(&err)
 
 	// Step 1: Collect annotation IDs matching the filter.
@@ -2999,7 +3038,7 @@ func (s *Store) GetAnnotationTypeID(ctx context.Context, typeID string) (string,
 // All parent + TPT child rows are inserted on a single pooled connection.
 // Returns the UUIDs in the same order as params, or an error if any insert fails.
 // On error, no rows are committed (savepoint rollback).
-func (s *Store) BatchCreateAnnotations(ctx context.Context, params []CreateAnnotationParams) ([]string, error) {
+func (s *Store) BatchCreateAnnotations(ctx context.Context, params []CreateAnnotationParams) (result []string, err error) {
 	if len(params) == 0 {
 		return nil, fmt.Errorf("store: BatchCreateAnnotations: params slice is empty")
 	}
@@ -3010,7 +3049,16 @@ func (s *Store) BatchCreateAnnotations(ctx context.Context, params []CreateAnnot
 	}
 	defer s.pool.Put(conn)
 
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, fmt.Sprintf("create %d annotations", len(params)))
+	if err != nil {
+		return nil, err
+	}
+	// Run after the transaction finalizer, so rolled-back inserts return no IDs.
+	defer func() {
+		if err != nil {
+			result = nil
+		}
+	}()
 	defer endFn(&err)
 
 	ids := make([]string, len(params))

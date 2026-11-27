@@ -1,11 +1,13 @@
 'use client';
 
+import { ProjectRouteKind } from '@/lib/navigation/projectRoutes';
+
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Skeleton } from '@/lib/ft-ui';
 import { SessionDetailV2 } from '@/components/session-detail/v2/SessionDetailV2';
 import { formatMapRouteState, mapHref, parseMapRouteState, parseProjectDetailRoute, parseTranscriptRoute, parseTranscriptRouteQuery, transcriptHref, type ProjectHash, type TranscriptHrefOptions, type TranscriptRouteQuery } from '@/lib/navigation/projectRoutes';
-import { useProjectIdentity } from '@/lib/navigation/useProjectIdentity';
+import { ProjectIdentityPhase, useProjectIdentity } from '@/lib/navigation/useProjectIdentity';
 import { ProjectIdentityProblem } from '@/components/ProjectIdentityProblem';
 
 /**
@@ -30,13 +32,13 @@ export function ProjectsRouter() {
   const route = parseTranscriptRoute(pathname);
   const detailRoute = parseProjectDetailRoute(pathname);
   const query = parseTranscriptRouteQuery(searchParams ?? '');
-  const isViewer = route.kind === 'canonical' || route.kind === 'legacy';
+  const isViewer = route.kind === ProjectRouteKind.Canonical || route.kind === ProjectRouteKind.Legacy;
 
   useEffect(() => {
     if (!mounted) return;
-    if (isViewer || detailRoute.kind === 'legacy') return;
-    if (detailRoute.kind === 'canonical') router.replace(canonicalProjectDetailDestination(detailRoute.projectHash, searchParams?.toString() ?? ''));
-    else if (route.kind === 'missing') router.replace('/');
+    if (isViewer || detailRoute.kind === ProjectRouteKind.Legacy) return;
+    if (detailRoute.kind === ProjectRouteKind.Canonical) router.replace(canonicalProjectDetailDestination(detailRoute.projectHash, searchParams?.toString() ?? ''));
+    else if (route.kind === ProjectRouteKind.Missing) router.replace('/');
   }, [detailRoute, isViewer, mounted, route, router, searchParams]);
 
   if (!mounted) {
@@ -44,10 +46,10 @@ export function ProjectsRouter() {
   }
 
   if (isViewer && !query) return <p role="alert">This transcript link contains malformed navigation state. Return Home and open the session again.</p>;
-  if (route.kind === 'canonical' && query) return <ResolvedProjectViewer projectLabel={route.projectHash} sessionId={route.sessionId} query={query} canonical />;
-  if (route.kind === 'legacy' && query) return <LegacyProjectViewer projectLabel={route.projectLabel} sessionId={route.sessionId} query={query} />;
-  if (detailRoute.kind === 'legacy') return <LegacyProjectDetail projectLabel={detailRoute.projectLabel} search={searchParams?.toString() ?? ''} />;
-  if (route.kind === 'malformed') return <p role="alert">{route.message}</p>;
+  if (route.kind === ProjectRouteKind.Canonical && query) return <ResolvedProjectViewer projectLabel={route.projectHash} sessionId={route.sessionId} query={query} canonical />;
+  if (route.kind === ProjectRouteKind.Legacy && query) return <LegacyProjectViewer projectLabel={route.projectLabel} sessionId={route.sessionId} query={query} />;
+  if (detailRoute.kind === ProjectRouteKind.Legacy) return <LegacyProjectDetail projectLabel={detailRoute.projectLabel} search={searchParams?.toString() ?? ''} />;
+  if (route.kind === ProjectRouteKind.Malformed) return <p role="alert">{route.message}</p>;
 
   // Redirecting (effect above) — show a brief affordance instead of a blank
   // frame, so the interim is never a flash of nothing.
@@ -68,9 +70,9 @@ function LegacyProjectDetail({ projectLabel, search }: { projectLabel: string; s
   const router = useRouter();
   const { state, retry } = useProjectIdentity(projectLabel);
   useEffect(() => {
-    if (state.phase === 'ready' && state.requestedIdentity === projectLabel) router.replace(canonicalProjectDetailDestination(state.projectHash, search));
+    if (state.phase === ProjectIdentityPhase.Ready && state.requestedIdentity === projectLabel) router.replace(canonicalProjectDetailDestination(state.projectHash, search));
   }, [router, search, state]);
-  if (state.phase === 'missing' || state.phase === 'error') return <ProjectIdentityProblem state={state} onRetry={retry} />;
+  if (state.phase === ProjectIdentityPhase.Missing || state.phase === ProjectIdentityPhase.Error) return <ProjectIdentityProblem state={state} onRetry={retry} />;
   return <ProjectsRouteSkeleton />;
 }
 
@@ -96,14 +98,14 @@ function ResolvedProjectViewer({ projectLabel, sessionId, query, canonical }: { 
   const router = useRouter();
   const { state, retry } = useProjectIdentity(projectLabel);
   useEffect(() => {
-    if (!canonical && state.phase === 'ready' && state.requestedIdentity === projectLabel) router.replace(transcriptHref(state.projectHash, sessionId, transcriptOptions(query)));
+    if (!canonical && state.phase === ProjectIdentityPhase.Ready && state.requestedIdentity === projectLabel) router.replace(transcriptHref(state.projectHash, sessionId, transcriptOptions(query)));
   }, [canonical, projectLabel, query, router, sessionId, state]);
-  if (state.phase === 'missing' || state.phase === 'error') return <ProjectIdentityProblem state={state} onRetry={retry} />;
+  if (state.phase === ProjectIdentityPhase.Missing || state.phase === ProjectIdentityPhase.Error) return <ProjectIdentityProblem state={state} onRetry={retry} />;
   // Keyed by session: opening a different stored session (a followed context or
   // starter link) is a new document, so its host-owned reading state must be
   // rehydrated from that session's own persisted state instead of leaking the
   // previous session's search, disclosure, selection, and scroll.
-  if (canonical && state.phase === 'ready' && state.requestedIdentity === projectLabel) return <SessionDetailV2 key={sessionId} sessionId={sessionId} projectHash={state.projectHash} projectName={state.label} routeQuery={query} />;
+  if (canonical && state.phase === ProjectIdentityPhase.Ready && state.requestedIdentity === projectLabel) return <SessionDetailV2 key={sessionId} sessionId={sessionId} projectHash={state.projectHash} projectName={state.label} routeQuery={query} />;
   return <ProjectsRouteSkeleton />;
 }
 

@@ -1,0 +1,35 @@
+required_names: [continued-global, location-global, add-short-global, trailing-short-global, private-prefix, local-install, no-save, ci]
+global_pattern: '(?m)\bnpm\s+(install|i|add|in|ins)\b[^\n]*(--global\b|--location(?:=|\s+)global\b|(?:^|\s)-g(?:\s|$))'
+prefix_pattern: '(?m)^[ \t]*prefix="\$RUNNER_TEMP/[^"\n]+"[ \t]*$'
+install_pattern: '(?m)^[ \t]*npm\s+(install|i|add|in|ins)\b[^\n]*--prefix[= \t]+"\$prefix"[^\n]*@ast-grep/cli@0\.51\.2(?:[ \t]|$)'
+path_pattern: '(?m)^[ \t]*echo[ \t]+"\$prefix/node_modules/\.bin"[ \t]*>>[ \t]*"\$GITHUB_PATH"[ \t]*$'
+workflow: tests.yml
+job: check
+step: Install ast-grep
+cases:
+  - name: continued-global
+    input: |-
+      npm install \
+        --global x
+    want: true
+  - name: location-global
+    input: npm install --location=global x
+    want: true
+  - name: add-short-global
+    input: sudo npm add -g x
+    want: true
+  - name: trailing-short-global
+    input: npm install x -g
+    want: true
+  - name: private-prefix
+    input: 'npm install --prefix "$RUNNER_TEMP/x" y'
+    want: false
+  - name: local-install
+    input: npm i foo
+    want: false
+  - name: no-save
+    input: npm install --no-save foo
+    want: false
+  - name: ci
+    input: npm ci
+    want: false

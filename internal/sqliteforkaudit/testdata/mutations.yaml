@@ -92,9 +92,9 @@ cases:
   - name: upstream-file-byte-changed
     steps:
       - kind: file-append
-        path: session.go
+        path: backup.go
         text: "\n// probe\n"
-    want: "undocumented SQLite source change: session.go"
+    want: "undocumented SQLite source change: backup.go"
   - name: modified-file-change-undocumented
     steps:
       - kind: file-append

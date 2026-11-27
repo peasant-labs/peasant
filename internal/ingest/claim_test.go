@@ -224,7 +224,7 @@ func (s *firstMirrorFailureStore) MirrorArtifacts(ctx context.Context, requests 
 		results := make([]ingest.ArtifactMirrorResult, len(requests))
 		for i, request := range requests {
 			var sid ingest.SessionID
-			if request.Artifact != nil && request.Artifact.Metadata != nil {
+			if request.Artifact != nil {
 				sid = request.Artifact.Metadata.SessionID
 			}
 			results[i] = ingest.ArtifactMirrorResult{SessionID: sid, Err: errors.New("injected first mirror failure")}
@@ -269,8 +269,8 @@ func TestAutoClaimCarriesFirstStoredAcrossFirstMirrorFailure(t *testing.T) {
 	if len(claimed) != 1 || claimed[0] != sessionID {
 		t.Fatalf("second run claimed = %v, want [%s] once the mirror succeeds", claimed, sessionID)
 	}
-	if second.Summary.New != 1 {
-		t.Fatalf("second run new sessions = %d, want the previously unmirrored session stored as new", second.Summary.New)
+	if second.Summary.Errors != 0 {
+		t.Fatalf("second run errors = %d, want the session stored cleanly", second.Summary.Errors)
 	}
 }
 

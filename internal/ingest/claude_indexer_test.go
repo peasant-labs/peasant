@@ -309,27 +309,21 @@ func TestClaudeIndexer_ThinkingFieldPopulatesPreview(t *testing.T) {
 	if err != nil {
 		t.Fatalf("IndexTranscript: %v", err)
 	}
-	if len(entries) != 2 {
-		t.Fatalf("expected 2 entries (depth=0 parent + depth=1 thinking), got %d", len(entries))
+	// A thinking-only reply is one entry: the thinking is its content and is
+	// not repeated as a child.
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry (the thinking-only reply), got %d", len(entries))
 	}
 
 	parent := entries[0]
 	if !parent.HasThinking {
 		t.Error("parent has_thinking: expected true")
 	}
-	if parent.ContentPreview == nil || *parent.ContentPreview == "" {
-		t.Error("parent content_preview: expected thinking text, got empty")
+	if parent.EntryType != ingest.EntryTypeThinking {
+		t.Errorf("parent type: expected %s, got %s", ingest.EntryTypeThinking, parent.EntryType)
 	}
-
-	child := entries[1]
-	if child.Depth != 1 {
-		t.Errorf("child depth: expected 1, got %d", child.Depth)
-	}
-	if !child.HasThinking {
-		t.Error("child has_thinking: expected true")
-	}
-	if child.ContentPreview == nil || *child.ContentPreview == "" {
-		t.Error("child content_preview: expected thinking text, got empty")
+	if parent.ContentPreview == nil || *parent.ContentPreview != "Let me analyze this step by step." {
+		t.Errorf("parent content_preview: expected the thinking text, got %v", parent.ContentPreview)
 	}
 }
 

@@ -4,6 +4,7 @@ requiredNames:
   - claude-thinking-only
   - claude-blank-text-and-tool-use
   - claude-blocks-as-separate-records
+  - claude-one-message-across-records
   - claude-image-only-prompt
   - opencode-unmanaged-text-part-and-tool-part
   - opencode-unmanaged-tool-parts-only

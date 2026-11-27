@@ -5,6 +5,53 @@ See [`AGENTS.md`](AGENTS.md) for the test and fixture writing rules and
 [`README.md`](README.md#package-map) for the package map; the documentation map below links each
 test layer to its entry point.
 
+### Tests never read your git configuration
+
+Executable fixtures written by tests use `internal/testkit/executable.Write`,
+which prevents Go forks from inheriting their writable descriptors. The
+`no-unsafe-executable-write` ast-grep rule catches octal, hexadecimal, and
+binary literal execute modes in test files and e2e support; decimal literals,
+digit separators, variable modes, and wrapper functions require manual review.
+An inert file may retain `os.WriteFile` with a `not executed:`
+explanation and a rule-specific suppression.
+
+A test result must not depend on the machine. Every package whose tests start a
+process (git, a shell script, `go`) has a `TestMain` that calls
+`gitconfig.RunWithIsolatedGitConfig` (`internal/testkit/gitconfig/gitconfig.go`). Goroutine-leak-checked packages pass `gitconfig.WithGoleak(m)` as the runner. Before any test runs it sets `GIT_CONFIG_GLOBAL=/dev/null` and `GIT_CONFIG_NOSYSTEM=1`,
+and unsets `GIT_CONFIG_COUNT`, `GIT_CONFIG_PARAMETERS` and the repository
+location variables (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`,
+`GIT_COMMON_DIR`, `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`)
+that a hook or `rebase -x` exports. A global `commit.gpgsign`, a
+`url.*.insteadOf` rewrite or injected `GIT_CONFIG_*` values therefore never
+reach a child, and a test's git never acts on an outer repository.
+`GIT_CONFIG_GLOBAL` needs git 2.32 or newer; older git ignores it. Do not add
+per-call `-c commit.gpgsign=false` or `GIT_CONFIG_GLOBAL` workarounds. Set the
+commit identity per call (`GIT_AUTHOR_*`, `GIT_COMMITTER_*`), as the existing
+helpers do.
+
+`TestEveryPackageThatStartsProcessesIsolatesGitConfig` scans test files that
+import `os/exec`. Their package must have an unconstrained `TestMain` ending in
+`os.Exit(gitconfig.RunWithIsolatedGitConfig(...))`, with no other `m.Run`,
+`goleak.VerifyTestMain`, `os.Exit`, or isolation-helper call. Setup before the
+exit is allowed. The helper's own package instead calls unexported
+`isolateGitConfig` in a top-level `if err := isolateGitConfig(); err != nil`
+that exits nonzero, then ends with `os.Exit(m.Run())`, without a competing
+runner, exit, or isolation call. It runs independently so a broken helper
+cannot skip its own tests. The fixture corpus is
+`internal/testkit/gitconfig/testdata/git_isolation_scanner.yaml`.
+`TestIsolatedChildGitReadsNoHostileSource` runs a real child git under every
+hostile source and checks that it reads none of them once isolated.
+
+The guard cannot see:
+
+- a test that starts git only through non-test code (it checks `_test.go`
+  imports only);
+- a process started without `os/exec` (`os.StartProcess`, `syscall.Exec`);
+- git run by a dependency outside the module;
+- a `TestMain` that calls the helper on only some paths;
+- a child whose environment a test rebuilds from scratch without the isolation
+  variables.
+
 ### E2E documentation map
 
 | Layer | Runs in | Entry point |
@@ -571,12 +618,12 @@ was `ingest.NewStagingBuffer`** — the harvest/pipeline tests each allocated th
 production **2 GiB** arena (`DefaultArenaSizeBytes`). With `t.Parallel` at
 `GOMAXPROCS=2`, two live 2 GiB arenas ≈ 4 GiB; on a 4-vcpu runner ≈ 8 GiB.
 
-**Regression coverage.** A tiny test arena, via an env override that mirrors
-`PEASANT_DB_POOL_SIZE`: `ingest.EnvArenaSizeBytes` (`PEASANT_INGEST_ARENA_BYTES`)
-+ `resolveArenaSizeBytes`, set to **64 MiB** in the `cmd/peasant` and
-`internal/ingest` `TestMain`s. The API test binary applies the same override for
-its mounted ingest paths, and E2E TestMain supplies it to the harness and CLI
-children. Result: `cmd/peasant -race` 2173–6267 MB →
+**Regression coverage.** Ordinary tests use a 64 MiB arena. The `cmd/peasant` and
+`internal/api` test binaries set `PEASANT_INGEST_ARENA_BYTES` in `TestMain`.
+The `internal/e2e` binary sets it if unset and passes it to CLI children.
+`internal/ingest` and every other package do not set this environment variable
+in `TestMain`. The ingest tests inject the size per pipeline instead.
+The earlier result was `cmd/peasant -race` 2173–6267 MB →
 **240 MB**, `ingest` 6185 → **274 MB**. The memory result stands; the time claim
 that followed it did not. The ~26s once stated here was stale: at the point the
 race/no-race partition landed, a full `make check -race` on a 32-thread box
@@ -586,6 +633,37 @@ wall on every run, so read that output rather than a figure fixed here — the
 suite is still being optimised, and a hardcoded number ages. Whether a 2-vcpu
 runner can hold the per-PR job is a separate CI question and is not settled by
 this paragraph.
+
+### Rules for a test that runs the ingest pipeline
+
+- In `internal/ingest` external tests, use `newTestPipeline` from
+  `test_options_helpers_test.go`. It injects `testIngestArenaBytes`.
+- In white-box tests, pass `WithArenaSizeBytes(testIngestArenaBytes)`. The
+  white-box constant lives in `test_options_helpers_internal_test.go`.
+  In other packages, such as `internal/store` and `internal/push`, pass
+  `ingest.WithArenaSizeBytes(...)`. Use 64 MiB unless the test needs more, and
+  say why if it does.
+- Do not call `ingest.NewPipeline` in a test without a bounded arena. Pass the
+  option inline, not in a slice variable. The
+  `ingest-test-arena` and `ingest-package-test-arena` rules in
+  `ast-grep/ingest-test-arena.yml` run in `make check`. See that file for the
+  exemptions and their reasons. The rule is a lint, not a proof: it cannot see
+  a pipeline built through a wrapper in another package.
+- A test that deliberately checks the production default, such as
+  `TestStagingArenaSizeKeepsTheEnvironmentDefault`, must not run a pipeline at
+  that size.
+
+Measurement harnesses use the production-sized arena: the opt-in
+import-profiler harness in `internal/ingest`, and `cmd/skip-budget`. They
+measure production-scale staging, not test-sized runs.
+
+A fresh process may leave the 2 GiB arena's untouched pages non-resident.
+Inside a long test binary, Go zeroes recycled heap on reuse, which makes those
+pages resident. A test can pass alone at about 300 MB yet add about 2 GB per
+pipeline run in the full binary. In [issue #1115](https://github.com/peasant-labs/peasant/issues/1115),
+`TestManagedMetricsDurationRoundtrip` added 4.08 GB in a serial run. The full
+ingest binary's peak fell from 6,402,308 kB to 1,773,228 kB after the fix.
+At `-test.parallel=1`, the fixed binary peaked at 769,780 kB.
 
 ### How memory was profiled (different tools than time)
 
@@ -599,11 +677,17 @@ this paragraph.
 - **Attribute it** with `-memprofile` + `go tool pprof -alloc_space -top` (names
   the dominant allocator). `GOMEMLIMIT` could *not* reclaim the 4 GB — it is
   *live* during the run (the arena is in use), not garbage.
+- To find the test responsible for a peak, run the test binary with
+  `-test.parallel=1 -test.v=test2json`. Sample `/proc/<pid>/status` `VmRSS`
+  every 50 ms and attribute each new peak to the test running at that moment.
+  Then run that test with `-memprofile` and inspect allocation totals with
+  `go tool pprof -sample_index=alloc_space -top`. The allocation profile names
+  the allocator; it does not measure the resident pages.
 - A counterintuitive tell we chased down: `-race` sometimes showed *less* peak
   than no-race for `cmd/peasant`, because `-race` serializes execution so fewer
   2 GiB arenas overlap at the peak instant (a 2.2–6.3 GB run-to-run swing).
 
-**Rule.** A test that drives the ingest pipeline — or any production code that
+**Rule.** An ordinary test that drives the ingest pipeline — or any production code that
 pre-allocates a large buffer/pool sized for *throughput* — must inject a
 **test-sized** value, not the production default. Use Go's `-memprofile` and
 `pprof` commands above when investigating a regression locally; do not commit
@@ -611,22 +695,21 @@ machine-specific profiling captures.
 
 ### Test env-var overrides
 
-Both knobs are **production** config env vars that `TestMain` shrinks to
-test-sized values — the production code reads the env, the test sets it, so there
-is **no test-only code path**. Both fall back to the production default when
-unset, and both are set via `os.Setenv` (process-wide, so they do not mark any
-test non-parallel).
+The pool and arena knobs are **production** config env vars. Some test binaries
+set them in `TestMain` with `os.Setenv`, which does not mark tests non-parallel.
+The production code reads the same values, so there is **no test-only code
+path**. Both fall back to the production default when unset.
 
 | Env var | Constant | Production default | Test value | Why |
 |---------|----------|--------------------|------------|-----|
 | `PEASANT_DB_POOL_SIZE` | `store.EnvPoolSize` | `10` (`store.DefaultPoolSize`) | `1` cmd/peasant · `2` store | Avoid the default 10-connection pool (each re-parsing the schema) per `store.Open`. `internal/store` uses **2**, not 1 — pool=1 deadlocks its tests that take a 2nd connection while holding the 1st. |
-| `PEASANT_INGEST_ARENA_BYTES` | `ingest.EnvArenaSizeBytes` | 2 GiB (`ingest.DefaultArenaSizeBytes`) | 64 MiB (`64*1024*1024`) | Avoid allocating the 2 GiB staging arena per pipeline run (the `-race` OOM). |
+| `PEASANT_INGEST_ARENA_BYTES` | `ingest.EnvArenaSizeBytes` | 2 GiB (`ingest.DefaultArenaSizeBytes`) | 64 MiB in `cmd/peasant` and `internal/api`; `internal/e2e` defaults to 64 MiB when unset; `internal/ingest`: n/a (injected per pipeline) | Avoid allocating the 2 GiB staging arena per pipeline run (the `-race` OOM). |
 | `PEASANT_STORETEST_TMPDIR` | `storetest.EnvStoretestTmpDir` | (unset → `t.TempDir()` copies) | (unset) | Opt-in: route golden copies through a managed root (e.g. a macOS hdiutil RAM disk) with per-process shelves and dead-owner sweeping. `TMPDIR` already routes the default copies — `t.TempDir()` and `os.MkdirTemp("")` resolve through `os.TempDir()`, so `TMPDIR` alone moves every default copy. This override **additionally** scopes cleanup to storetest-owned `pid-*` shelves: they sit under a per-user, scheme-versioned managed root and a dead-owner sweep reclaims them on first use. The default `t.TempDir()` showed no measured copy-speed difference (the copy micro-measurement: 100 copies 36.6 ms vs 44.8 ms tmpfs — noise). |
 
 Set in `cmd/peasant/main_test.go` (`PEASANT_DB_POOL_SIZE=1`, arena),
 `internal/store/store_test.go` (`PEASANT_DB_POOL_SIZE=2`),
-`internal/ingest/main_test.go` and `internal/api/main_test.go` (arena), and
-`internal/e2e/main_test.go` (arena default). The resolvers (`store.resolvePoolSize`,
+`internal/api/main_test.go` (arena), and `internal/e2e/main_test.go` (arena
+default). The resolvers (`store.resolvePoolSize`,
 `ingest.resolveArenaSizeBytes`) take the env override only when it parses as a
 positive integer, else the default.
 

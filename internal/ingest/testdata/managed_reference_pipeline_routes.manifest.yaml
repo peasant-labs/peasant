@@ -1,0 +1,20 @@
+# Exact membership of managed_reference_pipeline_routes.yaml, plus the rows
+# that do not apply and why.
+requiredNames:
+  - context-change-references
+  - no-candidate-parses
+  - source-moved-parses
+  - owner-seal-mismatch-parses
+  - parse-input-context-parses
+  - plan-error-parses
+  - install-error-parses
+  - force-skips-the-step
+  - reindex-skips-the-step
+  - disable-refresh-skips-skips-the-step
+  - non-context-mismatch-skips-the-step
+  - store-without-referencer
+  - validated-settle-wins-over-reference
+  - claude-without-candidate-parses
+notApplicable:
+  - name: no-candidate-parses-on-a-claude-erroring-branch
+    reason: claude_erroring_branches.manifest.yaml lists no branch where the metadata half errors while the full builder succeeds

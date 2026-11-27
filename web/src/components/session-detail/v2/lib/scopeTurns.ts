@@ -1,3 +1,4 @@
+import { EntryType, Role as SchemaRole } from '@peasant-labs/schema';
 import { prefilterTurns as packagePrefilterTurns } from '@peasant-labs/fairtrade/ui';
 import type { TurnDetail } from '@/types/messages';
 import {
@@ -93,7 +94,7 @@ export function taskScopeTurns(turns: TurnDetail[], entryIndex: number): TurnDet
   let end = turns.length;
   for (let i = start + 1; i < turns.length; i++) {
     const t = turns[i];
-    if (t.role === 'user' && (t.depth ?? 0) === 0) {
+    if (t.role === SchemaRole.User && (t.depth ?? 0) === 0) {
       end = i;
       break;
     }
@@ -182,9 +183,9 @@ export function turnsToMarkdown(turns: TurnDetail[]): string {
   const blocks: string[] = [];
   for (const t of turns) {
     const who =
-      t.role === 'user'
+      t.role === SchemaRole.User
         ? 'You'
-        : t.role === 'assistant'
+        : t.role === SchemaRole.Assistant
           ? t.agentName
             ? `Assistant (${t.agentName})`
             : 'Assistant'
@@ -216,7 +217,7 @@ export function prefilterTurns(turns: TurnDetail[]): TurnDetail[] {
   // The published viewer names an image entry the pinned schema client does not.
   // The filter returns a subset of the turns it was given; drop an image entry
   // rather than widen the host's turn type.
-  return packagePrefilterTurns(turns).filter((turn): turn is TurnDetail => turn.entryType !== 'image');
+  return packagePrefilterTurns(turns).filter((turn): turn is TurnDetail => turn.entryType !== EntryType.Image);
 }
 
 // -- Breadcrumb + chip helpers ---------------------------------------------------

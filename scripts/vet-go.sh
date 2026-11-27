@@ -29,9 +29,9 @@ go vet -unsafeptr=false "${native_package}"
 opt_in_tags=(
   astgrep capability_scan_negative dry_run_capability_negative e2e
   evidence_negative_dedup evidence_negative_indexer evidence_negative_suppression
-  experimental guided_screenshots managed_refresh_bench origin_audit
+  experimental guided_screenshots origin_audit
   projection_negative_fold projection_negative_scope projection_negative_seed
-  upgrade_measure
+  skipbudget upgrade_measure
 )
 
 # Search owned files, including untracked ones; git grep exits 1 for no matches.

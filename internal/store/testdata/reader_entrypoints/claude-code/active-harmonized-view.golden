@@ -1,0 +1,114 @@
+{
+  "Found": true,
+  "GenerationID": "G_golden",
+  "Record": {
+    "SessionID": "abc00000-0000-4000-8000-0000000000c1",
+    "GenerationID": "G_golden",
+    "SchemaVersion": 12,
+    "Harness": "claude-code",
+    "Model": "claude-synthetic",
+    "Version": "",
+    "TimestampStartMs": 1767312000000,
+    "TimestampEndMs": 1767312004000,
+    "TimestampIngestedMs": 1767312000000,
+    "SourceFilePath": "/synthetic/claude-code/abc00000-0000-4000-8000-0000000000c1",
+    "SourceFormat": "jsonl",
+    "GitBranch": null,
+    "GitRemote": null,
+    "GitWorktree": null,
+    "GitTracking": null,
+    "ProjectHash": "987468aa2aadbcf0b4ea7128f83160052825d1bd82e02aff8193ab8b0f82b916",
+    "ProjectFilePath": "/synthetic/reader-corpus",
+    "ProjectName": "reader-corpus",
+    "HostSlug": "reader-host",
+    "RootSessionID": null,
+    "Purpose": null,
+    "CWD": "/synthetic/reader-corpus",
+    "DerivedAtMs": null,
+    "ContentHash": "479c2558895b2332bffbc3cf5a15431a8e4907cb2988ea209a2ab41301b6e014",
+    "MetadataHash": "e64563b26484b4e1c20e98ea779b59e2d72548e7d29ea9dfb373494f4d7f3297",
+    "RedactionApplied": false,
+    "RedactionLevel": null,
+    "RedactionRuleSetVersion": null,
+    "RedactionAtMs": null,
+    "RedactionContentHashAtRedact": null,
+    "AdapterVersion": 5,
+    "DiagnosticsPartial": null,
+    "Completeness": "complete",
+    "SourceEvidenceDigest": "479c2558895b2332bffbc3cf5a15431a8e4907cb2988ea209a2ab41301b6e014",
+    "IndexFormatVersion": 2,
+    "CandidateDigest": "3e332f5ee0e458c7653f9155ea288cf6e2e98f60ebd590d223ffcb1d7ca88910",
+    "PriorEvidence": null,
+    "InstalledAtMs": 0,
+    "ActivatedAtMs": null
+  },
+  "Children": {
+    "Subagents": null,
+    "Commits": null,
+    "Associations": null,
+    "Diagnostics": null,
+    "TitleRefs": [
+      "e_golden_0001",
+      "e_golden_0007"
+    ],
+    "Relationships": null,
+    "Segments": null,
+    "SegmentRefs": null,
+    "Sections": [
+      {
+        "PartitionID": 0,
+        "EarlierState": null
+      }
+    ],
+    "NativeMetadata": null
+  },
+  "Mapping": [
+    {
+      "Partition": 0,
+      "Index": 0,
+      "Digest": "bb91f7aea929aa6fda24a5d37b32ddd32005a1175656c557bc9bd610ef0a67e9"
+    },
+    {
+      "Partition": 0,
+      "Index": 1,
+      "Digest": "e671612f844dfefca19f6aefb33dffc17625e0bb9e96d2541fc1947b51275964"
+    },
+    {
+      "Partition": 0,
+      "Index": 2,
+      "Digest": "a6a2c1915af9b81999e10a3345ac0c68ae25cdf7420b17c1b92d5e2ed6fdbb8e"
+    },
+    {
+      "Partition": 0,
+      "Index": 3,
+      "Digest": "b8f36bbe9ac87672961dfc8a796c43359cedcf517993d4758a3e59b777cd4d5c"
+    },
+    {
+      "Partition": 0,
+      "Index": 4,
+      "Digest": "ab4cb3f5e275ce30f32ae79963f1da050122a6d4fc8eb6e536f6481eecb24cb9"
+    },
+    {
+      "Partition": 0,
+      "Index": 5,
+      "Digest": "c1e8022b09dcc5ed0a5f648c169b267130456fdd113c3708cf2add7eab76f745"
+    },
+    {
+      "Partition": 0,
+      "Index": 6,
+      "Digest": "500bab4105bd7337babbb067a25c197330b9fb0ef729e33f7521aec380bd0c92"
+    }
+  ],
+  "Descriptors": {},
+  "Aliases": {
+    "accept:claude:abc00000-0000-4000-8000-0000000000c1:u1": "e_golden_0001",
+    "accept:claude:abc00000-0000-4000-8000-0000000000c1:u3": "e_golden_0007",
+    "block:claude:abc00000-0000-4000-8000-0000000000c1:a1": "e_golden_0002",
+    "block:claude:abc00000-0000-4000-8000-0000000000c1:a1:1": "e_golden_0003",
+    "block:claude:abc00000-0000-4000-8000-0000000000c1:a2": "e_golden_0006",
+    "block:claude:abc00000-0000-4000-8000-0000000000c1:u1": "e_golden_0001",
+    "block:claude:abc00000-0000-4000-8000-0000000000c1:u2": "e_golden_0004",
+    "block:claude:abc00000-0000-4000-8000-0000000000c1:u2:0": "e_golden_0005",
+    "block:claude:abc00000-0000-4000-8000-0000000000c1:u3": "e_golden_0007"
+  }
+}

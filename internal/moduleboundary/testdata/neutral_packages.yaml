@@ -4,10 +4,12 @@ cases:
   - {name: selectionfilter-not-import-onboarding, directory: internal/selectionfilter, forbidden: github.com/peasant-labs/peasant/internal/onboarding}
   - {name: api-not-import-internal-tui, directory: internal/api, forbidden: github.com/peasant-labs/peasant/internal/tui}
   - {name: discovery-not-import-internal-tui, directory: internal/discovery, forbidden: github.com/peasant-labs/peasant/internal/tui}
+  - {name: sourcepreview-not-import-internal-tui, directory: internal/sourcepreview, forbidden: github.com/peasant-labs/peasant/internal/tui}
+  - {name: sourcepreview-not-import-net-http, directory: internal/sourcepreview, forbidden: net/http}
   - {name: one-declaration-of-each-neutral-type}
 neutralTypes: [ProjectIdentity, PreparedSessionListing, SessionListing, SessionSource, SessionSourceOrigin, Forest, Node, Stop, Field, Draft, Residual, StopKind, FieldKind, ModelScope, FlowKey, NextStep]
 retiredTypes: [NextStepKind]
-guardedDirectories: [internal/tui/settings, internal/tui/kickstart, internal/tui/ftue, internal/discovery]
+guardedDirectories: [internal/tui/settings, internal/tui/kickstart, internal/tui/ftue, internal/discovery, internal/sourcepreview]
 permittedHomonyms:
   - {file: internal/codegraph/graph.go, name: Node}
   - {file: internal/tui/settings/field.go, name: Field}

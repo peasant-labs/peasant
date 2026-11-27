@@ -1,0 +1,3 @@
+requiredNames:
+  - stamp-only-bump-settles-or-parses
+  - context-change-parses-after-the-failed-proof

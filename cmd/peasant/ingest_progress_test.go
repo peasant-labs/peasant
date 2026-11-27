@@ -24,6 +24,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
+	"github.com/peasant-labs/peasant/internal/testkit/executable"
 	"github.com/peasant-labs/peasant/internal/testkit/testwait"
 	"github.com/peasant-labs/peasant/internal/tui/harvestprogress"
 	"github.com/peasant-labs/peasant/internal/tui/ingestprogress"
@@ -1114,7 +1115,7 @@ func TestHarvestInterruptMounted(t *testing.T) {
 			if c.DiffSession != "" {
 				git = "#!/bin/sh\nexit 1\n"
 			}
-			if err := os.WriteFile(filepath.Join(dir, "git"), []byte(git), 0o700); err != nil {
+			if err := executable.Write(filepath.Join(dir, "git"), []byte(git), 0o700); err != nil {
 				t.Fatal(err)
 			}
 			args := []string{"harvest", "--source-harness=opencode", "--source-path=" + filepath.Dir(source.Path), "--output=" + filepath.Join(dir, "output"), "--data-dir=" + dir, "--config-dir=" + dir}

@@ -36,14 +36,10 @@ const (
     tool_kind, stop_reason, part_type
 ) VALUES `
 
-	sqlSessionEntriesExist = `SELECT 1 FROM session_entries WHERE session_id = ? LIMIT 1`
-
-	// sqlShimEntriesExist covers the harmonized representation: an active
+	// shimEntriesExistSQL covers the harmonized representation: an active
 	// generation's main-partition mapping rows. The mirror holds no rows for
 	// converted sessions, so existence checks both homes.
-	sqlShimEntriesExist = `SELECT 1 FROM session_generation_entries m
-JOIN sessions s ON s.session_id = m.session_id
-WHERE m.session_id = ? AND m.generation_id = s.active_generation_id AND m.partition_id = 0 LIMIT 1`
+	sqlSessionEntriesExist = `SELECT 1 FROM session_entries WHERE session_id = ? LIMIT 1`
 
 	// sqlSelectTargetEntriesForSession reads the entry-annotation attachments a
 	// re-index has to carry across its DELETE. Ordered so a restore is
@@ -1389,7 +1385,7 @@ JOIN session_entry_bodies b
   ON b.session_id = m.session_id AND b.body_digest = m.body_digest
 JOIN sessions s ON s.session_id = m.session_id
 WHERE m.session_id = ?
-AND m.generation_id = s.active_generation_id AND m.partition_id = 0
+AND ` + activeRowsOfM(conn) + ` AND m.partition_id = 0
 ORDER BY m.entry_index`
 	}
 	err = sqlitex.Execute(conn, query, &sqlitex.ExecOptions{
@@ -1684,7 +1680,7 @@ func (s *Store) SessionEntriesExist(ctx context.Context, sessionID ingest.Sessio
 		return false, fmt.Errorf("store: check session_entries for %s: %w", sessionID, err)
 	}
 	if !exists {
-		err = sqlitex.Execute(conn, sqlShimEntriesExist, &sqlitex.ExecOptions{
+		err = sqlitex.Execute(conn, shimEntriesExistSQL(conn), &sqlitex.ExecOptions{
 			Args: []any{string(sessionID)},
 			ResultFunc: func(_ *sqlite.Stmt) error {
 				exists = true
@@ -1699,6 +1695,12 @@ func (s *Store) SessionEntriesExist(ctx context.Context, sessionID ingest.Sessio
 }
 
 // --- helpers ---
+
+func shimEntriesExistSQL(conn *sqlite.Conn) string {
+	return `SELECT 1 FROM session_generation_entries m
+JOIN sessions s ON s.session_id = m.session_id
+WHERE m.session_id = ? AND ` + activeRowsOfM(conn) + ` AND m.partition_id = 0 LIMIT 1`
+}
 
 func boolToInt(b bool) int {
 	if b {

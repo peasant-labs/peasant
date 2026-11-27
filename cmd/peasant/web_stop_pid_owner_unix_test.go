@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/peasant-labs/peasant/internal/testkit/executable"
 )
 
 const webServerStandInEnv = "PEASANT_TEST_WEB_SERVER_STAND_IN"
@@ -143,27 +145,42 @@ func TestStopWebLeavesAnUnrelatedProcessAlone(t *testing.T) {
 	}
 }
 
+const programWithServerArgsFixture = "testdata/program_with_server_args.sh"
+
 // TestStopWebLeavesAnotherProgramWithServerArgsAlone is the #714 review repro:
 // a different executable started with the server's own trailing arguments
-// (`python3 -c … web start --foreground --port P`) must not be signalled.
+// (`sh program_with_server_args.sh web start --foreground --port P`) must not
+// be signalled. The program is a real file; it blocks on a pipe this test holds
+// open, so it starts no child that could outlive the test.
 func TestStopWebLeavesAnotherProgramWithServerArgsAlone(t *testing.T) {
 	t.Parallel()
-	python, err := exec.LookPath("python3")
+	shell, err := exec.LookPath("sh")
 	if err != nil {
-		t.Skip("python3 not installed")
+		t.Skip("sh not installed")
 	}
+	program, err := filepath.Abs(programWithServerArgsFixture)
+	if err != nil {
+		t.Fatalf("resolve fixture %s: %v", programWithServerArgsFixture, err)
+	}
+	stdin, hold, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = hold.Close() })
 	port := freePort(t)
-	cmd := exec.Command(python, "-c", "import time; time.sleep(300)", "web", "start", "--foreground", "--port", strconv.Itoa(port))
+	cmd := exec.Command(shell, program, "web", "start", "--foreground", "--port", strconv.Itoa(port))
+	cmd.Stdin = stdin
 	exited := startChild(t, cmd)
+	_ = stdin.Close()
 	writePIDFile(t, port, cmd.Process.Pid)
 	deadline := time.Now().Add(10 * time.Second)
-	for !commandLineShows(cmd.Process.Pid, "time.sleep") {
+	for !commandLineShows(cmd.Process.Pid, "program_with_server_args.sh web start --foreground --port "+strconv.Itoa(port)) {
 		if time.Now().After(deadline) {
-			t.Fatal("python3 stand-in never started")
+			t.Fatal("the program with the server's arguments never started")
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	assertNotSignalled(t, "python3 with the server's arguments", cmd, exited, stopWeb(port))
+	assertNotSignalled(t, "another program with the server's arguments", cmd, exited, stopWeb(port))
 }
 
 // procCmdlineRoot is the kernel's process view. A test points it at an empty
@@ -218,16 +235,7 @@ func TestStopWebLeavesSameNamedExecutableAtAnotherPathAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	other := filepath.Join(t.TempDir(), filepath.Base(self))
-	staged := other + ".staged"
-	if err := os.WriteFile(staged, data, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// Publish the copy with a rename so the executed path is never the inode a
-	// write descriptor is attached to. A parallel test can fork between the
-	// write and the start; that child inherits the open write descriptor, and
-	// an exec of the same path fails with ETXTBSY ("text file busy"). The
-	// rename leaves the inherited descriptor on the unlinked staged inode.
-	if err := os.Rename(staged, other); err != nil {
+	if err := executable.Write(other, data, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	port := freePort(t)

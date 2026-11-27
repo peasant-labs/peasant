@@ -1652,6 +1652,7 @@ func (h *syncHandler) newIngestPipeline(progState *ingest.ProgressState, scope *
 		}
 	}
 
+	pipelineCfg.Validator = db
 	// Automatic ownership follows the signed-in account, from the same store
 	// this run writes. A signed-out server keeps working and claims nothing.
 	pipelineOptions := []ingest.PipelineOption{

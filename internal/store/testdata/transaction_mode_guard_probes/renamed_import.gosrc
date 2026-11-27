@@ -1,0 +1,15 @@
+package store
+
+import (
+	sx "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+)
+
+func probeRenamedImport(conn *sqlite.Conn) (err error) {
+	defer sx.Save(conn)(&err)
+	return readThenWrite(conn)
+}
+
+func probeLocalNamedSqlitex(conn *sqlite.Conn) error {
+	sqlitex := lookalike{}
+	return sqlitex.Transaction(conn)
+}

@@ -1,9 +1,17 @@
 package store
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"testing"
+
+	"github.com/peasant-labs/peasant/internal/indexformat"
+
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+	"github.com/peasant-labs/schema"
 )
 
 // PoolForTest exposes the connection pool for test assertions.
@@ -27,4 +35,176 @@ func (s *Store) SetSessionMembershipChunk(fn func(conn *sqlite.Conn, chunk []ing
 // This function is only available in test builds.
 func SessionsWithoutEntriesChunkSizeForTest() int {
 	return sessionsWithoutEntriesChunkSize
+}
+
+// SettleCapturedGenerationUnchangedAtForTest is SettleCapturedGenerationUnchanged
+// with the settle's stats stamp pinned, so two forks that settle the same
+// session write the same bytes.
+// This function is only available in test builds.
+func (s *Store) SettleCapturedGenerationUnchangedAtForTest(ctx context.Context, request ingest.ManagedGenerationUnchangedProof, updatedAtMs int64) (ingest.ManagedGenerationUnchangedSettleOutcome, error) {
+	proof, found, err := s.capturedUnchangedRequest(ctx, request)
+	if err != nil {
+		return ingest.ManagedGenerationUnchangedSettleOutcome{}, err
+	}
+	if !found {
+		return ingest.ManagedGenerationUnchangedSettleOutcome{}, &ingest.StaleIndexWorkError{SessionID: request.SessionID}
+	}
+	proof.UpdatedAtMs = updatedAtMs
+	result, err := s.SettleManagedGenerationUnchanged(ctx, proof)
+	if err != nil {
+		return ingest.ManagedGenerationUnchangedSettleOutcome{}, err
+	}
+	return ingest.ManagedGenerationUnchangedSettleOutcome{GenerationID: result.GenerationID}, nil
+}
+
+// SetValidatedSettleMutationForTest removes one named write from every
+// validated settle of this store. The name is skipped-stats-write or
+// skipped-mirror-write.
+// This function is only available in test builds.
+func (s *Store) SetValidatedSettleMutationForTest(t testing.TB, name string) {
+	t.Helper()
+	mutation := unchangedSettleMutation(name)
+	if mutation != settleSkipsStatsWrite && mutation != settleSkipsMirrorWrite {
+		t.Fatalf("unknown validated-settle mutation %q", name)
+	}
+	s.settleValidatedMutation = func() unchangedSettleMutation { return mutation }
+}
+
+// ActiveHarmonizedViewForTest is the exported form of the skip comparison's
+// operand, the structured read of a session's active harmonized generation.
+// This type is only available in test builds.
+type ActiveHarmonizedViewForTest struct {
+	Found        bool
+	GenerationID string
+	Record       GenerationRecord
+	Children     GenerationChildren
+	Mapping      []MappedBodyForTest
+	Descriptors  map[schema.SourceEntryRef]string
+	Aliases      map[string]schema.SourceEntryRef
+}
+
+// MappedBodyForTest is one entry-mapping row of the active view.
+// This type is only available in test builds.
+type MappedBodyForTest struct {
+	Partition int
+	Index     int
+	Digest    string
+}
+
+// ReadActiveHarmonizedViewForTest runs the production readActiveHarmonizedView
+// on a pooled connection inside one savepoint, so the reads see one snapshot.
+// This function is only available in test builds.
+func (s *Store) ReadActiveHarmonizedViewForTest(ctx context.Context, sessionID schema.SessionID) (_ ActiveHarmonizedViewForTest, err error) {
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return ActiveHarmonizedViewForTest{}, err
+	}
+	defer s.pool.Put(conn)
+	defer sqlitex.Save(conn)(&err)
+	view, err := readActiveHarmonizedView(conn, sessionID)
+	if err != nil {
+		return ActiveHarmonizedViewForTest{}, err
+	}
+	out := ActiveHarmonizedViewForTest{Found: view.found, GenerationID: view.generationID, Record: view.record, Children: view.children, Descriptors: view.descriptors, Aliases: view.aliases}
+	for _, mapped := range view.mapping {
+		out.Mapping = append(out.Mapping, MappedBodyForTest{Partition: mapped.partition, Index: mapped.index, Digest: mapped.digest})
+	}
+	return out, nil
+}
+
+// MappingSetSchemaVersionForTest is the schema that adds the generation
+// mapping-set column.
+// This constant is only available in test builds.
+const MappingSetSchemaVersionForTest = mappingSetSchemaVersion
+
+// BuildBehindStoreForTest creates a store at schema from through the real
+// migration chain, then runs seed on its raw connection.
+// This function is only available in test builds.
+func BuildBehindStoreForTest(t *testing.T, path string, from int, seed func(*sqlite.Conn)) {
+	t.Helper()
+	buildBehindStore(t, path, from, seed)
+}
+
+// NewerSchemaErrorForTest is the refusal Open returns for a store a newer
+// build upgraded.
+// This function is only available in test builds.
+func NewerSchemaErrorForTest(dbPath string, version int) error {
+	return newerSchemaError(dbPath, version)
+}
+
+// BuildChainReferenceForTest builds a store through every migration the way
+// the baseline generator does.
+// This function is only available in test builds.
+func BuildChainReferenceForTest(t *testing.T, path string) {
+	t.Helper()
+	buildChainReference(t, path)
+}
+
+// DumpDatabaseForTest is the schema and seed-row dump the fresh-versus-
+// migrated comparison uses.
+// This function is only available in test builds.
+func DumpDatabaseForTest(t *testing.T, path string) []byte {
+	t.Helper()
+	return dumpDatabase(t, path)
+}
+
+// SetReferenceInstallSeamForTest observes the reference install: conn is
+// called with the install connection before its transaction, and read runs
+// inside the transaction before any write; an error from read fails the
+// install there.
+// This function is only available in test builds.
+func (s *Store) SetReferenceInstallSeamForTest(t testing.TB, conn func(*sqlite.Conn), read func(*sqlite.Conn) error) {
+	t.Helper()
+	s.referenceInstallSeam = referenceInstallSeam{conn: conn, read: read}
+	t.Cleanup(func() { s.referenceInstallSeam = referenceInstallSeam{} })
+}
+
+// RebindReferencePlanForTest hands a plan made by one store to another
+// store opened on the same database, so a test can install it on fresh
+// connections.
+// This function is only available in test builds.
+func RebindReferencePlanForTest(plan ingest.ManagedGenerationReferencePlan, s *Store) ingest.ManagedGenerationReferencePlan {
+	planned := *plan.(*ManagedGenerationReferencePlan)
+	planned.store = s
+	return &planned
+}
+
+// ParseTablesForTest lists the tables whose rows a generation may read from
+// its owner.
+// This function is only available in test builds.
+func ParseTablesForTest() []string { return append([]string(nil), parseTables...) }
+
+// GenerationScopedTablesForTest lists every generation-scoped table.
+// This function is only available in test builds.
+func GenerationScopedTablesForTest() []string { return append([]string(nil), reclaimTableNames...) }
+
+// ParseProjectionForTest prepares a candidate the way activation does and
+// returns its parse projection as JSON: the ordered body digests and their
+// partitions, the blob digests, the aliases, and the title refs, segments,
+// segment refs, sections and native metadata. renameSegmentRefs replaces each
+// segment ref by its position, for a builder that mints those refs at random.
+// This function is only available in test builds.
+func ParseProjectionForTest(generation indexformat.Generation, blobs map[schema.SourceEntryRef][]byte, renameSegmentRefs bool) ([]byte, error) {
+	prepared, err := prepareHarmonizedCandidate(generation.Metadata.SessionID, generation, blobs)
+	if err != nil {
+		return nil, err
+	}
+	children := prepared.children
+	segmentRefs := append([]GenerationSegmentRef(nil), children.SegmentRefs...)
+	if renameSegmentRefs {
+		for i := range segmentRefs {
+			segmentRefs[i].SourceEntryRef = schema.SourceEntryRef(fmt.Sprintf("segment-ref-%d", i))
+		}
+	}
+	return json.Marshal(struct {
+		Bodies         []BodyDigest
+		Partitions     []int
+		Blobs          []BlobDigest
+		Aliases        map[string]schema.SourceEntryRef
+		TitleRefs      []schema.SourceEntryRef
+		Segments       []GenerationSegment
+		SegmentRefs    []GenerationSegmentRef
+		Sections       []GenerationSection
+		NativeMetadata []GenerationNativeMetadata
+	}{prepared.bodyDigests, prepared.partitions, prepared.blobDigests(), prepared.aliases, children.TitleRefs, children.Segments, segmentRefs, children.Sections, children.NativeMetadata})
 }

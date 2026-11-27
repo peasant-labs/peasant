@@ -1,0 +1,194 @@
+# Measured budgets, one row per planned skip, each from its own 240 x 1000
+# harness report (5 rounds). Every row must pass the measured-budget validator.
+#
+# Field mapping, all in milliseconds and all medians over the report's rounds:
+#   proof   = skip arm medianProofMs: the stored refresh_proof stage.
+#   settle  = skip arm medianIndexStageMs: the INDEX stage of the skip arm. The
+#             stored profile has no separate settle stage, so INDEX (which
+#             holds the settle, or the stored-index re-index) is the skip's own
+#             cost. The proof runs inside the index stage, so its time may be
+#             counted twice; that can only overstate the skip's cost, which
+#             keeps the ratio conservative.
+#   avoided = baseline arm medianIndexStageMs: the INDEX stage of the work the
+#             skip replaces.
+# The ratio the validator checks is (proof + settle) / avoided.
+#
+# proven-settle (C1, stamp-only adapter bump): (98.077 + 1161.793) / 15322.876
+#   = 0.082. Wall medians: 5500.570 ms against 20068.291 ms (ratio 0.274).
+#   Wall min–max: skip 5329.447–6099.094 ms; baseline 19901.781–20529.832 ms.
+#   INDEX min–max: skip 1121.664–1333.833 ms; baseline 15249.097–15644.007 ms.
+#   Skip proof min–max: 62.006–153.575 ms.
+# stored-index (C3, indexer bump): 15895.061 / 35430.329 = 0.449. The lane has
+#   no proof. Wall medians: 21568.407 ms against 45752.144 ms (ratio 0.471).
+#   Wall min–max: skip 20925.720–21801.179 ms; baseline 44996.532–46106.574 ms.
+#   INDEX min–max: skip 15815.532–15992.401 ms; baseline 35329.255–36482.771 ms.
+#
+# Wall figures and spreads are informational; ValidateMeasured does not read
+# them. C1's wall ratio fell from 0.428 to 0.274 while its budget ratio stayed
+# roughly flat. Wall covers more than INDEX, and the cause is unconfirmed.
+# The prior rows were measured at different heads (0c4084f45 and c14b7259a)
+# without recorded spreads, so the change cannot be attributed to per-process
+# sampling alone.
+#
+# Measured on an AMD Ryzen 9 7950X3D (32 logical CPUs), 240 x 1000, five
+# rounds, one process per arm sample, in the Nix shell with GOTOOLCHAIN=go1.26.0.
+# C1 start/end load averages (includes the run): 0.25/0.58/2.05 and 1.60/1.24/2.01.
+# C3 start/end (includes the run): 1.60/1.24/2.01 and 2.30/2.97/2.67.
+# CI, runner VMs and test processes were checked before, every 30 seconds
+# during, and after each case; earlier attempts were discarded when CI became
+# active. Head and base are the same commit: this is a re-measure at one head.
+#
+# validated-settle (C7, adapter bump over a stale stored metadata hash; every
+#   session's cheap proof fails on the metadata context, its metadata candidate
+#   validates, and the validated settle runs): (703.195 + 3427.512) / 20700.209
+#   = 0.200. All 1,200 session runs validated and settled; zero parses. Wall
+#   medians: 8722.514 ms against 25953.076 ms (ratio 0.336).
+#   Wall min–max: skip 8397.496–13709.901 ms; baseline 24009.475–29837.845 ms.
+#   INDEX min–max: skip 3379.996–7851.601 ms; baseline 18294.085–24260.268 ms.
+#   Skip proof min–max: 93.031–1502.021 ms.
+#   What the ratio covers: the metadata candidate and the validator run inside
+#   the INDEX stage, in the parser workers between the proof and the settle,
+#   and INDEX is that stage's wall time, so settle (skip INDEX) already holds
+#   the validation; proof is added on top, as for proven-settle. The report's
+#   medianValidateMs (8272.491 ms) is the refresh_validate stage, a sum of
+#   per-session times across the parallel workers (per session, median
+#   32.217 ms), so it is larger than the INDEX wall and is not added again.
+#   Measured at head 5c5e62e55 with that head as base, 240 x 1000, five rounds,
+#   one process per arm sample, clean worktree. The machine was not idle:
+#   start/end load averages 15.49/15.87/15.90 and 9.16/12.57/14.55; the
+#   maintainer accepted a busy machine for this row, so its spreads are wider
+#   than C1's and C3's.
+#
+# reference-install (C8, adapter bump with a context change — project rename —
+#   over managed generations; every session's cheap proof and context
+#   validator fail on the context, and the reference plan and install run):
+#   (80.798 + 1661.265) / 37839.409 = 0.046. All 1,200 session runs (240 x 5)
+#   referenced; zero parses. Wall medians: 11864.310 ms against 48100.032 ms
+#   (ratio 0.247).
+#   Wall min–max: skip 11752.294–13275.309 ms; baseline 46744.170–50055.020 ms.
+#   INDEX min–max: skip 1541.244–1892.018 ms; baseline 36532.441–39261.357 ms.
+#   Skip proof min–max: 70.166–94.135 ms.
+#   What the ratio covers: the metadata candidate, the validator, and the
+#   reference plan and install all run inside the INDEX stage, so settle
+#   (skip INDEX) already holds both the validation and the reference
+#   plan/install; proof is added on top and may be counted twice (keeping the
+#   ratio conservative). The report's medianValidateMs (5965.912 ms; per
+#   session median 23.368 ms) and medianReferenceMs (33967.666 ms; per session
+#   median 3.948 ms) are per-session sums across parallel workers, not wall
+#   time, so they are larger than INDEX wall and are not added again.
+#   Measured at head ea7c73a06 with that head as base, shape 240 x 1000
+#   (240 sessions, 1000 entries per session, 230,694,000 corpusBytes,
+#   360,000 importedEntries, 240 activeGenerations), five rounds, one process
+#   per arm sample, dirtyWorktree false, start/end load averages
+#   4.78/5.85/7.24 and 4.26/4.93/6.32.
+#
+# Any other failed proof parses, so the stored-metadata lane has no further
+# skip to budget; the copy refresh that once filled that gap was measured
+# slower than the parse when metadata changed and removed.
+measurementRequired: true
+requiredNames:
+  - proven-settle
+  - stored-index
+  - validated-settle
+  - reference-install
+budgets:
+  - name: proven-settle
+    lane: stored-metadata
+    disposition: proven
+    cases: [C1]
+    proof: 98.077
+    settle: 1161.793
+    avoided: 15322.876
+    provenance:
+      head: 2fb31a933d110ca668b16550bb288e7bb0da0c47
+      base: 2fb31a933
+      command: 'nix develop --command env GOTOOLCHAIN=go1.26.0 go run -tags skipbudget ./cmd/skip-budget -case C1 -base 2fb31a933 -root /tmp/opencode/skip-remeasure -sessions 240 -entries 1000 -rounds 5'
+      date: '2026-11-20T05:20:03Z'
+      samples: 5
+  - name: stored-index
+    lane: stored-index
+    disposition: index
+    cases: [C3]
+    proof: 0
+    settle: 15895.061
+    avoided: 35430.329
+    provenance:
+      head: 2fb31a933d110ca668b16550bb288e7bb0da0c47
+      base: 2fb31a933
+      command: 'nix develop --command env GOTOOLCHAIN=go1.26.0 go run -tags skipbudget ./cmd/skip-budget -case C3 -base 2fb31a933 -root /tmp/opencode/skip-remeasure -sessions 240 -entries 1000 -rounds 5'
+      date: '2026-11-20T05:23:38Z'
+      samples: 5
+  - name: validated-settle
+    lane: stored-metadata
+    disposition: validated
+    cases: [C7]
+    proof: 703.195
+    settle: 3427.512
+    avoided: 20700.209
+    provenance:
+      head: 5c5e62e553a078d1d61a4087f71fc6a26266ec26
+      base: 5c5e62e55
+      command: 'nix develop --command env GOTOOLCHAIN=go1.26.0 go run -tags skipbudget ./cmd/skip-budget -case C7 -base 5c5e62e55 -root /tmp/opencode/c7 -sessions 240 -entries 1000 -rounds 5'
+      date: '2026-11-20T11:01:03Z'
+      samples: 5
+  - name: reference-install
+    lane: stored-metadata
+    disposition: referenced
+    cases: [C8]
+    proof: 80.798
+    settle: 1661.265
+    avoided: 37839.409
+    provenance:
+      head: ea7c73a06e74a20501c108a027e20bcf1788d940
+      base: ea7c73a06
+      command: 'nix develop --command env GOTOOLCHAIN=go1.26.0 go run -tags skipbudget ./cmd/skip-budget -case C8 -base ea7c73a06 -root /tmp/opencode/c8 -sessions 240 -entries 1000 -rounds 5'
+      date: '2026-11-21T16:51:06Z'
+      samples: 5
+dispositions: [proven, validated, referenced, index]
+unknownDispositions: [copied, ""]
+cases:
+  - name: winning-ratio
+    proof: 1
+    settle: 1
+    avoided: 3
+    valid: true
+  - name: break-even-ratio
+    proof: 1
+    settle: 1
+    avoided: 2
+    valid: false
+  - name: losing-ratio
+    proof: 2
+    settle: 1
+    avoided: 2
+    valid: false
+  - name: unmeasured-settle
+    proof: 1
+    avoided: 3
+    valid: false
+  - name: zero-avoided
+    proof: 0
+    settle: 0
+    avoided: 0
+    valid: false
+  - name: negative-proof
+    proof: -1
+    settle: 1
+    avoided: 3
+    valid: false
+  - name: not-a-number
+    proof: .nan
+    settle: 1
+    avoided: 3
+    valid: false
+  - name: infinite-avoided
+    proof: 1
+    settle: 1
+    avoided: .inf
+    valid: false
+missingProvenance:
+  - head
+  - base
+  - command
+  - recorded-date
+  - samples

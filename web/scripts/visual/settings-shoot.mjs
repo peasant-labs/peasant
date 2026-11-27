@@ -41,6 +41,8 @@ import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { applyDeterminism } from './determinism.mjs'
 import { SMOKE_THEMES } from './smoke-surfaces.mjs'
+import { ownedServerSandbox } from './lib/owned-server-sandbox.mjs'
+import { startOwnedServer } from './lib/owned-server-start.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const WEB = join(HERE, '../..')
@@ -89,7 +91,12 @@ console.log(`[settings-shoot] provenance chunk=${relative(REPO, markerChunk)} bi
 const ROOT = mkdtempSync(join(tmpdir(), 'peasant-settings-'))
 const HOME = join(ROOT, 'home')
 const CONFIG = join(ROOT, 'config')
-const env = { ...process.env, HOME, XDG_CONFIG_HOME: CONFIG, XDG_DATA_HOME: join(ROOT, 'data'), XDG_STATE_HOME: join(ROOT, 'state'), GIT_CONFIG_NOSYSTEM: '1' }
+// The world's HOME, configuration and data directories are named through the server sandbox, so they
+// are used as this script prepares them (nothing is seeded into them) and kept with KEEP=1; the
+// server's state and cache directories are the sandbox's own throwaway root. Git, run below to make
+// the repositories, gets the same environment, so it reads no system or personal Git configuration.
+const sandbox = ownedServerSandbox('settings-shoot', { home: HOME, configDir: CONFIG, dataDir: join(ROOT, 'data') }, { ...process.env, GIT_CONFIG_NOSYSTEM: '1' })
+const env = sandbox.env
 const git = (dir, ...args) => execFileSync('git', ['-C', dir, ...args], { env, stdio: 'pipe' })
 const repoPath = (name) => join(HOME, 'work/acme', name)
 
@@ -164,15 +171,11 @@ function resetHooks() {
 }
 
 /* ---- the server ---- */
-const server = spawn(BIN, ['web', 'start', '--port', PORT, '--foreground', '--no-browser'], { cwd: ROOT, env, stdio: ['ignore', 'ignore', 'pipe'] })
-let serverLog = ''
-let serverDown = false
-server.stderr.on('data', (data) => { serverLog += data.toString() })
-server.on('exit', () => { serverDown = true })
+let server
 let browser
 const teardown = async () => {
   try { if (browser) await browser.close() } catch {}
-  try { if (!serverDown) server.kill('SIGTERM') } catch {}
+  try { if (server && server.exitCode === null && server.signalCode === null) server.kill('SIGTERM') } catch {}
   village.close()
   if (process.env.KEEP !== '1') rmSync(ROOT, { recursive: true, force: true })
 }
@@ -181,13 +184,15 @@ const abort = async (what, fix) => {
   fail(what, fix)
 }
 
+const IngestStatus = Object.freeze({ Running: 'running' })
+const ConsoleLevel = Object.freeze({ Error: 'error' })
+const RequestMethod = Object.freeze({ Patch: 'PATCH' })
+
 try {
-  let healthy = false
-  for (let attempt = 0; attempt < 60 && !healthy && !serverDown; attempt++) {
-    healthy = (await fetch(`${ORIGIN}/api/v1/health`).catch(() => null))?.status === 200
-    if (!healthy) await pause(250)
-  }
-  if (!healthy) await abort(`peasant did not answer on ${ORIGIN}: ${serverLog.trim().slice(-400)}`, `free port ${PORT} or set PEASANT_SETTINGS_PORT.`)
+  // It is started only when nothing answers on the port yet, and the wait ends when it answers or has
+  // exited, so the page is never driven against a server this run did not start.
+  server = await startOwnedServer({ port: PORT, portVariable: 'PEASANT_SETTINGS_PORT', start: () => spawn(BIN, ['web', 'start', '--port', PORT, '--foreground', '--no-browser', ...sandbox.args], { cwd: ROOT, env: sandbox.env, stdio: ['ignore', 'ignore', 'pipe'] }) })
+    .catch((error) => abort(error.message, `free port ${PORT} or set PEASANT_SETTINGS_PORT, and run make build if the binary did not start.`))
 
   const servedChunk = `/${relative(join(WEB, 'out'), markerChunk).split('\\').join('/')}`
   const served = await fetch(`${ORIGIN}${servedChunk}`).catch(() => null)
@@ -199,10 +204,10 @@ try {
   for (let attempt = 0; attempt < 120 && recorded < REPOS.length; attempt++) {
     await pause(250)
     const status = await (await fetch(`${ORIGIN}/api/v1/sync/ingest/status`)).json()
-    if (status.status === 'running') continue
+    if (status.status === IngestStatus.Running) continue
     recorded = (await (await fetch(`${ORIGIN}/api/v1/sessions`)).json()).sessions?.length ?? 0
   }
-  if (recorded < REPOS.length) await abort(`ingest recorded ${recorded} of ${REPOS.length} sessions.`, 'check the server log with KEEP=1.')
+  if (recorded < REPOS.length) await abort(`ingest recorded ${recorded} of ${REPOS.length} sessions.`, 'rerun with KEEP=1 and inspect the recordings under home/.claude/projects and the store under data/ of the kept world.')
 
   mkdirSync(OUT, { recursive: true })
   const puppeteer = (await import(process.env.PUPPETEER_CORE || 'puppeteer-core')).default
@@ -244,7 +249,7 @@ try {
     const errors = []
     page.on('pageerror', (error) => errors.push(error.message))
     // The browser logs every non-2xx answer; the refused write is one on purpose. Script errors still count.
-    page.on('console', (message) => { if (message.type() === 'error' && !/favicon|^Failed to load resource/i.test(message.text())) errors.push(message.text()) })
+    page.on('console', (message) => { if (message.type() === ConsoleLevel.Error && !/favicon|^Failed to load resource/i.test(message.text())) errors.push(message.text()) })
     await applyDeterminism(page)
     await page.evaluateOnNewDocument((value) => { try { localStorage.setItem('peasant-theme', value) } catch {} }, theme)
     await page.goto(`${ORIGIN}/settings/?section=automatic-publishing`, { waitUntil: 'networkidle0' })
@@ -294,7 +299,7 @@ try {
     await page.setRequestInterception(true)
     let held = null
     page.on('request', (request) => {
-      if (request.method() === 'PATCH' && held === null) { held = request; return }
+      if (request.method() === RequestMethod.Patch && held === null) { held = request; return }
       void request.continue()
     })
     await page.click('[data-setting-keys~="daemon.projectMode"] [role="switch"]')

@@ -26,6 +26,7 @@ requiredNames:
   - selected-two
   - selected-two-licensed
   - selection-scope-two-selected
+  - connected-selected-two
 cases:
   - name: fresh
     session:
@@ -458,6 +459,15 @@ cases:
   # the wizard's by sharing it.
   - name: selection-scope-two-selected
     extends: selection-scope
+    set:
+      revision: 4
+      stops[selection].fields[transcripts].value: [s-one, s-two]
+
+  # A wizard whose village question is settled (signed in, so the server hides
+  # its stop) after the reader added a second session: the wizard opens on its
+  # selection stop, with nothing to answer before it.
+  - name: connected-selected-two
+    extends: connected
     set:
       revision: 4
       stops[selection].fields[transcripts].value: [s-one, s-two]

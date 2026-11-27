@@ -1,0 +1,58 @@
+# Production search across schemas 75, 81, and 82.
+# Pre-82 stores lack session_generations.mapping_set_id, so the reader must
+# select the pre-82 generation predicate and return identical search results.
+cases:
+  - name: schema_75_parent_and_child_hits
+    schema: 75
+    query: '"quasar"'
+    wantHasMappingSetSQL: false
+    wantMatchesAny: true
+    wantHits:
+      - sessionID: cccccccc-3333-4333-8333-cccccccccccc
+        entryIndex: 1
+        role: assistant
+  - name: schema_81_parent_and_child_hits
+    schema: 81
+    query: '"quasar"'
+    wantHasMappingSetSQL: false
+    wantMatchesAny: true
+    wantHits:
+      - sessionID: cccccccc-3333-4333-8333-cccccccccccc
+        entryIndex: 1
+        role: assistant
+  - name: schema_82_parent_and_child_hits
+    schema: 82
+    query: '"quasar"'
+    wantHasMappingSetSQL: true
+    wantMatchesAny: true
+    wantHits:
+      - sessionID: cccccccc-3333-4333-8333-cccccccccccc
+        entryIndex: 1
+        role: assistant
+  - name: schema_75_dedup_hides_duplicate_child
+    schema: 75
+    query: '"nebula"'
+    wantHasMappingSetSQL: false
+    wantMatchesAny: true
+    wantHits:
+      - sessionID: cccccccc-3333-4333-8333-cccccccccccc
+        entryIndex: 0
+        role: user
+  - name: schema_81_dedup_hides_duplicate_child
+    schema: 81
+    query: '"nebula"'
+    wantHasMappingSetSQL: false
+    wantMatchesAny: true
+    wantHits:
+      - sessionID: cccccccc-3333-4333-8333-cccccccccccc
+        entryIndex: 0
+        role: user
+  - name: schema_82_dedup_hides_duplicate_child
+    schema: 82
+    query: '"nebula"'
+    wantHasMappingSetSQL: true
+    wantMatchesAny: true
+    wantHits:
+      - sessionID: cccccccc-3333-4333-8333-cccccccccccc
+        entryIndex: 0
+        role: user

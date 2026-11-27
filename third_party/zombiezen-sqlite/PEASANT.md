@@ -145,13 +145,21 @@ its exact original unsafe.Pointer source lines (including multiplicity) from the
 official v1.4.2 distribution and rejects any new conversions in added fork files.
 No upstream pointer operation is rewritten or new operation exempted.
 
-## Migration after-script callback
+## Migration script hooks
 
-`sqlitemigration` gains one optional callback, `MigrateWithAfterScript`. It is
-called once per applied migration, inside that migration's transaction, after
-the migration's script and before its `COMMIT`. A callback error rolls the
-migration back. A nil callback is identical to `Migrate`, and `Migrate` and
-`NewPool` behave as upstream. Peasant uses it so a data fill commits with the
-schema step that needs it, and so the store upgrade can report each step.
-`TestMigrateWithAfterScript` covers the commit, the rollback and the nil case.
-The change is part of `connection-lifetime.patch` and the manifest digests.
+`sqlitemigration` gains one optional entry point, `MigrateWithScriptHooks`,
+with two callbacks in `ScriptHooks`. Each is called once per applied
+migration, inside that migration's transaction: `Before` after its `BEGIN`
+and before its script, `After` after its script and before its `COMMIT`. An
+error from either rolls the migration back; a `Before` error stops before the
+script runs. Zero hooks are identical to `Migrate`, and `Migrate` and
+`NewPool` behave as upstream. Peasant uses `After` so a data fill commits with
+the schema step that needs it and the store upgrade can report each step, and
+`Before` so the search trigger repair can set the search index's rebuild
+budget inside the same transaction as the shipped script that rebuilds it.
+(The hook replaced an earlier `MigrateWithAfterScript`, which had only the
+`After` callback.) `TestMigrateWithScriptHooks` covers the commit, the order,
+the rollback of either hook and the nil case. The change is part of
+`connection-lifetime.patch` and the manifest digests; the two
+`sqlitemigration` sections of the patch are `diff -u` of the v1.4.2 files
+against the fork.

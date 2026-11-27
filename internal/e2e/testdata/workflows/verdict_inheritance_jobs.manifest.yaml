@@ -1,0 +1,11 @@
+# Required inherited_jobs in verdict_inheritance.yaml: every job an inherited
+# verdict replaces. Removing a row needs a deliberate manifest change.
+requiredNames:
+  - check
+  - harvester-version-guard
+  - third-party-notices
+  - web-lockfiles-in-sync
+  - web-pnpm-build
+  - home-phone-gate
+  - windows
+  - schema-parity

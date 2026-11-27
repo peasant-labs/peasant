@@ -70,8 +70,8 @@ func TestParentStateDriftAgainstLogicalParentRule(t *testing.T) {
 		}
 		var snapshot *ingest.SessionID
 		switch tc.Snapshot {
-		case "":
-		case "snapshot":
+		case parentFixtureNoSnapshot:
+		case parentFixtureHasSnapshot:
 			value := ingest.SessionID(snapshotParent)
 			snapshot = &value
 		default:
@@ -116,7 +116,7 @@ VALUES(?, 'gen-context', 0, 'context_from', ?, ?, 'native_typed', '', '', '')`, 
 			wantResolved = fixture.Target
 		case "unstored":
 			wantResolved = fixture.Unstored
-		case "snapshot":
+		case string(parentFixtureHasSnapshot):
 			wantResolved = fixture.Snapshot
 		}
 		if wantResolved == "" {

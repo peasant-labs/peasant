@@ -12,11 +12,11 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
+	"github.com/peasant-labs/peasant/internal/testkit/gitconfig"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/schema"
-	"go.uber.org/goleak"
 	"gopkg.in/yaml.v3"
 )
 
@@ -70,7 +70,7 @@ func TestMain(m *testing.M) {
 	// while holding the first — a 1-connection pool deadlocks them.
 	// (Production keeps the default; this env override is test-only.)
 	os.Setenv(store.EnvPoolSize, "2")
-	goleak.VerifyTestMain(m)
+	os.Exit(gitconfig.RunWithIsolatedGitConfig(gitconfig.WithGoleak(m)))
 }
 
 // takeConn is a test helper that checks out a pool connection or fails the test.
@@ -242,6 +242,22 @@ func TestStore_Migrations_ApplyV1(t *testing.T) {
 	err = sqlitex.ExecuteTransient(conn, `INSERT INTO daily_summary_harness (date_utc, model_harness) VALUES ('2026-01-01', 'invalid');`, nil)
 	if err == nil {
 		t.Error("expected CHECK constraint to reject invalid model_harness, but insert succeeded")
+	}
+
+	// Verify session_generations carries the nullable mapping-set column (V82)
+	// with no default: NULL means the generation owns its parsed rows.
+	var mappingSetColumns int
+	err = sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM pragma_table_info('session_generations') WHERE name = 'mapping_set_id' AND type = 'TEXT' AND "notnull" = 0 AND dflt_value IS NULL AND pk = 0;`, &sqlitex.ExecOptions{
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			mappingSetColumns = int(stmt.ColumnInt64(0))
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("read session_generations columns: %v", err)
+	}
+	if mappingSetColumns != 1 {
+		t.Error("session_generations has no nullable TEXT mapping_set_id column without a default")
 	}
 
 	// Verify user_version was set by the migration framework.

@@ -1,0 +1,186 @@
+{
+  "entries": [
+    {
+      "sessionId": "abc00000-0000-4000-8000-0000000000c1",
+      "entryIndex": 0,
+      "harness": "claude-code",
+      "entryType": "text",
+      "role": "user",
+      "timestampMs": 1767312000000,
+      "contentPreview": "synthetic reader request",
+      "hasToolUse": false,
+      "hasThinking": false,
+      "isError": false,
+      "rawByteLength": 209,
+      "depth": 0
+    },
+    {
+      "sessionId": "abc00000-0000-4000-8000-0000000000c1",
+      "entryIndex": 1,
+      "harness": "claude-code",
+      "entryType": "text",
+      "role": "assistant",
+      "timestampMs": 1767312001000,
+      "contentPreview": "synthetic plan",
+      "tokensIn": 12,
+      "tokensOut": 8,
+      "hasToolUse": false,
+      "toolNamesCsv": "Read",
+      "hasThinking": false,
+      "isError": false,
+      "rawByteLength": 439,
+      "depth": 0,
+      "extra": "{\"model_id\":\"claude-synthetic\"}"
+    },
+    {
+      "sessionId": "abc00000-0000-4000-8000-0000000000c1",
+      "entryIndex": 2,
+      "harness": "claude-code",
+      "entryType": "tool_use",
+      "role": "assistant",
+      "contentPreview": "{\"file_path\":\"/synthetic/reader-corpus/file.txt\"}",
+      "hasToolUse": true,
+      "toolKind": "read",
+      "toolNamesCsv": "Read",
+      "hasThinking": false,
+      "isError": false,
+      "toolCallId": "e_golden_0003",
+      "depth": 1,
+      "parentIndex": 1,
+      "toolInput": "{\"file_path\":\"/synthetic/reader-corpus/file.txt\"}",
+      "partType": "tool_use"
+    },
+    {
+      "sessionId": "abc00000-0000-4000-8000-0000000000c1",
+      "entryIndex": 3,
+      "harness": "claude-code",
+      "entryType": "tool_result",
+      "role": "tool",
+      "timestampMs": 1767312002000,
+      "hasToolUse": false,
+      "hasThinking": false,
+      "isError": false,
+      "rawByteLength": 288,
+      "depth": 0
+    },
+    {
+      "sessionId": "abc00000-0000-4000-8000-0000000000c1",
+      "entryIndex": 4,
+      "harness": "claude-code",
+      "entryType": "tool_result",
+      "role": "tool",
+      "contentPreview": "synthetic file body",
+      "hasToolUse": false,
+      "hasThinking": false,
+      "isError": false,
+      "toolCallId": "e_golden_0003",
+      "depth": 1,
+      "parentIndex": 3,
+      "toolOutput": "synthetic file body",
+      "partType": "tool_result"
+    },
+    {
+      "sessionId": "abc00000-0000-4000-8000-0000000000c1",
+      "entryIndex": 5,
+      "harness": "claude-code",
+      "entryType": "text",
+      "role": "assistant",
+      "timestampMs": 1767312003000,
+      "contentPreview": "synthetic reader answer",
+      "tokensIn": 20,
+      "tokensOut": 6,
+      "hasToolUse": false,
+      "hasThinking": false,
+      "isError": false,
+      "rawByteLength": 334,
+      "depth": 0,
+      "extra": "{\"model_id\":\"claude-synthetic\"}"
+    },
+    {
+      "sessionId": "abc00000-0000-4000-8000-0000000000c1",
+      "entryIndex": 6,
+      "harness": "claude-code",
+      "entryType": "text",
+      "role": "user",
+      "timestampMs": 1767312004000,
+      "contentPreview": "second synthetic request",
+      "hasToolUse": false,
+      "hasThinking": false,
+      "isError": false,
+      "rawByteLength": 227,
+      "depth": 0
+    }
+  ],
+  "detail": {
+    "id": "abc00000-0000-4000-8000-0000000000c1",
+    "harness": "claude-code",
+    "startTime": "2026-01-02T00:00:00Z",
+    "endTime": "2026-01-02T00:00:04Z",
+    "durationMins": 0.06666666666666667,
+    "totalTokens": 14,
+    "tokensIn": 0,
+    "tokensOut": 14,
+    "turnCount": 4,
+    "conversationTurnCount": 4,
+    "toolCallCount": 1,
+    "turns": [
+      {
+        "index": 0,
+        "role": "user",
+        "content": "synthetic reader request",
+        "timestamp": "2026-01-02T00:00:00Z",
+        "depth": 0,
+        "entryType": "text"
+      },
+      {
+        "index": 1,
+        "role": "assistant",
+        "content": "synthetic plan",
+        "toolCalls": [
+          {
+            "id": "e_golden_0003",
+            "name": "Read",
+            "arguments": "{\"file_path\":\"/synthetic/reader-corpus/file.txt\"}",
+            "result": "synthetic file body",
+            "filePath": "/synthetic/reader-corpus/file.txt",
+            "toolKind": "read"
+          }
+        ],
+        "timestamp": "2026-01-02T00:00:01Z",
+        "depth": 0,
+        "observedModel": "claude-synthetic",
+        "entryType": "text",
+        "tokensIn": 12,
+        "tokensOut": 8
+      },
+      {
+        "index": 5,
+        "role": "assistant",
+        "content": "synthetic reader answer",
+        "timestamp": "2026-01-02T00:00:03Z",
+        "depth": 0,
+        "observedModel": "claude-synthetic",
+        "entryType": "text",
+        "tokensIn": 20,
+        "tokensOut": 6
+      },
+      {
+        "index": 6,
+        "role": "user",
+        "content": "second synthetic request",
+        "timestamp": "2026-01-02T00:00:04Z",
+        "depth": 0,
+        "entryType": "text"
+      }
+    ],
+    "source": "imported",
+    "status": "local",
+    "project": "/synthetic/reader-corpus",
+    "model": "claude-synthetic",
+    "workingDirectory": "/synthetic/reader-corpus",
+    "scorecard": {
+      "m7SpecHasExamples": false,
+      "m7SpecHasConstraints": false
+    }
+  }
+}

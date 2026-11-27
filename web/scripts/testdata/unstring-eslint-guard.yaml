@@ -1,0 +1,45 @@
+cases:
+  - name: named-disable
+    rejected: true
+    source: '/* eslint-disable unstring/closed-set-literal */'
+  - name: named-disable-line
+    rejected: true
+    source: 'const value = 1 // eslint-disable-line unstring/closed-set-literal'
+  - name: named-disable-next-line
+    rejected: true
+    source: |
+      // eslint-disable-next-line unstring/closed-set-literal
+      const value = 1
+  - name: named-block-multiline
+    rejected: true
+    source: |
+      /* eslint-disable
+       * unstring/closed-set-literal
+       */
+  - name: bare-disable
+    rejected: true
+    source: '/* eslint-disable */'
+  - name: bare-disable-line
+    rejected: true
+    source: 'const value = 1 // eslint-disable-line'
+  - name: bare-disable-next-line
+    rejected: true
+    source: |
+      // eslint-disable-next-line
+      const value = 1
+  - name: bare-block-multiline
+    rejected: true
+    source: |
+      /* eslint-disable
+       */
+  - name: inline-rule-config
+    rejected: true
+    source: '/* eslint "unstring/closed-set-literal": "off" */'
+  - name: clean-source
+    rejected: false
+    source: 'const value = 1'
+  - name: unrelated-rule-with-reason
+    rejected: false
+    source: |
+      // eslint-disable-next-line other/rule -- documented reason
+      const value = 1

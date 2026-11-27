@@ -110,7 +110,7 @@ ast-grep scan --config sgconfig.yml .
 
 ### Static guard
 
-`make check-unstring` runs `unstring` v0.0.2 over the Go tree and `web/`. It
+`make check-unstring` runs `unstring` v0.4.0 over the Go tree and `web/`. It
 needs Go 1.26+ and ast-grep 0.51.2; the dev shell provides both. `make check`
 runs the guard directly after the strict ast-grep scan, and a guard failure
 stops the gate. The generated baseline can only shrink; `make unstring-update`
@@ -124,8 +124,8 @@ different versions. A deliberate exception uses
 files are exempt in `.unstring.yaml`. A rule-specific exemption is a review
 decision and the exempt file must still be generated, even though the loader
 only enforces the generated header for `rule: "*"` and the two closed-set
-rules. A re-sync of `third_party/zombiezen-sqlite` regenerates the baseline in
-the same commit because the two endpoint entries live in vendored code.
+rules. Vendored code under `third_party/` is excluded in `.unstring.yaml` and
+is not scanned.
 
 ### Record-kind vocabulary
 

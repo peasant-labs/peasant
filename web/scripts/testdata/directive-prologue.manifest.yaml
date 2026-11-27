@@ -1,0 +1,18 @@
+requiredCaseNames:
+  - client-first
+  - server-first-with-comments
+  - absent
+  - string-data
+  - client-after-import
+  - server-after-statement
+  - nested-directive
+  - second-directive
+  - inline-server-action
+  - misplaced-function-directive
+  - parenthesized-client
+  - single-quoted-client
+  - leading-comment
+  - escaped-client
+  - action-after-strict-directive
+  - async-arrow-action
+  - non-async-action

@@ -5,7 +5,7 @@
 VERSION ?=
 
 # Static guard against stringly-typed values, pinned to the published tool.
-UNSTRING ?= go run github.com/peasant-labs/infra/unstring/cmd/unstring@v0.0.2
+UNSTRING ?= go run github.com/peasant-labs/infra/unstring/cmd/unstring@v0.4.0
 
 define build_peasant_cli
 set -e; \
@@ -31,7 +31,7 @@ RACE ?= 0
 GORACE_FLAG := $(if $(filter 0,$(RACE)),,-race)
 
 # Wall-clock start of `make check`, stamped immediately at parse time so the
-# gate's pre-test wall includes the fmt/lint/ast-grep/release-guard steps that
+# gate's pre-test wall includes the fmt/lint/ast-grep steps that
 # run before the test passes. `cmd/testgate run` reads it and reports
 # `test-start - CHECK_START_NS` as the pre-test wall, separate from the test
 # wall. `:=` forces the stamp now, before the prerequisites run.
@@ -81,13 +81,7 @@ web-stub:
 	@touch web/out/.gitkeep
 
 fmt-check:
-	@unformatted=$$(git ls-files -z -- '*.go' | xargs -0 "$$(go env GOROOT)/bin/gofmt" -l -e) || { \
-		echo "gofmt could not read every Go file (see errors above)"; exit 1; }; \
-	if [ -n "$$unformatted" ]; then \
-		echo "Go files not gofmt-clean (run make fmt):"; \
-		echo "$$unformatted"; \
-		exit 1; \
-	fi
+	@./scripts/check-gofmt.sh
 
 fmt:
 	@formatted=$$(go fmt ./...); \
@@ -110,6 +104,7 @@ check: fmt-check lint docs-cli-check
 	go test -tags=astgrep $(GORACE_FLAG) ./internal/tui/gates/... ./internal/testkit/astgreprules/...; \
 	go test -tags=projection_negative_seed -run '^(TestThinkingSeedNegativeFailsOnlyDesignatedCases|TestModelProjectionNegativeFailsOnlyDesignatedCase)$$' ./internal/transcript/; \
 	go test -tags=projection_negative_scope -run '^(TestThinkingSeedNegativeFailsOnlyDesignatedCases|TestModelProjectionNegativeFailsOnlyDesignatedCase)$$' ./internal/transcript/; \
+	go test -tags=skipbudget -run '^(TestMeasurementCasesAreOneClosedSet|TestSmokeSamplesRunInChildProcesses|TestSampleFlagsRoundTripThroughTheFlagSet)$$' ./cmd/skip-budget/; \
 	go run ./cmd/testgate run -race=$(RACE)
 	# The gate above replaces the single `go test` pass. It computes the run
 	# plan from `go test -list`, runs a race pass and a no-race pass (or one

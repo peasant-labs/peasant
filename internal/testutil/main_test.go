@@ -1,11 +1,12 @@
 package testutil
 
 import (
+	"os"
 	"testing"
 
-	"go.uber.org/goleak"
+	"github.com/peasant-labs/peasant/internal/testkit/gitconfig"
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m)
+	os.Exit(gitconfig.RunWithIsolatedGitConfig(gitconfig.WithGoleak(m)))
 }

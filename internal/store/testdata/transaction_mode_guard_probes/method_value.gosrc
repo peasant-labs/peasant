@@ -1,0 +1,13 @@
+package store
+
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+
+func probeMethodValue(conn *sqlite.Conn) (err error) {
+	begin := sqlitex.Transaction
+	defer begin(conn)(&err)
+	return readThenWrite(conn)
+}
+
+func probeSaveAsArgument(conn *sqlite.Conn) error {
+	return withBegin(conn, sqlitex.Save)
+}

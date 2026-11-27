@@ -1589,7 +1589,8 @@ func TestClassifyResolutionEntries_MarksResolutionEvidence(t *testing.T) {
 	for _, r := range resolutionEvidence {
 		if r.Target != nil && r.Target.EntryIndex == 3 {
 			foundIdx3 = true
-			if r.Value != "present" {
+			const expectedEvidenceValue = "present"
+			if r.Value != expectedEvidenceValue {
 				t.Errorf("Value = %q, want %q", r.Value, "present")
 			}
 		}

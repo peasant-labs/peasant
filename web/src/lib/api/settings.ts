@@ -139,9 +139,11 @@ export function installAutoPublishRule(id: string, path: string): Promise<AutoPu
   });
 }
 
-/** GET /api/v1/sync/auth: whether this computer is signed in to Village, and as whom. */
-export function fetchVillageAuth(): Promise<SyncAuthResponse> {
-  return call(SYNC_AUTH_PATH, zSyncAuthResponse);
+/** GET /api/v1/sync/auth: whether this computer is signed in to Village, and as whom.
+ * An optional signal cancels both the request and response-body consumption.
+ */
+export function fetchVillageAuth(signal?: AbortSignal): Promise<SyncAuthResponse> {
+  return call(SYNC_AUTH_PATH, zSyncAuthResponse, signal ? { signal } : undefined);
 }
 
 /** POST /api/v1/sync/logout: remove this computer's stored Village credential. */

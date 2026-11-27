@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -1008,7 +1009,7 @@ func (rec *eventRecorder) readyFunc() SignalFunc {
 	}
 }
 
-func TestMigrateWithAfterScript(t *testing.T) {
+func TestMigrateWithScriptHooks(t *testing.T) {
 	schema := Schema{
 		AppID: 0xedbeef,
 		Migrations: []string{
@@ -1032,7 +1033,7 @@ func TestMigrateWithAfterScript(t *testing.T) {
 		}
 		defer conn.Close()
 		var seen []int32
-		err = MigrateWithAfterScript(context.Background(), conn, schema, func(conn *sqlite.Conn, version int32) error {
+		err = MigrateWithScriptHooks(context.Background(), conn, schema, ScriptHooks{After: func(conn *sqlite.Conn, version int32) error {
 			seen = append(seen, version)
 			if conn.AutocommitEnabled() {
 				t.Errorf("version %d: callback ran outside the migration transaction", version)
@@ -1041,7 +1042,7 @@ func TestMigrateWithAfterScript(t *testing.T) {
 				return sqlitex.ExecuteTransient(conn, `insert into foo (note) values ('filled');`, nil)
 			}
 			return nil
-		})
+		}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1064,12 +1065,12 @@ func TestMigrateWithAfterScript(t *testing.T) {
 		}
 		defer conn.Close()
 		boom := errors.New("boom")
-		err = MigrateWithAfterScript(context.Background(), conn, schema, func(conn *sqlite.Conn, version int32) error {
+		err = MigrateWithScriptHooks(context.Background(), conn, schema, ScriptHooks{After: func(conn *sqlite.Conn, version int32) error {
 			if version == 2 {
 				return boom
 			}
 			return nil
-		})
+		}})
 		if !errors.Is(err, boom) {
 			t.Fatalf("error = %v, want it to wrap the callback error", err)
 		}
@@ -1088,13 +1089,97 @@ func TestMigrateWithAfterScript(t *testing.T) {
 		}
 	})
 
+	t.Run("BeforeRunsInTheTransactionAheadOfTheScript", func(t *testing.T) {
+		conn, err := sqlite.OpenConn(filepath.Join(t.TempDir(), "before-script.db"), sqlite.OpenReadWrite, sqlite.OpenCreate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+		var order []string
+		err = MigrateWithScriptHooks(context.Background(), conn, schema, ScriptHooks{
+			Before: func(conn *sqlite.Conn, version int32) error {
+				order = append(order, fmt.Sprintf("before %d", version))
+				if conn.AutocommitEnabled() {
+					t.Errorf("version %d: before hook ran outside the migration transaction", version)
+				}
+				if got := userVersionOf(t, conn); got != int64(version-1) {
+					t.Errorf("version %d: before hook saw user_version %d, want %d: the script must not have run yet", version, got, version-1)
+				}
+				if version == 2 {
+					// The script of migration 2 has not run, but migration 1's
+					// table is there: a write here commits with migration 2.
+					return sqlitex.ExecuteTransient(conn, `insert into foo (note) values ('before');`, nil)
+				}
+				return nil
+			},
+			After: func(conn *sqlite.Conn, version int32) error {
+				order = append(order, fmt.Sprintf("after %d", version))
+				return nil
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := "before 1,after 1,before 2,after 2"; strings.Join(order, ",") != want {
+			t.Errorf("hook order = %q, want %q", strings.Join(order, ","), want)
+		}
+		rows, err := sqlitex.ResultInt64(conn.Prep("select count(*) from foo where note = 'before';"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rows != 1 {
+			t.Errorf("rows written by the before hook = %d, want 1", rows)
+		}
+	})
+
+	t.Run("BeforeErrorRollsBackItsWritesAndSkipsTheScript", func(t *testing.T) {
+		conn, err := sqlite.OpenConn(filepath.Join(t.TempDir(), "before-script-error.db"), sqlite.OpenReadWrite, sqlite.OpenCreate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+		boom := errors.New("boom")
+		afterCalls := 0
+		err = MigrateWithScriptHooks(context.Background(), conn, schema, ScriptHooks{
+			Before: func(conn *sqlite.Conn, version int32) error {
+				if version != 2 {
+					return nil
+				}
+				if err := sqlitex.ExecuteTransient(conn, `insert into foo (note) values ('before');`, nil); err != nil {
+					return err
+				}
+				return boom
+			},
+			After: func(*sqlite.Conn, int32) error { afterCalls++; return nil },
+		})
+		if !errors.Is(err, boom) {
+			t.Fatalf("error = %v, want it to wrap the before hook's error", err)
+		}
+		if !conn.AutocommitEnabled() {
+			t.Error("the failed migration left a transaction open")
+		}
+		if got := userVersionOf(t, conn); got != 1 {
+			t.Errorf("user_version = %d, want 1: the first migration stays, the second rolls back", got)
+		}
+		if afterCalls != 1 {
+			t.Errorf("after hook calls = %d, want 1: the failed migration's script and after hook must not run", afterCalls)
+		}
+		rows, err := sqlitex.ResultInt64(conn.Prep("select count(*) from foo;"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rows != 0 {
+			t.Errorf("rows after the rolled-back before hook = %d, want 0", rows)
+		}
+	})
+
 	t.Run("NilCallbackMatchesMigrate", func(t *testing.T) {
 		conn, err := sqlite.OpenConn(filepath.Join(t.TempDir(), "after-script-nil.db"), sqlite.OpenReadWrite, sqlite.OpenCreate)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer conn.Close()
-		if err := MigrateWithAfterScript(context.Background(), conn, schema, nil); err != nil {
+		if err := MigrateWithScriptHooks(context.Background(), conn, schema, ScriptHooks{}); err != nil {
 			t.Fatal(err)
 		}
 		if got := userVersionOf(t, conn); got != 2 {

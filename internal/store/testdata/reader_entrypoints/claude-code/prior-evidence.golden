@@ -1,0 +1,65 @@
+{
+  "GenerationID": "G_golden",
+  "Metadata": {
+    "schemaVersion": 12,
+    "sessionId": "abc00000-0000-4000-8000-0000000000c1",
+    "parentUuid": null,
+    "harness": "claude-code",
+    "model": "claude-synthetic",
+    "version": "",
+    "timestamp": {
+      "start": 1767312000000,
+      "end": 1767312004000,
+      "ingested": 1767312000000
+    },
+    "source": {
+      "filePath": "/synthetic/claude-code/abc00000-0000-4000-8000-0000000000c1",
+      "format": "jsonl"
+    },
+    "git": {},
+    "project": {
+      "hash": "987468aa2aadbcf0b4ea7128f83160052825d1bd82e02aff8193ab8b0f82b916",
+      "filePath": "/synthetic/reader-corpus",
+      "name": "reader-corpus"
+    },
+    "hostSlug": "reader-host",
+    "stats": {
+      "turnCount": 4,
+      "inputSubmissionCount": 2,
+      "conversationTurnCount": 4,
+      "toolCallCount": 1,
+      "subagentCount": 0,
+      "durationMs": 4000,
+      "tokensIn": 32,
+      "tokensOut": 14
+    },
+    "subagents": [],
+    "cwd": "/synthetic/reader-corpus",
+    "diagnostics": {
+      "warnings": []
+    },
+    "contentHash": "479c2558895b2332bffbc3cf5a15431a8e4907cb2988ea209a2ab41301b6e014",
+    "metadataHash": "",
+    "redaction": {
+      "applied": false
+    },
+    "adapterVersion": 5
+  },
+  "Aliases": {
+    "Entries": {
+      "claude:abc00000-0000-4000-8000-0000000000c1:a1": "e_golden_0002",
+      "claude:abc00000-0000-4000-8000-0000000000c1:a1:1": "e_golden_0003",
+      "claude:abc00000-0000-4000-8000-0000000000c1:a2": "e_golden_0006",
+      "claude:abc00000-0000-4000-8000-0000000000c1:u1": "e_golden_0001",
+      "claude:abc00000-0000-4000-8000-0000000000c1:u2": "e_golden_0004",
+      "claude:abc00000-0000-4000-8000-0000000000c1:u2:0": "e_golden_0005",
+      "claude:abc00000-0000-4000-8000-0000000000c1:u3": "e_golden_0007"
+    },
+    "Submissions": {
+      "claude:abc00000-0000-4000-8000-0000000000c1:u1": "s_golden_0001",
+      "claude:abc00000-0000-4000-8000-0000000000c1:u3": "s_golden_0002"
+    }
+  },
+  "HasCompleteGeneration": true,
+  "PriorEvidence": null
+}

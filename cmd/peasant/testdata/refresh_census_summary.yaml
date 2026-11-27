@@ -1,4 +1,4 @@
-requiredNames: [stored-census, incomplete-audit, unknown-census, dry-run-forecast, reindex-dry-run-unavailable]
+requiredNames: [stored-census, incomplete-audit, unknown-census, dry-run-forecast, empty-dry-run-forecast, reindex-dry-run-unavailable]
 cases:
   - name: stored-census
     stored: true
@@ -25,3 +25,9 @@ cases:
     reindexRouting: true
     contains: ["reindex dry-run stops before source routing and index decisions", "run without --dry-run"]
     absent: ["refresh census: 0 sessions", "forecast (not stored"]
+  - name: empty-dry-run-forecast
+    census: true
+    empty: true
+    forecast: true
+    contains: ["refresh census: 0 sessions (forecast)"]
+    absent: ["forecast (not stored"]

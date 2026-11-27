@@ -14,13 +14,21 @@ type ManagedGenerationUnchangedProof struct {
 	IndexerTarget int
 	FormatTarget  int
 	Expected      *SessionIndexState
+	// Validated is set only after validation proves the captured context equal.
+	Validated *ValidatedContext
+}
+
+// ValidatedContext binds a validated candidate to the generation it matched.
+type ValidatedContext struct {
+	GenerationID string
+	Candidate    GenerationMetadataCandidate
 }
 
 // ManagedGenerationUnchangedProver is the store boundary for a read-only
 // proof and its separately revalidated settlement.
 type ManagedGenerationUnchangedProver interface {
 	ProveCapturedGenerationUnchanged(context.Context, ManagedGenerationUnchangedProof) (UnchangedProof, error)
-	SettleCapturedGenerationUnchanged(context.Context, ManagedGenerationUnchangedProof) (ManagedGenerationRefreshOutcome, error)
+	SettleCapturedGenerationUnchanged(context.Context, ManagedGenerationUnchangedProof) (ManagedGenerationUnchangedSettleOutcome, error)
 }
 
 // UnchangedProofMismatch identifies why an equality proof could not be made.
@@ -53,6 +61,16 @@ func AllUnchangedProofMismatches() []UnchangedProofMismatch {
 		UnchangedNotProvenMetadata, UnchangedNotProvenRedaction, UnchangedNotProvenIndexer,
 		UnchangedNotProvenInputProof, UnchangedNotProvenSeal,
 	}
+}
+
+// ContextMismatches returns the mismatch reasons eligible for context validation.
+func ContextMismatches() []UnchangedProofMismatch {
+	return []UnchangedProofMismatch{UnchangedNotProvenMetadata, UnchangedNotProvenRedaction}
+}
+
+// IsContext reports whether the mismatch is eligible for context validation.
+func (m UnchangedProofMismatch) IsContext() bool {
+	return slices.Contains(ContextMismatches(), m)
 }
 
 // NewUnchangedProofMismatch validates a mismatch at a boundary.

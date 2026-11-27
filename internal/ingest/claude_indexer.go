@@ -3,6 +3,7 @@ package ingest
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -162,10 +163,36 @@ func (idx *ClaudeIndexer) parseJSONLWithCompletion(ctx context.Context, sessionI
 	return idx.parseClaudeRecords(ctx, sessionID, data, completion, false)
 }
 
-// parseClaudeRecords keeps the decoded envelope local to one record. Managed
-// candidates validate that same envelope before projecting it and decomposing
-// its content; the tolerant stored index path retains its existing behavior.
+// parseClaudeRecords returns the stored entries: the source records with the
+// records of one API message grouped into one reply (groupClaudeReplies).
 func (idx *ClaudeIndexer) parseClaudeRecords(ctx context.Context, sessionID SessionID, data []byte, completion *indexCompletion, strict bool) ([]schema.SessionEntry, error) {
+	parsed, err := idx.parseClaudeSourceRecords(ctx, sessionID, data, completion, strict)
+	entries, _, groupErr := groupClaudeReplies(parsed.entries, parsed.messageIDs, idx.fullContent)
+	if groupErr != nil {
+		return nil, groupErr
+	}
+	return entries, err
+}
+
+// claudeSourceRecords is the ungrouped parse: one depth-0 entry per source
+// record with its decomposed blocks, and the API message id of every reply
+// record, keyed by its entry index.
+type claudeSourceRecords struct {
+	entries    []schema.SessionEntry
+	messageIDs map[int]string
+}
+
+// parseClaudeSourceRecords keeps the decoded envelope local to one record.
+// Managed candidates validate that same envelope before projecting it and
+// decomposing its content; the tolerant stored index path retains its existing
+// behavior.
+func (idx *ClaudeIndexer) parseClaudeSourceRecords(ctx context.Context, sessionID SessionID, data []byte, completion *indexCompletion, strict bool) (claudeSourceRecords, error) {
+	messageIDs := make(map[int]string)
+	entries, err := idx.parseClaudeSourceEntries(ctx, sessionID, data, completion, strict, messageIDs)
+	return claudeSourceRecords{entries: entries, messageIDs: messageIDs}, err
+}
+
+func (idx *ClaudeIndexer) parseClaudeSourceEntries(ctx context.Context, sessionID SessionID, data []byte, completion *indexCompletion, strict bool, messageIDs map[int]string) ([]schema.SessionEntry, error) {
 	if strict {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -184,6 +211,11 @@ func (idx *ClaudeIndexer) parseClaudeRecords(ctx context.Context, sessionID Sess
 	// assistant entry carries the level that governed it.
 	var levelState claudeThinkingLevelState
 
+	type replyRecordIdentity struct {
+		uuid   string
+		digest [sha256.Size]byte
+	}
+	seenReplyRecords := make(map[replyRecordIdentity]struct{})
 	for scanner.Scan() {
 		if strict {
 			if err := ctx.Err(); err != nil {
@@ -274,6 +306,16 @@ func (idx *ClaudeIndexer) parseClaudeRecords(ctx context.Context, sessionID Sess
 		entry.RawByteLength = &sourceBytes
 		if err := AttachRetainedUnknown(&entry, unknown); err != nil {
 			return nil, err
+		}
+		if id, reply := claudeReplyMessageID(entry, line); reply {
+			if id != "" && line.UUID != "" {
+				key := replyRecordIdentity{uuid: line.UUID, digest: sha256.Sum256(raw)}
+				if _, seen := seenReplyRecords[key]; seen {
+					continue
+				}
+				seenReplyRecords[key] = struct{}{}
+			}
+			messageIDs[entry.EntryIndex] = id
 		}
 		entries = append(entries, entry)
 		parentIndex := entryIndex
@@ -407,6 +449,9 @@ type claudeIndexLine struct {
 	Effort     json.RawMessage `json:"effort"`
 	Attachment json.RawMessage `json:"attachment"`
 	Message    struct {
+		// ID is the API message id. Claude Code writes one message as
+		// several records that share it.
+		ID      string          `json:"id"`
 		Role    string          `json:"role"`
 		Model   string          `json:"model"`
 		Content json.RawMessage `json:"content"`
@@ -870,6 +915,10 @@ func decomposeClaudeContentBlocks(ctx context.Context, idx *ClaudeIndexer, sessi
 			entry.PartType = &pt
 			entry.EntryType = EntryTypeThinking
 			entry.HasThinking = true
+			// A thinking block is served as a turn of its own under its reply,
+			// so it carries the time of the record that wrote it: a reader
+			// times the thinking from it.
+			entry.TimestampMs = parseIndexTimestamp(line.Timestamp)
 			// Claude transcripts store thinking trace text in `thinking`, not `text`.
 			// Fall back to `text` for older fixtures that used the legacy shape.
 			text := block.Thinking

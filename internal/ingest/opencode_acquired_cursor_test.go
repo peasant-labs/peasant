@@ -198,7 +198,7 @@ func TestPipelineStoresOnlyAcquiredOpenCodeCursor(t *testing.T) {
 				}
 				warned := false
 				for _, diagnostic := range second.Diagnostics {
-					if diagnostic.ErrorType == "adapter_refresh_unavailable" && strings.Contains(diagnostic.Message, "changed after discovery") && diagnostic.Location != "" && diagnostic.Remediation != "" {
+					if diagnostic.ErrorType == ingest.OutcomeReasonAdapterRefreshUnavailable.Code() && strings.Contains(diagnostic.Message, "changed after discovery") && diagnostic.Location != "" && diagnostic.Remediation != "" {
 						warned = true
 					}
 				}

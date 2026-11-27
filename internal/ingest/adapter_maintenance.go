@@ -53,15 +53,11 @@ func (p *Pipeline) adapterTargetNeedsWork(ctx context.Context, target reindexTar
 	decision := p.refreshDecisionForLocation(target.session, loc, metadata)
 	if !hasLocation {
 		version, present := storedAdapterEvidence(loc, false, metadata)
-		decision = decideRefresh(refreshEvidence{
-			StoredRow:           true,
-			Forced:              p.config.Force,
-			MetadataSchemaOld:   metadataNeedsNativeRefresh(metadata.SchemaVersion),
-			AdapterVersion:      version,
-			AdapterTarget:       p.versionTargets()[target.session.Harness].AdapterVersion,
-			AdapterStampPresent: present,
-			AdapterCanExtract:   p.adapterSupportsStoredExtraction(target.session.Harness),
-		})
+		decision = decideRefresh(p.withAdapterEvidence(refreshEvidence{
+			StoredRow:         true,
+			Forced:            p.config.Force,
+			MetadataSchemaOld: metadataNeedsNativeRefresh(metadata.SchemaVersion),
+		}, target.session.Harness, version, present))
 	}
 	return decision.Reason == RefreshReasonAdapterBehind ||
 		decision.Reason == RefreshReasonAdapterStampAbsent ||
@@ -165,14 +161,10 @@ func (p *Pipeline) storedAdapterEntry(ctx context.Context, sid SessionID, native
 	} else {
 		// A legacy pair with no row is decided from its file stamp only.
 		version, present := storedAdapterEvidence(loc, false, metadata)
-		decision = decideRefresh(refreshEvidence{
-			StoredRow:           metadata != nil,
-			Forced:              p.config.Force,
-			AdapterVersion:      version,
-			AdapterTarget:       p.versionTargets()[reconstructed.Harness].AdapterVersion,
-			AdapterStampPresent: present,
-			AdapterCanExtract:   p.adapterSupportsStoredExtraction(reconstructed.Harness),
-		})
+		decision = decideRefresh(p.withAdapterEvidence(refreshEvidence{
+			StoredRow: metadata != nil,
+			Forced:    p.config.Force,
+		}, reconstructed.Harness, version, present))
 	}
 	if decision.Lane != RefreshLaneStoredMetadata && decision.Reason != RefreshReasonAdapterBehindNativeOnly && decision.Reason != RefreshReasonMetadataSchema {
 		// The stored-index lane is settled by the index inventory from the
@@ -612,7 +604,7 @@ func (p *Pipeline) appendPairRepairWork(ctx context.Context, entries []DiffEntry
 			entries[outcome.queuedIndex].repairMetadataPath = outcome.metadataPath
 			// A missing or damaged pair is a native repair regardless of what
 			// the queued path would otherwise have done.
-			entries[outcome.queuedIndex].Decision = RefreshDecision{Reason: RefreshReasonPairMissing, Lane: RefreshLaneNative}
+			entries[outcome.queuedIndex].Decision = decideRefresh(refreshEvidence{StoredRow: true, PairMissing: true})
 			entries[outcome.queuedIndex].Status = DiffUpdated
 		case pairRepairAppend:
 			entries = append(entries, outcome.entry)
@@ -723,7 +715,7 @@ func (p *Pipeline) pairRepairDecision(ctx context.Context, sid SessionID, entrie
 		}
 	}
 	return pairRepairOutcome{kind: pairRepairAppend, entry: DiffEntry{
-		Session: session, Status: DiffUpdated, Decision: RefreshDecision{Reason: RefreshReasonPairMissing, Lane: RefreshLaneNative},
+		Session: session, Status: DiffUpdated, Decision: decideRefresh(refreshEvidence{StoredRow: true, PairMissing: true}),
 		pairRepair: true, repairMetadataPath: metadataPath,
 	}, damaged: true}
 }

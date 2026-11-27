@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/testkit/executable"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"gopkg.in/yaml.v3"
 	"mvdan.cc/sh/v3/syntax"
@@ -867,7 +868,7 @@ touch "$INSTALL_MARKER"
 
 func writeExecutable(t *testing.T, path, contents string) {
 	t.Helper()
-	if err := os.WriteFile(path, []byte(contents), 0o700); err != nil {
+	if err := executable.Write(path, []byte(contents), 0o700); err != nil {
 		t.Fatalf("release: write command stub %s: %v", path, err)
 	}
 }
@@ -1427,6 +1428,104 @@ func releaseWorkflowRepoRoot(t *testing.T) string {
 		}
 		if parent := filepath.Dir(dir); parent == dir {
 			t.Fatalf("release-e2e: cannot locate peasant repository root from %s", wd)
+		}
+	}
+}
+
+//go:embed testdata/workflows/private-install.yaml
+var privateInstallFixture []byte
+
+type privateWorkflow struct {
+	Jobs map[string]struct {
+		Steps []struct {
+			Name string `yaml:"name"`
+			Run  string `yaml:"run"`
+		} `yaml:"steps"`
+	} `yaml:"jobs"`
+}
+type privateInstallConfig struct {
+	Required []string `yaml:"required_names"`
+	Global   string   `yaml:"global_pattern"`
+	Prefix   string   `yaml:"prefix_pattern"`
+	Install  string   `yaml:"install_pattern"`
+	Path     string   `yaml:"path_pattern"`
+	Workflow string   `yaml:"workflow"`
+	Job      string   `yaml:"job"`
+	Step     string   `yaml:"step"`
+	Cases    []struct {
+		Name  string `yaml:"name"`
+		Input string `yaml:"input"`
+		Want  bool   `yaml:"want"`
+	} `yaml:"cases"`
+}
+
+// The runner tool cache is shared; inspect actual workflow steps and exercise the matcher independently.
+func TestWorkflowPrivateNpmInstall(t *testing.T) {
+	var f privateInstallConfig
+	if err := yaml.Unmarshal(privateInstallFixture, &f); err != nil {
+		t.Fatal(err)
+	}
+	global := regexp.MustCompile(f.Global)
+	continuation := regexp.MustCompile(`\\\n\s*`)
+	normalize := func(s string) string { return continuation.ReplaceAllString(s, " ") }
+	seen := make(map[string]bool)
+	for _, c := range f.Cases {
+		if seen[c.Name] {
+			t.Fatalf("duplicate case %q", c.Name)
+		}
+		seen[c.Name] = true
+		if got := global.MatchString(normalize(c.Input)); got != c.Want {
+			t.Errorf("case %s: global = %v, want %v", c.Name, got, c.Want)
+		}
+	}
+	for _, name := range f.Required {
+		if !seen[name] {
+			t.Errorf("missing required case %s", name)
+		}
+	}
+	if len(seen) != len(f.Required) {
+		t.Fatal("case names differ from manifest")
+	}
+	dir := filepath.Join(releaseWorkflowRepoRoot(t), ".github", "workflows")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var target []string
+	found := false
+	for _, entry := range entries {
+		if entry.IsDir() || !(strings.HasSuffix(entry.Name(), ".yml") || strings.HasSuffix(entry.Name(), ".yaml")) {
+			continue
+		}
+		found = true
+		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var doc privateWorkflow
+		if err := yaml.Unmarshal(data, &doc); err != nil {
+			t.Fatal(err)
+		}
+		for job, value := range doc.Jobs {
+			for _, step := range value.Steps {
+				if global.MatchString(normalize(step.Run)) {
+					t.Errorf("%s job %s step %s uses global npm install", entry.Name(), job, step.Name)
+				}
+				if entry.Name() == f.Workflow && job == f.Job && step.Name == f.Step {
+					target = append(target, normalize(step.Run))
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("no workflow files found")
+	}
+	if len(target) != 1 {
+		t.Fatalf("%s job %s: found %d install steps, want 1", f.Workflow, f.Job, len(target))
+	}
+	for _, pattern := range []string{f.Prefix, f.Install, f.Path} {
+		if !regexp.MustCompile(pattern).MatchString(target[0]) {
+			t.Errorf("%s job %s step %s lacks private install invariant %q", f.Workflow, f.Job, f.Step, pattern)
 		}
 	}
 }

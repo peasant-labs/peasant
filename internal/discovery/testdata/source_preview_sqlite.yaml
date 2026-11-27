@@ -5,10 +5,12 @@
 # path is the provider database, so the preview must never read that path
 # directly; it must materialize the one selected session's rows instead.
 #
-# preview_budget_bytes bounds how much of the session the preview materializes.
-# A case that leaves it unset previews the whole session and must show no
-# notice. A case that sets a tiny budget forces the bound and must show the
-# notice naming what the preview left out, WITH the turns it did read.
+# preview_budget_bytes bounds each read of the preview capture. A case that
+# leaves it unset reads with the terminal's sizes, previews the whole session
+# and must show no sentence. A current session read in tiny pieces shows the
+# note naming what is loaded so far, WITH the turns it did read. A legacy
+# session exposes no change marker, so a bounded read stops after one read and
+# says, below its turns, that it cannot be read further.
 #
 # required_cases names the cases that must stay present; removing one goes red
 # by name. Adding a case need not appear here.
@@ -32,12 +34,10 @@ cases:
     origin: opencode-legacy-sqlite
     min_turns: 1
     # Enough for the session's message rows and its first part, so the preview
-    # shows a turn while the bound leaves the rest of the session to a scroll.
+    # shows a turn while the bound leaves the rest of the session unread.
     preview_budget_bytes: 2000
-    expect_notice_contains:
-      - showing the first
-      - session
-      - scroll to the bottom to load more
+    expect_end_notice_contains:
+      - cannot be read further
       - the full session ingests normally
 
   - name: current-sqlite-session-over-budget-previews-a-prefix-with-a-notice

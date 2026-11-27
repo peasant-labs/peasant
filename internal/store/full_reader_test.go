@@ -24,10 +24,21 @@ var fullReadBudgetYAML []byte
 //go:embed testdata/full_read_consistency.yaml
 var fullReadConsistencyYAML []byte
 
+type fullReadAction string
+
+const (
+	fullReadSnapshot         fullReadAction = "snapshot"
+	fullReadCorruptChunk     fullReadAction = "corrupt_chunk"
+	fullReadCancelChunk      fullReadAction = "cancel_chunk"
+	fullReadCancelProjection fullReadAction = "cancel_projection"
+	fullReadNegative         fullReadAction = "negative"
+)
+
 type fullReadFixture struct {
 	RequiredNames []string `yaml:"requiredNames"`
 	Cases         []struct {
-		Name, Action   string
+		Name           string
+		Action         fullReadAction
 		Entries, Bytes int
 		Budget         int64
 		Pages          []int
@@ -218,7 +229,7 @@ func TestFullReaderSnapshotCancellationAndRelease(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			var writer *sqlite.Conn
-			if f.Action == "snapshot" {
+			if f.Action == fullReadSnapshot {
 				var err error
 				writer, err = sqlite.OpenConn(path, sqlite.OpenReadWrite)
 				if err != nil {
@@ -226,7 +237,7 @@ func TestFullReaderSnapshotCancellationAndRelease(t *testing.T) {
 				}
 				defer writer.Close()
 			}
-			if f.Action == "corrupt_chunk" {
+			if f.Action == fullReadCorruptChunk {
 				execContentSQL(t, s, `UPDATE session_entry_full_content_chunks SET chunk_sha256='0000000000000000000000000000000000000000000000000000000000000000' WHERE entry_index=2 AND chunk_index=1`)
 			}
 			triggered := false
@@ -234,7 +245,7 @@ func TestFullReaderSnapshotCancellationAndRelease(t *testing.T) {
 			observeFullReadChunks(t, s, func(index int) {
 				if index == 0 {
 					chunkQueries++
-					if f.Action == "cancel_chunk" && chunkQueries == 2 {
+					if f.Action == fullReadCancelChunk && chunkQueries == 2 {
 						triggered = true
 						cancel()
 					}
@@ -246,7 +257,7 @@ func TestFullReaderSnapshotCancellationAndRelease(t *testing.T) {
 				}
 				if a.Table() == "session_entries" && a.Column() == "entry_type" && !triggered {
 					// Capture SELECT has already executed, establishing the snapshot.
-					if f.Action == "snapshot" {
+					if f.Action == fullReadSnapshot {
 						triggered = true
 						if err := sqlitex.ExecuteTransient(writer, `UPDATE session_entries SET tool_output='changed' WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(id)}}); err != nil {
 							t.Error(err)
@@ -255,17 +266,17 @@ func TestFullReaderSnapshotCancellationAndRelease(t *testing.T) {
 				}
 				// Manifest preparation occurs inside the projection row callback,
 				// after the semantic SELECT has begun stepping.
-				if a.Table() == "session_entry_full_content" && f.Action == "cancel_projection" && !triggered {
+				if a.Table() == "session_entry_full_content" && f.Action == fullReadCancelProjection && !triggered {
 					triggered = true
 					cancel()
 				}
 			})
 			budget := int64(1)
-			if f.Action == "negative" {
+			if f.Action == fullReadNegative {
 				budget = -1
 			}
 			got, _, err := s.LoadFullSessionEntries(ctx, id, budget)
-			if f.Action == "snapshot" {
+			if f.Action == fullReadSnapshot {
 				if !triggered || err != nil || !reflect.DeepEqual(got, want) {
 					t.Fatalf("snapshot mixed concurrent state: triggered=%v err=%v", triggered, err)
 				}
@@ -276,7 +287,7 @@ func TestFullReaderSnapshotCancellationAndRelease(t *testing.T) {
 				if err == nil || got != nil {
 					t.Fatal("failure returned usable partial entries")
 				}
-				if strings.HasPrefix(f.Action, "cancel_") && (!triggered || !errors.Is(err, context.Canceled)) {
+				if strings.HasPrefix(string(f.Action), "cancel_") && (!triggered || !errors.Is(err, context.Canceled)) {
 					t.Fatalf("expected cancellation: %v", err)
 				}
 			}

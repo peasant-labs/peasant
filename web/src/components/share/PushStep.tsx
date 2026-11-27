@@ -1,4 +1,5 @@
 'use client';
+import { SyncPushSessionStatus as SchemaSyncPushSessionStatus } from '@peasant-labs/schema';
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { WhereDoesThisGo, Button } from '@/lib/ft-ui';
@@ -18,6 +19,7 @@ import {
   ShieldCheckIcon,
 } from 'lucide-react';
 import type { SetShareFooterActions } from '@/components/share/footer-actions';
+import ErrorCard from '@/components/ErrorCard';
 
 /** The village transcripts are published to. */
 function villageUrl(): string {
@@ -110,9 +112,9 @@ function usePush(sessionIds: string[], redactionLevel: SelectableRedactionLevel,
         sessionIds.map((id) => {
           const r = byId.get(id);
           if (!r) return { sessionId: id, state: 'skipped' };
-          if (r.status === 'error') return { sessionId: id, state: 'error', error: r.error };
+          if (r.status === SchemaSyncPushSessionStatus.Error) return { sessionId: id, state: 'error', error: r.error };
           // A held session waits for ingest: nothing was sent, so it is not done.
-          if (r.status === 'skipped' || r.status === 'held') return { sessionId: id, state: 'skipped' };
+          if (r.status === SchemaSyncPushSessionStatus.Skipped || r.status === SchemaSyncPushSessionStatus.Held) return { sessionId: id, state: 'skipped' };
           return { sessionId: id, state: 'done' };
         }),
       );
@@ -322,10 +324,10 @@ export function PushStep({
           message is shown verbatim; for the common "log in first" case it tells
           the user exactly what to do. No fabricated success. */}
       {phase === 'error' && topError && (
-        <div className="border border-danger/30 bg-danger-soft px-5 py-4" role="alert">
+        <ErrorCard>
           <p className="text-sm font-medium text-ink">Nothing was sent.</p>
           <p className="mt-1 text-[13px] text-danger">{topError}</p>
-        </div>
+        </ErrorCard>
       )}
 
       {/* Completion — only claim success when something actually published. */}
@@ -359,13 +361,13 @@ export function PushStep({
           as a failure, not "already up to date". */}
       {phase === 'done' && summary.done === 0 && (
         summary.errors > 0 ? (
-          <div className="border border-danger/30 bg-danger-soft px-5 py-4" role="alert">
+          <ErrorCard>
             <p className="text-sm font-medium text-ink">Nothing was sent.</p>
             <p className="mt-1 text-[13px] text-danger">
               {topError ??
                 `${summary.errors} session${summary.errors === 1 ? '' : 's'} failed; see the rows below.`}
             </p>
-          </div>
+          </ErrorCard>
         ) : (
           <div className="border border-rule bg-surface px-5 py-4">
             <p className="text-sm text-ink-2">

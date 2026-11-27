@@ -27,20 +27,28 @@ var parentStateYAML []byte
 //go:embed testdata/parent_state.manifest.yaml
 var parentStateManifestYAML []byte
 
+// A snapshot input is either absent or names the snapshot parent in the fixture.
+type parentFixtureSnapshot string
+
+const (
+	parentFixtureNoSnapshot  parentFixtureSnapshot = ""
+	parentFixtureHasSnapshot parentFixtureSnapshot = "snapshot"
+)
+
 // parentStateCase is one stored child and the inputs that decide its parent
 // lane. The same row drives the V70 backfill over the predecessor schema and
 // the drift check over the production writers.
 type parentStateCase struct {
-	Name               string `yaml:"name"`
-	Child              string `yaml:"child"`
-	EvidenceKind       string `yaml:"evidenceKind"`
-	EvidenceState      string `yaml:"evidenceState"`
-	EvidenceTarget     string `yaml:"evidenceTarget"`
-	CacheParent        string `yaml:"cacheParent"`
-	Snapshot           string `yaml:"snapshot"`
-	InactiveEvidence   bool   `yaml:"inactiveEvidence"`
-	WantState          string `yaml:"wantState"`
-	WantResolvedParent string `yaml:"wantResolvedParent"`
+	Name               string                `yaml:"name"`
+	Child              string                `yaml:"child"`
+	EvidenceKind       string                `yaml:"evidenceKind"`
+	EvidenceState      string                `yaml:"evidenceState"`
+	EvidenceTarget     string                `yaml:"evidenceTarget"`
+	CacheParent        string                `yaml:"cacheParent"`
+	Snapshot           parentFixtureSnapshot `yaml:"snapshot"`
+	InactiveEvidence   bool                  `yaml:"inactiveEvidence"`
+	WantState          string                `yaml:"wantState"`
+	WantResolvedParent string                `yaml:"wantResolvedParent"`
 }
 
 // parentStateRejection is one value the projection column must refuse.
@@ -83,9 +91,9 @@ func loadParentStateFixture(t *testing.T) parentStateFixture {
 	cases := make([]string, 0, len(fixture.Cases))
 	for _, tc := range fixture.Cases {
 		cases = append(cases, tc.Name)
-		for _, token := range []string{tc.EvidenceState, tc.EvidenceTarget, tc.CacheParent, tc.Snapshot, tc.WantResolvedParent} {
+		for _, token := range []string{tc.EvidenceState, tc.EvidenceTarget, tc.CacheParent, string(tc.Snapshot), tc.WantResolvedParent} {
 			switch token {
-			case "", "target", "unstored", "snapshot", "explicit_none", "target_known", "target_known_retained", "unknown", "conflicting_current_native_evidence":
+			case "", "target", "unstored", string(parentFixtureHasSnapshot), "explicit_none", "target_known", "target_known_retained", "unknown", "conflicting_current_native_evidence":
 			default:
 				t.Fatalf("parent state case %q names the unknown token %q", tc.Name, token)
 			}
@@ -136,8 +144,8 @@ func parentStateIDs(t *testing.T, fixture parentStateFixture, tc parentStateCase
 		t.Fatalf("case %q names the unknown evidence token %q", tc.Name, tc.EvidenceTarget)
 	}
 	switch tc.Snapshot {
-	case "":
-	case "snapshot":
+	case parentFixtureNoSnapshot:
+	case parentFixtureHasSnapshot:
 		snapshot = fixture.Snapshot
 	default:
 		t.Fatalf("case %q names the unknown snapshot token %q", tc.Name, tc.Snapshot)
@@ -286,7 +294,7 @@ func assertParentState(t *testing.T, tc parentStateCase, fixture parentStateFixt
 		want = fixture.Target
 	case "unstored":
 		want = fixture.Unstored
-	case "snapshot":
+	case string(parentFixtureHasSnapshot):
 		want = fixture.Snapshot
 	}
 	if want == "" {

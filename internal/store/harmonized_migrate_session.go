@@ -825,7 +825,11 @@ func (s *Store) stageMigrateObjects(ctx context.Context, prepared *preparedHarmo
 	// blob write lock is never held across the body writes. Every exit
 	// below ends the transaction and returns the connection explicitly.
 	txnErr := error(nil)
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, "stage the migration blobs of session "+prepared.sessionID.String())
+	if err != nil {
+		s.pool.Put(conn)
+		return err
+	}
 	for _, blob := range prepared.blobs {
 		if err := ctx.Err(); err != nil {
 			txnErr = err
@@ -847,14 +851,16 @@ func (s *Store) stageMigrateObjects(ctx context.Context, prepared *preparedHarmo
 		return txnErr
 	}
 	cfg := s.writeConfigForLane()
-	flush := func(batch []int) error {
+	flush := func(batch []int) (txnErr error) {
 		conn, err := s.pool.Take(ctx)
 		if err != nil {
 			return fmt.Errorf("take connection to stage bodies: %w", err)
 		}
 		defer s.pool.Put(conn)
-		txnErr := error(nil)
-		endFn := sqlitex.Transaction(conn)
+		endFn, err := beginWrite(conn, "stage the migration bodies of session "+prepared.sessionID.String())
+		if err != nil {
+			return err
+		}
 		defer endFn(&txnErr)
 		for _, index := range batch {
 			if err := ctx.Err(); err != nil {
@@ -904,14 +910,22 @@ func (s *Store) stageMigrateObjects(ctx context.Context, prepared *preparedHarmo
 // newer row survives the age gate, is never clobbered, and the
 // conversion proceeds; the shadow verify consumes the captured document,
 // never the live row.
-func (s *Store) upsertMigrateStats(ctx context.Context, oracle *migrateOracle) error {
+func (s *Store) upsertMigrateStats(ctx context.Context, oracle *migrateOracle) (txnErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return fmt.Errorf("take connection for the stats upsert: %w", err)
 	}
 	defer s.pool.Put(conn)
-	txnErr := error(nil)
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, "upsert the captured stats of session "+oracle.sessionID.String())
+	if err != nil {
+		return err
+	}
+	committing := false
+	defer func() {
+		if committing && txnErr != nil {
+			txnErr = fmt.Errorf("store: commit migrated session stats for %s: %w", oracle.sessionID, txnErr)
+		}
+	}()
 	defer endFn(&txnErr)
 	stats := oracle.statsRaw
 	// The retained document's turn numbers are in whatever unit its producer
@@ -926,6 +940,7 @@ func (s *Store) upsertMigrateStats(ctx context.Context, oracle *migrateOracle) e
 		txnErr = fmt.Errorf("upsert the captured stats: %w", err)
 		return txnErr
 	}
+	committing = true
 	return nil
 }
 
@@ -945,14 +960,22 @@ type migrateShadowMismatch struct {
 // projection rows and commit. A data mismatch rolls the transaction back
 // and reports the dimension; a defect mismatch rolls back and halts the
 // run naming the session and the dimension.
-func (s *Store) commitMigrateSession(ctx context.Context, oracle *migrateOracle, prepared *preparedHarmonized) (bool, *migrateShadowMismatch, error) {
+func (s *Store) commitMigrateSession(ctx context.Context, oracle *migrateOracle, prepared *preparedHarmonized) (committed bool, mismatch *migrateShadowMismatch, txnErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return false, nil, fmt.Errorf("take connection for the catalog transaction: %w", err)
 	}
 	defer s.pool.Put(conn)
-	txnErr := error(nil)
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, "commit the converted session "+oracle.sessionID.String())
+	if err != nil {
+		return false, nil, err
+	}
+	defer func() {
+		if committed && txnErr != nil {
+			committed = false
+			txnErr = fmt.Errorf("store: commit migrated session %s: %w", oracle.sessionID, txnErr)
+		}
+	}()
 	defer endFn(&txnErr)
 	if err := deleteMigrateSharedOldRows(conn, oracle); err != nil {
 		txnErr = err
@@ -1005,6 +1028,11 @@ func (s *Store) commitMigrateSession(ctx context.Context, oracle *migrateOracle,
 		if mismatch.Defect {
 			return false, nil, fmt.Errorf("session %s: defect mismatch at %s: %s; the catalog transaction rolled back and the run halts", oracle.sessionID, mismatch.Dimension, mismatch.Reason)
 		}
+		// A non-defect mismatch is reported separately from the returned
+		// error. Roll back before returning nil in the named error result;
+		// the deferred finalizer then sees an already-ended transaction.
+		// sqlitex's finalizer returns early when autocommit is already on.
+		endFn(&txnErr)
 		return false, mismatch, nil
 	}
 	if err := clearLegacySeedOnConn(conn, oracle.sessionID); err != nil {

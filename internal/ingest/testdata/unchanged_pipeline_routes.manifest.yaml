@@ -2,6 +2,14 @@ requiredNames:
   - proven
   - index-not-current
   - metadata-context
-  - copy-refused
+  - unproven-unchanged-parses
   - proof-error
   - settle-refused
+  - disable-refresh-skips-never-validates
+  - force-never-validates
+  - reindex-never-validates
+  - validated-settles-with-the-real-store
+  - unsupported-harness-parses
+  - validator-error-parses-on-the-real-store
+  - validated-settle-refused-parses-on-the-real-store
+  - claude-without-candidate-parses

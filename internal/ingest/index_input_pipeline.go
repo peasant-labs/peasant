@@ -34,8 +34,8 @@ type CapturedIndexInput struct {
 	// managedGenerationRefresh marks input this run produced on the
 	// adapter-behind / adapter-stamp-absent stored-metadata lane for a harness
 	// whose declared output is a managed generation. It is the marker the
-	// specific no-parse refresh rule reads; it is not a general permission for
-	// a managed generation to bind without a re-parse.
+	// unchanged proof and settle read; it is not a general permission for a
+	// managed generation to bind without a re-parse.
 	managedGenerationRefresh bool
 	transcript               []byte
 	tree                     *openCodeJSONInput
@@ -156,8 +156,9 @@ func CaptureIndexInput(ctx context.Context, indexer TranscriptIndexer, session D
 	input := &CapturedIndexInput{session: session, artifactHash: artifact.ArtifactHash, transcript: artifact.Transcript, metadata: &artifact.Metadata}
 	input.session.SourceFormat = artifact.Metadata.Source.Format
 	input.session.ParentUUID = artifact.Metadata.ParentUUID
+	input.session.openCodeRecognition = nil
 	if session.Harness == HarnessOpenCode {
-		origin, err := recognizeManagedOpenCodeProjection(artifact.Transcript, session.SessionID)
+		origin, err := session.openCodeRecognition.recognize(artifact.Transcript, session.SessionID)
 		if err != nil {
 			return nil, err
 		}

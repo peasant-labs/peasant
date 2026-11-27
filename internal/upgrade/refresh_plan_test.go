@@ -80,18 +80,13 @@ func TestPlanRefreshBehind(t *testing.T) {
 	if sha256.Sum256(data) != before {
 		t.Fatal("planning changed database")
 	}
-	if !plan.LowerBound || len(plan.Sessions) != 1 || plan.Sessions[0].Harness != string(ingest.HarnessClaudeCode) {
+	if !plan.LowerBound || plan.Estimate.Sessions != 1 || plan.Estimate.Undecided != 0 {
 		t.Fatalf("unexpected plan: %+v", plan)
 	}
 	if !plan.Approximate || !slices.Contains(plan.EvidenceNotRead, "content_pending") ||
 		!slices.Contains(plan.UnappliedEffects, store.StampEffectSearchInvalidated) ||
 		!slices.Contains(plan.UnappliedEffects, store.StampEffectRecountOwed) {
 		t.Fatalf("missing census limitations: %+v", plan)
-	}
-	for _, effect := range []store.StampEffect{store.StampEffectHarnessRename, store.StampEffectIndexInvalidated} {
-		if !slices.Contains(plan.Sessions[0].Effects, effect) {
-			t.Errorf("session census omitted migration effect %s", effect)
-		}
 	}
 	for _, field := range []string{"adapter_version", "indexed_input_hash"} {
 		if !slices.Contains(plan.Unknown, RefreshUnknown{"old-session", field}) {
@@ -164,7 +159,7 @@ func TestPlanRefreshUsesManagedProducerTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.Sessions) != 1 || plan.Sessions[0].Decision.Reason != ingest.RefreshReasonAdapterBehind {
+	if plan.Estimate.Sessions != 1 || plan.Estimate.ByReason[ingest.RefreshReasonAdapterBehind] != 1 {
 		t.Fatalf("managed adapter target not used: %+v", plan)
 	}
 }
@@ -187,44 +182,20 @@ func TestPlanRefreshDelegates(t *testing.T) {
 	if err := yaml.Unmarshal(refreshDelegationCases, &fixture); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(t.TempDir(), "current.db")
-	db, err := store.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatal(err)
-	}
-	conn, err := sqlite.OpenConn(path, sqlite.OpenReadWrite)
-	if err != nil {
-		t.Fatal(err)
-	}
 	target := ingest.GenerationRepairTargets[ingest.HarnessClaudeCode]
 	_, canExtract := ingest.DefaultAdapterRegistry[ingest.HarnessClaudeCode](nil, nil, salt.Salt{}).(ingest.TranscriptMetadataExtractor)
 	var names []string
+	var seeds []refreshSeed
 	for _, c := range fixture.Cases {
 		names = append(names, c.Name)
-		metadata := int(ingest.CurrentSchemaVersion)
-		if c.MetadataOld {
-			metadata = 1
-		}
-		var proof any
-		if c.Proof {
-			proof = "0000000000000000000000000000000000000000000000000000000000000000"
-		}
-		err := sqlitex.ExecuteTransient(conn, `INSERT INTO sessions(session_id,model_harness,model_id,opaque_host_id,project_hash,start_ms,end_ms,ingested_ms,source_path,source_format,schema_version,adapter_version,index_version,indexed_input_hash) VALUES (?, ?, 'model', 'host', 'project', 1, 2, 3, 'source', 'jsonl', ?, ?, ?, ?)`, &sqlitex.ExecOptions{Args: []any{c.Name, string(ingest.HarnessClaudeCode), metadata, target.AdapterVersion + c.AdapterOffset, target.IndexerVersion + c.IndexerOffset, proof}})
-		if err != nil {
-			t.Fatal(err)
-		}
+		seeds = append(seeds, refreshSeed{ID: c.Name, Harness: ingest.HarnessClaudeCode, AdapterOffset: offset(c.AdapterOffset), IndexerOffset: c.IndexerOffset, MetadataOld: c.MetadataOld, Proof: c.Proof})
 	}
 	for _, name := range fixture.RequiredNames {
 		if !slices.Contains(names, name) {
 			t.Errorf("missing fixture %s", name)
 		}
 	}
-	if err := conn.Close(); err != nil {
-		t.Fatal(err)
-	}
+	path := currentRefreshStore(t, seeds...)
 	rows, _, err := store.ReadRefreshEvidence(t.Context(), path)
 	if err != nil {
 		t.Fatal(err)
@@ -249,22 +220,20 @@ func TestPlanRefreshDelegates(t *testing.T) {
 	if !maps.Equal(plan.Estimate.ByReason, reasons) || !maps.Equal(plan.Estimate.ByLane, lanes) {
 		t.Fatalf("census = %+v, want reasons %v lanes %v", plan.Estimate, reasons, lanes)
 	}
-	if len(plan.Sessions) != len(decisions) {
-		t.Fatalf("sessions = %+v, want %v", plan.Sessions, decisions)
-	}
-	for _, session := range plan.Sessions {
-		if !session.Decided || session.Decision != decisions[session.SessionID] {
-			t.Errorf("session = %+v want %+v", session, decisions[session.SessionID])
-		}
+	if plan.Estimate.Sessions != len(decisions) {
+		t.Fatalf("sessions = %d, want %d", plan.Estimate.Sessions, len(decisions))
 	}
 	for _, c := range fixture.Cases {
 		if decisions[c.Name].Reason != c.Reason {
 			t.Errorf("%s reason = %s, want %s", c.Name, decisions[c.Name].Reason, c.Reason)
 		}
 	}
+	// This deliberately changes only the version on a current-schema store,
+	// not its schema. It tests that the two pending effects do not change the
+	// decisions, not that a historical store can be read.
 	// Migration 77's recount does not feed decideRefresh; migration 62's
 	// content-pending work is not evidence this planner reads.
-	conn, err = sqlite.OpenConn(path, sqlite.OpenReadWrite)
+	conn, err := sqlite.OpenConn(path, sqlite.OpenReadWrite)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,17 +250,14 @@ func TestPlanRefreshDelegates(t *testing.T) {
 	if !slices.Contains(behind.UnappliedEffects, store.StampEffectSearchInvalidated) || !slices.Contains(behind.UnappliedEffects, store.StampEffectRecountOwed) {
 		t.Fatalf("unapplied effects = %v", behind.UnappliedEffects)
 	}
-	if len(behind.Sessions) != len(decisions) {
-		t.Fatalf("behind sessions = %+v", behind.Sessions)
-	}
-	for _, session := range behind.Sessions {
-		if !session.Decided || session.Decision != decisions[session.SessionID] {
-			t.Errorf("pending effects changed %s: %+v, want %+v", session.SessionID, session.Decision, decisions[session.SessionID])
-		}
+	if behind.Estimate.Sessions != len(decisions) || !maps.Equal(behind.Estimate.ByLane, lanes) || !maps.Equal(behind.Estimate.ByReason, reasons) {
+		t.Errorf("pending effects changed census: %+v", behind.Estimate)
 	}
 }
 
 func TestPlanRefreshVersionBoundaries(t *testing.T) {
+	// Share the store reader's version-boundary cases so both tests exercise
+	// the same historical layouts; move this path with the store fixture.
 	const boundaryFixturePath = "../store/testdata/refresh_boundaries.yaml"
 	data, err := os.ReadFile(boundaryFixturePath)
 	if err != nil {
@@ -380,8 +346,8 @@ var refreshHarnessRenameCases []byte
 func TestPlanRefreshHistoricalHarnessRename(t *testing.T) {
 	var fixture struct {
 		Cases []struct {
-			Name, Input, Output string
-			Renamed, Unknown    bool
+			Name, Input string
+			Unknown     bool
 		} `yaml:"cases"`
 		RequiredNames []string `yaml:"requiredNames"`
 	}
@@ -408,22 +374,18 @@ func TestPlanRefreshHistoricalHarnessRename(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(plan.Sessions) != 1 {
-				t.Fatalf("sessions = %+v", plan.Sessions)
-			}
-			session := plan.Sessions[0]
-			if session.Harness != c.Output || slices.Contains(session.Effects, store.StampEffectHarnessRename) != c.Renamed {
-				t.Fatalf("session = %+v", session)
+			if plan.Estimate.Sessions != 1 {
+				t.Fatalf("sessions = %d", plan.Estimate.Sessions)
 			}
 			unknown := slices.Contains(plan.Unknown, RefreshUnknown{"old-session", "harness"})
 			if unknown != c.Unknown {
 				t.Fatalf("unknown evidence = %+v", plan.Unknown)
 			}
 			if c.Unknown {
-				if session.Decided || plan.Estimate.Undecided != 1 || len(plan.Estimate.ByLane) != 0 || len(plan.Estimate.ByReason) != 0 {
+				if plan.Estimate.Undecided != 1 || len(plan.Estimate.ByLane) != 0 || len(plan.Estimate.ByReason) != 0 {
 					t.Fatalf("unknown harness was decided: %+v", plan)
 				}
-			} else if !session.Decided || plan.Estimate.Undecided != 0 {
+			} else if plan.Estimate.Undecided != 0 || len(plan.Estimate.ByLane) != 1 {
 				t.Fatalf("known harness was not decided: %+v", plan)
 			}
 		})

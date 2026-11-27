@@ -1,7 +1,9 @@
 package ingest
 
 import (
+	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -43,6 +45,12 @@ const (
 	// StageRefreshProof counts attempted equality proofs; Done is the number
 	// proven and Total is the number attempted.
 	StageRefreshProof Stage = "refresh_proof"
+	// StageRefreshValidate counts attempts in Total and proven results in Done.
+	StageRefreshValidate Stage = "refresh_validate"
+	// StageRefreshValidateUnsupported counts unsupported results in Total.
+	StageRefreshValidateUnsupported Stage = "refresh_validate_unsupported"
+	// StageRefreshReference (refresh_reference) is declared beside the
+	// reference step in managed_generation_reference.go.
 	// StageIndexLog covers index_log persistence after INDEX work completes.
 	StageIndexLog Stage = "INDEX LOG"
 	// StageAudit covers the final ingest_log write.
@@ -50,7 +58,7 @@ const (
 )
 
 // IndexProfileStageOrder is the display order for profile-only stage timings.
-var IndexProfileStageOrder = []Stage{
+var IndexProfileStageOrder = withReferenceRefusalStages([]Stage{
 	StageReconcile,
 	StageDiscover,
 	StagePrepare,
@@ -60,6 +68,10 @@ var IndexProfileStageOrder = []Stage{
 	StageDBInsert,
 	StageContent,
 	StageRefreshProof,
+	StageRefreshValidate,
+	StageRefreshValidateUnsupported,
+	StageRefreshReference,
+	StageRefreshReferenceError,
 	StageIndex,
 	StageIndexLog,
 	StageCompute,
@@ -67,6 +79,17 @@ var IndexProfileStageOrder = []Stage{
 	StageCleanup,
 	StageReport,
 	StageAudit,
+})
+
+// withReferenceRefusalStages inserts, right after StageRefreshReference, one
+// stage per reference refusal reason, in AllReferenceRefusalReasons order.
+func withReferenceRefusalStages(order []Stage) []Stage {
+	at := slices.Index(order, StageRefreshReference) + 1
+	refused := make([]Stage, 0, len(AllReferenceRefusalReasons()))
+	for _, reason := range AllReferenceRefusalReasons() {
+		refused = append(refused, StageRefreshReferenceRefused(reason))
+	}
+	return slices.Insert(order, at, refused...)
 }
 
 // IndexProfileStage records elapsed time for one pipeline stage segment. Some
@@ -85,8 +108,8 @@ type IndexProfileStage struct {
 
 // StageTotals folds the recorded stage segments into one row per stage, in
 // profile display order. Several segments of one stage sum their durations and
-// bytes; Done and Total come from the last segment except for refresh_proof,
-// whose counts sum across attempts. Stages overlap by design, so the rows do
+// bytes; Done and Total come from the last segment except for refresh proof
+// and validation, whose counts sum across attempts. Stages overlap, so rows do
 // not sum to wall time.
 func (p *IndexProfiler) StageTotals() []IndexProfileStage {
 	if p == nil {
@@ -110,7 +133,8 @@ func (p *IndexProfiler) StageTotals() []IndexProfileStage {
 
 // FoldProfileStages folds stage segments into one row per stage, in profile
 // display order: durations, bytes and lane waits sum; Done and Total come from
-// the last segment except for refresh_proof, whose counts sum across attempts.
+// the last segment except for the refresh stages, whose counts sum across
+// attempts.
 func FoldProfileStages(segments []IndexProfileStage) []IndexProfileStage {
 	position := make(map[Stage]int, len(segments))
 	var totals []IndexProfileStage
@@ -124,7 +148,7 @@ func FoldProfileStages(segments []IndexProfileStage) []IndexProfileStage {
 		totals[at].Duration += segment.Duration
 		totals[at].Bytes += segment.Bytes
 		totals[at].LaneWait += segment.LaneWait
-		if segment.Stage == StageRefreshProof {
+		if segment.Stage.sumsAttempts() {
 			totals[at].Done += segment.Done
 			totals[at].Total += segment.Total
 		} else {
@@ -677,4 +701,15 @@ func (p *IndexProfiler) Snapshot() IndexProfileSnapshot {
 		result.ActivationSizes[size] = count
 	}
 	return result
+}
+
+// sumsAttempts reports whether a stage records one segment per attempt, so
+// its Done and Total sum across segments: the refresh proof, validation and
+// reference stages.
+func (s Stage) sumsAttempts() bool {
+	switch s {
+	case StageRefreshProof, StageRefreshValidate, StageRefreshValidateUnsupported, StageRefreshReference, StageRefreshReferenceError:
+		return true
+	}
+	return strings.HasPrefix(string(s), stageRefreshReferenceRefusedPrefix)
 }

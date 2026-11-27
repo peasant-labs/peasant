@@ -17,6 +17,8 @@ import (
 //go:embed testdata/collective_cache_menus.yaml
 var cacheMenusYAML []byte
 
+const collectiveFixtureSourceMenu = "source"
+
 func menuStrings[T ~string](values []T) []string {
 	result := make([]string, 0, len(values))
 	for _, value := range values {
@@ -76,7 +78,7 @@ func TestCollectiveCacheSQLMenusMatchCanonicalSets(t *testing.T) {
 				expected = menuStrings(schema.AllOperationIssueCodes)
 			case "coverage":
 				expected = menuStrings(schema.AllCollectiveEvidenceCoverages)
-			case "source":
+			case collectiveFixtureSourceMenu:
 				expected = menuStrings(schema.AllCollectiveObservationSources)
 			case "domain":
 				expected = menuStrings(schema.AllCollectiveFetchDomains)

@@ -1,0 +1,71 @@
+# Synthetic values only. Session transcript content never travels over HTTP;
+# repository previews may include metadata, but logs and errors must not.
+secrets:
+  repoPath: /synthetic/repository-path-marker/.git
+  branch: feature/branch-marker
+  setupID: setup-session-marker
+  sourceID: source-session-marker
+  nodeID: session-node-marker
+  missingRow: missing-node-marker
+  transcript: synthetic-transcript-marker
+  readerError: synthetic-reader-error-marker
+  cursor: synthetic-cursor-marker
+# The preview's server log lines (plan section 8). They carry counts and
+# closed-set reasons only. Every preview line the socket cases write must be
+# one of these messages and carry only these attribute keys, and no value may
+# hold the source path, transcript text, or a session, node or capture id.
+previewLog:
+  named:
+    opened: "kickstart preview: capture opened"
+    sent: "kickstart preview: segment sent"
+    ended: "kickstart preview: capture reached its end"
+    closed: "kickstart preview: capture closed"
+    freed: "kickstart preview: capture freed"
+  keys: [turns, source_bytes, source_total_bytes, continuation, seq, segment_bytes, loaded_segments, loaded_turns, cut_reason, reason, code, retained_bytes]
+socketCases:
+  - unreadable-source-errors-and-logs-carry-no-source-or-path
+  - preview-close-carries-no-source-or-path
+  - preview-cut-carries-no-source-or-path
+  - preview-logs-open-segments-close-and-free
+  - socket-disconnect-logs-capture-freed
+  - idle-expiry-logs-capture-freed
+requiredNames:
+  - project-preview
+  - branch-preview
+  - escaped-route-segment
+  - head-preview
+  - session-preview
+  - unknown-row
+  - unknown-setup-session
+  - foreign-host-preview
+  - foreign-origin-preview
+  - foreign-host-noncanonical-preview
+  - foreign-host-unmatched-preview
+  - noncanonical-preview-redirect
+  - noncanonical-preview-backtracking
+  - unmatched-preview-descendant
+  - unexpected-preview-method
+  - unrelated-health-route
+  - unrelated-tree-route
+  - unrelated-foreign-host-tree
+  - unrelated-foreign-host-route
+cases:
+  - {name: project-preview, row: project, status: 200, expected: 'git directory: /synthetic/repository-path-marker/.git', noStore: true}
+  - {name: branch-preview, row: branch, status: 200, expected: 'branch: feature/branch-marker', noStore: true}
+  - {name: escaped-route-segment, row: branch, escapedRoute: true, status: 200, expected: 'branch: feature/branch-marker', noStore: true}
+  - {name: head-preview, row: project, method: HEAD, status: 200, noStore: true}
+  - {name: session-preview, row: session, status: 200, expected: 'open this session in the local preview', noStore: true}
+  - {name: unknown-row, row: missing, status: 404, code: kickstart_preview_row_not_found, expected: 'Reload the tree', noStore: true}
+  - {name: unknown-setup-session, row: session, unknownSetup: true, status: 404, code: kickstart_session_not_found, expected: 'Open a session again', noStore: true}
+  - {name: foreign-host-preview, row: branch, host: foreign.example, status: 403, code: request_host_not_local, expected: 'peasant web start', noStore: true}
+  - {name: foreign-origin-preview, row: branch, method: POST, origin: 'https://foreign.example', status: 403, code: request_origin_not_local, expected: 'peasant web start', noStore: true, fallbackPath: true}
+  - {name: foreign-host-noncanonical-preview, row: branch, host: foreign.example, noncanonical: true, status: 403, code: request_host_not_local, expected: 'peasant web start', noStore: true}
+  - {name: foreign-host-unmatched-preview, row: branch, host: foreign.example, suffix: /extra, status: 403, code: request_host_not_local, expected: 'peasant web start', noStore: true, fallbackPath: true}
+  - {name: noncanonical-preview-redirect, row: branch, noncanonical: true, status: 307}
+  - {name: noncanonical-preview-backtracking, row: branch, suffix: /../.., status: 307, fallbackPath: true}
+  - {name: unmatched-preview-descendant, row: branch, suffix: /extra, status: 200, fallbackPath: true}
+  - {name: unexpected-preview-method, row: branch, method: POST, status: 200, fallbackPath: true}
+  - {name: unrelated-health-route, route: /api/v1/health, status: 200, expected: '"status":"ok"', rawLog: /api/v1/health}
+  - {name: unrelated-tree-route, route: /api/v1/kickstart/sessions/unrelated-diagnostic/tree, status: 404, code: kickstart_session_not_found, rawLog: /api/v1/kickstart/sessions/unrelated-diagnostic/tree}
+  - {name: unrelated-foreign-host-tree, route: /api/v1/kickstart/sessions/unrelated-diagnostic/tree, host: foreign.example, status: 403, code: request_host_not_local, expected: /api/v1/kickstart/sessions/unrelated-diagnostic/tree, noStore: true, rawLog: /api/v1/kickstart/sessions/unrelated-diagnostic/tree}
+  - {name: unrelated-foreign-host-route, route: /api/v1/health, host: foreign.example, status: 403, code: request_host_not_local, expected: /api/v1/health, noStore: true, rawLog: /api/v1/health}

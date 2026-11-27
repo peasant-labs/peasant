@@ -474,7 +474,11 @@ func renderSelectionCapture(
 		// is what makes the capture evidence that a person sees the badge,
 		// rather than evidence that the renderer can draw one.
 	)
-	sourceTurns := kickstart.NewSourceTurns(&ingest.OSFileSystem{}, listings)
+	captureOptions := kickstart.TerminalCaptureOptions()
+	if state.Key == selectionStateBudgetPreview {
+		captureOptions.SourceCapBytes = 200
+	}
+	sourceTurns := kickstart.NewSourceTurns(&ingest.OSFileSystem{}, listings, kickstart.WithSourceTurnsCaptureOptions(captureOptions))
 	program := kickstart.NewProgram(kickstart.ProgramDeps{
 		Theme:  th,
 		Draft:  draft,
@@ -487,6 +491,7 @@ func renderSelectionCapture(
 			// row previews from its own source file.
 			storedThenHarnessTurns(selection.Transcripts, sourceTurns),
 			kickstart.WithSessionPreviewNotice(sourceTurns.Notice),
+			kickstart.WithSessionPreviewEndNotice(sourceTurns.EndNotice),
 			kickstart.WithListingPreviewContextSource(source),
 			kickstart.WithDiscoveryInventory(state.DiscoveryInventory),
 		),

@@ -12,10 +12,19 @@ import (
 // than one exec call carrying the fragment, and a function with no exec call.
 // The registry fixtures cover the branches that a real file can express.
 
-func writeSiteFile(t *testing.T, body string) string {
+// writeSiteFile copies testdata/exec_site/<name>.go.txt to site.go in a fresh
+// directory, the file the anchors below name.
+const execSiteFixtureDir = "testdata/exec_site"
+
+func writeSiteFile(t *testing.T, name string) string {
 	t.Helper()
+	fixturePath := filepath.Join(execSiteFixtureDir, name+".go.txt")
+	body, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Fatalf("read the locator input for %s from %s: %v", name, fixturePath, err)
+	}
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "site.go"), []byte(body), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "site.go"), body, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return dir
@@ -24,18 +33,7 @@ func writeSiteFile(t *testing.T, body string) string {
 // TestResolveExecSite_LocatesCallInsideNamedFunction proves the locator picks
 // the call inside the named function by its fragment, not by a line offset.
 func TestResolveExecSite_LocatesCallInsideNamedFunction(t *testing.T) {
-	dir := writeSiteFile(t, `package p
-
-import "os/exec"
-
-func first() {
-	exec.Command("go", "vet", "./...")
-}
-
-func second() {
-	exec.Command("go", "build", "-race=false", "-o", "out", "./cmd/app")
-}
-`)
+	dir := writeSiteFile(t, "call-inside-named-function")
 	anchor := ExecAnchor{File: "site.go", Func: "second", Fragment: `exec.Command("go", "build"`}
 	site, err := ResolveExecSite(dir, anchor)
 	if err != nil {
@@ -55,16 +53,7 @@ func second() {
 // TestResolveExecSite_AmbiguousFunctionNameFails proves a name declared twice
 // in the file is an error, not a first match.
 func TestResolveExecSite_AmbiguousFunctionNameFails(t *testing.T) {
-	dir := writeSiteFile(t, `package p
-
-import "os/exec"
-
-type a struct{}
-type b struct{}
-
-func (a) run() { exec.Command("go", "build") }
-func (b) run() { exec.Command("go", "build") }
-`)
+	dir := writeSiteFile(t, "ambiguous-function-name")
 	_, err := ResolveExecSite(dir, ExecAnchor{File: "site.go", Func: "run", Fragment: "exec.Command"})
 	if err == nil || !strings.Contains(err.Error(), "ambiguous") {
 		t.Fatalf("err = %v, want an ambiguity error", err)
@@ -75,15 +64,7 @@ func (b) run() { exec.Command("go", "build") }
 // in the function carries the fragment, the anchor is an error, not a first
 // match.
 func TestResolveExecSite_AmbiguousFragmentFails(t *testing.T) {
-	dir := writeSiteFile(t, `package p
-
-import "os/exec"
-
-func build() {
-	exec.Command("go", "build")
-	exec.Command("go", "build")
-}
-`)
+	dir := writeSiteFile(t, "ambiguous-fragment")
 	_, err := ResolveExecSite(dir, ExecAnchor{File: "site.go", Func: "build", Fragment: `exec.Command("go", "build"`})
 	if err == nil || !strings.Contains(err.Error(), "ambiguous") {
 		t.Fatalf("err = %v, want an ambiguity error", err)
@@ -93,14 +74,7 @@ func build() {
 // TestResolveExecSite_MissingFragmentFails proves the fragment pins the call:
 // a present function whose call does not carry the fragment fails closed.
 func TestResolveExecSite_MissingFragmentFails(t *testing.T) {
-	dir := writeSiteFile(t, `package p
-
-import "os/exec"
-
-func build() {
-	exec.Command("go", "build")
-}
-`)
+	dir := writeSiteFile(t, "missing-fragment")
 	_, err := ResolveExecSite(dir, ExecAnchor{File: "site.go", Func: "build", Fragment: "exec.CommandContext"})
 	if err == nil || !strings.Contains(err.Error(), "required fragment") {
 		t.Fatalf("err = %v, want a missing-fragment error", err)
@@ -110,10 +84,7 @@ func build() {
 // TestResolveExecSite_NoExecCallFails proves an anchored function with no exec
 // call fails closed.
 func TestResolveExecSite_NoExecCallFails(t *testing.T) {
-	dir := writeSiteFile(t, `package p
-
-func build() {}
-`)
+	dir := writeSiteFile(t, "no-exec-call")
 	_, err := ResolveExecSite(dir, ExecAnchor{File: "site.go", Func: "build", Fragment: "exec.Command"})
 	if err == nil || !strings.Contains(err.Error(), "no exec.Command") {
 		t.Fatalf("err = %v, want a no-exec-call error", err)

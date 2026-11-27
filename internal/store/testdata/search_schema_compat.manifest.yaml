@@ -1,0 +1,7 @@
+requiredNames:
+  - schema_75_parent_and_child_hits
+  - schema_81_parent_and_child_hits
+  - schema_82_parent_and_child_hits
+  - schema_75_dedup_hides_duplicate_child
+  - schema_81_dedup_hides_duplicate_child
+  - schema_82_dedup_hides_duplicate_child

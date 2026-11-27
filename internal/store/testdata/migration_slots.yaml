@@ -85,6 +85,7 @@ slots:
   - {name: v79-import-profile-and-outcome-reasons, slot: 79, needle: "CREATE TABLE ingest_outcome_reasons ("}
   - {name: v80-publication-capture-outcome, slot: 80, needle: "VALUES (311, 3, 'publication_capture_missing', 0);"}
   - {name: v81-source-diagnostic-lanes, slot: 81, needle: "CREATE TABLE session_source_unavailability_v80 AS SELECT session_id, reason"}
+  - {name: v82-generation-mapping-set, slot: 82, needle: "ADD COLUMN mapping_set_id TEXT"}
   - {name: v83-owner-claims, slot: 83, needle: "CREATE TABLE local_owner ("}
 guards:
   - name: deleted-required-slot

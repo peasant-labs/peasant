@@ -19,6 +19,7 @@ requiredNames:
   - server-without-a-configuration-file-is-unavailable-on-every-route
   - save-while-another-change-holds-the-file-is-busy
   - foreign-host-is-refused-on-every-route
+  - preview-foreign-host-refusal-is-not-stored
   - unknown-connect-token-is-an-invalid-body
 codes:
   kickstart_body_missing: {case: open-without-a-body-is-refused}
@@ -49,7 +50,18 @@ codes:
     unreachable: a draft the model built once is rebuilt from the same values; only a defect in the model fails, and no request can cause one
   kickstart_answer_unencodable:
     unreachable: encoding a list of strings cannot fail; the code guards the encoder
-  kickstart_preview_unreadable: {fixture: tree, case: preview-of-an-unreadable-transcript-reports-the-reason}
+  kickstart_preview_unreadable:
+    unreachable: the HTTP preview no longer reads transcripts; unreadable source failures are carried by the WebSocket preview
+  kickstart_preview_capture_not_found:
+    unreachable: capture ownership is checked on the WebSocket, not on an HTTP route
+  kickstart_preview_source_changed:
+    unreachable: source changes are reported by the WebSocket capture, not an HTTP route
+  kickstart_preview_late_result:
+    unreachable: late results are reported by the WebSocket capture, not an HTTP route
+  kickstart_preview_capacity:
+    unreachable: capture capacity is enforced on the WebSocket, not an HTTP route
+  kickstart_preview_out_of_order:
+    unreachable: preview sequence is checked on the WebSocket, not an HTTP route
   publishing_contract_breach: {fixture: commit, case: finish-step-outside-the-contract-is-refused-before-any-write}
   kickstart_unavailable: {case: server-without-a-configuration-file-is-unavailable-on-every-route}
   kickstart_config_busy: {case: save-while-another-change-holds-the-file-is-busy}
@@ -257,6 +269,22 @@ cases:
       # nothing was opened
       - call: GET /api/v1/kickstart/status
         absent: [activeSessionId]
+
+  - name: preview-foreign-host-refusal-is-not-stored
+    world: {listings: two-projects}
+    steps:
+      - call: GET /api/v1/kickstart/sessions/x/tree/y/preview
+        host: site.example
+        status: 403
+        headers: {Cache-Control: [no-store]}
+        json: {code: request_host_not_local}
+        contains: {error: "/api/v1/kickstart/sessions/{id}/tree/{nodeId}/preview"}
+      # Other local-guard refusals retain their requested path.
+      - call: GET /api/v1/kickstart/sessions/x/tree
+        host: site.example
+        status: 403
+        headers: {Cache-Control: [no-store]}
+        json: {code: request_host_not_local}
 
   # The connect offer's answers are a closed set that the body's decoder holds,
   # so a token outside it never reaches the plan: it is an invalid body, and

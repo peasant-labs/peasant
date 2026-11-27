@@ -4,7 +4,6 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -12,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/githooks"
+	"github.com/peasant-labs/peasant/internal/testkit/executable"
 )
 
 //go:embed testdata/manual_composition.yaml
@@ -199,7 +199,7 @@ func TestManualSnippet_ComposesWithoutChangingTheHooksStatus(t *testing.T) {
 			composed := composeHook(testCase, snippet)
 			assertShellParses(t, testCase.Name, composed)
 			hook := filepath.Join(t.TempDir(), "composed-"+testCase.Event.String())
-			if writeErr := os.WriteFile(hook, []byte(composed), 0o755); writeErr != nil {
+			if writeErr := executable.Write(hook, []byte(composed), 0o755); writeErr != nil {
 				t.Fatalf("write composed hook: %v", writeErr)
 			}
 

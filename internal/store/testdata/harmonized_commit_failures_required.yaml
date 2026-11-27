@@ -1,0 +1,12 @@
+names:
+  - migrate-body-flush
+  - stage-batch
+  - migrate-stats
+  - sweep-bodies
+  - sweep-blobs
+  - consolidate-search
+  - retire-projections
+  - skip-bookkeeping
+  - repair-objects
+  - nondefect-shadow-mismatch
+  - migrate-catalog-commit

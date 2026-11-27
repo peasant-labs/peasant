@@ -24,10 +24,12 @@ import { isolatedServerSandbox } from './isolated-sandbox.mjs';
  * nothing is written into it, so one with no configuration file still has none.
  *
  * @param {string} name names the script in the root's directory name
- * @param {{configDir?: string, dataDir?: string}} [named] directories the caller names itself and keeps
+ * @param {{configDir?: string, dataDir?: string, home?: string}} [named] directories the caller names itself and keeps
  * @param {Record<string, string | undefined>} [inherited] the environment to extend (default: the script's own)
+ * @param {{removeOnExit?: boolean}} [options] `removeOnExit: false` leaves the root for the caller to
+ *   remove itself, for a script that must keep it while a child it started may still be alive
  */
-export function ownedServerSandbox(name, named = {}, inherited = process.env) {
+export function ownedServerSandbox(name, named = {}, inherited = process.env, { removeOnExit = true } = {}) {
   if (typeof name !== 'string' || !/^[a-z0-9-]+$/.test(name)) {
     throw new Error(`The server sandbox could not be made in ownedServerSandbox because its name is ${JSON.stringify(name)}, not lowercase letters, digits and dashes. Nothing was created or started. Pass the script's own short name, for example "share-geometry".`);
   }
@@ -41,7 +43,7 @@ export function ownedServerSandbox(name, named = {}, inherited = process.env) {
     rmSync(root, { recursive: true, force: true });
     throw error;
   }
-  process.once('exit', () => {
+  if (removeOnExit) process.once('exit', () => {
     try { rmSync(sandbox.root, { recursive: true, force: true }); } catch { /* the temporary directory is cleared by the system */ }
   });
   return sandbox;

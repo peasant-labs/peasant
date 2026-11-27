@@ -1,9 +1,5 @@
 # Peasant Release Architecture
 
-> Historical reference: the release-PR tagging and direct Homebrew publication
-> described below have been superseded. For the current queue, tag, publisher,
-> and vendor-hash procedures, use the [release runbook](release-runbook.md).
-
 This document is the maintainer-facing reference for the release system: which
 workflow owns which invariant, how release data moves from source commits into
 packages, and why tags are created only after Nix hash freshness has been proven.
@@ -18,77 +14,87 @@ source state.
 
 The split is intentional:
 
-- `release-pr.yml` owns release intent: title grammar, maintainer authorization,
-  duplicate-tag refusal, and pre-tag Nix hash repair. The maintainer-approval
-  assertion remains deferred for the single-maintainer repository.
+- `title-guard.yml` owns release intent: every PR title must pass
+  `release-intent check-title`, and the release PR's content must match the
+  generator.
+- `release-batch.yml` owns the version and the tag: it computes the version from
+  the landed titles, keeps the standing release PR current, and tags the landed
+  release commit with the releaser App. A required independent approval remains
+  deferred for the single-maintainer repository.
 - `release.yml` owns immutable tag publication: final-vs-rc lineage, tag-time Nix
   hash freshness, the **`e2e` + `release-e2e` publication gates** (both must pass
-  before Goreleaser runs), Goreleaser publication, and post-publish smoke.
+  before Goreleaser runs), the Goreleaser build, GitHub Release publication, and
+  post-publish smoke.
 - `e2e.yml` / `release-e2e.yml` are reusable workflows `release.yml` calls on
   **every** release tag (rc and final): `e2e.yml` proves the full-stack push
   skip-gate (`TestSkipGateE2E`) and `release-e2e.yml` proves installed per-distro
   packages (`TestReleasePerDistro`). Each must emit a positive `--- PASS` line; a
   SKIP or "no tests to run" **fails** the gate — no asserted coverage ⇒ no publish.
-- `release-validate.yml` owns package installability before a tag is minted and
-  again on rc tags.
+- `release-validate.yml` owns package installability in the release PR's merge
+  group, before a tag is minted, and again on rc tags.
 - `nix-vendor-hash.yml` keeps `develop` close to release-ready after dependency
-  and package-input changes.
+  and package-input changes, through an `automation/vendor-hash` PR.
 
 ```mermaid
 flowchart TD
-  A[Release PR to develop] --> B{"Title parses as release(vX.Y.Z[-rcN])?"}
+  A["PR titled type(scope)[level]: subject"] --> B{title-guard: check-title passes?}
   B -- no --> X[Fail PR validation]
-  B -- yes --> C{PR author is admin/maintain?}
-  C -- no --> X
-  C -- yes --> D[release-validate.yml snapshot package matrix]
-  D --> F[Merge PR]
-  F --> H[make nix-vendor-hash on merge commit]
-  H --> I{flake.nix changed?}
-  I -- yes --> J[Commit chore: update nix vendor hash to develop]
-  I -- no --> K[Use merge commit]
-  J --> L[Push annotated tag]
-  K --> L
+  B -- yes --> C[Merge queue lands PR on develop]
+  C --> D["release-batch.yml: plan computes vX.Y.Z"]
+  D --> E["Standing PR release[level]: vX.Y.Z on automation/release"]
+  E --> F{"Release merge group: release content, Nix vendor hash, e2e, packaging"}
+  F -- fail --> X2[Ejected; not landed or tagged]
+  F -- pass --> G[Release PR lands on develop]
+  G --> L[release-batch.yml pushes annotated tag with App token]
   L --> M[release.yml on tag]
   M --> V{Tag actor is the releaser App?}
   V -- no --> X
-  V -- yes --> N[Guard: parse Peasant release tag]
-  N --> O[Tag-time Nix vendorHash freshness gate]
-  O --> E2[e2e gate: TestSkipGateE2E PASS]
-  E2 --> RE[release-e2e gate: TestReleasePerDistro PASS]
-  RE --> P[Goreleaser publishes GitHub Release]
-  P --> Q[Smoke released Linux archives]
+  V -- yes --> N[guard: parse-tag]
+  M --> VT[verify-tag: develop reaches the tag]
+  N --> O[nix-vendor-hash: tag-time freshness gate]
+  N --> E2[e2e gate: TestSkipGateE2E PASS]
+  O --> E2
+  N --> RE[release-e2e gate: TestReleasePerDistro PASS]
+  O --> RE
+  E2 --> B[build: Goreleaser --skip=publish]
+  RE --> B
+  VT --> B
+  B --> P[publish GitHub Release]
+  VT --> P
+  P --> Q[smoke, windows-smoke]
+  P --> QM[macos-cask-smoke, final tags only]
   P --> R[Package consumers]
 ```
 
 ## Trigger Model
 
-Release intent is expressed only by a PR title into `develop`:
+Release intent is expressed only by PR titles, `type(scope)[level]: subject`
+([runbook](release-runbook.md#current-release-procedure)). No author writes a
+version: `release-intent plan`, built from the pinned `peasant-labs/infra`
+commit, computes it from the titles landed since the last final tag, and the
+bot titles its standing release PR `release[level]: vX.Y.Z`. The release config
+is `.github/release-intent.yaml` and the queue policy is
+`.github/release-queue.policy.yml`; `release-intent check-workflows` (`make
+check-workflows`) keeps the workflows matching that policy. The only piece left
+in `github.com/peasant-labs/schema/cmd/release-guard` is `parse-tag`, which
+`release.yml` runs. Schema releases occur in the standalone schema repository
+and cannot trigger Peasant's workflow.
 
-```text
-release(vX.Y.Z): <summary>        -> final release
-release(vX.Y.Z-rcN): <summary>    -> release candidate
-```
+No workflow checks a PR author's permission: the App writes the release PR and
+the tag, and the merge queue lands them. A required approval is deferred because
+GitHub does not permit self-approval and there is one active maintainer.
 
-The grammar is implemented in the shared `github.com/peasant-labs/schema/cmd/release-guard`
-tool; the workflows call it via `go run github.com/peasant-labs/schema/cmd/release-guard …`
-instead of duplicating regexes in YAML, and peasant's per-repo job-graph expectations live
-in `.github/release-guard.policy.yml`. Schema releases occur in the standalone schema
-repository and cannot trigger Peasant's workflow.
+The Nix vendor hash is a hard gate in the release PR's merge group, so the
+landed release commit is already hash-current when it is tagged. This matters
+because a release tag is immutable source: a stale `vendorHash` cannot be
+repaired after the tag has already published without moving the tag. The
+release group's other jobs are in the runbook's
+[Verdict inheritance](release-runbook.md#verdict-inheritance) section.
 
-Open release PRs are validated early. The title must parse, and the PR author must
-have GitHub collaborator permission `admin` or `maintain`. The approval assertion is
-deferred because GitHub does not permit self-approval and there is one active maintainer.
-
-Merge-time tagging checks out the PR merge commit and runs `make nix-vendor-hash`
-before creating the tag. If `flake.nix` changes, the release bot commits
-`chore: update nix vendor hash` to `develop` and tags that new hash-fix commit. This
-matters because a release tag is immutable source: a stale `vendorHash` cannot be
-repaired after the tag has already published without moving the tag.
-
-RC tags publish GitHub prereleases. Final tags publish full releases without requiring
-a prior same-version rc. Both paths still require the release App actor, valid Peasant
-tag grammar, the Nix vendor-hash freshness gate, full-stack e2e, release e2e,
-Goreleaser, and smoke validation.
+No current workflow creates an rc tag (see the runbook's
+[tag namespaces](release-runbook.md#tag-namespaces)). Final and rc tags both
+require the release App actor, valid Peasant tag grammar, the Nix vendor-hash
+freshness gate, full-stack e2e, release e2e, Goreleaser, and smoke validation.
 
 An active repository ruleset permits only GitHub App ID `3988034`
 (`peasant-labs-releaser`) to create or mutate `v*` tags. `release.yml` independently
@@ -99,28 +105,33 @@ publication.
 
 ```mermaid
 sequenceDiagram
-  participant Maintainer
-  participant PR as release-pr.yml
+  participant Queue as merge queue
+  participant Batch as release-batch.yml
   participant Git as develop branch
   participant Tag as annotated tag
   participant Rel as release.yml
 
-  Maintainer->>PR: Merge release(vX.Y.Z[-rcN]) PR
-  PR->>Git: Checkout merge commit
-  PR->>PR: make nix-vendor-hash
-  alt flake.nix changed
-    PR->>Git: Commit chore: update nix vendor hash
-    PR->>Tag: Tag hash-fix commit
-  else hash already current
-    PR->>Tag: Tag merge commit
-  end
+  Queue->>Git: Land releasing PRs
+  Batch->>Batch: release-intent plan computes vX.Y.Z
+  Batch->>Queue: Open/refresh and arm release[level]: vX.Y.Z
+  Queue->>Queue: Release group: content, vendor hash, e2e, packaging
+  Queue->>Git: Land release PR
+  Batch->>Tag: Tag landed release commit (App token)
   Tag->>Rel: Push v* tag
-  Rel->>Rel: Verify releaser App actor login and ID
-  Rel->>Rel: Parse Peasant release tag
-  Rel->>Rel: make nix-vendor-hash must be clean
-  Rel->>Rel: e2e gate (TestSkipGateE2E PASS)
-  Rel->>Rel: release-e2e gate (TestReleasePerDistro PASS)
-  Rel->>Rel: Goreleaser build and publish
+  par guard and verify-tag in parallel
+    Rel->>Rel: guard: releaser App actor login and ID, parse-tag
+  and
+    Rel->>Rel: verify-tag: develop reaches the tag
+  end
+  Rel->>Rel: nix-vendor-hash (after guard): make nix-vendor-hash must be clean
+  par e2e gates in parallel, after guard and nix-vendor-hash
+    Rel->>Rel: e2e gate (TestSkipGateE2E PASS)
+  and
+    Rel->>Rel: release-e2e gate (TestReleasePerDistro PASS)
+  end
+  Rel->>Rel: build (after all gates and verify-tag): Goreleaser --skip=publish
+  Rel->>Rel: publish GitHub Release
+  Rel->>Rel: smoke, windows-smoke; macos-cask-smoke on final tags
 ```
 
 ## Workflow Map
@@ -128,10 +139,12 @@ sequenceDiagram
 | Workflow | Triggers | Purpose | Mutates repo? | Required credentials |
 |----------|----------|---------|---------------|----------------------|
 | `tests.yml` | PRs and pushes touching Go, schema, Makefile, ast-grep, or flake files | Runs `nix develop -c make check`; also verifies `CGO_ENABLED=0` build behavior and module-zip buildability | No | `GITHUB_TOKEN` read |
-| `nix-vendor-hash.yml` | Pushes to `develop` touching `go.mod`, `go.sum`, `web/package.json`, `web/pnpm-lock.yaml`, flake files, `Makefile`, hash script, or the workflow; manual dispatch | Keeps `flake.nix` `vendorHash` current on `develop` | Yes, commits `chore: update nix vendor hash` when needed | GitHub App token with `Contents: write` |
-| `release-pr.yml` | PR open/edit/synchronize/reopen/labeled/close into `develop` | Validates release PR title/author; re-runs the e2e and packaging matrices only for pushes that touch their inputs or lack passing evidence (the `full-gate` label forces the complete matrix); on merge updates the Nix hash and pushes an immutable annotated tag | Yes, possibly commits hash fix and pushes tag | `GITHUB_TOKEN` read for collaborator checks; GitHub App token with `Contents: write` |
-| `release-validate.yml` | `workflow_call` from the Release PR ceremony and rc releases | Builds a Goreleaser snapshot and validates deb, rpm, AUR PKGBUILD, Homebrew cask style/install, and `nix build .#peasant` | No | `GITHUB_TOKEN` read |
-| `release.yml` | Push tags matching `v*` | Verifies the releaser App actor, guards tag lineage, checks Nix hash freshness, runs the **`e2e` + `release-e2e` publication gates** (both must PASS before publish), publishes via Goreleaser, smokes released archives; also fans out `release-validate.yml` on rc tags (non-blocking) | Publishes GitHub Release; pushes the Homebrew cask to the tap on final tags; may push AUR only after separate publisher approval | `GITHUB_TOKEN` contents write/actions read; GitHub App token for `homebrew-tap`; `AUR_KEY` after AUR approval |
+| `nix-vendor-hash.yml` | Pushes to `develop` touching `go.mod`, `go.sum`, `web/package.json`, `web/pnpm-lock.yaml`, flake files, `Makefile`, hash script, or the workflow; manual dispatch | Keeps `flake.nix` `vendorHash` current on `develop` | Opens or updates `chore(nix): update vendor hash` on `automation/vendor-hash` with auto-merge; never pushes `develop` | GitHub App token |
+| `title-guard.yml` | Every PR event and merge-group build | `release-intent check-title` on the live title and the changed paths (the bot-owned `CHANGELOG.md`); release PR content against the generator; `check-config` and `check-workflows` | No | `GITHUB_TOKEN` read |
+| `release-batch.yml` | Pushes to `develop`; every 30 minutes; manual dispatch | Plans the version, keeps the standing release PR current and armed, tags the landed release commit (`RELEASE_BATCH_MODE=tag`) | Pushes `automation/release` and the annotated tag | GitHub App token, in the `release` job only |
+| `cut-release.yml` | Manual dispatch with `patch` or `minor` | Opens the empty `release[level]: cut a release` PR | Pushes `automation/cut-release` | GitHub App token, in the `cut` job only |
+| `release-validate.yml` | `workflow_call` from the release merge group (`tests.yml`) and rc tags | Builds a Goreleaser snapshot and validates deb, rpm, AUR PKGBUILD, Homebrew cask style/install, and `nix build .#peasant` | No | `GITHUB_TOKEN` read |
+| `release.yml` | Push tags matching `v*` | Verifies the releaser App actor, parses the tag, proves `develop` reaches it, checks Nix hash freshness, runs the **`e2e` + `release-e2e` publication gates** (both must PASS before publish), builds with Goreleaser without a write token, publishes the GitHub Release, smokes released archives and a cask rendered from the tap's template; also fans out `release-validate.yml` on rc tags (non-blocking) | Publishes the GitHub Release only | `GITHUB_TOKEN`, `contents: write` in `publish` only |
 | `e2e.yml` | PRs to `develop` on relevant paths; `workflow_call`; pushes to `develop`/`main`; manual dispatch | Full-stack push skip-gate (podman Postgres + RustFS + real village server + peasant CLI); asserts a positive `--- PASS: TestSkipGateE2E` — a SKIP or `no tests to run` fails the job | No | Read-only `GITHUB_TOKEN`; Village and schema are public |
 | `release-e2e.yml` | `workflow_call`; manual dispatch | Installed-binary / per-distro release gate; asserts a positive `--- PASS: TestReleasePerDistro` | No | Read-only `GITHUB_TOKEN`; Village and schema are public |
 
@@ -139,10 +152,10 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-  S[Source merge commit] --> H{make nix-vendor-hash clean?}
-  H -- no --> C[Hash-fix commit on develop]
+  C[vendor-hash PR on develop] --> S[Landed release commit]
+  S --> H{release group: make nix-vendor-hash clean?}
+  H -- no --> X[Ejected from the queue]
   H -- yes --> T[Annotated release tag]
-  C --> T
   T --> G[Goreleaser]
   G --> A[Linux and Darwin tar.gz archives]
   G --> D[deb packages]
@@ -191,7 +204,7 @@ Homebrew style exceptions.
 | `.deb` | Ubuntu/Debian amd64/arm64 | Goreleaser `nfpms` | `release-validate.yml` deb matrix on Ubuntu 22.04/24.04 | GitHub Release | Empty `Depends`; static binary installed to `/usr/bin/peasant` |
 | `.rpm` | Fedora/openSUSE; **produced** amd64+arm64, **validated** amd64 | Goreleaser `nfpms` | `release-validate.yml` Fedora `dnf` and openSUSE `zypper modifyrepo --disable --all` followed by local `zypper --allow-unsigned-rpm` (amd64) | GitHub Release | Unsigned local rpm install in validation; artifact name `peasant_{version}_linux_{amd64\|arm64}.rpm` (goreleaser `file_name_template`, not the conventional `name-version-release.arch`) |
 | AUR `peasant-bin` | Arch Linux x86_64 | Goreleaser `aurs` | Offline `makepkg` with local release tarball and full checksum verification | Disabled for now via `skip_upload: "true"`; enable (`auto`) after AUR publishing is separately approved | Requires public repo and `AUR_KEY`; prereleases remain skipped with `auto` |
-| Homebrew cask | macOS amd64/arm64 | Goreleaser `homebrew_casks` | `brew style` on Linux + `brew audit` on macOS (tap CI); cask install on macOS for rc tags; cask smoke on macOS for final tags | Enabled via `skip_upload: "auto"` — publishes to the tap on final tags; rc tags never touch the tap | Requires tap repo and GitHub App `Contents: write` (granted); unsigned binary uses quarantine-removal hook |
+| Homebrew cask | macOS amd64/arm64 | `peasant-labs/homebrew-tap`'s scheduled publisher, from the latest final release's `checksums.txt`; Goreleaser `homebrew_casks` keeps `skip_upload: "true"` and its generated cask is used only for validation | `brew style` on Linux (`release-validate.yml`); `brew audit` on macOS (tap CI); cask install on macOS for rc tags; `macos-cask-smoke` on final tags | Published by the tap; rc tags never reach the tap | Peasant holds no tap credential; unsigned binary uses quarantine-removal hook |
 | In-repo Nix flake | Nix systems supported by the flake | `flake.nix` `buildGoModule` | `release-validate.yml` `nix build .#peasant`; `release.yml` hash freshness | Available from source checkout/GitHub flake | Requires current `vendorHash`; stubs `web/out` until frontend derivation exists |
 | Future nixpkgs | nixpkgs-supported systems | nixpkgs expression | Future nixpkgs CI plus local update checks | Deferred until a stable GitHub release exists | Requires public repo, tagged release, maintainer metadata; the license requirement is met (Apache-2.0, free) |
 
@@ -204,12 +217,12 @@ flowchart TD
   GR --> Deb[deb]
   GR --> Rpm[rpm]
   GR --> Aur[AUR peasant-bin]
-  GR --> Brew[Homebrew cask]
   Tar --> GH[GitHub Release]
   Win --> GH
   Deb --> GH
   Rpm --> GH
   Aur --> Arch[Arch users]
+  GH --> Brew[Homebrew cask, rendered by the tap]
   Brew --> Mac[macOS users]
   FX --> Nix[Nix users]
   FX --> Nixpkgs[future nixpkgs]
@@ -234,12 +247,18 @@ first-party edit to the schema module's sources no longer moves peasant's
 Web package manifests are also treated as packaging-relevant inputs because the
 release build embeds the dashboard output.
 
-The Homebrew cask publishes to `peasant-labs/homebrew-tap` on final tags
-(`skip_upload: "auto"`; rc tags never touch the tap). `release.yml` mints the
-short-lived tap token from the GitHub App installation (`Contents: write` on the tap);
-there is no long-lived tap token secret. AUR publication remains disabled until its
-operational checklist is complete (a dedicated `AUR_KEY`); Goreleaser keeps the AUR
-upload `skip_upload: "true"` until then. The project is licensed Apache-2.0.
+The Homebrew cask comes from the latest final release, and rc tags never reach
+the tap. The tap publishes on its own schedule (see `peasant-labs/homebrew-tap`
+`publish-cask.yml`). The final-tag smoke does not wait for it: it renders the
+cask from the tap's template and this release's `checksums.txt` and installs it
+from a throwaway tap. The tap's publisher renders and audits the cask before it
+pushes; this smoke does not check that the tap has published, so a stale tap
+shows only as a failed or missing `publish-cask` run in the tap. Peasant holds no
+tap credential.
+
+AUR publication remains disabled until its operational checklist is complete (a
+dedicated `AUR_KEY`); Goreleaser keeps the AUR upload `skip_upload: "true"` until
+then. The project is licensed Apache-2.0.
 
 macOS binaries are not signed or notarized yet. Browser-downloaded raw tarballs
 require the manual `xattr -dr com.apple.quarantine ./peasant` step documented in the
@@ -251,12 +270,12 @@ signatures, and provenance attestations are deferred release-hardening work.
 
 | Failure | Owner | What happens | Operator response |
 |---------|-------|--------------|-------------------|
-| Stale Nix `vendorHash` on release PR merge | `release-pr.yml` | Bot commits `chore: update nix vendor hash` and tags that commit | Verify the extra commit on `develop`; no manual action if the workflow succeeds |
-| Manual/non-App `v*` tag attempt | GitHub tag ruleset / `release.yml` | GitHub rejects the ref mutation; if policy drift lets an event reach Actions, the actor guard fails before checkout | Do not bypass or weaken the rule; create releases only by merging a protected release PR |
-| Stale Nix `vendorHash` on a release tag | `release.yml` | `nix-vendor-hash` job fails before Goreleaser | Do not move the tag; update `develop` with `make nix-vendor-hash` and cut a new tag/version through a release PR |
-| Existing release tag | `release-pr.yml` | Tag step hard-fails and refuses to move it | Bump to a new version or rc number |
-| Invalid release PR title | `release-pr.yml` | Open-PR validation fails | Rename the PR to the exact title grammar |
-| Missing maintainer approval | `release-pr.yml` (step disabled during the single-maintainer period) | n/a while independent approval is unsatisfiable | Re-enable the assertion once another active maintainer can approve, then get an `admin`/`maintain` approval and rerun |
+| Stale Nix `vendorHash` on the release PR | `tests.yml` release group | `vendor-hash` fails and the queue ejects the release PR before it lands or is tagged | Let the `automation/vendor-hash` PR land; the bot rebuilds the release PR |
+| Manual/non-App `v*` tag attempt | GitHub tag ruleset / `release.yml` | GitHub rejects the ref mutation; if policy drift lets an event reach Actions, the actor guard fails before checkout | Do not bypass or weaken the rule; create releases only through the release batch |
+| Stale Nix `vendorHash` on a release tag | `release.yml` | `nix-vendor-hash` job fails before Goreleaser | Do not move the tag; land the vendor-hash fix on `develop` and let the bot cut a new version |
+| Existing release tag | `release-batch.yml` | Tag step hard-fails and refuses to move it | Read the `plan` output and [fix forward](release-runbook.md#fix-forward) |
+| Invalid PR title | `title-guard.yml` | `check-title` fails on the PR and in the merge group | Retitle to `type(scope)[level]: subject` (remove a queued PR from the queue first) |
+| Stale release PR content | `title-guard.yml` | `release-content-stale`; the PR cannot land | None: `release-batch.yml` rebuilds the release PR |
 | Web dashboard build failure | `release.yml` / `release-e2e.yml` / `release-validate.yml` | Artifact production stops before Goreleaser; no stub dashboard is publishable | Fix the frontend build or dependency pin and rerun the gate |
 | `e2e` / `release-e2e` gate SKIP or failure | `release.yml` | Publication blocked — no positive `--- PASS: TestSkipGateE2E` / `TestReleasePerDistro` line means no asserted product / installed-package e2e coverage. A SKIP (`no tests to run`, missing podman/runner) is treated as **failure**, never green | Fix the harness/runner so the gate actually runs and passes; never bypass — a green publish requires proven e2e coverage |
-| Package validation failure | `release-validate.yml` | Blocks the **release PR** (pre-tag). On rc **tags** it runs as **non-blocking** parallel coverage (`needs: guard`, `if: -rc`; NOT in `release.needs`) — it does not gate the rc prerelease publish | Fix the package metadata, install script, flake, or Goreleaser config and rerun validation |
+| Package validation failure | `release-validate.yml` | Ejects the **release PR** from its merge group (pre-tag). On rc **tags** it runs as **non-blocking** parallel coverage (`needs: guard`, `if: -rc`; NOT in `build.needs`) — it does not gate the rc prerelease publish | Fix the package metadata, install script, flake, or Goreleaser config and rerun validation |

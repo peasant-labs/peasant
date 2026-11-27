@@ -97,7 +97,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: peasant-labs/infra
-          ref: bcdaa02f9defd528b4dd9cb3077238573e709749
+          ref: 7d2a604afe5b50a3dcc20df06f02e85c2a0d4027
           path: infra-tool
           sparse-checkout: tools/release
           persist-credentials: false
@@ -167,6 +167,10 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+    env:
+      # The release body. The staging steps keep it beside dist/assets, never
+      # inside it, and the publisher reads it as dist/release-notes.md.
+      RELEASE_NOTES: release-notes.md
     steps:
       - name: Checkout repository (full history for changelog)
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -220,7 +224,7 @@ jobs:
           PEASANT_RELEASE_HEADER="$(go run ./scripts/release-header -tag "$TAG")"
           export PEASANT_RELEASE_HEADER
           "$RUNNER_TEMP/goreleaser-bin/goreleaser" release --clean --skip=publish
-          printf '%s\n' "$PEASANT_RELEASE_HEADER" > dist/release-notes.md
+          printf '%s\n' "$PEASANT_RELEASE_HEADER" > "dist/${RELEASE_NOTES}"
 
       - name: Stage the bare Windows binary at its checksum name
         run: |
@@ -242,6 +246,46 @@ jobs:
           set -euo pipefail
           test -s dist/checksums.txt
           (cd dist && sha256sum --check checksums.txt)
+
+      # gh release create refuses a directory, so the publisher's one asset
+      # glob must match only files. GoReleaser's dist holds per-target build
+      # directories, so its top-level files are copied into dist/assets and
+      # the rest is moved out of the artifact. The notes sit beside the
+      # assets, not inside them, so they are the release body and not an
+      # asset.
+      - name: Stage the release assets in one flat directory
+        run: |
+          set -euo pipefail
+          goreleaser_out="$(mktemp -d "$RUNNER_TEMP/goreleaser-dist.XXXXXX")"
+          mv dist "${goreleaser_out}/dist"
+          mkdir -p dist/assets
+          mv "${goreleaser_out}/dist/${RELEASE_NOTES}" "dist/${RELEASE_NOTES}"
+          find "${goreleaser_out}/dist" -mindepth 1 -maxdepth 1 -type f -exec cp -- {} dist/assets/ \;
+
+      # The published asset set is exact: every file checksums.txt names,
+      # checksums.txt itself, and GoReleaser's four metadata files, and
+      # nothing else. A new or missing file fails here, before any release
+      # exists, instead of publishing a release the install docs do not
+      # describe.
+      - name: Verify the staged release assets
+        run: |
+          set -euo pipefail
+          test -s "dist/${RELEASE_NOTES}" || { echo "::error::dist/${RELEASE_NOTES} is missing or empty"; exit 1; }
+          stray="$(find dist/assets -mindepth 1 ! -type f -print -quit)"
+          if [ -n "${stray}" ]; then
+            echo "::error::dist/assets must hold only regular files; found ${stray}"
+            exit 1
+          fi
+          test -s dist/assets/checksums.txt || { echo "::error::dist/assets/checksums.txt is missing or empty"; exit 1; }
+          expected="$( { awk '{print $2}' dist/assets/checksums.txt; echo checksums.txt; printf '%s\n' CHANGELOG.md artifacts.json config.yaml metadata.json; } | LC_ALL=C sort)"
+          staged="$(find dist/assets -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort)"
+          if [ "${staged}" != "${expected}" ]; then
+            echo "::error::dist/assets does not hold exactly the checksummed files, checksums.txt and the GoReleaser metadata. If GoReleaser's output changed on purpose, update the expected metadata list in BOTH this step of .github/workflows/release.yml and internal/e2e/testdata/workflows/release_publish_contract.yaml."
+            diff <(printf '%s\n' "${expected}") <(printf '%s\n' "${staged}") || true
+            exit 1
+          fi
+          (cd dist/assets && sha256sum --check checksums.txt)
+          ls -l dist dist/assets
 
       - name: Hand release artifacts to the publisher
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -266,31 +310,69 @@ jobs:
         with:
           name: release-dist
           path: dist
+      # Any view failure, including a network or authentication error, is
+      # treated as no release; the list check below then fails closed.
       - name: Look for an existing release
         id: view
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release view "$TAG" --repo "$GITHUB_REPOSITORY"
-      - name: Create the release for the existing tag
-        id: create
+
+      # A rerun after a published release succeeds only when that release is
+      # complete. \u0024 prints a dollar sign in the jq message without a jq
+      # variable. A leftover draft is deleted by its id: gh release delete
+      # resolves a tag that has several drafts to the oldest one.
+      - name: Verify the existing release is complete
+        if: steps.view.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,assets --jq 'if (.isDraft | type) != "boolean" then error("release draft status is invalid; inspect the release before retrying") elif .isDraft then error("release is an unpublished draft; list the drafts for this tag with gh api repos/\u0024GITHUB_REPOSITORY/releases, delete each by id with gh api -X DELETE repos/\u0024GITHUB_REPOSITORY/releases/<id> (never gh release delete \u0024TAG), then rerun; do not create a new tag") elif (.assets | type) != "array" then error("published release assets are invalid; inspect the release before retrying") elif (.assets | length == 0) then error("published release has no assets; tags are never moved, so fix forward with a new tag") else "existing release is published and has assets" end'
+
+      # A failed view may be a rate limit, a 5xx or an authentication error
+      # rather than an absent release, and GitHub keeps several drafts for one
+      # tag. gh lists drafts too, so this fails when any release or leftover
+      # draft names the tag, and it fails closed on any API error, stopping
+      # the run before anything is created.
+      - name: Refuse an existing release for the tag
+        id: list
         if: steps.view.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,isDraft --jq '[.[] | select(.tagName == env.TAG)] | if length > 0 then error("a release or draft already exists for this tag, so nothing was created; list the drafts with gh api repos/\u0024GITHUB_REPOSITORY/releases, delete stale drafts by id with gh api -X DELETE repos/\u0024GITHUB_REPOSITORY/releases/<id> (never gh release delete \u0024TAG), then rerun; no new tag is needed") else "no release or draft exists for this tag" end'
+
+      # One command creates the draft and uploads every asset to that same
+      # release. A separate uploader finds its release by tag and can create
+      # a second release, which is how other releases were published empty.
+      - name: Create the draft release with its assets
+        id: create
+        if: steps.view.outcome == 'failure' && steps.list.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ needs.guard.outputs.prerelease }}
+        run: gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag --title "$TAG" --notes-file dist/release-notes.md --prerelease="$PRERELEASE" 'dist/assets/*'
+
+      - name: Verify the draft before publishing
+        if: steps.view.outcome == 'failure' && steps.create.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,assets --jq 'if .isDraft != true or (.assets | type) != "array" or (.assets | length) == 0 then error("the draft is missing or has no assets and was not published; list the drafts for this tag with gh api repos/\u0024GITHUB_REPOSITORY/releases, delete each by id with gh api -X DELETE repos/\u0024GITHUB_REPOSITORY/releases/<id> (never gh release delete \u0024TAG), then rerun; no new tag is needed") else "draft holds \(.assets | length) assets" end'
+
+      - name: Publish the release
+        if: steps.view.outcome == 'failure' && steps.create.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
           PRERELEASE: ${{ needs.guard.outputs.prerelease }}
           LATEST: ${{ needs.guard.outputs.latest }}
-        run: gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" --notes-file dist/release-notes.md --prerelease="$PRERELEASE" --latest="$LATEST"
-      - name: Upload the release assets
-        if: steps.view.outcome == 'success' || steps.create.outcome == 'success'
-        uses: softprops/action-gh-release@5be0e66d93ac7ed76da52eca8bb058f665c3a5fe # v2.4.2
-        with:
-          tag_name: ${{ github.ref_name }}
-          repository: ${{ github.repository }}
-          files: dist/*
-          fail_on_unmatched_files: true
-          overwrite_files: true
-          prerelease: ${{ needs.guard.outputs.prerelease }}
-          make_latest: ${{ needs.guard.outputs.latest }}
+        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease="$PRERELEASE" --latest="$LATEST"
+
+      # Peasant releases are not immutable, so this checks only that the
+      # release left draft and still holds its assets.
+      - name: Verify the published release
+        if: steps.view.outcome == 'failure' && steps.create.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,assets --jq 'if .isDraft != false or (.assets | type) != "array" or (.assets | length) == 0 then error("the release did not publish with its assets; inspect it with gh release view \u0024TAG, and fix forward with a new tag rather than moving this one") else "release is published and holds \(.assets | length) assets" end'
 
   # Post-publish smoke: download the released linux archives on NATIVE runners
   # (no QEMU) and assert the binary is static and reports the tag version.
@@ -514,51 +596,63 @@ jobs:
             if ($LASTEXITCODE -ne 0) { Write-Host "::warning::web stop exited $LASTEXITCODE" }
           }
 
-  # Post-publish macOS smoke: on final tags, install from the live tap.
-  # The tap publisher polls on its own fifteen-minute schedule and peasant holds
-  # no tap credential, so this job waits for the tap to carry the tagged version
-  # before installing. A tap that never catches up still fails the smoke rather
-  # than certifying an older package as the current release.
+  # Post-publish macOS smoke: on final tags, install the cask users get, rendered
+  # here from the tap's own template and this release's checksums. The tap's
+  # scheduled publisher is best-effort and peasant holds no tap credential, so
+  # this job never waits on it. The tap's publisher renders and audits the cask
+  # before it pushes; this smoke does not check that the tap has published, so a
+  # stale tap shows only as a failed or missing publish-cask run in the tap. The
+  # checkout tracks the tap's main unpinned on purpose, so the smoke renders with
+  # the template the tap publishes from.
   macos-cask-smoke:
     name: macos cask smoke (final only)
     needs: publish
     if: github.event_name == 'push' && !contains(github.ref_name, '-rc')
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 15
     permissions:
       contents: read
     env:
       TAG: ${{ github.ref_name }}
     steps:
-      - name: Wait for the tap publisher to carry this release
+      - name: Check out the tap (read-only)
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: peasant-labs/homebrew-tap
+          path: homebrew-tap
+          persist-credentials: false
+
+      - name: Render the cask from the tap template and this release's checksums
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          expected="${TAG#v}"
-          deadline=$((SECONDS + 960))
-          while :; do
-            published="$(gh api -H 'Accept: application/vnd.github.raw' \
-              repos/peasant-labs/homebrew-tap/contents/Casks/peasant.rb 2>/dev/null || true)"
-            if printf '%s' "${published}" | grep -qF "version \"${expected}\""; then
-              echo "the tap serves peasant ${expected}"
-              exit 0
-            fi
-            if [ "${SECONDS}" -ge "${deadline}" ]; then
-              echo "::error::the tap did not publish peasant ${expected} within 16 minutes. The tap publisher runs every 15 minutes; a stale tap fails this smoke rather than certifying an older package as the current release."
-              exit 1
-            fi
-            echo "the tap does not carry ${expected} yet; checking again in 30s"
-            sleep 30
-          done
+          mkdir -p "${RUNNER_TEMP}/release"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern checksums.txt --dir "${RUNNER_TEMP}/release" --clobber
+          # render-cask.sh needs bash 4 (mapfile); macOS ships bash 3.2. The
+          # script is fail-closed: a missing archive digest or a surviving
+          # placeholder exits non-zero before anything is installed.
+          HOMEBREW_NO_AUTO_UPDATE=1 brew install bash
+          "$(brew --prefix bash)/bin/bash" homebrew-tap/scripts/render-cask.sh \
+            "${TAG#v}" \
+            "${RUNNER_TEMP}/release/checksums.txt" \
+            homebrew-tap/templates/peasant.rb.tmpl \
+            "${RUNNER_TEMP}/peasant.rb"
+          grep -F "version \"${TAG#v}\"" "${RUNNER_TEMP}/peasant.rb"
 
-      - name: Tap + install the published cask
+      - name: Install the rendered cask from a throwaway tap
         run: |
           set -euxo pipefail
-          brew tap peasant-labs/tap
+          tap="peasant-labs/cask-smoke"
+          brew tap-new "$tap"
+          tap_dir="$(brew --repository "$tap")"
+          mkdir -p "$tap_dir/Casks"
+          cp "${RUNNER_TEMP}/peasant.rb" "$tap_dir/Casks/peasant.rb"
+          brew trust --cask "$tap/peasant"
           # Fully-qualified token so this never resolves a same-named cask from
           # another tap.
-          brew install --cask peasant-labs/tap/peasant
+          brew install --cask "$tap/peasant"
 
       - name: Assert version matches the tag
         run: |

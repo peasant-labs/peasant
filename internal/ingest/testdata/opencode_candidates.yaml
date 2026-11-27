@@ -379,6 +379,16 @@ allowed_query_statements:
     statement: 'select count(*), coalesce(sum(length(data)), 0) from message where session_id = ?1'
   - name: current-session-payload-size
     statement: 'select count(*), coalesce(sum(length(data)), 0) from session_message where session_id = ?1'
+  - name: current-message-lengths-first
+    statement: 'select seq, length(data) from session_message where session_id = ?1 order by seq limit ?2'
+  - name: current-message-lengths-before
+    statement: 'select seq, length(data) from session_message where session_id = ?1 and seq < ?2 order by seq limit ?3'
+  - name: current-message-lengths-after
+    statement: 'select seq, length(data) from session_message where session_id = ?1 and seq > ?2 order by seq limit ?3'
+  - name: current-message-lengths-bounded
+    statement: 'select seq, length(data) from session_message where session_id = ?1 and seq > ?2 and seq < ?3 order by seq limit ?4'
+  - name: current-messages-change-marker
+    statement: 'select count(*), coalesce(max(time_updated), 0), coalesce(sum(length(data)), 0) from session_message where session_id = ?1 and seq <= ?2'
 required_query_guard_mutations:
   - payload-table-scope
   - keyset-predicate

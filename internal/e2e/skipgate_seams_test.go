@@ -9,14 +9,12 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/peasant-labs/peasant/internal/testkit/executable"
 )
 
 func TestPeasantBinSeamUsesInjectedCommand(t *testing.T) {
-	fake := filepath.Join(t.TempDir(), "fake-peasant")
-	script := "#!/bin/sh\necho fake-peasant \"$@\"\n"
-	if err := os.WriteFile(fake, []byte(script), 0o700); err != nil {
-		t.Fatalf("write fake peasant: %v", err)
-	}
+	fake := installFakePeasant(t, "injected", filepath.Join(t.TempDir(), "fake-peasant"))
 
 	setenv(t, envPeasantBin, fake)
 	bin := buildPeasant(t)
@@ -32,15 +30,11 @@ func TestPeasantBinSeamUsesInjectedCommand(t *testing.T) {
 	// wrapper filename. Keep a controlled older executable behind that directory
 	// so this proves the hook cannot silently run a different installed build.
 	fallback := t.TempDir()
-	if err := os.WriteFile(filepath.Join(fallback, "peasant"), []byte("#!/bin/sh\necho wrong-installed-peasant\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	shell, err := exec.LookPath("sh")
-	if err != nil {
-		t.Fatal(err)
-	}
-	hook := exec.Command(shell, "-c", "exec peasant sentinel")
-	hook.Env = append(os.Environ(), "PATH="+filepath.Dir(bin)+string(os.PathListSeparator)+fallback)
+	installFakePeasant(t, "installed", filepath.Join(fallback, "peasant"))
+	// Resolve `peasant` through the hook's PATH the way the hook's shell does:
+	// the first directory on PATH that holds it wins.
+	t.Setenv("PATH", filepath.Dir(bin)+string(os.PathListSeparator)+fallback)
+	hook := exec.Command("peasant", "sentinel")
 	out, err = hook.CombinedOutput()
 	if err != nil {
 		t.Fatalf("resolve injected command through the installed-hook PATH: %v\n%s", err, out)
@@ -55,12 +49,7 @@ func TestPeasantBinWrapperQuotesInjectedCommand(t *testing.T) {
 	// close-on-exec write descriptor before WriteFile closes it and retain it
 	// until its own exec, making the script temporarily busy. Keep this test
 	// sequential with those subprocess tests.
-	dir := t.TempDir()
-	fake := filepath.Join(dir, "fake peasant")
-	script := "#!/bin/sh\necho quoted-peasant \"$@\"\n"
-	if err := os.WriteFile(fake, []byte(script), 0o700); err != nil {
-		t.Fatalf("write fake peasant: %v", err)
-	}
+	fake := installFakePeasant(t, "quoted", filepath.Join(t.TempDir(), "fake peasant"))
 
 	wrapper, err := writePeasantBinWrapper(t.TempDir(), shellQuote(fake)+" --fixed")
 	if err != nil {
@@ -377,4 +366,21 @@ func TestRefreshRejectsMissingDatabaseHandle(t *testing.T) {
 		!strings.Contains(output, "fix:") {
 		t.Fatalf("missing-database refresh fatal was not actionable\n%s", output)
 	}
+}
+
+// installFakePeasant copies the stand-in program testdata/fake_peasant/<name>.sh
+// to path as an executable and returns path.
+const fakePeasantFixtureDir = "testdata/fake_peasant"
+
+func installFakePeasant(t *testing.T, name, path string) string {
+	t.Helper()
+	scriptPath := filepath.Join(fakePeasantFixtureDir, name+".sh")
+	script, err := os.ReadFile(scriptPath)
+	if err != nil {
+		t.Fatalf("read the %s stand-in for peasant from %s: %v", name, scriptPath, err)
+	}
+	if err := executable.Write(path, script, 0o700); err != nil {
+		t.Fatalf("install the %s stand-in for peasant at %s: %v", name, path, err)
+	}
+	return path
 }

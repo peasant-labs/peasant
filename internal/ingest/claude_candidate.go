@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -20,7 +21,10 @@ import (
 // fallback consults structural sibling snapshots through the same accessor the
 // stored adapter uses.
 
-var _ GenerationBuilder = (*ClaudeIndexer)(nil)
+var (
+	_ GenerationBuilder         = (*ClaudeIndexer)(nil)
+	_ GenerationMetadataBuilder = (*ClaudeIndexer)(nil)
+)
 
 // claudeCandidateRefusal is the fixed-shape, sanitized refusal for the Claude
 // candidate boundary. It names the harness and session identity plus a fixed
@@ -84,19 +88,64 @@ func (idx *ClaudeIndexer) BuildGeneration(ctx context.Context, in GenerationBuil
 	return candidate, nil
 }
 
-// buildClaudeGeneration composes the Claude candidate from the attempt's
-// captured bytes and recorded metadata. It never consults the stored-capture
-// authority: a Claude candidate is proven from the captured pair, and the prior
-// only supplies the reusable alias state a refresh must retain.
-func (idx *ClaudeIndexer) buildClaudeGeneration(ctx context.Context, in GenerationBuildInput) (GenerationCandidate, error) {
-	if in.GenerationID == "" {
-		return GenerationCandidate{}, fmt.Errorf("ingest.ClaudeIndexer.BuildGeneration: no generation identity was supplied for session %s; activation owns generation addressing and the projection invents none; wire the generation identity before requesting a candidate", in.Session.SessionID)
+// claudeMetadataHalfMutationForTest is nil in production. A test sets it to
+// change the metadata BuildGenerationMetadata returns, so a mutation of the
+// metadata half can be shown to fail the parity and validation tests. Only
+// BuildGenerationMetadata reads it; BuildGeneration never does, and no
+// production file assigns it (a source guard enforces both).
+var claudeMetadataHalfMutationForTest func(in GenerationBuildInput, metadata *UnifiedMetadata)
+
+// BuildGenerationMetadata runs the metadata half of BuildGeneration: the
+// re-gate, the stored metadata extraction, the retained identity proof and the
+// transcript metadata parse, with no entry parse, classification or
+// projection. It returns the metadata exactly as BuildGeneration hands it to
+// the projection, so its stats are the parse's own and not the projection's
+// strict counts. Any failure leaves through the same fixed sanitized refusal
+// as BuildGeneration, and means the caller has no candidate.
+func (idx *ClaudeIndexer) BuildGenerationMetadata(ctx context.Context, in GenerationBuildInput) (GenerationMetadataCandidate, error) {
+	if err := ctx.Err(); err != nil {
+		return GenerationMetadataCandidate{}, claudeMetadataCompletionFailure(in.Session)
 	}
+	half, err := idx.claudeCandidateMetadata(ctx, in)
+	if err != nil {
+		return GenerationMetadataCandidate{}, claudeMetadataCompletionFailure(in.Session)
+	}
+	if mutate := claudeMetadataHalfMutationForTest; mutate != nil {
+		mutate(in, &half.metadata)
+	}
+	return GenerationMetadataCandidate{
+		Metadata:             half.metadata,
+		Completeness:         indexformat.GenerationCompletenessComplete,
+		SourceEvidenceDigest: half.metadata.ContentHash,
+	}, nil
+}
+
+// claudeMetadataCompletionFailure is BuildGenerationMetadata's form of the
+// fixed Claude refusal: the same reason, effect and recovery, naming the
+// metadata operation.
+func claudeMetadataCompletionFailure(session DiscoveredSession) error {
+	refusal := claudeCandidateCompletionFailure(session).(*claudeCandidateRefusal)
+	refusal.Operation = "ClaudeIndexer.BuildGenerationMetadata"
+	return refusal
+}
+
+// claudeMetadataResult is the metadata half's output: the candidate metadata
+// before the entry parse.
+type claudeMetadataResult struct {
+	metadata UnifiedMetadata
+}
+
+// claudeCandidateMetadata is the metadata half both BuildGeneration and
+// BuildGenerationMetadata run: everything the builder does before its entry
+// parse. It never writes to in.RecordedMetadata: the extraction deep-copies
+// the recorded metadata before it appends, and the identity proof copies the
+// recorded relationships before it edits them.
+func (idx *ClaudeIndexer) claudeCandidateMetadata(ctx context.Context, in GenerationBuildInput) (claudeMetadataResult, error) {
 	if in.CapturedTranscript == nil {
-		return GenerationCandidate{}, fmt.Errorf("ingest.ClaudeIndexer.BuildGeneration: no captured transcript was supplied for session %s; a managed candidate indexes exactly the verified capture; capture the session bytes before requesting a candidate", in.Session.SessionID)
+		return claudeMetadataResult{}, fmt.Errorf("ingest.ClaudeIndexer.BuildGeneration: no captured transcript was supplied for session %s; a managed candidate indexes exactly the verified capture; capture the session bytes before requesting a candidate", in.Session.SessionID)
 	}
 	if in.RecordedMetadata == nil {
-		return GenerationCandidate{}, fmt.Errorf("ingest.ClaudeIndexer.BuildGeneration: no recorded metadata agreement was supplied for session %s; the candidate cannot be indexed against an identity; provide the committed metadata", in.Session.SessionID)
+		return claudeMetadataResult{}, fmt.Errorf("ingest.ClaudeIndexer.BuildGeneration: no recorded metadata agreement was supplied for session %s; the candidate cannot be indexed against an identity; provide the committed metadata", in.Session.SessionID)
 	}
 	data := in.CapturedTranscript
 
@@ -117,36 +166,19 @@ func (idx *ClaudeIndexer) buildClaudeGeneration(ctx context.Context, in Generati
 	}
 	metadata, err := metadataForTranscriptExtraction(ctx, HarnessClaudeCode, data, recorded)
 	if err != nil {
-		return GenerationCandidate{}, err
+		return claudeMetadataResult{}, err
 	}
 	allowed, relationships, err := verifyRetainedClaudeIdentityWith(data, in.RecordedMetadata, metadata.ContentHash, claudeIdentitySnapshotFrom(idx.fs))
 	if err != nil {
-		return GenerationCandidate{}, err
+		return claudeMetadataResult{}, err
 	}
 	parsed := NewUnifiedMetadata()
 	parsed.SessionID = in.RecordedMetadata.SessionID
 	if _, err := parseClaudeTranscriptMetadataWithIdentity(data, &parsed, allowed); err != nil {
-		return GenerationCandidate{}, err
+		return claudeMetadataResult{}, err
 	}
 	if err := transcriptMetadataParsingError(HarnessClaudeCode, &parsed); err != nil {
-		return GenerationCandidate{}, err
-	}
-
-	// The tolerant classification parse mirrors the retained harvest parse:
-	// completion-less, full-depth, full-content, retaining unknown evidence, so
-	// the accounted omissions and unrepresented kinds the strict validator
-	// tolerated become placeholders and opaque carriers rather than gaps.
-	parse := *idx
-	parse.fullContent = true
-	parse.fullDepth = true
-	parse.retainUnknown = true
-	entries, err := parse.parseClaudeRecords(ctx, in.Session.SessionID, data, nil, true)
-	if err != nil {
-		return GenerationCandidate{}, err
-	}
-	blocks, err := claudeClassifiedBlocks(in.Session.SessionID, entries)
-	if err != nil {
-		return GenerationCandidate{}, err
+		return claudeMetadataResult{}, err
 	}
 
 	metadata.SessionID = in.Session.SessionID
@@ -161,7 +193,43 @@ func (idx *ClaudeIndexer) buildClaudeGeneration(ctx context.Context, in Generati
 	metadata.Stats.DurationMs = parsed.Stats.DurationMs
 	metadata.Stats.TurnCount, metadata.Stats.ToolCallCount = parsed.Stats.TurnCount, parsed.Stats.ToolCallCount
 	metadata.Stats.TokensIn, metadata.Stats.TokensOut = parsed.Stats.TokensIn, parsed.Stats.TokensOut
-	metadata.Diagnostics.Warnings = append(metadata.Diagnostics.Warnings, parsed.Diagnostics.Warnings...)
+	// A fresh slice: the result never shares a backing array with the
+	// extraction's copy or with the parse.
+	metadata.Diagnostics.Warnings = slices.Concat(metadata.Diagnostics.Warnings, parsed.Diagnostics.Warnings)
+	return claudeMetadataResult{metadata: *metadata}, nil
+}
+
+// buildClaudeGeneration composes the Claude candidate from the attempt's
+// captured bytes and recorded metadata. It never consults the stored-capture
+// authority: a Claude candidate is proven from the captured pair, and the prior
+// only supplies the reusable alias state a refresh must retain.
+func (idx *ClaudeIndexer) buildClaudeGeneration(ctx context.Context, in GenerationBuildInput) (GenerationCandidate, error) {
+	if in.GenerationID == "" {
+		return GenerationCandidate{}, fmt.Errorf("ingest.ClaudeIndexer.BuildGeneration: no generation identity was supplied for session %s; activation owns generation addressing and the projection invents none; wire the generation identity before requesting a candidate", in.Session.SessionID)
+	}
+	half, err := idx.claudeCandidateMetadata(ctx, in)
+	if err != nil {
+		return GenerationCandidate{}, err
+	}
+	metadata := half.metadata
+	data := in.CapturedTranscript
+
+	// The tolerant classification parse mirrors the retained harvest parse:
+	// completion-less, full-depth, full-content, retaining unknown evidence, so
+	// the accounted omissions and unrepresented kinds the strict validator
+	// tolerated become placeholders and opaque carriers rather than gaps.
+	parse := *idx
+	parse.fullContent = true
+	parse.fullDepth = true
+	parse.retainUnknown = true
+	records, err := parse.parseClaudeSourceRecords(ctx, in.Session.SessionID, data, nil, true)
+	if err != nil {
+		return GenerationCandidate{}, err
+	}
+	blocks, err := claudeClassifiedBlocks(in.Session.SessionID, records)
+	if err != nil {
+		return GenerationCandidate{}, err
+	}
 
 	priorState := NewProjectionPriorState()
 	if in.Prior != nil {
@@ -179,7 +247,7 @@ func (idx *ClaudeIndexer) buildClaudeGeneration(ctx context.Context, in Generati
 		ID:                   in.GenerationID,
 		SessionID:            in.Session.SessionID,
 		Harness:              HarnessClaudeCode,
-		Metadata:             *metadata,
+		Metadata:             metadata,
 		SourceEvidenceDigest: metadata.ContentHash,
 		Completeness:         indexformat.GenerationCompletenessComplete,
 		Blocks:               blocks,
@@ -262,89 +330,97 @@ func claudeBoundKey(key string) (string, error) {
 // tool-result error flag, the stop reason) are not expressible in a managed
 // generation and are not reconstructed.
 //
+// Native keys are assigned over the ungrouped source records, then the records
+// of one API message are grouped into one reply exactly as the V1 path groups
+// them. A reply keeps its first record's key; every child keeps the key of its
+// own source record and its ordinal among that record's blocks, so a block's
+// key does not depend on which reply it was grouped into.
+//
 // RawByteLength keeps the retained indexer's meaning. A depth-0 block records
-// the whitespace-trimmed byte length of the JSONL line it came from, including
-// an opaque carrier and a line whose unknown content blocks were retained. A
-// depth-1 block is carved from that line and does not repeat its size: a
-// thinking block records the byte length of its thinking text, and every other
-// depth-1 block records none.
-func claudeClassifiedBlocks(sessionID SessionID, entries []schema.SessionEntry) ([]ClassifiedBlock, error) {
-	type claudeRecord struct {
-		carrier  schema.SessionEntry
-		children []schema.SessionEntry
+// the whitespace-trimmed byte length of the JSONL lines it came from (summed
+// over a reply's records), including an opaque carrier and a line whose
+// unknown content blocks were retained. A depth-1 block is carved from a line
+// and does not repeat its size: a thinking block records the byte length of
+// its thinking text, and every other depth-1 block records none.
+func claudeClassifiedBlocks(sessionID SessionID, records claudeSourceRecords) ([]ClassifiedBlock, error) {
+	entries := records.entries
+	for i := range entries {
+		entry := entries[i]
+		if entry.Depth != 0 && entry.ParentIndex == nil {
+			return nil, fmt.Errorf("ingest.claudeClassifiedBlocks: depth-1 entry %d has no parent index; the record boundary cannot be resolved; rebuild the classification", entry.EntryIndex)
+		}
 	}
-	records := make(map[int]*claudeRecord)
-	order := make([]int, 0, len(entries))
+	// Record keys over the ungrouped stream: the uuid, or the record's
+	// stream ordinal, with a duplicate discriminator for a repeated uuid.
+	var recordKeys []string
+	seenUUID := make(map[string]int)
+	carriers := make(map[int]bool)
 	for i := range entries {
 		entry := entries[i]
 		if entry.Depth != 0 {
+			if !carriers[*entry.ParentIndex] {
+				return nil, fmt.Errorf("ingest.claudeClassifiedBlocks: depth-1 entry %d names parent %d, which is not a classified record; the block has no carrier; rebuild the classification", entry.EntryIndex, *entry.ParentIndex)
+			}
 			continue
 		}
-		records[entry.EntryIndex] = &claudeRecord{carrier: entry}
-		order = append(order, entry.EntryIndex)
-	}
-	for i := range entries {
-		entry := entries[i]
-		if entry.Depth == 0 {
-			continue
-		}
-		if entry.ParentIndex == nil {
-			return nil, fmt.Errorf("ingest.claudeClassifiedBlocks: depth-1 entry %d has no parent index; the record boundary cannot be resolved; rebuild the classification", entry.EntryIndex)
-		}
-		record, ok := records[*entry.ParentIndex]
-		if !ok {
-			return nil, fmt.Errorf("ingest.claudeClassifiedBlocks: depth-1 entry %d names parent %d, which is not a classified record; the block has no carrier; rebuild the classification", entry.EntryIndex, *entry.ParentIndex)
-		}
-		record.children = append(record.children, entry)
-	}
-
-	seenUUID := make(map[string]int, len(order))
-	blocks := make([]ClassifiedBlock, 0, len(entries))
-	seenCalls := make(map[string]bool)
-	for ordinal, entryIndex := range order {
-		record := records[entryIndex]
-		carrier := record.carrier
-		uuid := claudeRecordUUID(carrier)
-		base, err := claudeRecordKey(sessionID, uuid, ordinal)
+		carriers[entry.EntryIndex] = true
+		uuid := claudeRecordUUID(entry)
+		key, err := claudeRecordKey(sessionID, uuid, len(recordKeys))
 		if err != nil {
 			return nil, err
 		}
-		recordKey := base
 		if uuid != "" {
 			seenUUID[uuid]++
 			if seenUUID[uuid] > 1 {
-				recordKey, err = claudeDuplicateRecordKey(base, seenUUID[uuid])
+				key, err = claudeDuplicateRecordKey(key, seenUUID[uuid])
 				if err != nil {
 					return nil, err
 				}
 			}
 		}
-		hasToolResultContent := false
-		for _, child := range record.children {
-			if child.EntryType == EntryTypeToolResult {
-				hasToolResultContent = true
-				break
-			}
+		recordKeys = append(recordKeys, key)
+	}
+
+	grouped, sources, err := groupClaudeReplies(entries, records.messageIDs, true)
+	if err != nil {
+		return nil, err
+	}
+	carrierKeys := make(map[int]string, len(recordKeys))
+	hasToolResultContent := make(map[int]bool)
+	for i, entry := range grouped {
+		if entry.Depth == 0 {
+			carrierKeys[entry.EntryIndex] = recordKeys[sources[i].record]
+			continue
 		}
-		carrierBlock, err := claudeCarrierBlock(recordKey, carrier, hasToolResultContent)
+		if entry.EntryType == EntryTypeToolResult {
+			hasToolResultContent[*entry.ParentIndex] = true
+		}
+	}
+
+	blocks := make([]ClassifiedBlock, 0, len(grouped))
+	seenCalls := make(map[string]bool)
+	for i, entry := range grouped {
+		recordKey := recordKeys[sources[i].record]
+		if entry.Depth == 0 {
+			block, err := claudeCarrierBlock(recordKey, entry, hasToolResultContent[entry.EntryIndex])
+			if err != nil {
+				return nil, err
+			}
+			blocks = append(blocks, block)
+			continue
+		}
+		childKey, err := claudeBlockKey(recordKey, sources[i].block)
 		if err != nil {
 			return nil, err
 		}
-		blocks = append(blocks, carrierBlock)
-		for blockOrdinal, child := range record.children {
-			childKey, err := claudeBlockKey(recordKey, blockOrdinal)
-			if err != nil {
-				return nil, err
-			}
-			block, err := claudeChildBlock(childKey, recordKey, child, seenCalls)
-			if err != nil {
-				return nil, err
-			}
-			if block.Depth == 1 {
-				seenCalls[derefString(child.ToolCallID)] = true
-			}
-			blocks = append(blocks, block)
+		block, err := claudeChildBlock(childKey, carrierKeys[*entry.ParentIndex], entry, seenCalls)
+		if err != nil {
+			return nil, err
 		}
+		if block.Depth == 1 {
+			seenCalls[derefString(entry.ToolCallID)] = true
+		}
+		blocks = append(blocks, block)
 	}
 	return blocks, nil
 }
@@ -411,6 +487,7 @@ func claudeChildBlock(childKey, recordKey string, entry schema.SessionEntry, see
 		RawByteLength:    entry.RawByteLength,
 		ToolName:         derefString(entry.ToolNamesCSV),
 		ToolKind:         derefToolKind(entry.ToolKind),
+		TimestampMs:      entry.TimestampMs,
 	}
 	retained, observedModel, extra, err := claudeEntryExtra(entry)
 	if err != nil {

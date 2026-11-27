@@ -9,7 +9,7 @@ import (
 // reports success at every stage without an observer.
 func TestReportContentSweepSeamNilHook(t *testing.T) {
 	contentSweepSeam = nil
-	for _, stage := range []string{contentSweepSeamAfterCommit, contentSweepSeamMidBatch} {
+	for _, stage := range []string{contentSweepSeamAfterCommit, contentSweepSeamMidBatch, contentSweepSeamFirstWrite, contentSweepSeamBodyDelete} {
 		if err := reportContentSweepSeam(stage); err != nil {
 			t.Fatalf("reportContentSweepSeam(%q) with nil hook = %v, want nil", stage, err)
 		}

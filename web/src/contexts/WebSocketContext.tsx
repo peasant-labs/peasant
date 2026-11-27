@@ -13,7 +13,14 @@ import {
 } from 'react';
 import type { ChannelName, ClientMessage, ServerMessage, SubscriptionMessage } from '@/types/messages';
 import { subscriptionKey, subscribe as mkSub, ChannelTopic, MessageType } from '@/types/messages';
-import { parseServerMessageRaw } from '@peasant-labs/schema';
+import {
+  LocalKickstartPreviewEventKind,
+  LocalKickstartPreviewOp,
+  parseLocalKickstartPreviewRequest,
+  parseServerMessageRaw,
+  type ClientMessage as SchemaClientMessage,
+  type LocalKickstartPreviewRequest,
+} from '@peasant-labs/schema';
 import { parseKickstartEvent, type KickstartEvent } from '@/lib/kickstart/model';
 import { DiscoveryErrorCode } from '@/lib/api/errors';
 import {
@@ -145,6 +152,28 @@ interface WebSocketContextValue {
    */
   onKickstartEvent: (listener: (event: KickstartEvent) => void) => () => void;
   /**
+   * Put one raw-preview request on this tab's socket. The request is checked
+   * against the contract first; a request the contract refuses, or a socket
+   * that is not open, sends nothing and answers false. The caller holds no
+   * other channel to the server for the preview, so false means the request
+   * did not leave this tab.
+   */
+  sendKickstartPreview: (request: LocalKickstartPreviewRequest) => boolean;
+  /**
+   * Listen for raw-preview frames. The server sends them to this connection
+   * only, so they never pass through the channel store: each frame is handed
+   * to every listener once, unparsed, and the listener applies it with the
+   * contract's merge. Returns the function that stops listening.
+   */
+  onKickstartPreview: (listener: (data: unknown) => void) => () => void;
+  /**
+   * Say that the `open` sent with this request id is no longer wanted. If the
+   * server still opens it, the provider closes that capture as soon as the
+   * `opened` frame names it, so a row the reader left before its preview
+   * arrived does not keep a capture open on the server.
+   */
+  abandonKickstartPreview: (requestId: string, sessionId: string) => void;
+  /**
    * Connect again now instead of waiting out the reconnect backoff. A no-op
    * while a socket is open or still connecting.
    */
@@ -170,6 +199,10 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   // Keyed by subscriptionKey(); stores the full subscription + ref-count for reconnect.
   const subsRef = useRef<Map<string, { sub: SubscriptionMessage; count: number }>>(new Map());
   const kickstartListenersRef = useRef(new Set<(event: KickstartEvent) => void>());
+  const previewListenersRef = useRef(new Set<(data: unknown) => void>());
+  // Request ids of `open`s the page left before the server answered, keyed to
+  // the setup session they named. Bounded: one capture lives per connection.
+  const abandonedPreviewsRef = useRef(new Map<string, string>());
 
   const sendRaw = useCallback((msg: ClientMessage) => {
     const ws = wsRef.current;
@@ -255,13 +288,13 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       };
 
       switch (msg.type) {
-        case 'connected':
+        case MessageType.Connected:
           // The socket is alive, but a valid message is not a recovery signal
           // for a retained data fault; only a reconnect clears a connection
           // fault, and only the same operation's success clears a data fault.
           break;
 
-        case 'error':
+        case MessageType.Error:
           if (msg.topic) {
             const key = msg.topic === ChannelTopic.SessionDetail && msg.id
               ? `${msg.topic}:${msg.id}`
@@ -306,10 +339,35 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
           break;
         }
 
-        case 'dashboard':
-        case 'sessions':
-        case 'trends':
-        case 'quality': {
+        case MessageType.KickstartPreview: {
+          // Raw transcript text for one previewed row, sent to this connection
+          // only. It is never written to the channel store: listeners hold it
+          // in memory and drop it with the pane.
+          const data = msg.data as { kind?: unknown; requestId?: unknown; captureId?: unknown; sessionId?: unknown } | undefined;
+          const requestId = typeof data?.requestId === 'string' ? data.requestId : null;
+          if (requestId !== null && abandonedPreviewsRef.current.has(requestId)) {
+            const sessionId = abandonedPreviewsRef.current.get(requestId)!;
+            abandonedPreviewsRef.current.delete(requestId);
+            if (data?.kind === LocalKickstartPreviewEventKind.Opened && typeof data.captureId === 'string') {
+              try {
+                const close = parseLocalKickstartPreviewRequest({ op: LocalKickstartPreviewOp.Close, requestId, sessionId, captureId: data.captureId });
+                const message: SchemaClientMessage = { type: MessageType.KickstartPreview, preview: close };
+                if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
+              } catch {
+                // An opened frame whose capture id the contract refuses names
+                // no capture to close; the server's idle limit frees it.
+              }
+            }
+            break;
+          }
+          for (const listener of Array.from(previewListenersRef.current)) listener(msg.data);
+          break;
+        }
+
+        case MessageType.Dashboard:
+        case MessageType.Sessions:
+        case MessageType.Trends:
+        case MessageType.Quality: {
           // Write to the ref-based store — only listeners for THIS channel
           // are notified. No React state change at the provider level.
           const operation = faultOperationForMessageType(msg.type);
@@ -318,7 +376,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
           break;
         }
 
-        case 'session_detail': {
+        case MessageType.SessionDetail: {
           // Write to both bare key and ID-qualified key so both the
           // legacy ChannelName[] API and typed subscribe.sessionDetail(id) work.
           acknowledge(FaultOperation.SessionDetailRead, msg.type);
@@ -332,7 +390,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
           break;
         }
 
-        case 'annotations': {
+        case MessageType.Annotations: {
           // Key must match subscriptionKey() format: "annotations:{axis}:{id}"
           const ann = msg.data as { axis?: string; id?: string } | undefined;
           const annKey = ann?.axis && ann?.id
@@ -343,7 +401,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
           break;
         }
 
-        case 'project_familiarity': {
+        case MessageType.ProjectFamiliarity: {
           // Key must match subscriptionKey() format: "project_familiarity:{id}".
           // The payload's project identity is `projectHash`, not an `id` member.
           const payload = msg.data as { projectHash?: string } | undefined;
@@ -379,6 +437,9 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
         WebFault.connection(FaultCause.SocketClosed, 'the socket closed'),
       );
       wsRef.current = null;
+      // A capture lives and dies with its connection, so nothing abandoned on
+      // this one can still be answered.
+      abandonedPreviewsRef.current.clear();
 
       const delay = backoffRef.current;
       backoffRef.current = Math.min(delay * BACKOFF_MULTIPLIER, MAX_BACKOFF_MS);
@@ -466,6 +527,37 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  const sendKickstartPreview = useCallback((request: LocalKickstartPreviewRequest): boolean => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    let checked: LocalKickstartPreviewRequest;
+    try {
+      checked = parseLocalKickstartPreviewRequest(request);
+    } catch {
+      return false;
+    }
+    const message: SchemaClientMessage = { type: MessageType.KickstartPreview, preview: checked };
+    ws.send(JSON.stringify(message));
+    return true;
+  }, []);
+
+  const onKickstartPreview = useCallback((listener: (data: unknown) => void) => {
+    previewListenersRef.current.add(listener);
+    return () => {
+      previewListenersRef.current.delete(listener);
+    };
+  }, []);
+
+  const abandonKickstartPreview = useCallback((requestId: string, sessionId: string) => {
+    // Only the open this tab has outstanding can be abandoned; the map never
+    // holds more than a handful, and a reconnect clears it.
+    if (abandonedPreviewsRef.current.size >= 8) {
+      const oldest = abandonedPreviewsRef.current.keys().next().value;
+      if (oldest !== undefined) abandonedPreviewsRef.current.delete(oldest);
+    }
+    abandonedPreviewsRef.current.set(requestId, sessionId);
+  }, []);
+
   // Context value changes ONLY when connected or the connection fault changes
   // (infrequent). Channel data and channel faults live in the ChannelStore ref
   // and are accessed via useSyncExternalStore — they never trigger context
@@ -480,9 +572,12 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       wsRefresh,
       sendMessage: sendRaw,
       onKickstartEvent,
+      sendKickstartPreview,
+      onKickstartPreview,
+      abandonKickstartPreview,
       reconnect,
     }),
-    [connected, connectionFault, wsSubscribe, wsUnsubscribe, wsRefresh, sendRaw, onKickstartEvent, reconnect],
+    [connected, connectionFault, wsSubscribe, wsUnsubscribe, wsRefresh, sendRaw, onKickstartEvent, sendKickstartPreview, onKickstartPreview, abandonKickstartPreview, reconnect],
   );
 
   return (
@@ -645,4 +740,20 @@ export function useKickstartTopic(listener: (event: KickstartEvent) => void): { 
     };
   }, [wsSubscribe, wsUnsubscribe, onKickstartEvent]);
   return { connected: ctx.connected };
+}
+
+/**
+ * The raw-preview transport of this tab's socket: send a request, listen for
+ * the frames the server sends this connection, and abandon an open the page
+ * no longer wants. `connected` tells a pane that its capture died with the
+ * socket. Nothing here subscribes to a channel or touches the channel store.
+ */
+export function useKickstartPreviewTransport() {
+  const ctx = useWsContext();
+  return {
+    connected: ctx.connected,
+    send: ctx.sendKickstartPreview,
+    listen: ctx.onKickstartPreview,
+    abandon: ctx.abandonKickstartPreview,
+  };
 }

@@ -1,5 +1,7 @@
 'use client';
 
+import { ProjectRouteKind } from '@/lib/navigation/projectRoutes';
+
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { usePathname } from 'next/navigation';
 import { WebSocketProvider } from '@/contexts/WebSocketContext';
@@ -65,7 +67,7 @@ export function LayoutShell({ children }: { children: ReactNode }) {
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => setHydrated(true), []);
   const route = parseTranscriptRoute(pathname);
-  const viewport = hydrated && (route.kind === 'canonical' || route.kind === 'legacy');
+  const viewport = hydrated && (route.kind === ProjectRouteKind.Canonical || route.kind === ProjectRouteKind.Legacy);
   return (
     <WebSocketProvider>
       <ServerCapabilitiesProvider>

@@ -101,9 +101,9 @@ func (p *Pipeline) capturedInputNeedsWork(input *CapturedIndexInput) bool {
 //     managed generation is excluded from THIS bind: its builder copies the
 //     recorded metadata's project, git, host, parent and redaction context
 //     into the generation, so a metadata change must rebuild it. The one
-//     narrower no-parse path for a managed generation is
-//     managedGenerationRefreshApplies below, which installs a new generation
-//     through the store's metadata-only refresh and never binds the stale one.
+//     no-parse path for a managed generation is the unchanged proof and settle
+//     in the index stage, which applies only when the captured metadata
+//     reproduces the active generation; any change parses.
 //   - The same producer would parse it: the stored indexer revision and index
 //     format are this build's target.
 //   - Nothing else is owed: no explicit rebuild (force or reindex), no latest
@@ -139,73 +139,6 @@ func (p *Pipeline) capturedInputBindsWithoutReparse(input *CapturedIndexInput) b
 	}
 	unbound := state.PublicationCaptureRevision > 0 && !state.PublicationBound
 	return input.published || (unbound && input.bindsPublication())
-}
-
-// managedGenerationRefreshApplies is the ONE admission of a managed generation
-// to a no-parse settle. It is not a relaxation of capturedInputBindsWithoutReparse:
-// a managed generation may never bind its stale context, because the builder
-// copied the recorded project, git, host, parent and redaction context into the
-// generation. The refresh is the narrower operation: it installs a NEW
-// immutable generation from the refreshed metadata capture while reusing the
-// stored bodies and content while cloning entry references and structural rows.
-// Its write cost grows with those rows and the refreshed context, not body bytes.
-//
-// Every term is required:
-//
-//   - The worker produced this input on the adapter-behind or
-//     adapter-stamp-absent stored-metadata lane for a managed-generation target.
-//     An indexer bump is the stored-index lane and reads the stored transcript;
-//     --force and --reindex are deliberate rebuilds; a native-only adapter never
-//     reaches this lane; a strict format-1 target has no generation to refresh.
-//   - The store advertises the refresh capability, so a refusal is a store
-//     decision rather than an unsupported writer.
-//   - The refreshed metadata capture is present: the pair install and managed
-//     mirror ran before the index stage.
-//   - The stored index is completed and current: the same indexer revision and
-//     index format this build writes, an input proof that equals the captured
-//     input, and no latest attempt held beside the authority. A stale proof or
-//     a behind producer keeps the ordinary parse path, and the active
-//     generation stays the read authority until that parse commits.
-//
-// A store refusal or a stale proof at the final compare falls back to the
-// ordinary parse path; it never leaves the session with a half-applied refresh.
-func (p *Pipeline) managedGenerationRefreshApplies(input *CapturedIndexInput) bool {
-	if input == nil || !input.managedGenerationRefresh {
-		return false
-	}
-	if p.config.Force || p.config.Reindex {
-		return false
-	}
-	if _, ok := p.metricsStore.(ManagedGenerationRefresher); !ok {
-		return false
-	}
-	if input.metadata == nil || input.expected == nil {
-		return false
-	}
-	if !p.adapterSupportsStoredExtraction(input.session.Harness) {
-		return false
-	}
-	target := p.sessionVersionTarget(input.session)
-	if target.IndexVersion == strictIndexFormat {
-		return false
-	}
-	state := input.expected
-	if !state.Completed() {
-		return false
-	}
-	if state.IndexVersion == nil || *state.IndexVersion != target.IndexVersion {
-		return false
-	}
-	if state.IndexerVersion < target.IndexerVersion {
-		return false
-	}
-	if state.IndexedInputHash == nil || *state.IndexedInputHash != input.inputHash {
-		return false
-	}
-	if state.LatestAttemptArtifactHash != nil {
-		return false
-	}
-	return true
 }
 
 // latestAttemptPreviewSettles reports whether a stored latest attempt has

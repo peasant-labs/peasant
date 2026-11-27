@@ -1,0 +1,56 @@
+# The note beside SQLite's interrupt is composed at the end of an observation
+# write. These cases build the caller and held states directly, so whether
+# either is live or expired is an input, never a race with the clock. Only an
+# interrupt, a live caller and a budget that had already run out produce the
+# note; every other ending keeps the error it arrived with. None of these cases
+# is an assertion that the budget caused an interrupt.
+requiredNames:
+  - interrupt-with-expired-budget
+  - wrapped-interrupt-with-expired-budget
+  - interrupt-with-cancelled-caller
+  - interrupt-with-expired-caller
+  - interrupt-with-live-budget
+  - busy-with-expired-budget
+  - plain-error-with-expired-budget
+  - nil-error
+cases:
+  - name: interrupt-with-expired-budget
+    error: interrupt
+    caller: live
+    held: expired
+    wantNote: true
+  - name: wrapped-interrupt-with-expired-budget
+    error: wrapped-interrupt
+    caller: live
+    held: expired
+    wantNote: true
+  - name: interrupt-with-cancelled-caller
+    error: interrupt
+    caller: cancelled
+    held: expired
+    wantNote: false
+  - name: interrupt-with-expired-caller
+    error: interrupt
+    caller: expired
+    held: expired
+    wantNote: false
+  - name: interrupt-with-live-budget
+    error: interrupt
+    caller: live
+    held: live
+    wantNote: false
+  - name: busy-with-expired-budget
+    error: busy
+    caller: live
+    held: expired
+    wantNote: false
+  - name: plain-error-with-expired-budget
+    error: plain
+    caller: live
+    held: expired
+    wantNote: false
+  - name: nil-error
+    error: none
+    caller: live
+    held: expired
+    wantNote: false

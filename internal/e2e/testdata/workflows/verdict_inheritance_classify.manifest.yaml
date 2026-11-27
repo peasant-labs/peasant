@@ -1,0 +1,6 @@
+# Required classify_cases in verdict_inheritance.yaml.
+requiredNames:
+  - release-merge-group-is-release-group
+  - ordinary-merge-group-entry-is-neither
+  - release-pr-is-candidate-not-release-group
+  - ordinary-bot-pr-is-neither

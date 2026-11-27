@@ -588,7 +588,8 @@ func TestProductionRepositoryResolverGroupsLinkedWorktreeSubmodulesByTopology(t 
 		t.Fatalf("real submodule topology roots=%d, want 4", len(roots))
 	}
 	grouped := repositoryRootByCohortKey(t, roots, linkedAIdentity.CohortKey.String())
-	if len(grouped.Children) != 1 || grouped.Children[0].Meta[settings.MetaBranch] != "main" || len(grouped.Children[0].Children) != 2 {
+	const primaryFixtureBranch = "main"
+	if len(grouped.Children) != 1 || grouped.Children[0].Meta[settings.MetaBranch] != primaryFixtureBranch || len(grouped.Children[0].Children) != 2 {
 		t.Fatalf("same-path linked submodules did not share one main branch: %#v", grouped.Children)
 	}
 	context, ok := source.ListingPreviewContext(grouped.ID)
@@ -647,7 +648,6 @@ func runRepositoryGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v in %q: %v\n%s", args, dir, err, output)
 	}

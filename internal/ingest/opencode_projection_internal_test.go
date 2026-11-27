@@ -388,13 +388,14 @@ func TestOpenCodeManagedCurrentDiagnosticsPreserveCauses(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), testCase.ErrorContains) || strings.Contains(err.Error(), "managed legacy") {
 				t.Fatalf("current diagnostic=%v want source-neutral actionable substring %q", err, testCase.ErrorContains)
 			}
+			const fixtureTypeError = "type"
 			switch testCase.ErrorType {
 			case "syntax":
 				var target *json.SyntaxError
 				if !errors.As(err, &target) {
 					t.Fatalf("syntax cause not preserved: %v", err)
 				}
-			case "type":
+			case fixtureTypeError:
 				var target *json.UnmarshalTypeError
 				if !errors.As(err, &target) {
 					t.Fatalf("type cause not preserved: %v", err)
@@ -423,6 +424,74 @@ func TestOpenCodeManagedProjectionRecognitionRejectsCorruptMarkers(t *testing.T)
 				t.Fatalf("recognition origin=%d error=%v; corrupt managed marker must fail closed before legacy fallback", origin, recognitionErr)
 			}
 		})
+	}
+}
+
+func TestCaptureIndexInputReusesOnlyMatchingOpenCodeRecognition(t *testing.T) {
+	fixture, err := loadOpenCodeSemanticFixture(openCodeSemanticFixtureYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := fixture.Cases[0]
+	source := openSemanticSource(t, testfixture.MaterializeByName(t, row.CurrentFixture).Path)
+	defer source.Close(t.Context())
+	nativeID, _ := NewOpenCodeCurrentSessionID(row.SessionID)
+	pageSize, _ := NewOpenCodeCurrentPageSize(MaxOpenCodeCurrentPageSize)
+	projection, _, err := readOpenCodeCurrentProjection(t.Context(), source, nativeID, pageSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(projection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid, _ := NewSessionID(row.SessionID)
+	evidence, err := captureOpenCodeProjectionRecognition(data, sid)
+	if err != nil || evidence.origin != TranscriptOriginOpenCodeCurrentSQLite {
+		t.Fatalf("lookup recognition = %+v, %v", evidence, err)
+	}
+	session := DiscoveredSession{SessionID: sid, Harness: HarnessOpenCode, openCodeRecognition: evidence}
+	meta := NewUnifiedMetadata()
+	meta.SessionID, meta.ModelHarness, meta.HostSlug = sid, HarnessOpenCode, "fixture"
+	meta.SchemaVersion, meta.Source.Format = 1, SourceFormatJSON
+	capture := func(data []byte) (*CapturedIndexInput, error) {
+		t.Helper()
+		meta.ContentHash = schema.ComputeTranscriptHash(data)
+		raw, err := json.Marshal(meta)
+		if err != nil {
+			t.Fatal(err)
+		}
+		artifact, err := NewManagedArtifact(raw, data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return CaptureIndexInput(t.Context(), NewOpenCodeIndexer(&OSFileSystem{}), session, artifact)
+	}
+	input, err := capture(data)
+	if err != nil || input.session.TranscriptOrigin != evidence.origin || input.session.openCodeRecognition != nil {
+		t.Fatalf("capture did not use and release lookup recognition: %+v, %v", input, err)
+	}
+	for _, bad := range fixture.ManagedErrors {
+		if !bad.RecognitionError {
+			continue
+		}
+		t.Run(bad.Name, func(t *testing.T) {
+			if _, err := capture([]byte(bad.Data)); err == nil || !strings.Contains(err.Error(), "recovery stopped before legacy fallback") {
+				t.Fatalf("capture reused stale recognition for a new checksummed pair: %v", err)
+			}
+		})
+	}
+	// A matching digest does not allow reuse for another session.
+	if _, err := evidence.recognize(data, "different-session"); err == nil {
+		t.Fatal("recognition crossed a session boundary")
+	}
+	legacy := []byte(`{"messages":[]}`)
+	legacyEvidence, err := captureOpenCodeProjectionRecognition(legacy, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if origin, err := legacyEvidence.recognize(legacy, sid); err != nil || origin != TranscriptOriginFile {
+		t.Fatalf("legacy recognition = %d, %v", origin, err)
 	}
 }
 

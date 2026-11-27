@@ -32,24 +32,30 @@ const sqlSessionIsNative = `(s.active_generation_id IS NOT NULL AND EXISTS (
    WHERE g.session_id = s.session_id AND g.generation_id = s.active_generation_id
 ))`
 
-// sqlSessionNativeEntries renders the FROM and WHERE of the active generation's
-// partition-0 body rows, aliased e.
-const sqlSessionNativeEntries = `session_generation_entries ge
+// sessionNativeEntriesSQL renders the FROM and WHERE of the active
+// generation's partition-0 body rows, aliased e.
+func sessionNativeEntriesSQL(hasMappingSet bool) string {
+	genExpr := `s.active_generation_id`
+	if hasMappingSet {
+		genExpr = sqlRowsGeneration("s.session_id", "s.active_generation_id")
+	}
+	return `session_generation_entries ge
   JOIN session_entry_bodies e
     ON e.session_id = ge.session_id AND e.body_digest = ge.body_digest
  WHERE ge.session_id = s.session_id
-   AND ge.generation_id = s.active_generation_id
+   AND ge.generation_id = ` + genExpr + `
    AND ge.partition_id = 0`
+}
 
 // sessionEntryExistsSQL renders whether an entry of the session satisfies a
 // predicate over the alias e. nativeOnly carries the clause that reads a column
 // the mirror does not have; it is empty for a rule both homes answer alike.
-func sessionEntryExistsSQL(predicate, nativeOnly string) string {
+func sessionEntryExistsSQL(predicate, nativeOnly string, hasMappingSet bool) string {
 	native := predicate
 	if nativeOnly != "" {
 		native = "(" + predicate + " OR " + nativeOnly + ")"
 	}
-	return `(EXISTS (SELECT 1 FROM ` + sqlSessionNativeEntries + ` AND ` + native + `)
+	return `(EXISTS (SELECT 1 FROM ` + sessionNativeEntriesSQL(hasMappingSet) + ` AND ` + native + `)
  OR (NOT ` + sqlSessionIsNative + ` AND EXISTS (
   SELECT 1 FROM session_entries e WHERE e.session_id = s.session_id AND ` + predicate + `)))`
 }
@@ -104,16 +110,18 @@ const sqlEntryIsCommandInvocation = `CASE WHEN instr(COALESCE(e.extra, e.extra_v
    AND json_valid(COALESCE(e.extra, e.extra_verbatim))
   THEN json_type(COALESCE(e.extra, e.extra_verbatim), '$.command_name') = 'text' ELSE 0 END`
 
-// sqlSessionSawSeveralModels compares the assistant model observations of the
+// sessionSawSeveralModelsSQL compares the assistant model observations of the
 // session's home. Claude's synthetic marker is left out: no model produced
 // that record. An OpenCode model switch needs no rule of its own, because the
 // indexer lands it on the next assistant turn as an observation, and a native
 // OpenCode switch is stored with no marker that tells it from an agent switch.
-var sqlSessionSawSeveralModels = `((SELECT COUNT(DISTINCT e.model_id) FROM ` + sqlSessionNativeEntries + `
+func sessionSawSeveralModelsSQL(hasMappingSet bool) string {
+	return `((SELECT COUNT(DISTINCT e.model_id) FROM ` + sessionNativeEntriesSQL(hasMappingSet) + `
    AND e.role = 'assistant' AND e.model_id IS NOT NULL AND e.model_id <> '` + defaults.ClaudeSyntheticModelID + `') > 1
  OR (NOT ` + sqlSessionIsNative + ` AND (SELECT COUNT(DISTINCT x.value_text) FROM session_entries_ext x
    WHERE x.session_id = s.session_id AND x.key = '` + knownExtTextKey + `'
      AND x.value_text <> '` + defaults.ClaudeSyntheticModelID + `') > 1))`
+}
 
 // sqlSessionIsPartial reads the active generation's own diagnostics, so an
 // older partial generation does not mark a session whose active one is whole.
@@ -125,23 +133,23 @@ const sqlSessionIsPartial = `EXISTS (
 
 // sessionFacetSQL renders one facet as a boolean expression. A value outside
 // the closed set holds for no session.
-func sessionFacetSQL(facet defaults.SessionWorkflowFacet) string {
+func sessionFacetSQL(facet defaults.SessionWorkflowFacet, hasMappingSet bool) string {
 	switch facet {
 	case defaults.SessionFacetSubagent:
-		return `(` + sqlSessionHasChild + ` OR ` + sessionEntryExistsSQL(toolNamedSQL("Task", "Agent"), "") + `)`
+		return `(` + sqlSessionHasChild + ` OR ` + sessionEntryExistsSQL(toolNamedSQL("Task", "Agent"), "", hasMappingSet) + `)`
 	case defaults.SessionFacetSkill:
 		return `((NOT ` + sqlSessionIsNative + ` AND EXISTS (SELECT 1 FROM session_commands sc WHERE sc.session_id = s.session_id))
- OR ` + sessionEntryExistsSQL(toolNamedSQL("Skill", "skill"), sqlEntryIsCommandInvocation) + `)`
+ OR ` + sessionEntryExistsSQL(toolNamedSQL("Skill", "skill"), sqlEntryIsCommandInvocation, hasMappingSet) + `)`
 	case defaults.SessionFacetMCP:
-		return sessionEntryExistsSQL(`',' || e.tool_names_csv GLOB '*,mcp__*'`, "")
+		return sessionEntryExistsSQL(`',' || e.tool_names_csv GLOB '*,mcp__*'`, "", hasMappingSet)
 	case defaults.SessionFacetCompact:
-		return sessionEntryExistsSQL(sqlEntryIsCompaction, sqlEntryIsGeneratedSummary)
+		return sessionEntryExistsSQL(sqlEntryIsCompaction, sqlEntryIsGeneratedSummary, hasMappingSet)
 	case defaults.SessionFacetClear:
-		return sessionEntryExistsSQL(sqlEntryIsClearCommand, "")
+		return sessionEntryExistsSQL(sqlEntryIsClearCommand, "", hasMappingSet)
 	case defaults.SessionFacetModelSwitch:
-		return sqlSessionSawSeveralModels
+		return sessionSawSeveralModelsSQL(hasMappingSet)
 	case defaults.SessionFacetBackground:
-		return sessionEntryExistsSQL(sqlEntryRunsInBackground, "")
+		return sessionEntryExistsSQL(sqlEntryRunsInBackground, "", hasMappingSet)
 	case defaults.SessionFacetPartial:
 		return sqlSessionIsPartial
 	default:
@@ -164,9 +172,13 @@ func (s *Store) SessionWorkflowFacets(ctx context.Context, sessionIDs []string) 
 	}
 	defer s.pool.Put(conn)
 
+	hasMappingSet, err := mappingSetColumnOnConn(conn)
+	if err != nil {
+		return nil, fmt.Errorf("store: read session facets: %w; no facets were read; retry the command", err)
+	}
 	columns := make([]string, len(defaults.AllSessionWorkflowFacets))
 	for i, facet := range defaults.AllSessionWorkflowFacets {
-		columns[i] = sessionFacetSQL(facet)
+		columns[i] = sessionFacetSQL(facet, hasMappingSet)
 	}
 	selectFacets := `SELECT s.session_id, ` + strings.Join(columns, ", ") + ` FROM sessions s WHERE s.session_id IN (?`
 	for start := 0; start < len(sessionIDs); start += indexFormatReadBatchSize {

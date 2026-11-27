@@ -1,0 +1,11 @@
+package store
+
+import "github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
+
+const sqlBeginDeferred = "BEGIN"
+
+var sqlBatchSavepoint = "SAVEPOINT batch"
+
+var beginDeferred = sqlitex.Transaction
+
+const sqlBeginImmediate = "BEGIN IMMEDIATE"

@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { parseStrictYAML, requireExactRequiredFields, requireRecord, requireUniqueNames } from '@/test/strictYaml';
 import {
   RouteOrigin,
+  ProjectRouteKind,
   TranscriptScope,
   formatMapRouteState,
   mapHref,
@@ -18,6 +19,8 @@ import {
   reviewHref,
   transcriptHref,
 } from './projectRoutes';
+
+const RouteFixtureOperation = Object.freeze({ Map: 'map', Review: 'review', Transcript: 'transcript', Legacy: 'legacy' } as const);
 
 const source = readFileSync(resolve(process.cwd(), 'src/lib/navigation/testdata/project_routes.yaml'), 'utf8');
 const fields = ['name', 'operation', 'pathname', 'search', 'projectHash', 'sessionId', 'branch', 'rawReturn', 'expected'];
@@ -52,13 +55,13 @@ describe.each(cases)('$name', (fixture) => {
   it('matches the canonical codec behavior', () => {
     const hash = parseProjectHash(fixture.projectHash);
     switch (fixture.operation) {
-      case 'map':
+      case RouteFixtureOperation.Map:
         expect(hash && mapHref(hash, { node: 'internal/ingest', mode: 'navigator', grain: 'file' })).toBe(fixture.expected);
         break;
-      case 'review':
+      case RouteFixtureOperation.Review:
         expect(hash && reviewHref(hash, { branch: fixture.branch })).toBe(fixture.expected);
         break;
-      case 'transcript':
+      case RouteFixtureOperation.Transcript:
         expect(hash && transcriptHref(hash, fixture.sessionId, { turn: 12, origin: RouteOrigin.Review })).toBe(fixture.expected);
         break;
       case 'transcript-scoped': {
@@ -114,13 +117,13 @@ describe.each(cases)('$name', (fixture) => {
       case 'transcript-query-reject':
         expect(parseTranscriptRouteQuery(fixture.search)).toBeNull();
         break;
-      case 'legacy': {
+      case RouteFixtureOperation.Legacy: {
         const route = fixture.pathname.startsWith('/review')
           ? parseReviewRoute(fixture.pathname)
           : fixture.pathname.startsWith('/projects')
             ? parseTranscriptRoute(fixture.pathname)
             : parseMapRoute(fixture.pathname);
-        expect(route.kind === 'legacy' ? route.projectLabel : '').toBe(fixture.expected);
+        expect(route.kind === ProjectRouteKind.Legacy ? route.projectLabel : '').toBe(fixture.expected);
         break;
       }
       case 'return-reject':
@@ -140,12 +143,12 @@ describe.each(cases)('$name', (fixture) => {
           : fixture.pathname.startsWith('/projects')
             ? parseTranscriptRoute(fixture.pathname)
             : parseMapRoute(fixture.pathname);
-        expect(route.kind === 'malformed' ? route.code : route.kind).toBe(fixture.expected);
+        expect(route.kind === ProjectRouteKind.Malformed ? route.code : route.kind).toBe(fixture.expected);
         break;
       }
       case 'project-detail': {
         const route = parseProjectDetailRoute(fixture.pathname);
-        expect(route.kind === 'canonical' ? route.projectHash : route.kind === 'legacy' ? route.projectLabel : route.kind).toBe(fixture.expected);
+        expect(route.kind === ProjectRouteKind.Canonical ? route.projectHash : route.kind === ProjectRouteKind.Legacy ? route.projectLabel : route.kind).toBe(fixture.expected);
         break;
       }
       default:

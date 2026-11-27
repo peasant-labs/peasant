@@ -259,7 +259,10 @@ func (s *Store) insertSessions(ctx context.Context, entries []ingest.StoreEntry,
 	}
 	defer s.pool.Put(conn)
 
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, fmt.Sprintf("insert %d sessions", len(entries)))
+	if err != nil {
+		return err
+	}
 	defer endFn(&err)
 	return s.insertSessionsOnConn(conn, entries, true, revisions)
 }
@@ -593,7 +596,10 @@ func (s *Store) UpdateDailySummary(ctx context.Context, days []string) (err erro
 	}
 	defer s.pool.Put(conn)
 
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := beginWrite(conn, fmt.Sprintf("update the daily summary of %d days", len(days)))
+	if err != nil {
+		return err
+	}
 	defer endFn(&err)
 
 	for _, day := range days {

@@ -6,6 +6,35 @@ All notable changes to Peasant are recorded here. The format follows
 GitHub Releases, which hold the signed artifacts and checksums. A version that
 was tagged but not published links to its tag instead.
 
+## [0.23.0] - 2026-11-21
+
+- settle a context-only change after validating it instead of parsing (#1149)
+
+## [0.22.0] - 2026-11-20
+
+- return a failed commit instead of reporting success (#1134)
+- rebuild the search index with a wider postings budget and estimate it in the upgrade plan (#1136)
+
+## [0.21.3] - 2026-11-20
+
+- take the SQLite writer before any store write reads (#1130)
+- label an empty dry-run census as a forecast and tidy review follow-ups (#1132)
+
+## [0.21.2] - 2026-11-20
+
+- drop the empty forecast header and tidy progress follow-ups (#1126)
+- let the sweep wait for the SQLite writer instead of failing as locked (#1127)
+
+## [0.21.1] - 2026-11-19
+
+- create the release draft and its assets in one command (#1103)
+- annotate sessions whose duration lost a millisecond on save (#1104)
+
+## [0.21.0] - 2026-11-18
+
+- ask a validator before re-parsing an unproven managed refresh (#1088)
+- name undeclared adapters and build the skip-budget measurement (#1093)
+
 ## [0.20.0] - 2026-11-18
 
 - prove and settle unchanged managed generations without parsing (#1081)
@@ -24,9 +53,17 @@ was tagged but not published links to its tag instead.
 
 ## [0.18.1] - 2026-11-17
 
+This version was tagged but never published as a GitHub release. Checksum
+verification failed because the bare Windows `.exe` was not staged at its
+checksummed name. Its changes shipped to users in 0.18.2.
+
 - cut a release (#1057)
 
 ## [0.18.0] - 2026-11-16
+
+This version was tagged but never published as a GitHub release. The
+cross-repository schema-parity gate failed before any artifacts were created.
+Its changes shipped to users in 0.18.2.
 
 ### Added
 - `peasant migrate --schema-only` upgrades the store schema and stops before
@@ -1374,7 +1411,8 @@ Second public release. See the
 Initial public release. See the
 [v0.1.0 release](https://github.com/peasant-labs/peasant/releases/tag/v0.1.0).
 
-[0.18.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.18.0
+[0.18.1]: https://github.com/peasant-labs/peasant/tree/v0.18.1
+[0.18.0]: https://github.com/peasant-labs/peasant/tree/v0.18.0
 [0.17.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.17.0
 [0.16.2]: https://github.com/peasant-labs/peasant/releases/tag/v0.16.2
 [0.16.1]: https://github.com/peasant-labs/peasant/releases/tag/v0.16.1

@@ -67,10 +67,10 @@ func (e *Engine) computeCapturedSession(ctx context.Context, backing ingest.Metr
 		merged.SubagentCount = &seed.SubagentCount
 		merged.InputTokens, merged.OutputTokens = &seed.TokensIn, &seed.TokensOut
 		merged.ToolCalls = &seed.ToolCallCount
-		duration := float64(seed.DurationMs) / 60000
+		duration := ingest.DurationMsToMinutes(seed.DurationMs)
 		merged.DurationMinutes = &duration
 	} else if input.EndMS >= input.StartMS {
-		duration := float64(input.EndMS-input.StartMS) / 60000
+		duration := ingest.DurationMsToMinutes(input.EndMS - input.StartMS)
 		merged.DurationMinutes = &duration
 	}
 	titleFunc := func(_ context.Context, _ ingest.SessionID, entries []schema.SessionEntry, _ *ingest.SessionMetrics) *ingest.SessionMetrics {
@@ -92,6 +92,28 @@ func (e *Engine) computeCapturedSession(ctx context.Context, backing ingest.Metr
 	}
 	if git.Result != nil {
 		mergeSessionMetrics(merged, git.Result)
+	}
+	// The derived upsert preserves existing captured knowledge for fields the
+	// computation could not determine. Hash that same retained value.
+	if input.Retained != nil {
+		if merged.DurationMinutes == nil {
+			merged.DurationMinutes = input.Retained.DurationMinutes
+		}
+		if merged.SubagentCount == nil {
+			merged.SubagentCount = input.Retained.SubagentCount
+		}
+		if merged.OutputTokens == nil {
+			merged.OutputTokens = input.Retained.OutputTokens
+		}
+		if merged.ToolCalls == nil {
+			merged.ToolCalls = input.Retained.ToolCalls
+		}
+	}
+	// Hash the value the reader returns. Current producers use integer
+	// milliseconds; canonicalization also protects future metric functions.
+	if merged.DurationMinutes != nil {
+		duration := ingest.CanonicalDurationMinutes(*merged.DurationMinutes)
+		merged.DurationMinutes = &duration
 	}
 	now, version := time.Now().UnixMilli(), CurrentComputeVersion
 	merged.ComputedAt, merged.ComputeVersion, merged.InputHash = &now, &version, &inputHash

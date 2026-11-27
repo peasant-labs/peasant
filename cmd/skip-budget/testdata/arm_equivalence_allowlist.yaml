@@ -1,0 +1,10 @@
+# Columns the arm-equivalence check leaves out when it compares the skip and
+# baseline arms of one round, as table.column, each with the reason the two
+# arms may differ there without a difference a reader would see.
+columns:
+  - column: session_captured_stats.updated_at_ms
+    reason: the wall-clock stamp of the stats write; each arm runs at its own instant
+  - column: sessions.indexed_at
+    reason: the wall-clock stamp of the index bookkeeping; each arm runs at its own instant
+  - column: session_metrics.computed_at
+    reason: the wall-clock stamp of the metric computation; each arm computes at its own instant

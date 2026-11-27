@@ -1,0 +1,9 @@
+package p
+
+import "os/exec"
+
+type a struct{}
+type b struct{}
+
+func (a) run() { exec.Command("go", "build") }
+func (b) run() { exec.Command("go", "build") }

@@ -21,8 +21,8 @@ type sourcePreviewScrollCase struct {
 	Name          string                   `yaml:"name"`
 	SourceFixture string                   `yaml:"source_fixture"`
 	Origin        ftue.SessionSourceOrigin `yaml:"origin"`
-	// PreviewBudgetBytes bounds the first read; SliceBudgetBytes bounds each
-	// scrolled continuation. Zero turns scrolled loading off.
+	// PreviewBudgetBytes bounds the capture's first read; SliceBudgetBytes
+	// bounds each later read, the one a scroll asks for.
 	PreviewBudgetBytes int64 `yaml:"preview_budget_bytes"`
 	SliceBudgetBytes   int64 `yaml:"slice_budget_bytes"`
 	MaxScrolls         int   `yaml:"max_scrolls"`
@@ -31,10 +31,10 @@ type sourcePreviewScrollCase struct {
 	// session at once and never continuing anything.
 	ExpectMoreAfterFirstRead bool     `yaml:"expect_more_after_first_read"`
 	ExpectNoticeContains     []string `yaml:"expect_notice_contains"`
-	// ExpectFinalNoticeContains is what the sentence must still say once
-	// scrolling has finished. It is empty for a preview that has reached the end
-	// of what it can load, which says nothing at all.
-	ExpectFinalNoticeContains string `yaml:"expect_final_notice_contains"`
+	// ExpectFinalEndNoticeContains is what the sentence BELOW the turns must say
+	// once scrolling has finished. It is empty for a preview that reached the
+	// end of the session, which says nothing at all.
+	ExpectFinalEndNoticeContains string `yaml:"expect_final_end_notice_contains"`
 }
 
 type sourcePreviewScrollDoc struct {
@@ -53,7 +53,7 @@ func loadSourcePreviewScrollDoc(t *testing.T) sourcePreviewScrollDoc {
 	}
 	seen := make(map[string]struct{}, len(doc.Cases))
 	for _, c := range doc.Cases {
-		if c.Name == "" || c.SourceFixture == "" || c.Origin == "" || c.MaxScrolls <= 0 {
+		if c.Name == "" || c.SourceFixture == "" || c.Origin == "" || c.MaxScrolls <= 0 || c.PreviewBudgetBytes <= 0 || c.SliceBudgetBytes <= 0 {
 			t.Fatalf("the scrolled preview fixture has an incomplete case: %+v", c)
 		}
 		if err := c.Origin.Validate(); err != nil {
@@ -93,17 +93,14 @@ func TestSourceTurns_ExtendsAPreviewAsTheReaderScrolls(t *testing.T) {
 				SessionID: string(session.SessionID),
 				Source:    kickstart.ListingSource(session),
 			}
-			options := []kickstart.SourceTurnsOption{
+			opts := kickstart.TerminalCaptureOptions()
+			opts.FirstReadBytes, opts.SliceReadBytes = c.PreviewBudgetBytes, c.SliceBudgetBytes
+			reader := kickstart.NewSourceTurns(&ingest.OSFileSystem{}, []ftue.SessionListing{listing},
 				kickstart.WithSourceTurnsGitResolver(testutil.NoGitResolver()),
 				kickstart.WithSourceTurnsSalt(salt.Salt{}),
-				kickstart.WithSourceTurnsSliceBudget(c.SliceBudgetBytes),
-			}
-			if c.PreviewBudgetBytes > 0 {
-				options = append(options, kickstart.WithSourceTurnsPreviewBudget(c.PreviewBudgetBytes))
-			}
-			reader := kickstart.NewSourceTurns(&ingest.OSFileSystem{}, []ftue.SessionListing{listing}, options...)
+				kickstart.WithSourceTurnsCaptureOptions(opts))
 
-			loaded, err := reader.Turns(listing.SessionID)
+			loaded, _, err := reader.FirstTurns(listing.SessionID)
 			if err != nil {
 				t.Fatalf("read the first slice of the preview: %v", err)
 			}
@@ -145,15 +142,18 @@ func TestSourceTurns_ExtendsAPreviewAsTheReaderScrolls(t *testing.T) {
 			if c.ExpectMoreAfterFirstRead && scrolls == 0 {
 				t.Fatal("no scroll ever ran, so this case never exercises a continuation")
 			}
-			finalNotice := reader.Notice(listing.SessionID)
-			if c.ExpectFinalNoticeContains == "" {
-				if finalNotice != "" {
-					t.Errorf("a preview with nothing more behind it still says %q; there is nothing left to explain", finalNotice)
+			if finalNotice := reader.Notice(listing.SessionID); finalNotice != "" {
+				t.Errorf("a preview with nothing more behind it still says %q above its turns; there is nothing left to load", finalNotice)
+			}
+			endNotice := reader.EndNotice(listing.SessionID)
+			if c.ExpectFinalEndNoticeContains == "" {
+				if endNotice != "" {
+					t.Errorf("a preview that reached the end of its session says %q below its turns; there is nothing to explain", endNotice)
 				}
 				return
 			}
-			if !strings.Contains(finalNotice, c.ExpectFinalNoticeContains) {
-				t.Errorf("the sentence above the turns is %q, which does not name %q", finalNotice, c.ExpectFinalNoticeContains)
+			if !strings.Contains(endNotice, c.ExpectFinalEndNoticeContains) {
+				t.Errorf("the sentence below the turns is %q, which does not name %q", endNotice, c.ExpectFinalEndNoticeContains)
 			}
 		})
 	}

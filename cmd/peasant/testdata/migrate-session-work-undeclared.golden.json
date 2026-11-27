@@ -1,0 +1,23 @@
+{
+  "available": true,
+  "lower_bound": false,
+  "approximate": true,
+  "evidence_not_read": [
+    "latest_attempt"
+  ],
+  "unapplied_effects": null,
+  "sessions": 2,
+  "undecided": 0,
+  "by_lane": {
+    "native": 1,
+    "stored-metadata": 1
+  },
+  "by_reason": {
+    "adapter_behind": 1,
+    "adapter_behind_native_only": 1
+  },
+  "full_step": {
+    "metadata-adapter/claude-code": 1
+  },
+  "unknown": {}
+}

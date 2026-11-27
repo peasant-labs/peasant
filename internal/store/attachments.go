@@ -156,7 +156,10 @@ func (r attachmentRows) ReplaceSessionAttachments(ctx context.Context, sessionID
 		return fmt.Errorf("store attachment replace: take connection: %w", err)
 	}
 	defer r.store.pool.Put(conn)
-	end := sqlitex.Transaction(conn)
+	end, err := beginWrite(conn, "replace the attachments of session "+sessionID)
+	if err != nil {
+		return fmt.Errorf("store attachment replace for session %q: %w", sessionID, err)
+	}
 	err = sqlitex.ExecuteTransient(conn, `DELETE FROM session_attachments WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{sessionID}})
 	if err != nil {
 		end(&err)
