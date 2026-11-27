@@ -51,6 +51,7 @@
     "@peasant-labs/fairtrade": "0.2.1",
     "@peasant-labs/schema": "0.58.1",
     "@xyflow/react": "^12.10.1",
+    "@zumer/snapdom": "3.8.3",
     "clsx": "^2.1.1",
     "diff": "^9.0.0",
     "lucide-react": "^0.575.0",
