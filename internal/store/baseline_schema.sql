@@ -1297,12 +1297,6 @@ CREATE INDEX idx_local_operation_diagnostics_order ON local_operation_diagnostic
 
 CREATE INDEX idx_models_family ON models(family) WHERE family IS NOT NULL;
 
-CREATE INDEX idx_owner_claims_owner_order
-    ON owner_claims(local_owner_id, claimed_at);
-
-CREATE INDEX idx_owner_claims_scope_order
-    ON owner_claims(local_owner_id, village_url, user_id, claimed_at);
-
 CREATE INDEX idx_publication_attempts_target ON publication_attempt_diagnostics(village_origin, owner_user_id, project_hash, session_id, attempted_at DESC);
 
 CREATE INDEX idx_pulled_annotations_local_session ON pulled_annotations(local_session_id);

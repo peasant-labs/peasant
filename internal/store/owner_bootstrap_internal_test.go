@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite"
+	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 )
 
 // TestOwnerCreatedAfterUpgradeFromV81 proves an explicit upgrade bootstraps the
@@ -33,17 +34,27 @@ func TestOwnerCreatedAfterUpgradeFromV81(t *testing.T) {
 	if _, err := Upgrade(context.Background(), path, UpgradeOptions{}); err != nil {
 		t.Fatalf("upgrade the V81 store: %v", err)
 	}
-	opened, err := Open(path)
+	// Assert the owner before any Open: Open bootstraps an owner itself, so a
+	// later read cannot prove Upgrade created one.
+	upgraded, err := sqlite.OpenConn(path, sqlite.OpenReadWrite)
 	if err != nil {
-		t.Fatalf("open the upgraded store: %v", err)
+		t.Fatalf("open the upgraded database directly: %v", err)
 	}
-	defer opened.Close()
-	owner, err := opened.LocalOwner(context.Background())
-	if err != nil || owner == nil {
-		t.Fatalf("owner after the upgrade = %+v, %v; want the bootstrapped owner", owner, err)
+	var ownerRows int
+	if err := sqlitex.ExecuteTransient(upgraded, `SELECT COUNT(*) FROM local_owner`, &sqlitex.ExecOptions{
+		ResultFunc: func(stmt *sqlite.Stmt) error { ownerRows = int(stmt.ColumnInt64(0)); return nil },
+	}); err != nil {
+		_ = upgraded.Close()
+		t.Fatalf("count local_owner after the upgrade: %v", err)
+	}
+	if err := upgraded.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if ownerRows != 1 {
+		t.Fatalf("local_owner rows after Upgrade = %d, want 1 before any Open", ownerRows)
 	}
 	if _, err := os.Stat(LocalOwnerFilePath(path)); err != nil {
-		t.Fatalf("owner file after the upgrade: %v", err)
+		t.Fatalf("owner file after the upgrade, before any Open: %v", err)
 	}
 }
 

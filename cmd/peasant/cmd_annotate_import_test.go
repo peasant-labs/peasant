@@ -213,11 +213,11 @@ func TestCLI_AnnotateImportRoundTrip(t *testing.T) {
 	if len(page.Claims) != 1 || page.Claims[0].Source != store.ClaimSourceAutomatic {
 		t.Fatalf("claims after import = %+v, want one automatic entry", page.Claims)
 	}
-	counts, err := db2.OwnershipCounts(ctx)
+	counts, err := db2.OwnershipCounts(ctx, &store.OwnershipAccount{VillageURL: "https://village.example/team", UserID: "11111111-1111-4111-8111-111111111111"})
 	if err != nil {
 		t.Fatalf("ownership after import: %v", err)
 	}
-	if counts.ClaimedAnnotations < 1 {
+	if counts.MineAnnotations < 1 {
 		t.Fatalf("ownership after import = %+v, want the imported annotation claimed", counts)
 	}
 }
@@ -908,11 +908,13 @@ func TestAnnotateImportSupersedeClaimsNewAnnotation(t *testing.T) {
 		t.Fatalf("import stdout = %q, want one superseding annotation", stdout)
 	}
 
-	counts, err := db.OwnershipCounts(t.Context())
+	counts, err := db.OwnershipCounts(t.Context(), &store.OwnershipAccount{VillageURL: "https://village.example/team", UserID: "11111111-1111-4111-8111-111111111111"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if counts.TotalAnnotations != 2 || counts.ClaimedAnnotations != 2 {
-		t.Fatalf("annotation ownership after the supersede = %+v, want both the original and the replacement claimed", counts)
+	// The first import was claimed when it was created, and the supersede adds
+	// the replacement. Both must point at the selected account.
+	if counts.TotalAnnotations != 2 || counts.MineAnnotations != 2 || counts.OthersAnnotations != 0 {
+		t.Fatalf("annotation ownership after the supersede = %+v, want both the original and the replacement claimed by the account", counts)
 	}
 }

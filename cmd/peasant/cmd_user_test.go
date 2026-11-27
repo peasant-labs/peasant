@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"encoding/json"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/auth"
+	"github.com/peasant-labs/peasant/internal/claimprompt"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
@@ -81,8 +83,9 @@ func runUserShowNoNetwork(t *testing.T) {
 		Ownership struct {
 			Sessions struct {
 				Total     int `json:"total"`
-				Claimed   int `json:"claimed"`
 				Unclaimed int `json:"unclaimed"`
+				Mine      int `json:"mine"`
+				Others    int `json:"others"`
 			} `json:"sessions"`
 		} `json:"ownership"`
 	}
@@ -101,8 +104,8 @@ func runUserShowNoNetwork(t *testing.T) {
 	if report.Prompt.State != string(userPromptStateNotApplicable) || report.Prompt.Account != nil {
 		t.Fatalf("prompt = %+v, want not_applicable without an account", report.Prompt)
 	}
-	if report.Ownership.Sessions.Total != 2 || report.Ownership.Sessions.Claimed != 0 || report.Ownership.Sessions.Unclaimed != 2 {
-		t.Fatalf("session counts = %+v, want 2 total and 2 unclaimed", report.Ownership.Sessions)
+	if report.Ownership.Sessions.Total != 2 || report.Ownership.Sessions.Unclaimed != 2 || report.Ownership.Sessions.Mine != 0 || report.Ownership.Sessions.Others != 0 {
+		t.Fatalf("session counts = %+v, want 2 total, 2 unclaimed, and nothing owned", report.Ownership.Sessions)
 	}
 	if _, statErr := os.Stat(filepath.Join(dir, "peasant", "credentials.json")); !os.IsNotExist(statErr) {
 		t.Fatalf("user show wrote or required credentials: %v", statErr)
@@ -307,13 +310,15 @@ func runUserClaimJSONParity(t *testing.T) {
 			Ownership struct {
 				Sessions struct {
 					Total     int `json:"total"`
-					Claimed   int `json:"claimed"`
 					Unclaimed int `json:"unclaimed"`
+					Mine      int `json:"mine"`
+					Others    int `json:"others"`
 				} `json:"sessions"`
 				Annotations struct {
 					Total     int `json:"total"`
-					Claimed   int `json:"claimed"`
 					Unclaimed int `json:"unclaimed"`
+					Mine      int `json:"mine"`
+					Others    int `json:"others"`
 				} `json:"annotations"`
 			} `json:"ownership"`
 		} `json:"status"`
@@ -416,6 +421,164 @@ func TestUserClaimNormalizesVillageURL(t *testing.T) {
 	}
 }
 
+type userArtifactOwnershipJSON struct {
+	Total     int `json:"total"`
+	Unclaimed int `json:"unclaimed"`
+	Mine      int `json:"mine"`
+	Others    int `json:"others"`
+}
+
+type userOwnershipJSON struct {
+	Sessions    userArtifactOwnershipJSON `json:"sessions"`
+	Annotations userArtifactOwnershipJSON `json:"annotations"`
+}
+
+func decodeUserOwnership(t *testing.T, document string) userOwnershipJSON {
+	t.Helper()
+	var report struct {
+		Ownership userOwnershipJSON `json:"ownership"`
+	}
+	if err := json.Unmarshal([]byte(document), &report); err != nil {
+		t.Fatalf("decode user ownership json: %v\n%s", err, document)
+	}
+	return report.Ownership
+}
+
+// runUserOwnershipParity proves the JSON and text surfaces report the same
+// three ownership partitions for two accounts and while signed out.
+func runUserOwnershipParity(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	db := openUserCommandStore(t, dir)
+	for _, id := range []string{"user-ownership-a", "user-ownership-b", "user-ownership-c"} {
+		storetest.SeedSession(t, db, id)
+	}
+	alice := saveUserCommandCredentials(t, dir)
+	aliceSnapshot, err := auth.CaptureCredentials(t.Context(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ClaimSessionIDs(t.Context(), aliceSnapshot, []string{"user-ownership-a"}, store.ClaimSourceAutomatic, 1700000001000); err != nil {
+		t.Fatal(err)
+	}
+	bob := alice
+	bob.UserID = "22222222-2222-4222-8222-222222222222"
+	bob.Username = "bob"
+	if err := auth.SaveCredentialsFrom(&bob, dir); err != nil {
+		t.Fatal(err)
+	}
+	bobSnapshot, err := auth.CaptureCredentials(t.Context(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ClaimSessionIDs(t.Context(), bobSnapshot, []string{"user-ownership-b"}, store.ClaimSourceAutomatic, 1700000002000); err != nil {
+		t.Fatal(err)
+	}
+	if err := auth.SaveCredentialsFrom(&alice, dir); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, _, err := executeWithDataDirStreams(t, BuildUserCommand(), dir, []string{"show", "--json"})
+	if err != nil {
+		t.Fatalf("user show --json: %v\n%s", err, stdout)
+	}
+	if got, want := decodeUserOwnership(t, stdout), (userOwnershipJSON{
+		Sessions: userArtifactOwnershipJSON{Total: 3, Unclaimed: 1, Mine: 1, Others: 1},
+	}); got != want {
+		t.Fatalf("ownership json = %+v, want %+v", got, want)
+	}
+
+	text, _, err := executeWithDataDirStreams(t, BuildUserCommand(), dir, []string{"show"})
+	if err != nil {
+		t.Fatalf("user show: %v\n%s", err, text)
+	}
+	for _, want := range []string{"3 total, 1 unclaimed, 1 mine, 1 other accounts", "0 total, 0 unclaimed, 0 mine, 0 other accounts"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("user show text = %q, want %q", text, want)
+		}
+	}
+
+	if err := auth.ClearCredentialsFrom(dir); err != nil {
+		t.Fatal(err)
+	}
+	signedOut, _, err := executeWithDataDirStreams(t, BuildUserCommand(), dir, []string{"show", "--json"})
+	if err != nil {
+		t.Fatalf("signed-out user show --json: %v\n%s", err, signedOut)
+	}
+	got := decodeUserOwnership(t, signedOut)
+	if got.Sessions.Total != 3 || got.Sessions.Unclaimed != 1 || got.Sessions.Mine != 0 || got.Sessions.Others != 2 {
+		t.Fatalf("signed-out ownership = %+v, want 3 total, 1 unclaimed, 0 mine, 2 others", got.Sessions)
+	}
+}
+
+// runClaimCommandCompletesPrompt proves a successful explicit claim settles the
+// prompt for the local owner plus account, so user show reports completed and a
+// later sign-in does not ask again.
+func runClaimCommandCompletesPrompt(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	db := openUserCommandStore(t, dir)
+	storetest.SeedSession(t, db, "user-claim-completes-session")
+	creds := saveUserCommandCredentials(t, dir)
+	if _, _, err := executeWithDataDirStreams(t, BuildUserCommand(), dir, []string{"claim", "--json"}); err != nil {
+		t.Fatalf("user claim: %v", err)
+	}
+	owner, err := db.LocalOwner(t.Context())
+	if err != nil || owner == nil {
+		t.Fatalf("read local owner = %+v, %v", owner, err)
+	}
+	show, _, err := executeWithDataDirStreams(t, BuildUserCommand(), dir, []string{"show", "--json"})
+	if err != nil {
+		t.Fatalf("user show --json: %v\n%s", err, show)
+	}
+	var report struct {
+		Prompt struct {
+			State string `json:"state"`
+		} `json:"prompt"`
+	}
+	if err := json.Unmarshal([]byte(show), &report); err != nil {
+		t.Fatalf("decode user show json: %v\n%s", err, show)
+	}
+	if report.Prompt.State != string(userPromptStateCompleted) {
+		t.Fatalf("prompt state after an explicit claim = %q, want completed", report.Prompt.State)
+	}
+
+	statePath := claimprompt.DefaultPath(defaults.ResolveStateDirPathWith(dir).String())
+	state, err := claimprompt.Load(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, err := auth.NormalizeVillageURL(creds.VillageURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.Decided(owner.ID, base, creds.UserID) {
+		t.Fatal("the claim did not record a prompt decision for the local owner and account")
+	}
+	var out bytes.Buffer
+	claimed := false
+	if err := promptSignInClaim(context.Background(), &creds, signInClaimDeps{
+		in:           strings.NewReader(""),
+		out:          &out,
+		interactive:  true,
+		statePath:    statePath,
+		localOwnerID: owner.ID,
+		now:          func() int64 { return 1700000003000 },
+		capture: func(context.Context) (auth.CredentialSnapshot, error) {
+			return auth.CaptureCredentials(t.Context(), dir)
+		},
+		claim: func(context.Context, auth.CredentialSnapshot, bool) (store.ClaimResult, error) {
+			claimed = true
+			return store.ClaimResult{}, nil
+		},
+	}); err != nil {
+		t.Fatalf("later sign-in prompt: %v", err)
+	}
+	if claimed || out.Len() != 0 {
+		t.Fatalf("a later sign-in prompted again (claimed=%v, output=%q)", claimed, out.String())
+	}
+}
+
 //go:embed testdata/user_command_cases.yaml
 var userCommandCasesYAML []byte
 
@@ -446,8 +609,10 @@ func TestUserCommandNamedCases(t *testing.T) {
 		t.Fatal(err)
 	}
 	runners := map[string]func(*testing.T){
-		"user-show-no-network":   runUserShowNoNetwork,
-		"user-claim-json-parity": runUserClaimJSONParity,
+		"user-show-no-network":           runUserShowNoNetwork,
+		"user-claim-json-parity":         runUserClaimJSONParity,
+		"user-ownership-parity":          runUserOwnershipParity,
+		"claim-command-completes-prompt": runClaimCommandCompletesPrompt,
 	}
 	for _, testCase := range fixture.Cases {
 		run, ok := runners[testCase.Name]

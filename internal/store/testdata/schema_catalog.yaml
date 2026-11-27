@@ -111,8 +111,6 @@ tables:
   - value_domain_kinds
 indexes:
   - idx_sessions_owner_claim
-  - idx_owner_claims_scope_order
-  - idx_owner_claims_owner_order
   - idx_annotations_owner_claim
   - idx_claude_evidence_identity_root
   - idx_claude_teammate_spawns_identity

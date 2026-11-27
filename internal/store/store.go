@@ -598,9 +598,10 @@ func newStoreOnPool(pool *sqlitex.Pool, dbPath string, o openOptions, formats ma
 	}
 
 	if !o.skipLocalOwnerBootstrap {
-		// A skip-migrations open may point at a pre-V79 database (a migration
-		// fixture that seeds an old version). Only bootstrap once the owner
-		// table exists; a normal open has just migrated to the current version.
+		// A skip-migrations open may point at a pre-V83 database (a migration
+		// fixture that seeds an old version), and Open never migrates. Only
+		// bootstrap once the owner table exists; an explicit Upgrade creates the
+		// owner row and file itself.
 		version, err := readUserVersion(pool)
 		if err != nil {
 			_ = pool.Close()

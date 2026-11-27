@@ -11,8 +11,9 @@ import (
 // file-only harvest attach no claimer, and a nil claimer claims nothing.
 //
 // Claiming is deliberately best-effort and never fails the run. The artifacts
-// are already stored; a later claim can retry the ownership assignment, so a
-// claim failure is reported and the run keeps its result.
+// are already stored; a later explicit `peasant user claim` retries the
+// ownership assignment, so a claim failure is reported and the run keeps its
+// result.
 type SessionClaimer interface {
 	ClaimSessions(ctx context.Context, sessionIDs []string) error
 }
@@ -36,7 +37,7 @@ func WithSessionClaimer(claimer SessionClaimer) PipelineOption {
 
 // claimRunSessions claims the sessions this run stored for the first time. It
 // never returns an error: ownership is a local projection of stored artifacts,
-// and the next claim can retry what this attempt could not assign.
+// and a later `peasant user claim` retries what this attempt could not assign.
 func (p *Pipeline) claimRunSessions(ctx context.Context, logPrefix string, sessionResults []SessionResult) {
 	if p.claimer == nil {
 		return
@@ -51,7 +52,7 @@ func (p *Pipeline) claimRunSessions(ctx context.Context, logPrefix string, sessi
 			ErrorType:   "local_ownership_claim_failed",
 			Location:    "local ownership claim",
 			Message:     fmt.Sprintf("claiming %d session(s) for the signed-in account failed: %v; the harvested sessions were kept", len(ids), err),
-			Remediation: "Run `peasant user claim` to assign local ownership, or sign in and harvest the same sessions again.",
+			Remediation: "Run `peasant user claim` to assign local ownership; re-harvesting stored sessions does not claim them.",
 		})
 	}
 }

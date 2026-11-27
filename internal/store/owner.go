@@ -60,7 +60,7 @@ const LocalOwnerFileName = "local-owner.json"
 
 // localOwnerSchemaVersion is the migration that creates local_owner. A
 // skip-migrations open below this version has no owner table to bootstrap.
-const localOwnerSchemaVersion = 82
+const localOwnerSchemaVersion = 83
 
 // LocalOwner is the permanent owner of one Peasant data directory. It is not a
 // Village account, a username, or an email address.
@@ -88,8 +88,9 @@ type OwnerClaim struct {
 }
 
 // ClaimResult reports one claim operation. Claimed counts artifacts whose
-// current owner pointer this operation assigned; AlreadyClaimed counts artifacts
-// in scope that already carried a pointer and were left alone. Stored counts
+// current owner pointer this operation assigned; AlreadyClaimed counts requested
+// artifacts that already named the selected account, under both the default and
+// --all. A pointer to another account is not already claimed. Stored counts
 // every local artifact in scope, so an empty store is distinguishable from a
 // fully claimed one. An explicit claim always appends an entry, so ClaimID names
 // it even when Claimed is zero. An automatic claim reuses its account's newest
@@ -102,15 +103,27 @@ type ClaimResult struct {
 	ClaimID        string
 }
 
+// OwnershipAccount is the selected Village account the ownership counts are
+// computed against. Nil means signed out, where Mine is always zero.
+type OwnershipAccount struct {
+	VillageURL string
+	UserID     string
+}
+
 // OwnershipCounts reports local artifact ownership at the row level. Pulled
-// rows are foreign and are not part of these counts.
+// rows are foreign and are not part of these counts. For each table,
+// Total = Unclaimed + Mine + Others: Unclaimed has no pointer, Mine points at
+// an entry of the selected account, and Others points at another account's
+// entry.
 type OwnershipCounts struct {
 	TotalSessions        int
-	ClaimedSessions      int
 	UnclaimedSessions    int
+	MineSessions         int
+	OthersSessions       int
 	TotalAnnotations     int
-	ClaimedAnnotations   int
 	UnclaimedAnnotations int
+	MineAnnotations      int
+	OthersAnnotations    int
 }
 
 // LocalOwnerFilePath returns the owner permanence file that sits beside the
@@ -168,41 +181,43 @@ type OwnerClaimsPage struct {
 	NextBefore string
 }
 
-// ownerClaimsPageSQL is the one page read. The owner and claimed_at index
-// supplies the order; rowid is the implicit tie-break SQLite appends to the
-// index, so no temporary B-tree is needed. The extra row decides nextBefore.
+// ownerClaimsPageSQL is the one page read. Write order (rowid) is the only
+// claim-log order key: with one local owner per store, the read walks the
+// owner_claims primary key backwards and stops at the LIMIT, so no index and
+// no temporary sort are needed. The extra row decides nextBefore.
 func ownerClaimsPageSQL(hasBefore bool) string {
 	query := `SELECT id, local_owner_id, village_url, user_id, username_snapshot, claimed_at, source
 FROM owner_claims
 WHERE local_owner_id = ?1`
 	if hasBefore {
 		query += `
-  AND (claimed_at, rowid) < (?2, ?3)`
+  AND rowid < ?2`
 	}
 	limitArg := 2
 	if hasBefore {
-		limitArg = 4
+		limitArg = 3
 	}
 	return query + `
-ORDER BY claimed_at DESC, rowid DESC
+ORDER BY rowid DESC
 LIMIT ?` + fmt.Sprint(limitArg)
 }
 
-// ownerClaimCursorSQL resolves the cursor id to its (claimed_at, rowid) order
-// key, scoped to this local owner.
-const ownerClaimCursorSQL = `SELECT claimed_at, rowid FROM owner_claims WHERE local_owner_id = ? AND id = ?`
+// ownerClaimCursorSQL resolves the cursor id to its rowid, scoped to this local
+// owner. A stale or foreign cursor is refused by the caller.
+const ownerClaimCursorSQL = `SELECT rowid FROM owner_claims WHERE local_owner_id = ? AND id = ?`
 
 // newestOwnerClaimSQL reads the newest entry of the whole log for one local
-// owner, the only entry strict reuse may reuse.
+// owner by write order, the only entry strict reuse may reuse. claimed_at is
+// display data and never decides newest.
 const newestOwnerClaimSQL = `SELECT id, village_url, user_id, source FROM owner_claims
 WHERE local_owner_id = ?
-ORDER BY claimed_at DESC, rowid DESC LIMIT 1`
+ORDER BY rowid DESC LIMIT 1`
 
 // OwnerClaims returns the most recent page of the append-only claim log for
-// this local owner, newest first: claimed_at descending, then insertion order
-// (rowid) descending. A non-empty before continues after that entry. The read
-// fetches the bound plus one row to decide whether an older page exists, and it
-// is served by the (local_owner_id, claimed_at) index with no temporary sort.
+// this local owner, newest first by insertion order (rowid descending). A
+// non-empty before continues after that entry. The read fetches the bound plus
+// one row to decide whether an older page exists, and it is a reverse row-order
+// read that stops at the limit with no temporary sort.
 func (s *Store) OwnerClaims(ctx context.Context, before string) (OwnerClaimsPage, error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
@@ -219,12 +234,12 @@ func (s *Store) OwnerClaims(ctx context.Context, before string) (OwnerClaimsPage
 	query := ownerClaimsPageSQL(before != "")
 	args := []any{owner.ID}
 	if before != "" {
-		var claimedAt, rowid int64
+		var rowid int64
 		found := false
 		if err := sqlitex.ExecuteTransient(conn, ownerClaimCursorSQL, &sqlitex.ExecOptions{
 			Args: []any{owner.ID, before},
 			ResultFunc: func(stmt *sqlite.Stmt) error {
-				claimedAt, rowid = stmt.ColumnInt64(0), stmt.ColumnInt64(1)
+				rowid = stmt.ColumnInt64(0)
 				found = true
 				return nil
 			},
@@ -234,7 +249,7 @@ func (s *Store) OwnerClaims(ctx context.Context, before string) (OwnerClaimsPage
 		if !found {
 			return OwnerClaimsPage{}, fmt.Errorf("read owner claims: the before cursor %q names no claim entry for this local owner; no ownership was changed; pass a nextBefore value from a previous page", before)
 		}
-		args = append(args, claimedAt, rowid)
+		args = append(args, rowid)
 	}
 	args = append(args, OwnerClaimsPageSize+1)
 	var claims []OwnerClaim
@@ -292,29 +307,32 @@ func (s *Store) OwnerClaimCount(ctx context.Context) (int, error) {
 	return count, nil
 }
 
-// OwnershipCounts reports how many local sessions and local annotations carry a
-// current owner pointer.
-func (s *Store) OwnershipCounts(ctx context.Context) (OwnershipCounts, error) {
+// OwnershipCounts reports how many local sessions and local annotations are
+// unclaimed, owned by the selected account, or owned by another account. A nil
+// account (signed out) reports Mine as zero.
+func (s *Store) OwnershipCounts(ctx context.Context, account *OwnershipAccount) (OwnershipCounts, error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return OwnershipCounts{}, fmt.Errorf("read ownership counts: take SQLite connection: %w", err)
 	}
 	defer s.pool.Put(conn)
-	sessionsTotal, sessionsClaimed, err := countOwnedRows(conn, "sessions")
+	sessionsTotal, sessionsUnclaimed, sessionsMine, err := countOwnership(conn, "sessions", account)
 	if err != nil {
 		return OwnershipCounts{}, fmt.Errorf("read ownership counts: sessions: %w", err)
 	}
-	annotationsTotal, annotationsClaimed, err := countOwnedRows(conn, "annotations")
+	annotationsTotal, annotationsUnclaimed, annotationsMine, err := countOwnership(conn, "annotations", account)
 	if err != nil {
 		return OwnershipCounts{}, fmt.Errorf("read ownership counts: annotations: %w", err)
 	}
 	return OwnershipCounts{
 		TotalSessions:        int(sessionsTotal),
-		ClaimedSessions:      int(sessionsClaimed),
-		UnclaimedSessions:    int(sessionsTotal - sessionsClaimed),
+		UnclaimedSessions:    int(sessionsUnclaimed),
+		MineSessions:         int(sessionsMine),
+		OthersSessions:       int(sessionsTotal - sessionsUnclaimed - sessionsMine),
 		TotalAnnotations:     int(annotationsTotal),
-		ClaimedAnnotations:   int(annotationsClaimed),
-		UnclaimedAnnotations: int(annotationsTotal - annotationsClaimed),
+		UnclaimedAnnotations: int(annotationsUnclaimed),
+		MineAnnotations:      int(annotationsMine),
+		OthersAnnotations:    int(annotationsTotal - annotationsUnclaimed - annotationsMine),
 	}, nil
 }
 
@@ -342,22 +360,19 @@ func (s *Store) ClaimArtifacts(ctx context.Context, snapshot auth.CredentialSnap
 		return ClaimResult{}, fmt.Errorf("claim local artifacts: resolve the signed-in account scope: %w", err)
 	}
 	username := snapshot.Credentials().Username
+	account := &OwnershipAccount{VillageURL: base, UserID: user}
 	var result ClaimResult
 	err = s.withObservationTransaction(ctx, snapshot, true, func(conn *sqlite.Conn) error {
-		sessionsTotal, sessionsClaimed, err := countOwnedRows(conn, "sessions")
+		sessionsTotal, _, sessionsMine, err := countOwnership(conn, "sessions", account)
 		if err != nil {
 			return err
 		}
-		annotationsTotal, annotationsClaimed, err := countOwnedRows(conn, "annotations")
+		annotationsTotal, _, annotationsMine, err := countOwnership(conn, "annotations", account)
 		if err != nil {
 			return err
 		}
 		result.Stored = int(sessionsTotal + annotationsTotal)
-		if all {
-			result.AlreadyClaimed = 0
-		} else {
-			result.AlreadyClaimed = int(sessionsClaimed + annotationsClaimed)
-		}
+		result.AlreadyClaimed = int(sessionsMine + annotationsMine)
 		// An explicit claim always appends its decision, even on an empty store
 		// or when every artifact already carries a pointer.
 		claimID, err := appendOrReuseOwnerClaim(conn, owner.ID, base, user, username, nowMs, source)
@@ -461,26 +476,27 @@ func (s *Store) ClaimSessionIDs(ctx context.Context, snapshot auth.CredentialSna
 		return ClaimResult{}, fmt.Errorf("claim harvest sessions: resolve the signed-in account scope: %w", err)
 	}
 	username := snapshot.Credentials().Username
+	account := &OwnershipAccount{VillageURL: base, UserID: user}
 	var result ClaimResult
 	err = s.withObservationTransaction(ctx, snapshot, true, func(conn *sqlite.Conn) error {
-		var sessionsTotal, sessionsClaimed, annotationsTotal, annotationsClaimed int64
+		var sessionsTotal, sessionsMine, annotationsTotal, annotationsMine int64
 		for start := 0; start < len(ids); start += indexFormatReadBatchSize {
 			batch := ids[start:min(start+indexFormatReadBatchSize, len(ids))]
-			total, claimed, err := countSessionsByID(conn, batch)
+			total, mine, err := countSessionsByID(conn, batch, account)
 			if err != nil {
 				return err
 			}
 			sessionsTotal += total
-			sessionsClaimed += claimed
-			total, claimed, err = countSessionTargetAnnotations(conn, batch)
+			sessionsMine += mine
+			total, mine, err = countSessionTargetAnnotations(conn, batch, account)
 			if err != nil {
 				return err
 			}
 			annotationsTotal += total
-			annotationsClaimed += claimed
+			annotationsMine += mine
 		}
 		result.Stored = int(sessionsTotal + annotationsTotal)
-		result.AlreadyClaimed = int(sessionsClaimed + annotationsClaimed)
+		result.AlreadyClaimed = int(sessionsMine + annotationsMine)
 		claimID, err := appendOrReuseOwnerClaim(conn, owner.ID, base, user, username, nowMs, source)
 		if err != nil {
 			return err
@@ -521,10 +537,11 @@ func (s *Store) ClaimSessionIDs(ctx context.Context, snapshot auth.CredentialSna
 	return result, nil
 }
 
-// ClaimAnnotationIDs points just-created local annotations at the signed-in
-// account's latest claim entry, appending one only when the account has no entry
-// yet. It is the annotate/import/web claim path: one annotation does not append
-// a log entry per artifact. Rows that already carry a pointer are left alone.
+// ClaimAnnotationIDs points just-created local annotations at the selected
+// account's reusable claim entry, or appends one when strict reuse does not
+// apply. It is the annotate/import/web claim path: one annotation does not
+// append a log entry per artifact. Rows that already carry a pointer, including
+// another account's, are left alone and never move.
 func (s *Store) ClaimAnnotationIDs(ctx context.Context, snapshot auth.CredentialSnapshot, annotationIDs []string, source ClaimSource, nowMs int64) (ClaimResult, error) {
 	if err := validateClaimRequest(source, nowMs); err != nil {
 		return ClaimResult{}, err
@@ -542,16 +559,18 @@ func (s *Store) ClaimAnnotationIDs(ctx context.Context, snapshot auth.Credential
 		return ClaimResult{}, fmt.Errorf("claim local annotations: resolve the signed-in account scope: %w", err)
 	}
 	username := snapshot.Credentials().Username
+	account := &OwnershipAccount{VillageURL: base, UserID: user}
 	var result ClaimResult
 	err = s.withObservationTransaction(ctx, snapshot, true, func(conn *sqlite.Conn) error {
-		var total, claimed int64
+		var total, mine int64
 		for start := 0; start < len(ids); start += indexFormatReadBatchSize {
 			batch := ids[start:min(start+indexFormatReadBatchSize, len(ids))]
-			if err := sqlitex.ExecuteTransient(conn, `SELECT COUNT(*), COUNT(owner_claim_id) FROM annotations WHERE id IN (`+sqlPlaceholders(len(batch))+`)`, &sqlitex.ExecOptions{
-				Args: sessionIDArgs(batch),
+			args := append([]any{account.VillageURL, account.UserID}, sessionIDArgs(batch)...)
+			if err := sqlitex.ExecuteTransient(conn, `SELECT COUNT(*), COUNT(CASE WHEN owner_claim_id IN (SELECT id FROM owner_claims WHERE village_url = ? AND user_id = ?) THEN 1 END) FROM annotations WHERE id IN (`+sqlPlaceholders(len(batch))+`)`, &sqlitex.ExecOptions{
+				Args: args,
 				ResultFunc: func(stmt *sqlite.Stmt) error {
 					total += stmt.ColumnInt64(0)
-					claimed += stmt.ColumnInt64(1)
+					mine += stmt.ColumnInt64(1)
 					return nil
 				},
 			}); err != nil {
@@ -559,7 +578,7 @@ func (s *Store) ClaimAnnotationIDs(ctx context.Context, snapshot auth.Credential
 			}
 		}
 		result.Stored = int(total)
-		result.AlreadyClaimed = int(claimed)
+		result.AlreadyClaimed = int(mine)
 		claimID, err := appendOrReuseOwnerClaim(conn, owner.ID, base, user, username, nowMs, source)
 		if err != nil {
 			return err
@@ -769,59 +788,108 @@ func ensureLocalOwnerFile(path string, owner LocalOwner) error {
 	return nil
 }
 
-// countOwnedRows returns the total and currently owned rows of one local
-// artifact table. table is a package literal, never caller input.
-func countOwnedRows(conn *sqlite.Conn, table string) (total, claimed int64, err error) {
-	if err := sqlitex.ExecuteTransient(conn, `SELECT COUNT(*), COUNT(owner_claim_id) FROM `+table, &sqlitex.ExecOptions{
+// countOwnership returns the total, unclaimed, and selected-account rows of one
+// local artifact table. table is a package literal, never caller input. A nil
+// account reports zero mine rows.
+func countOwnership(conn *sqlite.Conn, table string, account *OwnershipAccount) (total, unclaimed, mine int64, err error) {
+	query := `SELECT COUNT(*), COUNT(CASE WHEN owner_claim_id IS NULL THEN 1 END) FROM ` + table
+	args := []any(nil)
+	if account != nil && account.UserID != "" {
+		query = `SELECT COUNT(*),
+       COUNT(CASE WHEN owner_claim_id IS NULL THEN 1 END),
+       COUNT(CASE WHEN owner_claim_id IN (SELECT id FROM owner_claims WHERE village_url = ? AND user_id = ?) THEN 1 END)
+FROM ` + table
+		args = []any{account.VillageURL, account.UserID}
+	}
+	if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
+		Args: args,
 		ResultFunc: func(stmt *sqlite.Stmt) error {
-			total, claimed = stmt.ColumnInt64(0), stmt.ColumnInt64(1)
+			total, unclaimed = stmt.ColumnInt64(0), stmt.ColumnInt64(1)
+			if stmt.ColumnCount() > 2 {
+				mine = stmt.ColumnInt64(2)
+			}
 			return nil
 		},
 	}); err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
-	return total, claimed, nil
+	return total, unclaimed, mine, nil
 }
 
-// countSessionsByID returns the total and currently owned sessions among the
+// countSessionsByID returns the total and selected-account sessions among the
 // named ids only.
-func countSessionsByID(conn *sqlite.Conn, sessionIDs []string) (total, claimed int64, err error) {
-	if err := sqlitex.ExecuteTransient(conn, `SELECT COUNT(*), COUNT(owner_claim_id) FROM sessions WHERE session_id IN (`+sqlPlaceholders(len(sessionIDs))+`)`, &sqlitex.ExecOptions{
-		Args: sessionIDArgs(sessionIDs),
+func countSessionsByID(conn *sqlite.Conn, sessionIDs []string, account *OwnershipAccount) (total, mine int64, err error) {
+	query := `SELECT COUNT(*) FROM sessions WHERE session_id IN (` + sqlPlaceholders(len(sessionIDs)) + `)`
+	args := sessionIDArgs(sessionIDs)
+	if account != nil && account.UserID != "" {
+		query = `SELECT COUNT(*), COUNT(CASE WHEN owner_claim_id IN (SELECT id FROM owner_claims WHERE village_url = ? AND user_id = ?) THEN 1 END) FROM sessions WHERE session_id IN (` + sqlPlaceholders(len(sessionIDs)) + `)`
+		args = append([]any{account.VillageURL, account.UserID}, args...)
+	}
+	if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
+		Args: args,
 		ResultFunc: func(stmt *sqlite.Stmt) error {
-			total, claimed = stmt.ColumnInt64(0), stmt.ColumnInt64(1)
+			total = stmt.ColumnInt64(0)
+			if stmt.ColumnCount() > 1 {
+				mine = stmt.ColumnInt64(1)
+			}
 			return nil
 		},
 	}); err != nil {
 		return 0, 0, err
 	}
-	return total, claimed, nil
+	return total, mine, nil
 }
 
-// countSessionTargetAnnotations returns the total and currently owned local
+// countSessionTargetAnnotations returns the total and selected-account local
 // annotations whose explicit target is one of the named sessions.
-func countSessionTargetAnnotations(conn *sqlite.Conn, sessionIDs []string) (total, claimed int64, err error) {
+func countSessionTargetAnnotations(conn *sqlite.Conn, sessionIDs []string, account *OwnershipAccount) (total, mine int64, err error) {
 	targets, err := json.Marshal(sessionIDs)
 	if err != nil {
 		return 0, 0, fmt.Errorf("encode the session target set: %w", err)
 	}
-	if err := sqlitex.ExecuteTransient(conn, countHarvestAnnotationsSQL, &sqlitex.ExecOptions{
-		Args: []any{string(targets), string(targets), string(targets)},
+	query := countHarvestAnnotationsSQL
+	args := []any{string(targets), string(targets), string(targets)}
+	if account == nil || account.UserID == "" {
+		query = countHarvestAnnotationsAnyAccountSQL
+	} else {
+		args = append([]any{account.VillageURL, account.UserID}, args...)
+	}
+	if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
+		Args: args,
 		ResultFunc: func(stmt *sqlite.Stmt) error {
-			total, claimed = stmt.ColumnInt64(0), stmt.ColumnInt64(1)
+			total = stmt.ColumnInt64(0)
+			if stmt.ColumnCount() > 1 {
+				mine = stmt.ColumnInt64(1)
+			}
 			return nil
 		},
 	}); err != nil {
 		return 0, 0, err
 	}
-	return total, claimed, nil
+	return total, mine, nil
 }
 
 // countHarvestAnnotationsSQL counts annotations attached to a harvest session
 // set: session-target annotations, entry-target annotations, and association
-// targets whose session is in the set. The three json_each arguments each carry
-// the same session-id array.
-const countHarvestAnnotationsSQL = `SELECT COUNT(*), COUNT(a.owner_claim_id)
+// targets whose session is in the set. The first two arguments name the
+// selected account; the three json_each arguments each carry the same session-id
+// array.
+const countHarvestAnnotationsSQL = `SELECT COUNT(*),
+       COUNT(CASE WHEN a.owner_claim_id IN (SELECT id FROM owner_claims WHERE village_url = ?1 AND user_id = ?2) THEN 1 END)
+FROM annotations a
+WHERE a.id IN (
+  SELECT annotation_id FROM annotation_target_sessions WHERE session_id IN (SELECT value FROM json_each(?3))
+  UNION
+  SELECT annotation_id FROM annotation_target_entries WHERE session_id IN (SELECT value FROM json_each(?4))
+  UNION
+  SELECT annotation_id FROM annotation_target_associations WHERE association_id IN (
+    SELECT association_id FROM session_commit_associations WHERE session_id IN (SELECT value FROM json_each(?5))
+  )
+)`
+
+// countHarvestAnnotationsAnyAccountSQL counts the same harvest annotation set
+// without a selected account, for a signed-out report.
+const countHarvestAnnotationsAnyAccountSQL = `SELECT COUNT(*)
 FROM annotations a
 WHERE a.id IN (
   SELECT annotation_id FROM annotation_target_sessions WHERE session_id IN (SELECT value FROM json_each(?1))

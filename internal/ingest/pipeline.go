@@ -4460,10 +4460,15 @@ func (p *Pipeline) processNativeSession(ctx context.Context, entry DiffEntry, wr
 		origin = &value
 	}
 
+	// A pair left by a failed first mirror is still first-stored evidence. The
+	// marker beside it says this session has never had a database row, so the
+	// next successful mirror may claim it instead of treating the saved pair as
+	// an old installation.
+	savedPairExisted := metadataPath != "" && !p.pendingClaimMarkerPresent(metadataPath)
 	return workerResult{
 		transcriptKept:        kept.transcript,
 		commitCaptureComplete: commitCaptureComplete,
-		savedPairExisted:      metadataPath != "",
+		savedPairExisted:      savedPairExisted,
 		result:                result,
 		capturedSource:        capturedSource,
 		cwdProvenance:         publicationCWDProvenance(meta, session),

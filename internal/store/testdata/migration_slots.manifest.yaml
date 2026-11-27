@@ -80,7 +80,7 @@ requiredNames:
   - v79-import-profile-and-outcome-reasons
   - v80-publication-capture-outcome
   - v81-source-diagnostic-lanes
-  - v82-owner-claims
+  - v83-owner-claims
 requiredGuardNames:
   - deleted-required-slot
   - shared-needle

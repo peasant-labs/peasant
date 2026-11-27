@@ -149,17 +149,30 @@ type localOwnerClaimStep struct {
 }
 
 type localOwnerClaimExpected struct {
-	OwnerStable       *bool             `yaml:"ownerStable"`
-	OwnerRows         *int              `yaml:"ownerRows"`
-	OwnerFile         *bool             `yaml:"ownerFile"`
-	CredentialsAbsent *bool             `yaml:"credentialsAbsent"`
-	PulledUnchanged   *bool             `yaml:"pulledUnchanged"`
-	ClaimCount        *int              `yaml:"claimCount"`
-	ClaimSources      []string          `yaml:"claimSources"`
-	ClaimUsernames    []string          `yaml:"claimUsernames"`
-	ClaimUserIDs      []string          `yaml:"claimUserIDs"`
-	Sessions          map[string]string `yaml:"sessions"`
-	Annotations       map[string]string `yaml:"annotations"`
+	OwnerStable       *bool                        `yaml:"ownerStable"`
+	OwnerRows         *int                         `yaml:"ownerRows"`
+	OwnerFile         *bool                        `yaml:"ownerFile"`
+	CredentialsAbsent *bool                        `yaml:"credentialsAbsent"`
+	PulledUnchanged   *bool                        `yaml:"pulledUnchanged"`
+	ClaimCount        *int                         `yaml:"claimCount"`
+	ClaimSources      []string                     `yaml:"claimSources"`
+	ClaimUsernames    []string                     `yaml:"claimUsernames"`
+	ClaimUserIDs      []string                     `yaml:"claimUserIDs"`
+	Sessions          map[string]string            `yaml:"sessions"`
+	Annotations       map[string]string            `yaml:"annotations"`
+	Ownership         *localOwnerOwnershipExpected `yaml:"ownership"`
+}
+
+type localOwnerOwnershipExpected struct {
+	Sessions    localOwnerArtifactExpected `yaml:"sessions"`
+	Annotations localOwnerArtifactExpected `yaml:"annotations"`
+}
+
+type localOwnerArtifactExpected struct {
+	Total     int `yaml:"total"`
+	Unclaimed int `yaml:"unclaimed"`
+	Mine      int `yaml:"mine"`
+	Others    int `yaml:"others"`
 }
 
 func loadLocalOwnerClaimFixture(t *testing.T) localOwnerClaimFixture {
@@ -256,7 +269,7 @@ VALUES('village.example', 'pulled-a', 'remote-user', 'remote-user', 'hash-a', 'p
 VALUES('village.example', 'ann-hash-a', 'pulled-a', 'remote-author', 'remote-author', '{"value":"foreign"}', 14)`)
 			state.pulled["transcripts"] = ownerTestCount(t, s, `SELECT COUNT(*) FROM pulled_transcripts WHERE owner_user_id='remote-user' AND owner_username='remote-user'`)
 			state.pulled["annotations"] = ownerTestCount(t, s, `SELECT COUNT(*) FROM pulled_annotations WHERE author_user_id='remote-author' AND author_username='remote-author'`)
-		case "claimDefault", "claimAll", "claimSessions":
+		case "claimDefault", "claimAll", "claimSessions", "claimAnnotations":
 			if state.snapshot.Credentials().UserID == "" {
 				t.Fatalf("%s requires a signed-in account", step.Kind)
 			}
@@ -276,6 +289,16 @@ VALUES('village.example', 'ann-hash-a', 'pulled-a', 'remote-author', 'remote-aut
 				_, err = s.ClaimArtifacts(ctx, state.snapshot, true, source, step.NowMs)
 			case "claimSessions":
 				_, err = s.ClaimSessionIDs(ctx, state.snapshot, step.Sessions, source, step.NowMs)
+			case "claimAnnotations":
+				ids := make([]string, 0, len(step.Annotations))
+				for _, key := range step.Annotations {
+					id, ok := state.annotations[key]
+					if !ok {
+						t.Fatalf("claimAnnotations: fixture expected annotation %q but none was seeded", key)
+					}
+					ids = append(ids, id)
+				}
+				_, err = s.ClaimAnnotationIDs(ctx, state.snapshot, ids, source, step.NowMs)
 			}
 			if err != nil {
 				t.Fatalf("%s: %v", step.Kind, err)
@@ -377,6 +400,28 @@ VALUES('village.example', 'ann-hash-a', 'pulled-a', 'remote-author', 'remote-aut
 		got := ownerTestPointerOrdinal(t, s, claims, "annotations", "id", annotationID)
 		if got != want {
 			t.Fatalf("annotation %s pointer = %s, want %s", key, got, want)
+		}
+	}
+	if expect.Ownership != nil {
+		var account *store.OwnershipAccount
+		if creds := state.snapshot.Credentials(); creds.UserID != "" {
+			base, err := auth.NormalizeVillageURL(creds.VillageURL)
+			if err != nil {
+				t.Fatalf("normalize the selected account: %v", err)
+			}
+			account = &store.OwnershipAccount{VillageURL: base, UserID: creds.UserID}
+		}
+		counts, err := s.OwnershipCounts(ctx, account)
+		if err != nil {
+			t.Fatalf("read ownership counts: %v", err)
+		}
+		gotSessions := localOwnerArtifactExpected{Total: counts.TotalSessions, Unclaimed: counts.UnclaimedSessions, Mine: counts.MineSessions, Others: counts.OthersSessions}
+		gotAnnotations := localOwnerArtifactExpected{Total: counts.TotalAnnotations, Unclaimed: counts.UnclaimedAnnotations, Mine: counts.MineAnnotations, Others: counts.OthersAnnotations}
+		if gotSessions != expect.Ownership.Sessions {
+			t.Fatalf("session ownership = %+v, want %+v", gotSessions, expect.Ownership.Sessions)
+		}
+		if gotAnnotations != expect.Ownership.Annotations {
+			t.Fatalf("annotation ownership = %+v, want %+v", gotAnnotations, expect.Ownership.Annotations)
 		}
 	}
 }
@@ -503,7 +548,7 @@ func TestClaimSourceSetMatchesSchema(t *testing.T) {
 	}
 }
 
-func TestOwnerClaimsOrderedByClaimedAtThenInsertion(t *testing.T) {
+func TestOwnerClaimsOrderedByInsertion(t *testing.T) {
 	s := openTestStore(t)
 	ctx := t.Context()
 	owner, err := s.EnsureLocalOwner(ctx, 1000)
@@ -512,8 +557,8 @@ func TestOwnerClaimsOrderedByClaimedAtThenInsertion(t *testing.T) {
 	}
 	ownerTestExec(t, s, `INSERT INTO collective_observation_scopes(village_url, user_id, incarnation) VALUES(?, ?, 'ordering-fixture-one')`, ownerTestVillageURL, ownerTestUserOne)
 	ownerTestExec(t, s, `INSERT INTO collective_observation_scopes(village_url, user_id, incarnation) VALUES(?, ?, 'ordering-fixture-two')`, ownerTestVillageURL, ownerTestUserTwo)
-	// Deliberately reverse the id order: a claimed_at,id sort returns oc_aaa
-	// before oc_zzz, while claimed_at,rowid returns insertion order.
+	// Deliberately reverse the id order: the page follows write order (rowid),
+	// not the claim id, and both entries share a claimed_at value.
 	ownerTestExec(t, s, `INSERT INTO owner_claims(id, local_owner_id, village_url, user_id, username_snapshot, claimed_at, source)
 VALUES('oc_zzz', ?, ?, ?, 'first-inserted', 4000, 'manual')`, owner.ID, ownerTestVillageURL, ownerTestUserOne)
 	ownerTestExec(t, s, `INSERT INTO owner_claims(id, local_owner_id, village_url, user_id, username_snapshot, claimed_at, source)

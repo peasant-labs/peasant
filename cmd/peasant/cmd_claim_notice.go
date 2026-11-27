@@ -61,7 +61,7 @@ func announceUnclaimedClaim(ctx context.Context, out io.Writer, db *store.Store,
 	if state.Decided(owner.ID, base, creds.UserID) || state.Noticed(owner.ID, base, creds.UserID) {
 		return nil
 	}
-	counts, err := db.OwnershipCounts(ctx)
+	counts, err := db.OwnershipCounts(ctx, &store.OwnershipAccount{VillageURL: base, UserID: creds.UserID})
 	if err != nil {
 		return fmt.Errorf("check for unclaimed local ownership: %w", err)
 	}

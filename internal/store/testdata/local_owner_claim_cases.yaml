@@ -24,7 +24,12 @@ requiredNames:
   - auto-claim-leaves-other-account-annotations
   - auto-claim-after-reassign-back
   - auto-claim-after-own-manual-claim
+  - auto-claim-after-own-automatic-then-manual
+  - auto-claim-follows-insertion-order-after-clock-step
   - auto-claim-reuses-newest-automatic
+  - ownership-counts-two-accounts
+  - ownership-counts-signed-out
+  - claim-annotations-never-moves-other-account
 
 cases:
   - name: owner-created-without-village-login
@@ -231,6 +236,40 @@ cases:
       sessions:
         owner-session-a: first
 
+  - name: auto-claim-after-own-automatic-then-manual
+    steps:
+      - {kind: seed, sessions: [owner-session-a, owner-session-b, owner-session-c]}
+      - {kind: signIn, user: one, username: alice}
+      - {kind: claimSessions, sessions: [owner-session-a], source: automatic, nowMs: 1000}
+      - {kind: claimSessions, sessions: [owner-session-b], source: manual, nowMs: 2000}
+      - {kind: claimSessions, sessions: [owner-session-c], source: automatic, nowMs: 3000}
+    expect:
+      claimCount: 3
+      claimSources: [automatic, manual, automatic]
+      claimUserIDs: [one, one, one]
+      sessions:
+        owner-session-a: first
+        owner-session-b: second
+        owner-session-c: third
+
+  - name: auto-claim-follows-insertion-order-after-clock-step
+    steps:
+      - {kind: seed, sessions: [owner-session-a, owner-session-b, owner-session-c]}
+      - {kind: signIn, user: one, username: alice}
+      - {kind: claimSessions, sessions: [owner-session-a], source: automatic, nowMs: 2000}
+      - {kind: signIn, user: two, username: bob}
+      - {kind: claimSessions, sessions: [owner-session-b], source: manual, nowMs: 1000}
+      - {kind: signIn, user: one, username: alice}
+      - {kind: claimSessions, sessions: [owner-session-c], source: automatic, nowMs: 1500}
+    expect:
+      claimCount: 3
+      claimSources: [automatic, manual, automatic]
+      claimUserIDs: [one, two, one]
+      sessions:
+        owner-session-a: first
+        owner-session-b: second
+        owner-session-c: third
+
   - name: auto-claim-reuses-newest-automatic
     steps:
       - {kind: seed, sessions: [owner-session-a]}
@@ -241,4 +280,41 @@ cases:
       claimCount: 1
       claimSources: [automatic]
       sessions:
+        owner-session-a: first
+
+  - name: ownership-counts-two-accounts
+    steps:
+      - {kind: seed, sessions: [owner-session-a, owner-session-b, owner-session-c]}
+      - {kind: signIn, user: one, username: alice}
+      - {kind: claimSessions, sessions: [owner-session-a], source: automatic, nowMs: 1000}
+      - {kind: signIn, user: two, username: bob}
+      - {kind: claimSessions, sessions: [owner-session-b], source: automatic, nowMs: 2000}
+      - {kind: signIn, user: one, username: alice}
+    expect:
+      ownership:
+        sessions: {total: 3, unclaimed: 1, mine: 1, others: 1}
+        annotations: {total: 0, unclaimed: 0, mine: 0, others: 0}
+
+  - name: ownership-counts-signed-out
+    steps:
+      - {kind: seed, sessions: [owner-session-a, owner-session-b]}
+      - {kind: signIn, user: one, username: alice}
+      - {kind: claimDefault, source: manual, nowMs: 1000}
+      - {kind: signOut}
+    expect:
+      ownership:
+        sessions: {total: 2, unclaimed: 0, mine: 0, others: 2}
+        annotations: {total: 0, unclaimed: 0, mine: 0, others: 0}
+
+  - name: claim-annotations-never-moves-other-account
+    steps:
+      - {kind: seed, sessions: [owner-session-a], annotations: [owner-session-a]}
+      - {kind: signIn, user: one, username: alice}
+      - {kind: claimDefault, source: manual, nowMs: 1000}
+      - {kind: signIn, user: two, username: bob}
+      - {kind: claimAnnotations, annotations: [owner-session-a], source: automatic, nowMs: 2000}
+    expect:
+      claimCount: 2
+      claimUserIDs: [one, two]
+      annotations:
         owner-session-a: first

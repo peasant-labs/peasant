@@ -740,11 +740,11 @@ func TestAnnotationHandler_ClaimsWebAnnotation(t *testing.T) {
 	if len(page.Claims) != 1 || page.Claims[0].Source != store.ClaimSourceAutomatic || page.Claims[0].UsernameSnapshot != "alice" {
 		t.Fatalf("claims = %+v, want one automatic alice entry", page.Claims)
 	}
-	counts, err := s.OwnershipCounts(t.Context())
+	counts, err := s.OwnershipCounts(t.Context(), &store.OwnershipAccount{VillageURL: "https://village.example/team", UserID: "11111111-1111-4111-8111-111111111111"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if counts.ClaimedAnnotations != 1 {
+	if counts.MineAnnotations != 1 {
 		t.Fatalf("annotation counts = %+v, want the web annotation claimed", counts)
 	}
 }

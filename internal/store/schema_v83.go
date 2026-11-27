@@ -1,6 +1,6 @@
 package store
 
-// migrationV82 adds the permanent local owner and the append-only claim log.
+// migrationV83 adds the permanent local owner and the append-only claim log.
 //
 // local_owner holds exactly one row: singleton is UNIQUE and CHECKed to 1, and
 // BEFORE INSERT/UPDATE/DELETE triggers refuse a second row, a replacement, and
@@ -22,7 +22,7 @@ package store
 // as an observation cache. A claim is permanent, so a scope row referenced by a
 // claim is permanent too: the claim foreign key keeps that scope row from being
 // deleted for the life of the store.
-const migrationV82 = `
+const migrationV83 = `
 CREATE TABLE local_owner (
     id          TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 64),
     singleton   INTEGER NOT NULL DEFAULT 1 CHECK (singleton = 1) UNIQUE,
@@ -75,11 +75,10 @@ BEFORE DELETE ON local_owner BEGIN
     SELECT RAISE(ABORT, 'local_owner holds exactly one row for the life of the store');
 END;
 
-CREATE INDEX idx_owner_claims_owner_order
-    ON owner_claims(local_owner_id, claimed_at);
-
-CREATE INDEX idx_owner_claims_scope_order
-    ON owner_claims(local_owner_id, village_url, user_id, claimed_at);
+-- owner_claims is read in reverse row order, newest first: the append-only
+-- log has one local owner per store, so no index is needed and none is
+-- created. The log read, the older page, and the strict-reuse lookup all stop
+-- at their LIMIT while walking the primary key backwards.
 
 ALTER TABLE sessions ADD COLUMN owner_claim_id TEXT;
 ALTER TABLE annotations ADD COLUMN owner_claim_id TEXT;
@@ -87,7 +86,7 @@ ALTER TABLE annotations ADD COLUMN owner_claim_id TEXT;
 CREATE INDEX idx_sessions_owner_claim ON sessions(owner_claim_id);
 CREATE INDEX idx_annotations_owner_claim ON annotations(owner_claim_id);
 
--- V82 adds sessions.owner_claim_id, so the exhaustive parent-state
+-- V83 adds sessions.owner_claim_id, so the exhaustive parent-state
 -- update trigger is redefined to fire on it. The trigger body is the
 -- shipped V73 text plus the new column; the parent rule is unchanged.
 DROP TRIGGER IF EXISTS sessions_parent_state_au;

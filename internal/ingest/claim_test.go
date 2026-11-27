@@ -41,13 +41,13 @@ func TestPipelineClaimsNewSessions(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	const sessionID = "0a0a0a0a-1111-4111-8111-111111111111"
-	claimB1Source(t, root, sessionID, time.Now().Add(-72*time.Hour))
+	writeClaimSource(t, root, sessionID, time.Now().Add(-72*time.Hour))
 	var claimed []string
 	claimer := ingest.SessionClaimerFunc(func(_ context.Context, ids []string) error {
 		claimed = append(claimed, ids...)
 		return nil
 	})
-	result := claimB1RunWith(t, root, claimB1Config(root), claimer)
+	result := runClaimPipelineWith(t, root, claimPipelineConfig(root), claimer)
 	if result.Summary.New != 1 {
 		t.Fatalf("new sessions = %d, want 1", result.Summary.New)
 	}
@@ -81,11 +81,11 @@ func TestPipelineClaimFailureDoesNotFailTheRun(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	const sessionID = "0b0b0b0b-1111-4111-8111-111111111111"
-	claimB1Source(t, root, sessionID, time.Now().Add(-72*time.Hour))
+	writeClaimSource(t, root, sessionID, time.Now().Add(-72*time.Hour))
 	claimer := ingest.SessionClaimerFunc(func(_ context.Context, _ []string) error {
 		return errors.New("claim store unavailable")
 	})
-	result := claimB1RunWith(t, root, claimB1Config(root), claimer)
+	result := runClaimPipelineWith(t, root, claimPipelineConfig(root), claimer)
 	if result.Summary.New != 1 || result.Summary.Errors != 0 {
 		t.Fatalf("summary = %+v, want one successful new session", result.Summary)
 	}
@@ -100,9 +100,9 @@ func TestPipelineClaimFailureDoesNotFailTheRun(t *testing.T) {
 	}
 }
 
-// claimB1Source writes one settled or active Claude Code transcript under root
+// writeClaimSource writes one settled or active Claude Code transcript under root
 // and returns its path.
-func claimB1Source(t *testing.T, root, sessionID string, modTime time.Time) string {
+func writeClaimSource(t *testing.T, root, sessionID string, modTime time.Time) string {
 	t.Helper()
 	source := filepath.Join(root, "recordings", "-workspace", sessionID+".jsonl")
 	if err := os.MkdirAll(filepath.Dir(source), 0o700); err != nil {
@@ -118,30 +118,38 @@ func claimB1Source(t *testing.T, root, sessionID string, modTime time.Time) stri
 	return source
 }
 
-// claimB1Run runs the production pipeline against root with a claimer that
+// runClaimPipeline runs the production pipeline against root with a claimer that
 // records every session id it receives.
-func claimB1Run(t *testing.T, root string, cfg ingest.PipelineConfig) []string {
+func runClaimPipeline(t *testing.T, root string, cfg ingest.PipelineConfig) []string {
 	t.Helper()
 	var claimed []string
 	claimer := ingest.SessionClaimerFunc(func(_ context.Context, ids []string) error {
 		claimed = append(claimed, ids...)
 		return nil
 	})
-	claimB1RunWith(t, root, cfg, claimer)
+	runClaimPipelineWith(t, root, cfg, claimer)
 	return claimed
 }
 
-func claimB1RunWith(t *testing.T, root string, cfg ingest.PipelineConfig, claimer ingest.SessionClaimer) *ingest.PipelineResult {
+func runClaimPipelineWith(t *testing.T, root string, cfg ingest.PipelineConfig, claimer ingest.SessionClaimer) *ingest.PipelineResult {
 	t.Helper()
-	fs := &ingest.OSFileSystem{}
 	dbPath := filepath.Join(root, "peasant.db")
 	db, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
+	return runClaimPipelineOnStore(t, db, cfg, claimer, db)
+}
+
+// runClaimPipelineOnStore runs the production pipeline against an open store.
+// storeForPipeline may wrap the store to inject a failure while metricsStore
+// stays the real store.
+func runClaimPipelineOnStore(t *testing.T, metricsStore *store.Store, cfg ingest.PipelineConfig, claimer ingest.SessionClaimer, storeForPipeline ingest.SessionStore) *ingest.PipelineResult {
+	t.Helper()
+	fs := &ingest.OSFileSystem{}
 	pipeline, err := newTestPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, cfg,
-		ingest.WithStore(db), ingest.WithMetricsStore(db),
+		ingest.WithStore(storeForPipeline), ingest.WithMetricsStore(metricsStore),
 		ingest.WithIndexers(ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})),
 		ingest.WithSessionClaimer(claimer))
 	if err != nil {
@@ -154,7 +162,7 @@ func claimB1RunWith(t *testing.T, root string, cfg ingest.PipelineConfig, claime
 	return result
 }
 
-func claimB1Config(root string) ingest.PipelineConfig {
+func claimPipelineConfig(root string) ingest.PipelineConfig {
 	return ingest.PipelineConfig{
 		Sources:            map[ingest.Harness]ingest.SourceConfig{ingest.HarnessClaudeCode: {Enabled: true, Paths: []ingest.ResolvedPath{ingest.ResolvedPath(filepath.Join(root, "recordings"))}}},
 		OutputDir:          ingest.ResolvedPath(filepath.Join(root, "managed")),
@@ -169,17 +177,17 @@ func TestAutoClaimSessionFirstSeenActive(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	const sessionID = "11111111-1111-4111-8111-111111111201"
-	claimB1Source(t, root, sessionID, time.Now())
-	cfg := claimB1Config(root)
+	writeClaimSource(t, root, sessionID, time.Now())
+	cfg := claimPipelineConfig(root)
 	cfg.IncludeActive = true
 
-	first := claimB1Run(t, root, cfg)
+	first := runClaimPipeline(t, root, cfg)
 	if len(first) != 1 || first[0] != sessionID {
 		t.Fatalf("first active run claimed = %v, want [%s]", first, sessionID)
 	}
 	// The recording settles after that first run. It must not be claimed twice.
-	claimB1Source(t, root, sessionID, time.Now().Add(-72*time.Hour))
-	second := claimB1Run(t, root, cfg)
+	writeClaimSource(t, root, sessionID, time.Now().Add(-72*time.Hour))
+	second := runClaimPipeline(t, root, cfg)
 	if len(second) != 0 {
 		t.Fatalf("second run claimed = %v, want none for the already stored session", second)
 	}
@@ -191,14 +199,98 @@ func TestAutoClaimSkipsForcedReprocess(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	const sessionID = "11111111-1111-4111-8111-111111111202"
-	claimB1Source(t, root, sessionID, time.Now().Add(-72*time.Hour))
-	cfg := claimB1Config(root)
-	if first := claimB1Run(t, root, cfg); len(first) != 1 {
+	writeClaimSource(t, root, sessionID, time.Now().Add(-72*time.Hour))
+	cfg := claimPipelineConfig(root)
+	if first := runClaimPipeline(t, root, cfg); len(first) != 1 {
 		t.Fatalf("first run claimed = %v, want the new session", first)
 	}
 	cfg.Force = true
-	if forced := claimB1Run(t, root, cfg); len(forced) != 0 {
+	if forced := runClaimPipeline(t, root, cfg); len(forced) != 0 {
 		t.Fatalf("forced re-process claimed = %v, want none", forced)
+	}
+}
+
+// firstMirrorFailureStore fails the first artifact mirror and then delegates to
+// the real store. The pair is installed before the mirror, so the first run
+// leaves the saved files with no row, exactly the I3 failure path.
+type firstMirrorFailureStore struct {
+	*store.Store
+	failed bool
+}
+
+func (s *firstMirrorFailureStore) MirrorArtifacts(ctx context.Context, requests []ingest.ArtifactMirrorRequest) []ingest.ArtifactMirrorResult {
+	if !s.failed {
+		s.failed = true
+		results := make([]ingest.ArtifactMirrorResult, len(requests))
+		for i, request := range requests {
+			var sid ingest.SessionID
+			if request.Artifact != nil && request.Artifact.Metadata != nil {
+				sid = request.Artifact.Metadata.SessionID
+			}
+			results[i] = ingest.ArtifactMirrorResult{SessionID: sid, Err: errors.New("injected first mirror failure")}
+		}
+		return results
+	}
+	return s.Store.MirrorArtifacts(ctx, requests)
+}
+
+// TestAutoClaimCarriesFirstStoredAcrossFirstMirrorFailure proves a saved pair
+// whose first mirror write failed is still claimed on the next harvest. Without
+// the pending-claim marker the next run sees a saved pair and treats the session
+// as old, so the automatic claim never happens.
+func TestAutoClaimCarriesFirstStoredAcrossFirstMirrorFailure(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	const sessionID = "11111111-1111-4111-8111-111111111204"
+	writeClaimSource(t, root, sessionID, time.Now().Add(-72*time.Hour))
+	cfg := claimPipelineConfig(root)
+	dbPath := filepath.Join(root, "peasant.db")
+	db, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	wrapped := &firstMirrorFailureStore{Store: db}
+	var claimed []string
+	claimer := ingest.SessionClaimerFunc(func(_ context.Context, ids []string) error {
+		claimed = append(claimed, ids...)
+		return nil
+	})
+
+	first := runClaimPipelineOnStore(t, db, cfg, claimer, wrapped)
+	if len(claimed) != 0 {
+		t.Fatalf("first run claimed = %v, want none after the injected mirror failure", claimed)
+	}
+	if first.Summary.New != 1 {
+		t.Fatalf("first run new sessions = %d, want the session counted as new", first.Summary.New)
+	}
+
+	second := runClaimPipelineOnStore(t, db, cfg, claimer, wrapped)
+	if len(claimed) != 1 || claimed[0] != sessionID {
+		t.Fatalf("second run claimed = %v, want [%s] once the mirror succeeds", claimed, sessionID)
+	}
+	if second.Summary.New != 1 {
+		t.Fatalf("second run new sessions = %d, want the previously unmirrored session stored as new", second.Summary.New)
+	}
+}
+
+// TestAutoClaimSkipsStoredRowWithoutSavedPair proves the "no database row" half
+// of first stored: a row that already exists is not claimed again even when its
+// saved pair was deleted and the session is re-processed from the source.
+func TestAutoClaimSkipsStoredRowWithoutSavedPair(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	const sessionID = "11111111-1111-4111-8111-111111111205"
+	writeClaimSource(t, root, sessionID, time.Now().Add(-72*time.Hour))
+	cfg := claimPipelineConfig(root)
+	if first := runClaimPipeline(t, root, cfg); len(first) != 1 {
+		t.Fatalf("first run claimed = %v, want the new session", first)
+	}
+	if err := os.RemoveAll(filepath.Join(root, "managed")); err != nil {
+		t.Fatal(err)
+	}
+	if second := runClaimPipeline(t, root, cfg); len(second) != 0 {
+		t.Fatalf("second run claimed = %v, want none for a stored row without a saved pair", second)
 	}
 }
 
@@ -208,20 +300,20 @@ func TestAutoClaimSkipsRebuildFromSavedPairs(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	const sessionID = "11111111-1111-4111-8111-111111111203"
-	claimB1Source(t, root, sessionID, time.Now().Add(-72*time.Hour))
-	cfg := claimB1Config(root)
-	claimB1Run(t, root, cfg)
+	writeClaimSource(t, root, sessionID, time.Now().Add(-72*time.Hour))
+	cfg := claimPipelineConfig(root)
+	runClaimPipeline(t, root, cfg)
 
 	for _, suffix := range []string{"", "-wal", "-shm"} {
 		if err := os.Remove(filepath.Join(root, "peasant.db") + suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
 			t.Fatal(err)
 		}
 	}
-	if rebuilt := claimB1Run(t, root, cfg); len(rebuilt) != 0 {
+	if rebuilt := runClaimPipeline(t, root, cfg); len(rebuilt) != 0 {
 		t.Fatalf("rebuild from saved pairs claimed = %v, want none", rebuilt)
 	}
 	cfg.RebuildAll = true
-	if indexed := claimB1Run(t, root, cfg); len(indexed) != 0 {
+	if indexed := runClaimPipeline(t, root, cfg); len(indexed) != 0 {
 		t.Fatalf("harvest index --all claimed = %v, want none", indexed)
 	}
 }

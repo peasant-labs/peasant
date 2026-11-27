@@ -40,7 +40,7 @@ requiredResidual:
   - store-migration-v70
   - store-migration-v73
   - store-migration-v78
-  - store-migration-v82
+  - store-migration-v83
   - store-offset-page-child-filter
   - store-offset-page-child-count
 requiredRouted:

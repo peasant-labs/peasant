@@ -292,11 +292,11 @@ func TestAnnotateCreateClaimsNewAnnotations(t *testing.T) {
 	if len(page.Claims) != 1 || page.Claims[0].Source != store.ClaimSourceAutomatic {
 		t.Fatalf("claims = %+v, want one reused automatic entry", page.Claims)
 	}
-	counts, err := db.OwnershipCounts(t.Context())
+	counts, err := db.OwnershipCounts(t.Context(), &store.OwnershipAccount{VillageURL: "https://village.example/team", UserID: "11111111-1111-4111-8111-111111111111"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if counts.ClaimedAnnotations != 2 || counts.UnclaimedAnnotations != 0 {
+	if counts.MineAnnotations != 2 || counts.UnclaimedAnnotations != 0 {
 		t.Fatalf("annotation counts = %+v, want both new annotations claimed", counts)
 	}
 }
@@ -325,11 +325,11 @@ func TestAnnotateCreateProjectClaimsNewAnnotation(t *testing.T) {
 	if len(page.Claims) != 1 || page.Claims[0].Source != store.ClaimSourceAutomatic {
 		t.Fatalf("claims = %+v, want one automatic entry", page.Claims)
 	}
-	counts, err := db.OwnershipCounts(t.Context())
+	counts, err := db.OwnershipCounts(t.Context(), &store.OwnershipAccount{VillageURL: "https://village.example/team", UserID: "11111111-1111-4111-8111-111111111111"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if counts.TotalAnnotations != 1 || counts.ClaimedAnnotations != 1 {
+	if counts.TotalAnnotations != 1 || counts.MineAnnotations != 1 {
 		t.Fatalf("annotation counts = %+v, want the project annotation claimed", counts)
 	}
 }

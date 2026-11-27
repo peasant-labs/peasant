@@ -55,10 +55,12 @@ type userClaimEntry struct {
 }
 
 // userArtifactCounts is the machine shape of one artifact table's ownership.
+// Total = Unclaimed + Mine + Others.
 type userArtifactCounts struct {
 	Total     int `json:"total"`
-	Claimed   int `json:"claimed"`
 	Unclaimed int `json:"unclaimed"`
+	Mine      int `json:"mine"`
+	Others    int `json:"others"`
 }
 
 // userOwnershipReport is the machine shape of local ownership counts.
@@ -221,7 +223,11 @@ func buildUserShowReport(ctx context.Context, cmd *cobra.Command, db *store.Stor
 	if err != nil {
 		return userShowReport{}, err
 	}
-	counts, err := db.OwnershipCounts(ctx)
+	account, err := userOwnershipAccount(ctx, cmd)
+	if err != nil {
+		return userShowReport{}, err
+	}
+	counts, err := db.OwnershipCounts(ctx, account)
 	if err != nil {
 		return userShowReport{}, err
 	}
@@ -229,14 +235,18 @@ func buildUserShowReport(ctx context.Context, cmd *cobra.Command, db *store.Stor
 	if err != nil {
 		return userShowReport{}, err
 	}
+	createdAt, err := formatOwnerTime(owner.CreatedAt)
+	if err != nil {
+		return userShowReport{}, fmt.Errorf("user show: local owner created time: %w", err)
+	}
 	report := userShowReport{
-		Owner:       userOwnerReport{ID: owner.ID, CreatedAt: formatOwnerTime(owner.CreatedAt)},
+		Owner:       userOwnerReport{ID: owner.ID, CreatedAt: createdAt},
 		Claims:      make([]userClaimEntry, 0, len(page.Claims)),
 		TotalClaims: totalClaims,
 		Prompt:      prompt,
 		Ownership: userOwnershipReport{
-			Sessions:    userArtifactCounts{Total: counts.TotalSessions, Claimed: counts.ClaimedSessions, Unclaimed: counts.UnclaimedSessions},
-			Annotations: userArtifactCounts{Total: counts.TotalAnnotations, Claimed: counts.ClaimedAnnotations, Unclaimed: counts.UnclaimedAnnotations},
+			Sessions:    userArtifactCounts{Total: counts.TotalSessions, Unclaimed: counts.UnclaimedSessions, Mine: counts.MineSessions, Others: counts.OthersSessions},
+			Annotations: userArtifactCounts{Total: counts.TotalAnnotations, Unclaimed: counts.UnclaimedAnnotations, Mine: counts.MineAnnotations, Others: counts.OthersAnnotations},
 		},
 	}
 	if page.NextBefore != "" {
@@ -244,17 +254,39 @@ func buildUserShowReport(ctx context.Context, cmd *cobra.Command, db *store.Stor
 		report.NextBefore = &next
 	}
 	for _, claim := range page.Claims {
+		claimedAt, err := formatOwnerTime(claim.ClaimedAt)
+		if err != nil {
+			return userShowReport{}, fmt.Errorf("user show: claim entry %s claimed time: %w", claim.ID, err)
+		}
 		report.Claims = append(report.Claims, userClaimEntry{
 			ID:           claim.ID,
 			LocalOwnerID: claim.LocalOwnerID,
 			VillageURL:   claim.VillageURL,
 			UserID:       claim.UserID,
 			Username:     claim.UsernameSnapshot,
-			ClaimedAt:    formatOwnerTime(claim.ClaimedAt),
+			ClaimedAt:    claimedAt,
 			Source:       string(claim.Source),
 		})
 	}
 	return report, nil
+}
+
+// userOwnershipAccount resolves the selected account for ownership counts. It
+// returns nil while signed out, where Mine is zero.
+func userOwnershipAccount(ctx context.Context, cmd *cobra.Command) (*store.OwnershipAccount, error) {
+	snapshot, err := auth.CaptureCredentials(ctx, configDirOverride(cmd))
+	if errors.Is(err, auth.ErrSignedOut) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read the selected account for ownership counts: %w", err)
+	}
+	creds := snapshot.Credentials()
+	base, err := auth.NormalizeVillageURL(creds.VillageURL)
+	if err != nil {
+		return nil, fmt.Errorf("read the selected account for ownership counts: normalize the saved Village URL: %w", err)
+	}
+	return &store.OwnershipAccount{VillageURL: base, UserID: creds.UserID}, nil
 }
 
 // readUserPrompt computes the contract's prompt state from the selected
@@ -278,7 +310,10 @@ func readUserPrompt(ctx context.Context, cmd *cobra.Command, owner store.LocalOw
 	}
 	account := &userPromptAccount{VillageURL: base, UserID: creds.UserID}
 	if decision, ok := state.Decisions[claimprompt.ScopeKey(owner.ID, base, creds.UserID)]; ok {
-		decided := formatOwnerTime(decision.DecidedAt)
+		decided, err := formatOwnerTime(decision.DecidedAt)
+		if err != nil {
+			return userPromptReport{}, fmt.Errorf("read the local ownership prompt state: decision time: %w", err)
+		}
 		prompt := userPromptReport{Account: account, DecidedAt: &decided, State: userPromptStateCompleted}
 		if decision.Choice == claimprompt.NotNow {
 			prompt.State = userPromptStateDeclined
@@ -318,8 +353,12 @@ func runUserClaim(cmd *cobra.Command, all, yes, jsonOutput bool) error {
 	}
 	fmt.Fprintf(cmd.ErrOrStderr(), "Claiming %s for %s...\n", scope, creds.Username)
 
-	result, err := db.ClaimArtifacts(ctx, snapshot, all, store.ClaimSourceManual, time.Now().UnixMilli())
+	nowMs := time.Now().UnixMilli()
+	result, err := db.ClaimArtifacts(ctx, snapshot, all, store.ClaimSourceManual, nowMs)
 	if err != nil {
+		return err
+	}
+	if err := recordClaimCompleted(ctx, cmd, db, normalizedURL, creds.UserID, all, nowMs); err != nil {
 		return err
 	}
 	status, err := buildUserShowReport(ctx, cmd, db, "")
@@ -354,6 +393,31 @@ func runUserClaim(cmd *cobra.Command, all, yes, jsonOutput bool) error {
 	return nil
 }
 
+// recordClaimCompleted marks the local owner plus account prompt completed after
+// an explicit claim, using the same decision file and write the sign-in prompt
+// uses. A completed choice replaces an earlier decline, so a later sign-in does
+// not ask again.
+func recordClaimCompleted(ctx context.Context, cmd *cobra.Command, db *store.Store, villageURL, userID string, all bool, nowMs int64) error {
+	owner, err := db.LocalOwner(ctx)
+	if err != nil {
+		return err
+	}
+	if owner == nil {
+		return fmt.Errorf("record the completed local ownership prompt: this store has no local owner; reopen the store to create one, then retry")
+	}
+	statePath := claimprompt.DefaultPath(defaults.ResolveStateDirPathWith(stateDirOverride(cmd)).String())
+	state, err := claimprompt.Load(statePath)
+	if err != nil {
+		return err
+	}
+	choice := claimprompt.Unclaimed
+	if all {
+		choice = claimprompt.All
+	}
+	state.Record(owner.ID, villageURL, userID, choice, nowMs)
+	return claimprompt.Save(statePath, state)
+}
+
 func printUserShow(out io.Writer, report userShowReport) {
 	fmt.Fprintf(out, "Local owner: %s\n", report.Owner.ID)
 	fmt.Fprintf(out, "Created:     %s\n", report.Owner.CreatedAt)
@@ -376,8 +440,8 @@ func printUserShow(out io.Writer, report userShowReport) {
 		fmt.Fprintf(out, " decided %s", *report.Prompt.DecidedAt)
 	}
 	fmt.Fprintln(out)
-	fmt.Fprintf(out, "Sessions:    %d total, %d claimed, %d unclaimed\n", report.Ownership.Sessions.Total, report.Ownership.Sessions.Claimed, report.Ownership.Sessions.Unclaimed)
-	fmt.Fprintf(out, "Annotations: %d total, %d claimed, %d unclaimed\n", report.Ownership.Annotations.Total, report.Ownership.Annotations.Claimed, report.Ownership.Annotations.Unclaimed)
+	fmt.Fprintf(out, "Sessions:    %d total, %d unclaimed, %d mine, %d other accounts\n", report.Ownership.Sessions.Total, report.Ownership.Sessions.Unclaimed, report.Ownership.Sessions.Mine, report.Ownership.Sessions.Others)
+	fmt.Fprintf(out, "Annotations: %d total, %d unclaimed, %d mine, %d other accounts\n", report.Ownership.Annotations.Total, report.Ownership.Annotations.Unclaimed, report.Ownership.Annotations.Mine, report.Ownership.Annotations.Others)
 }
 
 func printUserClaim(out io.Writer, report userClaimReport) {
@@ -405,9 +469,12 @@ func encodeUserJSON(out io.Writer, document any) error {
 	return encoder.Encode(document)
 }
 
-func formatOwnerTime(ms int64) string {
+// formatOwnerTime renders a stored Unix-millisecond time at full precision.
+// A non-positive value is refused: it would emit an invalid timestamp rather
+// than silently print an empty one.
+func formatOwnerTime(ms int64) (string, error) {
 	if ms <= 0 {
-		return ""
+		return "", fmt.Errorf("time %d is not a positive wall-clock millisecond", ms)
 	}
-	return time.UnixMilli(ms).UTC().Format(time.RFC3339)
+	return time.UnixMilli(ms).UTC().Format(time.RFC3339Nano), nil
 }

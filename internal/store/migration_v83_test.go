@@ -11,15 +11,15 @@ import (
 )
 
 const (
-	v82FixtureVillageURL = "https://village.example/team"
-	v82FixtureUserID     = "11111111-1111-4111-8111-111111111111"
+	v83FixtureVillageURL = "https://village.example/team"
+	v83FixtureUserID     = "11111111-1111-4111-8111-111111111111"
 )
 
-// TestMigrationV82AddsLocalOwnerAndClaimLog proves a populated V75 database
-// becomes V82 without losing or rewriting any row, that the new singleton and
+// TestMigrationV83AddsLocalOwnerAndClaimLog proves a populated V75 database
+// becomes V83 without losing or rewriting any row, that the new singleton and
 // append-only constraints hold at the schema boundary, and that pulled rows stay
 // byte-identical.
-func TestMigrationV82AddsLocalOwnerAndClaimLog(t *testing.T) {
+func TestMigrationV83AddsLocalOwnerAndClaimLog(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "v75.db")
 	conn, err := sqlite.OpenConn(path, sqlite.OpenReadWrite, sqlite.OpenCreate)
@@ -30,7 +30,7 @@ func TestMigrationV82AddsLocalOwnerAndClaimLog(t *testing.T) {
 		conn.Close()
 		t.Fatal(err)
 	}
-	seedV82Predecessor(t, conn)
+	seedV83Predecessor(t, conn)
 
 	tables := []struct {
 		name string
@@ -44,10 +44,10 @@ func TestMigrationV82AddsLocalOwnerAndClaimLog(t *testing.T) {
 	preColumns := make(map[string][]string, len(tables))
 	before := make(map[string]map[string]string, len(tables))
 	for _, table := range tables {
-		preColumns[table.name] = v82Columns(t, conn, table.name)
-		before[table.name] = dumpV82Rows(t, conn, table.name, table.key, preColumns[table.name])
+		preColumns[table.name] = v83Columns(t, conn, table.name)
+		before[table.name] = dumpV83Rows(t, conn, table.name, table.key, preColumns[table.name])
 	}
-	beforeVersion := v82UserVersion(t, conn)
+	beforeVersion := v83UserVersion(t, conn)
 	if beforeVersion != 78 {
 		conn.Close()
 		t.Fatalf("predecessor user_version = %d, want 78", beforeVersion)
@@ -55,17 +55,17 @@ func TestMigrationV82AddsLocalOwnerAndClaimLog(t *testing.T) {
 
 	if err := migrateFrozenSchema(t, conn, CurrentSchemaVersion()); err != nil {
 		conn.Close()
-		t.Fatalf("migrate populated V75 database to V82: %v", err)
+		t.Fatalf("migrate populated V75 database to V83: %v", err)
 	}
-	if got := v82UserVersion(t, conn); got != 82 {
+	if got := v83UserVersion(t, conn); got != 82 {
 		conn.Close()
 		t.Fatalf("migrated user_version = %d, want 82", got)
 	}
 	for _, table := range tables {
-		after := dumpV82Rows(t, conn, table.name, table.key, preColumns[table.name])
+		after := dumpV83Rows(t, conn, table.name, table.key, preColumns[table.name])
 		if !reflect.DeepEqual(before[table.name], after) {
 			conn.Close()
-			t.Fatalf("%s rows changed during the V82 migration:\nbefore %v\nafter  %v", table.name, before[table.name], after)
+			t.Fatalf("%s rows changed during the V83 migration:\nbefore %v\nafter  %v", table.name, before[table.name], after)
 		}
 	}
 
@@ -73,10 +73,10 @@ func TestMigrationV82AddsLocalOwnerAndClaimLog(t *testing.T) {
 		conn.Close()
 		t.Fatalf("enable foreign keys for the schema-boundary checks: %v", err)
 	}
-	assertV82Count(t, conn, `SELECT COUNT(*) FROM local_owner`, 0)
-	assertV82Count(t, conn, `SELECT COUNT(*) FROM owner_claims`, 0)
-	assertV82Count(t, conn, `SELECT COUNT(*) FROM sessions WHERE owner_claim_id IS NOT NULL`, 0)
-	assertV82Count(t, conn, `SELECT COUNT(*) FROM annotations WHERE owner_claim_id IS NOT NULL`, 0)
+	assertV83Count(t, conn, `SELECT COUNT(*) FROM local_owner`, 0)
+	assertV83Count(t, conn, `SELECT COUNT(*) FROM owner_claims`, 0)
+	assertV83Count(t, conn, `SELECT COUNT(*) FROM sessions WHERE owner_claim_id IS NOT NULL`, 0)
+	assertV83Count(t, conn, `SELECT COUNT(*) FROM annotations WHERE owner_claim_id IS NOT NULL`, 0)
 
 	// local_owner holds at most one row, enforced in SQL rather than by callers.
 	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO local_owner(id, singleton, created_at) VALUES('lo_fixture', 1, 1000)`, nil); err != nil {
@@ -92,12 +92,12 @@ func TestMigrationV82AddsLocalOwnerAndClaimLog(t *testing.T) {
 		t.Fatal("a local_owner row with singleton != 1 was accepted")
 	}
 
-	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO collective_observation_scopes(village_url, user_id, incarnation) VALUES(?, ?, 'v82-fixture-incarnation')`, &sqlitex.ExecOptions{Args: []any{v82FixtureVillageURL, v82FixtureUserID}}); err != nil {
+	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO collective_observation_scopes(village_url, user_id, incarnation) VALUES(?, ?, 'v83-fixture-incarnation')`, &sqlitex.ExecOptions{Args: []any{v83FixtureVillageURL, v83FixtureUserID}}); err != nil {
 		conn.Close()
 		t.Fatalf("seed the claim account scope: %v", err)
 	}
 	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO owner_claims(id, local_owner_id, village_url, user_id, username_snapshot, claimed_at, source)
-VALUES('oc_fixture', 'lo_fixture', ?, ?, 'fixture-user', 4000, 'manual')`, &sqlitex.ExecOptions{Args: []any{v82FixtureVillageURL, v82FixtureUserID}}); err != nil {
+VALUES('oc_fixture', 'lo_fixture', ?, ?, 'fixture-user', 4000, 'manual')`, &sqlitex.ExecOptions{Args: []any{v83FixtureVillageURL, v83FixtureUserID}}); err != nil {
 		conn.Close()
 		t.Fatalf("insert a valid claim entry: %v", err)
 	}
@@ -114,7 +114,7 @@ VALUES('oc_fixture', 'lo_fixture', ?, ?, 'fixture-user', 4000, 'manual')`, &sqli
 	// firing the delete trigger while recursive triggers are off. The BEFORE
 	// INSERT guard must refuse the reused id.
 	if err := sqlitex.ExecuteTransient(conn, `INSERT OR REPLACE INTO owner_claims(id, local_owner_id, village_url, user_id, username_snapshot, claimed_at, source)
-VALUES('oc_fixture', 'lo_fixture', ?, ?, 'replaced-user', 9000, 'manual')`, &sqlitex.ExecOptions{Args: []any{v82FixtureVillageURL, v82FixtureUserID}}); err == nil || !strings.Contains(err.Error(), "append-only") {
+VALUES('oc_fixture', 'lo_fixture', ?, ?, 'replaced-user', 9000, 'manual')`, &sqlitex.ExecOptions{Args: []any{v83FixtureVillageURL, v83FixtureUserID}}); err == nil || !strings.Contains(err.Error(), "append-only") {
 		conn.Close()
 		t.Fatalf("INSERT OR REPLACE owner_claims error = %v, want an append-only refusal", err)
 	}
@@ -134,17 +134,17 @@ VALUES('oc_fixture', 'lo_fixture', ?, ?, 'replaced-user', 9000, 'manual')`, &sql
 	}
 
 	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO owner_claims(id, local_owner_id, village_url, user_id, username_snapshot, claimed_at, source)
-VALUES('oc_missing_owner', 'lo_missing', ?, ?, 'fixture-user', 5000, 'manual')`, &sqlitex.ExecOptions{Args: []any{v82FixtureVillageURL, v82FixtureUserID}}); err == nil {
+VALUES('oc_missing_owner', 'lo_missing', ?, ?, 'fixture-user', 5000, 'manual')`, &sqlitex.ExecOptions{Args: []any{v83FixtureVillageURL, v83FixtureUserID}}); err == nil {
 		conn.Close()
 		t.Fatal("owner_claims accepted a local_owner_id that does not exist")
 	}
 	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO owner_claims(id, local_owner_id, village_url, user_id, username_snapshot, claimed_at, source)
-VALUES('oc_missing_scope', 'lo_fixture', ?, '22222222-2222-4222-8222-222222222222', 'fixture-user', 6000, 'manual')`, &sqlitex.ExecOptions{Args: []any{v82FixtureVillageURL}}); err == nil {
+VALUES('oc_missing_scope', 'lo_fixture', ?, '22222222-2222-4222-8222-222222222222', 'fixture-user', 6000, 'manual')`, &sqlitex.ExecOptions{Args: []any{v83FixtureVillageURL}}); err == nil {
 		conn.Close()
 		t.Fatal("owner_claims accepted a (village_url, user_id) without a collective observation scope")
 	}
 	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO owner_claims(id, local_owner_id, village_url, user_id, username_snapshot, claimed_at, source)
-VALUES('oc_bad_source', 'lo_fixture', ?, ?, 'fixture-user', 7000, 'not-a-source')`, &sqlitex.ExecOptions{Args: []any{v82FixtureVillageURL, v82FixtureUserID}}); err == nil {
+VALUES('oc_bad_source', 'lo_fixture', ?, ?, 'fixture-user', 7000, 'not-a-source')`, &sqlitex.ExecOptions{Args: []any{v83FixtureVillageURL, v83FixtureUserID}}); err == nil {
 		conn.Close()
 		t.Fatal("owner_claims accepted a source outside the closed set")
 	}
@@ -154,33 +154,33 @@ VALUES('oc_bad_source', 'lo_fixture', ?, ?, 'fixture-user', 7000, 'not-a-source'
 	}
 }
 
-func seedV82Predecessor(t *testing.T, conn *sqlite.Conn) {
+func seedV83Predecessor(t *testing.T, conn *sqlite.Conn) {
 	t.Helper()
 	if err := sqlitex.ExecuteScript(conn, `
-INSERT INTO host_slugs(opaque_id, host_slug) VALUES('v82-host', 'v82-host');
-INSERT INTO projects(project_hash) VALUES('v82-project');
+INSERT INTO host_slugs(opaque_id, host_slug) VALUES('v83-host', 'v83-host');
+INSERT INTO projects(project_hash) VALUES('v83-project');
 INSERT INTO sessions(session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format)
-VALUES('v82-session-a', 'claude-code', 'fixture-model', 'v82-host', 'v82-project', 1, 2, 3, '/synthetic/v82-a.jsonl', 'jsonl');
+VALUES('v83-session-a', 'claude-code', 'fixture-model', 'v83-host', 'v83-project', 1, 2, 3, '/synthetic/v83-a.jsonl', 'jsonl');
 INSERT INTO sessions(session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format)
-VALUES('v82-session-b', 'claude-code', 'fixture-model', 'v82-host', 'v82-project', 4, 5, 6, '/synthetic/v82-b.jsonl', 'jsonl');
+VALUES('v83-session-b', 'claude-code', 'fixture-model', 'v83-host', 'v83-project', 4, 5, 6, '/synthetic/v83-b.jsonl', 'jsonl');
 INSERT INTO annotations(id, target_kind_id, annotation_type_id, annotator_id, value, created_at)
-VALUES('v82-annotation-a', (SELECT id FROM target_kinds WHERE name = 'session'), (SELECT id FROM annotation_types LIMIT 1), (SELECT id FROM annotators WHERE name = 'human-web'), 'keep-me', 7);
-INSERT INTO annotation_target_sessions(annotation_id, session_id) VALUES('v82-annotation-a', 'v82-session-a');
+VALUES('v83-annotation-a', (SELECT id FROM target_kinds WHERE name = 'session'), (SELECT id FROM annotation_types LIMIT 1), (SELECT id FROM annotators WHERE name = 'human-web'), 'keep-me', 7);
+INSERT INTO annotation_target_sessions(annotation_id, session_id) VALUES('v83-annotation-a', 'v83-session-a');
 INSERT INTO annotations(id, target_kind_id, annotation_type_id, annotator_id, value, created_at)
-VALUES('v82-annotation-b', (SELECT id FROM target_kinds WHERE name = 'session'), (SELECT id FROM annotation_types LIMIT 1), (SELECT id FROM annotators WHERE name = 'human-web'), 'keep-me-too', 8);
-INSERT INTO annotation_target_sessions(annotation_id, session_id) VALUES('v82-annotation-b', 'v82-session-b');
+VALUES('v83-annotation-b', (SELECT id FROM target_kinds WHERE name = 'session'), (SELECT id FROM annotation_types LIMIT 1), (SELECT id FROM annotators WHERE name = 'human-web'), 'keep-me-too', 8);
+INSERT INTO annotation_target_sessions(annotation_id, session_id) VALUES('v83-annotation-b', 'v83-session-b');
 INSERT INTO pulled_transcripts(village_host, transcript_id, owner_user_id, owner_username, local_session_id, title, harness, project_name, content_hash, visibility, pull_dir, first_pulled_at, last_pulled_at, annotation_count)
-VALUES('village.example', 'pulled-a', 'remote-user', 'remote-user', 'v82-session-a', 'Remote A', 'claude-code', 'remote-project', 'hash-a', 'private', '/pulls/a', 10, 11, 1);
+VALUES('village.example', 'pulled-a', 'remote-user', 'remote-user', 'v83-session-a', 'Remote A', 'claude-code', 'remote-project', 'hash-a', 'private', '/pulls/a', 10, 11, 1);
 INSERT INTO pulled_transcripts(village_host, transcript_id, owner_user_id, owner_username, content_hash, visibility, pull_dir, first_pulled_at, last_pulled_at)
 VALUES('village.example', 'pulled-b', '', '', 'hash-b', 'public', '/pulls/b', 12, 13);
 INSERT INTO pulled_annotations(village_host, content_hash, transcript_id, local_session_id, author_user_id, author_username, payload, pulled_at)
-VALUES('village.example', 'ann-hash-a', 'pulled-a', 'v82-session-a', 'remote-author', 'remote-author', '{"value":"foreign"}', 14);
+VALUES('village.example', 'ann-hash-a', 'pulled-a', 'v83-session-a', 'remote-author', 'remote-author', '{"value":"foreign"}', 14);
 `, nil); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func v82UserVersion(t *testing.T, conn *sqlite.Conn) int {
+func v83UserVersion(t *testing.T, conn *sqlite.Conn) int {
 	t.Helper()
 	var version int
 	if err := sqlitex.ExecuteTransient(conn, `PRAGMA user_version`, &sqlitex.ExecOptions{
@@ -191,7 +191,7 @@ func v82UserVersion(t *testing.T, conn *sqlite.Conn) int {
 	return version
 }
 
-func assertV82Count(t *testing.T, conn *sqlite.Conn, sql string, want int64) {
+func assertV83Count(t *testing.T, conn *sqlite.Conn, sql string, want int64) {
 	t.Helper()
 	var got int64
 	if err := sqlitex.ExecuteTransient(conn, sql, &sqlitex.ExecOptions{
@@ -204,10 +204,10 @@ func assertV82Count(t *testing.T, conn *sqlite.Conn, sql string, want int64) {
 	}
 }
 
-// dumpV82Rows encodes every column by name and SQLite literal representation,
+// dumpV83Rows encodes every column by name and SQLite literal representation,
 // including NULLs and blobs, so a changed byte or a missing row cannot hide in a
 // sampled column.
-func v82Columns(t *testing.T, conn *sqlite.Conn, table string) []string {
+func v83Columns(t *testing.T, conn *sqlite.Conn, table string) []string {
 	t.Helper()
 	var columns []string
 	if err := sqlitex.ExecuteTransient(conn, `SELECT name FROM pragma_table_info(?) ORDER BY cid`, &sqlitex.ExecOptions{
@@ -225,11 +225,11 @@ func v82Columns(t *testing.T, conn *sqlite.Conn, table string) []string {
 	return columns
 }
 
-// dumpV82Rows encodes every predecessor column by name and SQLite literal
+// dumpV83Rows encodes every predecessor column by name and SQLite literal
 // representation, including NULLs and blobs, so a changed byte or a missing row
-// cannot hide in a sampled column. Columns added by V82 are intentionally
+// cannot hide in a sampled column. Columns added by V83 are intentionally
 // omitted: the caller passes the predecessor column list for both reads.
-func dumpV82Rows(t *testing.T, conn *sqlite.Conn, table, key string, columnNames []string) map[string]string {
+func dumpV83Rows(t *testing.T, conn *sqlite.Conn, table, key string, columnNames []string) map[string]string {
 	t.Helper()
 	columns := make([]string, 0, len(columnNames))
 	for _, name := range columnNames {

@@ -59,11 +59,11 @@ func TestHarvestClaimsNewSessionsWhenSignedIn(t *testing.T) {
 	if page.Claims[0].Source != store.ClaimSourceAutomatic || page.Claims[0].UsernameSnapshot != "alice" {
 		t.Fatalf("claim = %+v, want the signed-in automatic claim", page.Claims[0])
 	}
-	counts, err := db.OwnershipCounts(t.Context())
+	counts, err := db.OwnershipCounts(t.Context(), &store.OwnershipAccount{VillageURL: "https://village.example/team", UserID: "11111111-1111-4111-8111-111111111111"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if counts.ClaimedSessions == 0 || counts.UnclaimedSessions != 0 {
+	if counts.MineSessions == 0 || counts.UnclaimedSessions != 0 {
 		t.Fatalf("ownership counts = %+v, want the harvested session claimed", counts)
 	}
 }
