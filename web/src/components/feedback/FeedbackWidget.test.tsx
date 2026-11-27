@@ -131,9 +131,11 @@ describe('FeedbackWidget', () => {
       height: 720,
       maskMode: MaskMode.Masked,
     };
-    captureMocks.captureFeedbackArtifacts.mockResolvedValue({
-      captures: [pageArtifact],
-      errors: [],
+    // The page shot must not contain the widget's own dialogs or their scrim.
+    const dialogsOpenAtCapture: number[] = [];
+    captureMocks.captureFeedbackArtifacts.mockImplementation(async () => {
+      dialogsOpenAtCapture.push(document.querySelectorAll('[role="dialog"]').length);
+      return { captures: [pageArtifact], errors: [] };
     });
 
     const callOrder: string[] = [];
@@ -165,6 +167,8 @@ describe('FeedbackWidget', () => {
         maskMode: MaskMode.Masked,
       });
     });
+
+    expect(dialogsOpenAtCapture).toEqual([0]);
 
     const preview = await screen.findByRole('img', { name: /whole page capture/i });
     expect(preview).toHaveAttribute('src', 'blob:feedback-preview-1');

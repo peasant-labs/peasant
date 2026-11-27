@@ -49,7 +49,9 @@ async function defaultLoadSnapdom(): Promise<SnapdomFn> {
 function defaultWaitForPaint(win: Window): Promise<void> {
   return new Promise((resolve) => {
     if (typeof win.requestAnimationFrame === 'function') {
-      win.requestAnimationFrame(() => resolve());
+      // Two frames: the first lets React's commit (dialog and scrim removal) reach
+      // layout, the second runs after that frame has painted.
+      win.requestAnimationFrame(() => win.requestAnimationFrame(() => resolve()));
     } else {
       resolve();
     }

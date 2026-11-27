@@ -239,10 +239,10 @@ export function FeedbackWidget(): ReactElement | null {
 
   if (!enabled) return null;
 
-  const composeOpen =
-    state.step === FeedbackStep.Capturing ||
-    state.step === FeedbackStep.Compose ||
-    state.step === FeedbackStep.Submitted;
+  // The compose dialog and its scrim are portaled outside the excluded widget
+  // root, so they stay closed while a capture runs or the page shot would show them.
+  const composeOpen = state.step === FeedbackStep.Compose || state.step === FeedbackStep.Submitted;
+  const capturing = state.step === FeedbackStep.Capturing;
 
   const context = readFeedbackContext(theme, serverVersion);
   const issuePreview = composeOpen
@@ -278,6 +278,10 @@ export function FeedbackWidget(): ReactElement | null {
         onClose={handleCloseAll}
         returnFocusRef={launcherRef}
       />
+
+      <p className="sr-only fbw-sr-only" role="status" aria-live="polite">
+        {capturing ? 'capturing screenshot' : ''}
+      </p>
 
       <ElementPickerOverlay
         active={state.step === FeedbackStep.Picking}
