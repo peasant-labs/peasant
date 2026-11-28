@@ -31,7 +31,8 @@ const REQUIRED_CASES = [
   'feature-selects-feature-template',
   'prefills-all-field-ids',
   'omits-empty-element-field',
-  'never-emits-labels-or-body',
+  'never-emits-labels',
+  'body-fallback-contains-description',
   'truncates-deterministically-under-cap',
 ] as const;
 
@@ -90,6 +91,7 @@ interface ParsedUrlCase {
     readonly descriptionEndsWith?: string;
     readonly elementEndsWith?: string;
     readonly elementContains?: readonly string[];
+    readonly bodyContains?: readonly string[];
     readonly environmentContains?: readonly string[];
     readonly environmentExcludes?: readonly string[];
   };
@@ -160,6 +162,7 @@ function loadFixture(): ParsedUrlCase[] {
         'descriptionEndsWith',
         'elementEndsWith',
         'elementContains',
+        'bodyContains',
         'environmentContains',
         'environmentExcludes',
       ],
@@ -198,6 +201,10 @@ function loadFixture(): ParsedUrlCase[] {
         elementContains:
           rawExpect.elementContains !== undefined
             ? parseStringList(rawExpect.elementContains, `${casePath}.expect.elementContains`)
+            : undefined,
+        bodyContains:
+          rawExpect.bodyContains !== undefined
+            ? parseStringList(rawExpect.bodyContains, `${casePath}.expect.bodyContains`)
             : undefined,
         environmentContains:
           rawExpect.environmentContains !== undefined
@@ -242,6 +249,7 @@ describe('feedback issueUrl', () => {
     if (testCase.expect.descriptionEndsWith) {
       const desc = parsed.searchParams.get(IssueFormFieldId.Description.wire) ?? '';
       expect(desc.endsWith(testCase.expect.descriptionEndsWith)).toBe(true);
+      expect(parsed.searchParams.get('body') ?? '').toContain(desc);
     }
     if (testCase.expect.elementEndsWith) {
       const elem = parsed.searchParams.get(IssueFormFieldId.Element.wire) ?? '';
@@ -251,6 +259,12 @@ describe('feedback issueUrl', () => {
       const elem = parsed.searchParams.get(IssueFormFieldId.Element.wire) ?? '';
       for (const fragment of testCase.expect.elementContains) {
         expect(elem).toContain(fragment);
+      }
+    }
+    if (testCase.expect.bodyContains) {
+      const body = parsed.searchParams.get('body') ?? '';
+      for (const fragment of testCase.expect.bodyContains) {
+        expect(body).toContain(fragment);
       }
     }
     if (testCase.expect.environmentContains) {

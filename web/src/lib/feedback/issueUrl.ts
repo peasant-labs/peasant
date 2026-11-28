@@ -1,9 +1,9 @@
 /** GitHub issue-form URL builder with deterministic length capping. */
 
 import {
+  FeedbackKind,
   IssueFormFieldId,
   type FeedbackContextInfo,
-  type FeedbackKind,
   type IssueDraftInput,
   type PickedElementInfo,
 } from '@/lib/feedback/types';
@@ -12,6 +12,12 @@ export const MAX_ISSUE_URL_LENGTH = 7500;
 export const DEFAULT_REPO_ISSUES_URL = 'https://github.com/peasant-labs/peasant/issues/new';
 
 const TRUNCATION_SUFFIX = '… [truncated]';
+const SCREENSHOTS_BODY_LINE = 'Paste the copied images here.';
+
+const DESCRIPTION_HEADING_BY_KIND: Readonly<Record<FeedbackKind['wire'], string>> = Object.freeze({
+  [FeedbackKind.Problem.wire]: 'What happened?',
+  [FeedbackKind.Feature.wire]: 'What would you like to see?',
+});
 
 export interface IssueUrlResult {
   readonly url: string;
@@ -49,6 +55,29 @@ export function formatElementBlock(target: PickedElementInfo | null): string {
     lines.push(`text: ${target.textSnippet}`);
   }
   return lines.join('\n');
+}
+
+function fenceTextBlock(content: string): string {
+  const longestFence = Math.max(2, ...(content.match(/`+/g) ?? []).map((run) => run.length));
+  const fence = '`'.repeat(longestFence + 1);
+  return `${fence}text\n${content}\n${fence}`;
+}
+
+function formatIssueBody(
+  kind: FeedbackKind,
+  descriptionText: string,
+  elementText: string,
+  environmentText: string,
+): string {
+  const sections: string[] = [
+    `### ${DESCRIPTION_HEADING_BY_KIND[kind.wire]}\n\n${descriptionText}`,
+  ];
+  if (elementText !== '') {
+    sections.push(`### Picked elements\n\n${fenceTextBlock(elementText)}`);
+  }
+  sections.push(`### Screenshots\n\n${SCREENSHOTS_BODY_LINE}`);
+  sections.push(`### App context\n\n${fenceTextBlock(environmentText)}`);
+  return sections.join('\n\n');
 }
 
 function sliceCodeUnitSafe(text: string, maxUnits: number): string {
@@ -118,6 +147,7 @@ export function buildGitHubIssueUrl(
       params.set(IssueFormFieldId.Element.wire, elementText);
     }
     params.set(IssueFormFieldId.Environment.wire, environmentText);
+    params.set('body', formatIssueBody(input.kind, descriptionText, elementText, environmentText));
     return `${baseUrl}${separator}${params.toString()}`;
   };
 

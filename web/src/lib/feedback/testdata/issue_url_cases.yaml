@@ -17,7 +17,13 @@ cases:
       params:
         template: "in-app-problem.yml"
         title: "Button clipped on narrow viewport"
-      forbiddenParams: [labels, "labels[]", body, screenshot]
+      forbiddenParams: [labels, "labels[]", screenshot]
+      bodyContains:
+        - "### What happened?"
+        - "The submit button clips at 390px."
+        - "### Screenshots"
+        - "Paste the copied images here."
+        - "### App context"
 
   - name: feature-selects-feature-template
     input:
@@ -37,7 +43,10 @@ cases:
       params:
         template: "in-app-feature.yml"
         title: "Add keyboard shortcut hint"
-      forbiddenParams: [labels, "labels[]", body, screenshot]
+      forbiddenParams: [labels, "labels[]", screenshot]
+      bodyContains:
+        - "### What would you like to see?"
+        - "Show shortcut tooltip on hover."
 
   - name: prefills-all-field-ids
     input:
@@ -93,7 +102,7 @@ cases:
       truncated: false
       absentParams: [element, screenshot]
 
-  - name: never-emits-labels-or-body
+  - name: never-emits-labels
     input:
       kind: feature
       title: "Export transcript summary"
@@ -113,7 +122,40 @@ cases:
     expect:
       template: "in-app-feature.yml"
       truncated: false
-      forbiddenParams: [labels, "labels[]", body, screenshot]
+      forbiddenParams: [labels, "labels[]", screenshot]
+
+  - name: body-fallback-contains-description
+    input:
+      kind: problem
+      title: "Description missing in fallback"
+      description: "Writing details here must appear in the fallback body."
+      element:
+        selector: "main > button.submit"
+        label: "button.submit"
+        section: "Composer"
+        textSnippet: "Submit"
+        box: { top: 40, left: 80, width: 110, height: 36 }
+      context:
+        route: "/sessions/42"
+        viewport: { width: 1280, height: 800 }
+        theme: dark
+        appVersion: "0.9.5"
+        userAgent: "TestBrowser/2.0"
+    expect:
+      template: "in-app-problem.yml"
+      truncated: false
+      forbiddenParams: [labels, "labels[]", screenshot]
+      bodyContains:
+        - "### What happened?"
+        - "Writing details here must appear in the fallback body."
+        - "### Picked elements"
+        - "```text"
+        - "selector: main > button.submit"
+        - "### Screenshots"
+        - "Paste the copied images here."
+        - "### App context"
+        - "route: /sessions/42"
+        - "peasant: 0.9.5"
 
   - name: truncates-deterministically-under-cap
     input:
@@ -167,7 +209,7 @@ cases:
         title: "request a feature"
 
   - name: truncates-element-when-description-and-element-exceed-cap
-    maxLength: 350
+    maxLength: 850
     input:
       kind: problem
       title: "Overflow"
@@ -187,7 +229,7 @@ cases:
     expect:
       template: "in-app-problem.yml"
       truncated: true
-      maxUrlLength: 350
+      maxUrlLength: 850
       descriptionEndsWith: "… [truncated]"
       elementEndsWith: "… [truncated]"
       environmentContains:
