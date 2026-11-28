@@ -83,3 +83,21 @@ pickLimitCases:
       expectedLabel: "pick another element"
       expectedDisabled: true
       expectedReason: "maximum 5 elements reached"
+
+submittedPreviewCases:
+  requiredNames:
+    - submitted-pane-keeps-previews
+    - copy-marker-moves
+  cases:
+    - name: submitted-pane-keeps-previews
+      captureCount: 2
+      initialCopiedIndex: 1
+      expectedMarker: "image 1 copied — paste it, then copy the next"
+      copyTargetIndex: 1
+      expectedNextMarker: "image 1 copied — paste it, then copy the next"
+    - name: copy-marker-moves
+      captureCount: 3
+      initialCopiedIndex: 1
+      expectedMarker: "image 1 copied — paste it, then copy the next"
+      copyTargetIndex: 2
+      expectedNextMarker: "image 2 copied — paste it, then copy the next"

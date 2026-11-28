@@ -190,6 +190,14 @@ function parseEvent(raw: unknown, path: string, state: FeedbackState): FeedbackE
         url: row.url,
         clipboardOutcome: findByWire(ALL_CLIPBOARD_OUTCOMES, row.clipboardOutcome, `${path}.clipboardOutcome`),
       };
+    case FeedbackEventType.CopyCaptureSettled:
+      requireExactRequiredFields(row, ['type', 'captureId', 'clipboardOutcome'], path);
+      if (typeof row.captureId !== 'number') throw new Error(`${path}.captureId must be a number`);
+      return {
+        type: FeedbackEventType.CopyCaptureSettled,
+        captureId: row.captureId,
+        clipboardOutcome: findByWire(ALL_CLIPBOARD_OUTCOMES, row.clipboardOutcome, `${path}.clipboardOutcome`),
+      };
     case FeedbackEventType.ReopenPicker:
       requireExactFields(row, ['type'], path);
       return { type: FeedbackEventType.ReopenPicker };
@@ -215,6 +223,7 @@ interface StateAssertion {
   readonly description?: string;
   readonly submittedUrl?: string | null;
   readonly clipboardOutcome?: ClipboardOutcome;
+  readonly copiedCaptureId?: number | null;
 }
 
 function parseExpectation(raw: unknown, path: string): StateAssertion {
@@ -238,6 +247,7 @@ function parseExpectation(raw: unknown, path: string): StateAssertion {
       'description',
       'submittedUrl',
       'clipboardOutcome',
+      'copiedCaptureId',
     ],
     path,
   );
@@ -293,6 +303,7 @@ function parseExpectation(raw: unknown, path: string): StateAssertion {
       row.clipboardOutcome !== undefined
         ? findByWire(ALL_CLIPBOARD_OUTCOMES, row.clipboardOutcome, `${path}.clipboardOutcome`)
         : undefined,
+    copiedCaptureId: row.copiedCaptureId === null || typeof row.copiedCaptureId === 'number' ? row.copiedCaptureId : undefined,
   };
 }
 
@@ -367,6 +378,7 @@ function assertStateMatches(state: FeedbackState, expected: StateAssertion) {
   if (expected.description !== undefined) expect(state.description).toBe(expected.description);
   if (expected.submittedUrl !== undefined) expect(state.submittedUrl).toBe(expected.submittedUrl);
   if (expected.clipboardOutcome !== undefined) expect(state.clipboardOutcome).toBe(expected.clipboardOutcome);
+  if (expected.copiedCaptureId !== undefined) expect(state.copiedCaptureId).toBe(expected.copiedCaptureId);
 }
 
 const fixtureCases = loadFixture();

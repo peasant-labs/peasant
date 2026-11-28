@@ -280,6 +280,28 @@ describe('FeedbackWidget', () => {
     expect(screen.getByText('element 1 (image 1): button#second-btn')).toBeInTheDocument();
     expect(screen.getByRole('img', { name: /image 1: picked element capture/i })).toBeInTheDocument();
     expect(screen.getByRole('img', { name: /image 2: whole page capture/i })).toBeInTheDocument();
+
+    // Submit copies image 1 automatically, keeps previews on Submitted, and updates copy marker on image 2 copy.
+    captureMocks.copyPngToClipboard.mockResolvedValue(ClipboardOutcome.Copied);
+    const openSpy = vi.fn(() => ({}) as Window);
+    window.open = openSpy as unknown as typeof window.open;
+
+    fireEvent.change(screen.getByLabelText('description (required)'), {
+      target: { value: 'Multiple captures submitted.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'open github issue' }));
+
+    expect(captureMocks.copyPngToClipboard).toHaveBeenCalledWith(el2Blob);
+    expect(await screen.findByText('image 1 copied — paste it, then copy the next')).toBeInTheDocument();
+    expect(screen.getAllByRole('img')).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole('button', { name: /copy image 2/i }));
+    expect(captureMocks.copyPngToClipboard).toHaveBeenLastCalledWith(pageBlob);
+    expect(await screen.findByText('image 2 copied — paste it, then copy the next')).toBeInTheDocument();
+
+    const revokeCountBeforeClose = (URL.revokeObjectURL as ReturnType<typeof vi.fn>).mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: 'done' }));
+    expect((URL.revokeObjectURL as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(revokeCountBeforeClose);
   });
 
   it('renders nothing when ?fb=off is present in the query string', () => {

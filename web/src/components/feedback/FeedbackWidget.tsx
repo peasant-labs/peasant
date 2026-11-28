@@ -246,6 +246,7 @@ export function FeedbackWidget(): ReactElement | null {
           type: FeedbackEventType.SubmitSucceeded,
           url,
           clipboardOutcome,
+          copiedCaptureId: clipboardOutcome === ClipboardOutcome.Copied ? capture?.id ?? null : null,
         });
       })
       .catch(() => {
@@ -254,6 +255,7 @@ export function FeedbackWidget(): ReactElement | null {
           type: FeedbackEventType.SubmitSucceeded,
           url,
           clipboardOutcome: ClipboardOutcome.Failed,
+          copiedCaptureId: null,
         });
       })
       .finally(() => {
@@ -265,7 +267,23 @@ export function FeedbackWidget(): ReactElement | null {
     (id: number) => {
       const artifact = state.captures.find((item) => item.id === id);
       if (!artifact) return;
-      void copyPngToClipboard(artifact.blob);
+      void copyPngToClipboard(artifact.blob)
+        .then((clipboardOutcome) => {
+          if (!mountedRef.current) return;
+          dispatch({
+            type: FeedbackEventType.CopyCaptureSettled,
+            captureId: artifact.id,
+            clipboardOutcome,
+          });
+        })
+        .catch(() => {
+          if (!mountedRef.current) return;
+          dispatch({
+            type: FeedbackEventType.CopyCaptureSettled,
+            captureId: artifact.id,
+            clipboardOutcome: ClipboardOutcome.Failed,
+          });
+        });
     },
     [state.captures],
   );

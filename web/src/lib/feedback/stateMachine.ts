@@ -124,6 +124,7 @@ export function createInitialFeedbackState(): FeedbackState {
     description: '',
     submittedUrl: null,
     clipboardOutcome: ClipboardOutcome.NotNeeded,
+    copiedCaptureId: null,
   };
 }
 
@@ -316,6 +317,10 @@ export function feedbackReducer(state: FeedbackState, event: FeedbackEvent): Fee
             step: FeedbackStep.Submitted,
             submittedUrl: event.url,
             clipboardOutcome: event.clipboardOutcome,
+            copiedCaptureId:
+              event.clipboardOutcome === ClipboardOutcome.Copied
+                ? (event.copiedCaptureId ?? state.captures[0]?.id ?? null)
+                : null,
           };
         default:
           return state;
@@ -323,10 +328,18 @@ export function feedbackReducer(state: FeedbackState, event: FeedbackEvent): Fee
     }
 
     case FeedbackStep.Submitted: {
-      if (event.type === FeedbackEventType.CloseAll) {
-        return createInitialFeedbackState();
+      switch (event.type) {
+        case FeedbackEventType.CloseAll:
+          return createInitialFeedbackState();
+        case FeedbackEventType.CopyCaptureSettled:
+          return {
+            ...state,
+            clipboardOutcome: event.clipboardOutcome,
+            copiedCaptureId: event.clipboardOutcome === ClipboardOutcome.Copied ? event.captureId : null,
+          };
+        default:
+          return state;
       }
-      return state;
     }
 
     default:

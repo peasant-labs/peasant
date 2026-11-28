@@ -54,6 +54,15 @@ interface PickLimitCase {
   expectedReason?: string;
 }
 
+interface SubmittedPreviewCase {
+  name: string;
+  captureCount: number;
+  initialCopiedIndex: number;
+  expectedMarker: string;
+  copyTargetIndex: number;
+  expectedNextMarker: string;
+}
+
 function assertRequiredInventory(
   section: Record<string, unknown>,
   label: string,
@@ -89,7 +98,7 @@ function loadFixture() {
   const root = requireRecord(parseStrictYAML(readFileSync(path, 'utf8'), 'compose dialog fixture'), 'compose dialog fixture');
   requireExactRequiredFields(
     root,
-    ['submitCases', 'kindCases', 'submittedOutcomeCases', 'pickLimitCases'],
+    ['submitCases', 'kindCases', 'submittedOutcomeCases', 'pickLimitCases', 'submittedPreviewCases'],
     'compose dialog fixture',
   );
 
@@ -181,7 +190,36 @@ function loadFixture() {
     };
   });
 
-  return { submitCases, kindCases, submittedOutcomeCases, pickLimitCases };
+  const submittedPreviewRows = assertRequiredInventory(
+    requireRecord(root.submittedPreviewCases, 'submittedPreviewCases'),
+    'submittedPreviewCases',
+  );
+  const submittedPreviewCases: SubmittedPreviewCase[] = submittedPreviewRows.map((row, idx) => {
+    requireExactRequiredFields(
+      row,
+      ['name', 'captureCount', 'initialCopiedIndex', 'expectedMarker', 'copyTargetIndex', 'expectedNextMarker'],
+      `submittedPreviewCases[${idx}]`,
+    );
+    if (
+      typeof row.captureCount !== 'number' ||
+      typeof row.initialCopiedIndex !== 'number' ||
+      typeof row.expectedMarker !== 'string' ||
+      typeof row.copyTargetIndex !== 'number' ||
+      typeof row.expectedNextMarker !== 'string'
+    ) {
+      throw new Error(`submittedPreviewCases[${idx}] has invalid field types`);
+    }
+    return {
+      name: row.name as string,
+      captureCount: row.captureCount,
+      initialCopiedIndex: row.initialCopiedIndex,
+      expectedMarker: row.expectedMarker,
+      copyTargetIndex: row.copyTargetIndex,
+      expectedNextMarker: row.expectedNextMarker,
+    };
+  });
+
+  return { submitCases, kindCases, submittedOutcomeCases, pickLimitCases, submittedPreviewCases };
 }
 
 const FIXTURE = loadFixture();
@@ -240,6 +278,7 @@ function makeState(overrides: Partial<FeedbackState> = {}): FeedbackState {
     description: '',
     submittedUrl: null,
     clipboardOutcome: ClipboardOutcome.NotNeeded,
+    copiedCaptureId: null,
     ...overrides,
   };
 }
@@ -351,6 +390,90 @@ describe('ComposeFeedbackDialog', () => {
 
       fireEvent.click(screen.getByRole('button', { name: 'done' }));
       expect(props.onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(FIXTURE.submittedPreviewCases)('$name', (c) => {
+      const captures = Array.from({ length: c.captureCount }, (_, idx) => {
+        const isLast = idx === c.captureCount - 1;
+        return makeCapture(idx + 1, isLast ? CaptureKind.Page : CaptureKind.Element, isLast ? null : idx + 1);
+      });
+      const initialCopiedId = captures[c.initialCopiedIndex - 1].id;
+      const targetCaptureId = captures[c.copyTargetIndex - 1].id;
+
+      const baseProps = makeProps({
+        state: makeState({
+          step: FeedbackStep.Compose,
+          description: 'Layout overlap',
+          captures,
+        }),
+      });
+      const { rerender } = render(<ComposeFeedbackDialog {...baseProps} />);
+      expect(createObjectURLSpy).toHaveBeenCalledTimes(c.captureCount);
+      expect(revokeObjectURLSpy).not.toHaveBeenCalled();
+
+      rerender(
+        <ComposeFeedbackDialog
+          {...makeProps({
+            ...baseProps,
+            state: makeState({
+              step: FeedbackStep.Submitted,
+              clipboardOutcome: ClipboardOutcome.Copied,
+              submittedUrl: 'https://github.com/peasant-labs/peasant/issues/new?template=in-app-problem.yml',
+              captures,
+              copiedCaptureId: initialCopiedId,
+            }),
+          })}
+        />,
+      );
+
+      // Transitioning to Submitted keeps the exact same object URLs alive without revoking them.
+      expect(revokeObjectURLSpy).not.toHaveBeenCalled();
+      expect(screen.getByText(c.expectedMarker)).toBeInTheDocument();
+
+      const imgs = screen.getAllByRole('img');
+      expect(imgs).toHaveLength(c.captureCount);
+      imgs.forEach((img, idx) => {
+        expect(img).toHaveAttribute('src', `blob:test-capture-${idx + 1}`);
+        expect(screen.getByText(`image ${idx + 1}`)).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: new RegExp(`^copy image ${idx + 1}\\b`, 'i') })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: new RegExp(`^download image ${idx + 1}\\b`, 'i') })).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: new RegExp(`^copy image ${c.copyTargetIndex}\\b`, 'i') }));
+      expect(baseProps.onCopyCapture).toHaveBeenCalledWith(targetCaptureId);
+
+      rerender(
+        <ComposeFeedbackDialog
+          {...makeProps({
+            ...baseProps,
+            state: makeState({
+              step: FeedbackStep.Submitted,
+              clipboardOutcome: ClipboardOutcome.Copied,
+              submittedUrl: 'https://github.com/peasant-labs/peasant/issues/new?template=in-app-problem.yml',
+              captures,
+              copiedCaptureId: targetCaptureId,
+            }),
+          })}
+        />,
+      );
+
+      expect(screen.getByText(c.expectedNextMarker)).toBeInTheDocument();
+      expect(revokeObjectURLSpy).not.toHaveBeenCalled();
+
+      // Closing the pane revokes every object URL.
+      rerender(
+        <ComposeFeedbackDialog
+          {...makeProps({
+            ...baseProps,
+            open: false,
+            state: makeState({
+              step: FeedbackStep.Closed,
+              captures: [],
+            }),
+          })}
+        />,
+      );
+      expect(revokeObjectURLSpy).toHaveBeenCalledTimes(c.captureCount);
     });
   });
 

@@ -134,6 +134,7 @@ cases:
           description: ""
           submittedUrl: null
           clipboardOutcome: not-needed
+          copiedCaptureId: null
 
   - name: remove-element-capture-removes-element
     steps:
@@ -314,3 +315,24 @@ cases:
         sameState: true
         expect:
           step: capturing
+
+  - name: submitted-copy-updates-copied-capture-id
+    steps:
+      - event: { type: open_menu }
+      - event: { type: select_kind, kind: problem }
+      - event: { type: toggle_attach_element }
+      - event: { type: toggle_attach_page }
+      - event: { type: proceed_from_attach }
+      - event: { type: pick_confirmed }
+      - event: { type: capture_succeeded, captures: [{ kind: element, elementId: 1 }, { kind: page }] }
+      - event: { type: update_draft, description: "Button overlaps" }
+      - event: { type: submit_succeeded, url: "https://github.com/peasant-labs/peasant/issues/new?template=in-app-problem.yml", clipboardOutcome: copied }
+        expect:
+          step: submitted
+          clipboardOutcome: copied
+          copiedCaptureId: 1
+      - event: { type: copy_capture_settled, captureId: 2, clipboardOutcome: copied }
+        expect:
+          step: submitted
+          clipboardOutcome: copied
+          copiedCaptureId: 2

@@ -136,6 +136,14 @@ export function ComposeFeedbackDialog({
 
   const outcomeDisplay = OUTCOME_TONES[state.clipboardOutcome.wire];
   const OutcomeIcon = outcomeDisplay.icon;
+  const copiedIndex =
+    state.copiedCaptureId !== null ? state.captures.findIndex((c) => c.id === state.copiedCaptureId) : -1;
+  const clipboardMarkerText =
+    copiedIndex !== -1
+      ? state.captures.length > 1
+        ? `image ${copiedIndex + 1} copied — paste it, then copy the next`
+        : `image ${copiedIndex + 1} copied — paste it into the issue`
+      : null;
 
   return (
     <Dialog
@@ -188,20 +196,41 @@ export function ComposeFeedbackDialog({
             PNG.
           </p>
 
+          {clipboardMarkerText && (
+            <div className="fbw-clipboard-marker" role="status">
+              <CheckCircle2 aria-hidden="true" />
+              <span>{clipboardMarkerText}</span>
+            </div>
+          )}
+
           {state.captures.length > 0 && (
             <div className="fbw-section">
               <span className="label">screenshots</span>
-              <div className="fbw-submitted-captures">
+              <div className="fbw-captures-grid">
                 {state.captures.map((capture, index) => {
                   const imageNumber = index + 1;
+                  const previewUrl = previews.find((entry) => entry.artifact.id === capture.id)?.url;
+                  const isOnClipboard = state.copiedCaptureId === capture.id;
                   return (
-                    <div key={capture.id} className="fbw-submitted-capture-row">
-                      <div className="fbw-submitted-capture-info">
+                    <div key={capture.id} className="fbw-capture-card">
+                      {previewUrl && (
+                        <img
+                          src={previewUrl}
+                          alt={`image ${imageNumber}: ${capture.kind.label} capture (${capture.maskMode.label})`}
+                          className="fbw-capture-img"
+                        />
+                      )}
+                      <div className="fbw-capture-meta">
                         <span className="fbw-capture-index">image {imageNumber}</span>
                         <span className="fbw-capture-label">{capture.kind.label}</span>
                         <span className="fbw-capture-dims tnum">
                           {capture.width}×{capture.height}
                         </span>
+                        {isOnClipboard && (
+                          <Chip chrome tone="ok" icon={CheckCircle2}>
+                            on clipboard
+                          </Chip>
+                        )}
                       </div>
                       <div className="fbw-submitted-capture-actions">
                         <Button

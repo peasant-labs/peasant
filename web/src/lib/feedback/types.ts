@@ -156,6 +156,7 @@ export const FeedbackEventType = {
   SetMaskMode: 'set_mask_mode',
   UpdateDraft: 'update_draft',
   SubmitSucceeded: 'submit_succeeded',
+  CopyCaptureSettled: 'copy_capture_settled',
   ReopenPicker: 'reopen_picker',
 } as const;
 export type FeedbackEventType = (typeof FeedbackEventType)[keyof typeof FeedbackEventType];
@@ -242,6 +243,7 @@ export interface FeedbackState {
   readonly description: string;
   readonly submittedUrl: string | null;
   readonly clipboardOutcome: ClipboardOutcome;
+  readonly copiedCaptureId: number | null;
 }
 
 export type FeedbackEvent =
@@ -267,6 +269,12 @@ export type FeedbackEvent =
   | {
       readonly type: typeof FeedbackEventType.SubmitSucceeded;
       readonly url: string;
+      readonly clipboardOutcome: ClipboardOutcome;
+      readonly copiedCaptureId?: number | null;
+    }
+  | {
+      readonly type: typeof FeedbackEventType.CopyCaptureSettled;
+      readonly captureId: number;
       readonly clipboardOutcome: ClipboardOutcome;
     }
   | { readonly type: typeof FeedbackEventType.ReopenPicker };

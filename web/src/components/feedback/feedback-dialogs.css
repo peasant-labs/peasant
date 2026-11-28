@@ -360,6 +360,26 @@
   gap: var(--sp-2);
 }
 
+.fbw-clipboard-marker {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: var(--stroke-hairline) solid var(--olive);
+  border-radius: 0;
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  color: var(--ink);
+}
+
+.fbw-clipboard-marker .lucide {
+  width: var(--ic-md);
+  height: var(--ic-md);
+  flex: none;
+  color: var(--olive);
+}
+
 .fbw-fallback-row {
   display: flex;
   flex-wrap: wrap;
