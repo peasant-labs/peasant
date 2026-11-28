@@ -45,7 +45,7 @@ cases:
   - {name: open-replaces-the-existing-capture, long: true, operation: reopen}
   - {name: close-frees-the-capture, long: true, operation: close-preview}
   - {name: second-connection-never-receives-the-firsts-frames, long: true, operation: isolation}
-  - {name: unreadable-source-errors-and-logs-carry-no-source-or-path, operation: missing-source}
+  - {name: unreadable-source-errors-and-logs-carry-no-source-or-path, operation: missing-source, logs: [closed, freed], freedReason: unreadable}
   - {name: idle-expiry-frees-the-capture, long: true, operation: expire}
   - {name: setup-session-end-closes-the-capture, long: true, operation: end-setup}
   - {name: oversized-turn-stays-within-frame-cap, operation: bounded-turn}
@@ -55,7 +55,7 @@ cases:
   - {name: final-frame-without-segment-when-last-already-sent, long: true, operation: finish-without-segment}
   - {name: final-frame-repeats-sent-refs-unchanged, long: true, operation: finish-without-segment}
   - {name: preview-close-carries-no-source-or-path, long: true, operation: close-preview}
-  - {name: preview-cut-carries-no-source-or-path, long: true, operation: finish-without-segment}
+  - {name: preview-cut-carries-no-source-or-path, long: true, operation: finish-without-segment, logs: [opened, sent, ended, freed], freedReason: complete}
   - {name: gated-read-close-discards-late-result, long: true, operation: gated-close}
   - {name: gated-read-replacement-orders-frames, long: true, operation: gated-reopen}
   - {name: gated-read-rescan-discards-late-result, long: true, operation: gated-rescan}

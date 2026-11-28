@@ -428,8 +428,8 @@ func TestGenerationReference(t *testing.T) {
 					}
 					id, err := targetDB.CreateEntryAnnotation(t.Context(), ingest.EntryAnnotationParams{
 						SessionID:        string(sid),
-						EntryIndex:       8,
-						EndIndex:         9,
+						EntryIndex:       6,
+						EndIndex:         7,
 						AnnotatorID:      annotatorID,
 						AnnotationTypeID: typeID,
 						Value:            "detected",
@@ -469,8 +469,8 @@ func TestGenerationReference(t *testing.T) {
 				}
 				w.seeded.activeID = referenceLaterID
 				wantTarget := referenceQuery(t, control.db, `SELECT entry_index, end_index FROM annotation_target_entries WHERE annotation_id = ?`, ctrlAnnID)
-				if !slices.Equal(wantTarget, []string{"1:10|1:11"}) {
-					t.Fatalf("control annotation %s target rows = %v, want [1:10|1:11]", ctrlAnnID, wantTarget)
+				if !slices.Equal(wantTarget, []string{"1:7|1:8"}) {
+					t.Fatalf("control annotation %s target rows = %v, want [1:7|1:8]", ctrlAnnID, wantTarget)
 				}
 				if got := referenceQuery(t, db, `SELECT entry_index, end_index FROM annotation_target_entries WHERE annotation_id = ?`, refAnnID); !slices.Equal(got, wantTarget) {
 					t.Fatalf("annotation %s target rows = %v, want %v (anchor lost)", refAnnID, got, wantTarget)

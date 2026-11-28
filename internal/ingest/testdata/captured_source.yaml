@@ -12,10 +12,7 @@ cases:
       - role: user
         depth: 0
         text: first turn
+      # the reply holds its text; the text block is not repeated as a child
       - role: assistant
         depth: 0
-        text: second turn
-      - role: assistant
-        depth: 1
-        parent: 1
         text: second turn

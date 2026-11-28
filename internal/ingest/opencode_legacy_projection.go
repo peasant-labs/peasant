@@ -3,6 +3,7 @@ package ingest
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1037,6 +1038,29 @@ func recognizeManagedOpenCodeProjection(data []byte, sessionID SessionID) (Trans
 		return candidate.origin, nil
 	}
 	return TranscriptOriginFile, nil
+}
+
+// openCodeProjectionRecognition records successful recognition of exact bytes
+// for one session. It owns no source buffers or decoded messages.
+type openCodeProjectionRecognition struct {
+	sessionID SessionID
+	digest    [sha256.Size]byte
+	origin    TranscriptOrigin
+}
+
+func captureOpenCodeProjectionRecognition(data []byte, sessionID SessionID) (*openCodeProjectionRecognition, error) {
+	origin, err := recognizeManagedOpenCodeProjection(data, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return &openCodeProjectionRecognition{sessionID: sessionID, digest: sha256.Sum256(data), origin: origin}, nil
+}
+
+func (r *openCodeProjectionRecognition) recognize(data []byte, sessionID SessionID) (TranscriptOrigin, error) {
+	if r != nil && r.sessionID == sessionID && r.digest == sha256.Sum256(data) {
+		return r.origin, nil
+	}
+	return recognizeManagedOpenCodeProjection(data, sessionID)
 }
 
 func managedOpenCodeFormatMarker(data []byte) string {

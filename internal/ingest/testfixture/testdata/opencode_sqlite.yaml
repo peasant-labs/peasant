@@ -1491,3 +1491,22 @@ cases:
         data: '{"type":"text","text":"out of order synthetic turn 04","time":{"created":1700000000301}}'
     current_messages: []
     ignored_history: []
+
+  - name: current-pending-tool-budget
+    logical_path: pending/opencode.db
+    format: sqlite
+    schema: current
+    journal_mode: delete
+    corruption: ""
+    declared_rows: {legacy_messages: 0, legacy_parts: 0, current_messages: 3, ignored_history: 0}
+    expected_catalog:
+      tables: [session, session_message]
+      indexes: [session_message_seq_idx, session_message_session_seq_idx]
+      seq: not_null
+    legacy_messages: []
+    legacy_parts: []
+    current_messages:
+      - {id: msg_pending_01, session_id: ses_3cd91f52effeXd3QAJ54jPend1, type: user, time_created: 1000, time_updated: 1000, seq: 1, data: '{"text":"synthetic request","metadata":{"cwd":"/synthetic/pending"},"time":{"created":1000}}'}
+      - {id: msg_pending_02, session_id: ses_3cd91f52effeXd3QAJ54jPend1, type: assistant, time_created: 1020, time_updated: 1030, seq: 2, data: '{"agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"tool","id":"call_pending","name":"read","state":{"status":"pending","input":"reading /synthetic/file"},"time":{"created":1020}}],"time":{"created":1020,"streamed":1030}}'}
+      - {id: msg_pending_03, session_id: ses_3cd91f52effeXd3QAJ54jPend1, type: user, time_created: 1040, time_updated: 1040, seq: 3, data: '{"text":"synthetic follow-up","time":{"created":1040}}'}
+    ignored_history: []
