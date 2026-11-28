@@ -14,14 +14,15 @@ import (
 var skipBudgetFixture []byte
 
 // TestValidateMeasuredRatios exercises the measured-budget validator on
-// ratios and malformed costs: a missing cost, a zero avoided cost, a negative
-// cost, NaN and infinity are all refused.
+// ratios, malformed costs and spreads: a missing cost, a zero avoided cost, a
+// negative cost, NaN, infinity, a spread that does not bracket its median and
+// a worst case that does not beat the avoided work are all refused.
 func TestValidateMeasuredRatios(t *testing.T) {
 	var fixture struct {
 		Cases []struct {
-			Name                   string `yaml:"name"`
-			Proof, Settle, Avoided *float64
-			Valid                  bool `yaml:"valid"`
+			Name       string `yaml:"name"`
+			SkipBudget `yaml:",inline"`
+			Valid      bool `yaml:"valid"`
 		} `yaml:"cases"`
 	}
 	if err := yaml.Unmarshal(skipBudgetFixture, &fixture); err != nil {
@@ -29,7 +30,8 @@ func TestValidateMeasuredRatios(t *testing.T) {
 	}
 	for _, c := range fixture.Cases {
 		t.Run(c.Name, func(t *testing.T) {
-			b := SkipBudget{Proof: c.Proof, Settle: c.Settle, Avoided: c.Avoided, Provenance: BudgetProvenance{Head: "head", Base: "base", Command: "command", Date: "date", Samples: 5}}
+			b := c.SkipBudget
+			b.Provenance = BudgetProvenance{Head: "head", Base: "base", Command: "command", Date: "date", Samples: 5}
 			if got := b.ValidateMeasured() == nil; got != c.Valid {
 				t.Fatalf("valid = %v; want %v", got, c.Valid)
 			}
