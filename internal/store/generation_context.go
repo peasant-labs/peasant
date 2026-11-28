@@ -58,6 +58,11 @@ func candidateContextMatchesOnConn(conn *sqlite.Conn, sid schema.SessionID, gene
 	}
 	record.CandidateDigest = ""
 	stored.CandidateDigest = ""
+	// Prior evidence is written by the parse, not by the metadata mapper, so
+	// it is not context: a candidate never carries it, and a reference copies
+	// the owner's.
+	record.PriorEvidence = nil
+	stored.PriorEvidence = nil
 	if !generationRecordsEqual(record, stored) {
 		return false, nil
 	}

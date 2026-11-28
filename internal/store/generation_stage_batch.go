@@ -61,7 +61,7 @@ func (s *Store) StageGenerationBatch(ctx context.Context, activations []Generati
 			errs[i] = err
 			continue
 		}
-		if repair || (active.found && refreshEqualsActive(p, active.view)) {
+		if repair || (active.found && refreshEqualsActive(p, a.PriorEvidence, active.view)) {
 			continue
 		}
 		handles[i] = &PreparedGeneration{sessionID: p.sessionID, generationID: p.generation.ID, prepared: p}
