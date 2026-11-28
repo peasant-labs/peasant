@@ -13,7 +13,11 @@ const PNG_MIME = 'image/png';
 const DEFAULT_PNG_FILENAME = 'peasant-feedback.png';
 const OBJECT_URL_REVOKE_DELAY_MS = 1000;
 
+const DEFAULT_DARK_BACKGROUND = '#0b0b0a';
+const DEFAULT_LIGHT_BACKGROUND = '#fbfaf7';
+
 export interface SnapdomCaptureOptions {
+  backgroundColor?: string | null;
   exclude?: string | ((el: Element) => boolean) | Array<string | ((el: Element) => boolean)>;
   excludeMode?: 'hide' | 'remove';
   clip?: 'viewport' | { x: number; y: number; width: number; height: number } | null;
@@ -74,6 +78,68 @@ function resolveDimension(primary: number | undefined, fallback: number): number
   return 0;
 }
 
+function isTransparentColor(raw: string): boolean {
+  const value = raw.trim().toLowerCase();
+  if (!value || value === 'transparent' || value === 'none') {
+    return true;
+  }
+  const slashAlpha = value.match(/\/\s*([0-9.]+%?)\s*\)$/);
+  if (slashAlpha) {
+    return Number.parseFloat(slashAlpha[1]) <= 0;
+  }
+  const rgbaMatch = value.match(/^(?:rgba|hsla)\([^,]+,[^,]+,[^,]+,\s*([0-9.]+)\s*\)$/);
+  if (rgbaMatch) {
+    return Number.parseFloat(rgbaMatch[1]) <= 0;
+  }
+  if (/^#[0-9a-f]{4}$/.test(value)) {
+    return value.endsWith('0');
+  }
+  if (/^#[0-9a-f]{8}$/.test(value)) {
+    return value.endsWith('00');
+  }
+  return false;
+}
+
+/**
+ * Resolves an opaque background color for captures so dark/light element shots
+ * never get transparent corners: `body` background -> `html` background ->
+ * `--canvas` CSS custom property -> theme fallback.
+ */
+export function resolveOpaqueBackgroundColor(doc: Document, win?: Window): string {
+  const getStyle = win && typeof win.getComputedStyle === 'function'
+    ? win.getComputedStyle.bind(win)
+    : typeof getComputedStyle === 'function'
+      ? getComputedStyle
+      : null;
+
+  if (getStyle) {
+    if (doc.body) {
+      const bodyBg = getStyle(doc.body).backgroundColor;
+      if (bodyBg && !isTransparentColor(bodyBg)) {
+        return bodyBg;
+      }
+    }
+    if (doc.documentElement) {
+      const htmlBg = getStyle(doc.documentElement).backgroundColor;
+      if (htmlBg && !isTransparentColor(htmlBg)) {
+        return htmlBg;
+      }
+      const canvasVar = getStyle(doc.documentElement).getPropertyValue('--canvas').trim();
+      if (canvasVar && !isTransparentColor(canvasVar)) {
+        return canvasVar;
+      }
+    }
+    if (doc.body) {
+      const bodyCanvasVar = getStyle(doc.body).getPropertyValue('--canvas').trim();
+      if (bodyCanvasVar && !isTransparentColor(bodyCanvasVar)) {
+        return bodyCanvasVar;
+      }
+    }
+  }
+
+  return doc.documentElement?.dataset?.theme === 'light' ? DEFAULT_LIGHT_BACKGROUND : DEFAULT_DARK_BACKGROUND;
+}
+
 /**
  * Lazily loads `@zumer/snapdom` and captures the requested element and/or visible
  * viewport under a temporary privacy-masking `<style>` element that is always
@@ -116,11 +182,13 @@ export async function captureFeedbackArtifacts(
     const captures: CaptureArtifact[] = [];
     const errors: string[] = [];
     const exclude = [...FEEDBACK_EXCLUDE_SELECTORS];
+    const backgroundColor = resolveOpaqueBackgroundColor(doc, win);
     let nextId = request.nextCaptureId ?? 1;
 
     for (const target of request.elements) {
       try {
         const result = await snapdomFn(target.el, {
+          backgroundColor,
           exclude,
           excludeMode: 'remove',
           format: 'png',
@@ -148,6 +216,7 @@ export async function captureFeedbackArtifacts(
       } else {
         try {
           const result = await snapdomFn(pageRoot, {
+            backgroundColor,
             exclude,
             excludeMode: 'remove',
             clip: 'viewport',

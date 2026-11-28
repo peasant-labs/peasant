@@ -5,6 +5,7 @@ import {
   captureFeedbackArtifacts,
   copyPngToClipboard,
   downloadPngBlob,
+  resolveOpaqueBackgroundColor,
   type SnapdomCaptureOptions,
   type SnapdomFn,
 } from './capture';
@@ -132,6 +133,61 @@ describe('capture', () => {
     expect(calls[2].stylePresent).toBe(true);
     expect(calls[2].options?.exclude).toEqual([...FEEDBACK_EXCLUDE_SELECTORS]);
     expect(calls[2].options?.clip).toBe('viewport');
+  });
+
+  it('capture-passes-opaque-background', async () => {
+    const target = document.createElement('div');
+    target.getBoundingClientRect = () => makeBox(120, 48);
+    document.body.appendChild(target);
+
+    const seenBackgrounds: Array<string | null | undefined> = [];
+    const snapdomMock: SnapdomFn = vi.fn(async (_el, options) => {
+      seenBackgrounds.push(options?.backgroundColor);
+      return {
+        meta: { w0: 120, h0: 48, targetW: 120, targetH: 48 },
+        toBlob: async () => new Blob(['png'], { type: 'image/png' }),
+      };
+    });
+
+    // 1) Prefers document.body computed backgroundColor when opaque.
+    document.body.style.backgroundColor = 'rgb(15, 16, 18)';
+    await captureFeedbackArtifacts(
+      { elements: [{ id: 1, el: target }], capturePage: false, maskMode: MaskMode.Masked },
+      { loadSnapdom: async () => snapdomMock, waitForPaint: async () => {} },
+    );
+
+    // 2) Falls back to html backgroundColor when body is transparent.
+    document.body.style.backgroundColor = 'transparent';
+    document.documentElement.style.backgroundColor = 'rgb(240, 240, 235)';
+    await captureFeedbackArtifacts(
+      { elements: [{ id: 1, el: target }], capturePage: false, maskMode: MaskMode.Masked },
+      { loadSnapdom: async () => snapdomMock, waitForPaint: async () => {} },
+    );
+
+    // 3) Falls back to --canvas CSS variable when body and html are transparent.
+    document.documentElement.style.backgroundColor = 'rgba(0, 0, 0, 0)';
+    document.documentElement.style.setProperty('--canvas', '#141413');
+    await captureFeedbackArtifacts(
+      { elements: [{ id: 1, el: target }], capturePage: false, maskMode: MaskMode.Masked },
+      { loadSnapdom: async () => snapdomMock, waitForPaint: async () => {} },
+    );
+
+    // 4) Never passes transparent even if body, html, and --canvas are unset.
+    document.documentElement.style.removeProperty('--canvas');
+    await captureFeedbackArtifacts(
+      { elements: [{ id: 1, el: target }], capturePage: false, maskMode: MaskMode.Masked },
+      { loadSnapdom: async () => snapdomMock, waitForPaint: async () => {} },
+    );
+
+    expect(seenBackgrounds).toEqual(['rgb(15, 16, 18)', 'rgb(240, 240, 235)', '#141413', '#0b0b0a']);
+    for (const bg of seenBackgrounds) {
+      expect(bg).toBeTruthy();
+      expect(bg).not.toBe('transparent');
+      expect(bg).not.toBe('rgba(0, 0, 0, 0)');
+    }
+    document.documentElement.dataset.theme = 'light';
+    expect(resolveOpaqueBackgroundColor(document, window)).toBe('#fbfaf7');
+    delete document.documentElement.dataset.theme;
   });
 
   it('mask-style-removed-even-on-capture-throw', async () => {
