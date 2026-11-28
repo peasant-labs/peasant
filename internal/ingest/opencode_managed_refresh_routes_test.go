@@ -9,7 +9,6 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -25,6 +24,7 @@ import (
 	"github.com/peasant-labs/peasant/third_party/zombiezen-sqlite/sqlitex"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
+	regexp "github.com/wasilibs/go-re2"
 )
 
 //go:embed testdata/opencode_managed_refresh_routes.yaml

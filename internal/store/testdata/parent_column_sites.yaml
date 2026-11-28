@@ -754,3 +754,9 @@ foreign:
     literals: 1
     class: foreign-database
     reason: The materialized OpenCode fixture database schema.
+  - name: skip-budget-opencode-corpus-schema
+    file: cmd/skip-budget/opencode_corpus.go
+    declaration: openCodeCorpusSchemaSQL
+    literals: 1
+    class: foreign-database
+    reason: The synthetic OpenCode source database schema the skip-budget harness measures against.
