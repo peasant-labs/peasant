@@ -185,4 +185,3 @@ func TestDecideRefreshAdapterMatrix(t *testing.T) {
 		})
 	}
 }
-

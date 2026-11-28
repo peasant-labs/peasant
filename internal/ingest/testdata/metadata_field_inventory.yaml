@@ -3,7 +3,8 @@
 # every stored metadata sidecar of its Claude corpus before the refresh; the
 # oracle, not this file, decides the expected result. A test reflects the
 # struct and requires exact membership, and the loader rejects a mutation
-# equal to a corpus value.
+# equal to a corpus value. An optional opencode_mutation replaces the mutation
+# in the OpenCode oracle where the shared value equals the OpenCode corpus value.
 fields:
   - {field: SchemaVersion, mutation: '11'}
   - {field: SessionID, mutation: '"deadbeef-0000-4000-8000-000000000001"'}
@@ -14,11 +15,11 @@ fields:
   - {field: ThinkingLevel, mutation: '"high"'}
   - {field: ThinkingLevelRaw, mutation: '"mutated-raw"'}
   - {field: ThinkingLevelHistory, mutation: '[{"level":"high","raw":"mutated-raw"}]'}
-  - {field: Timestamp.Start, mutation: '1000'}
-  - {field: Timestamp.End, mutation: '2000'}
+  - {field: Timestamp.Start, mutation: '1000', opencode_mutation: '7000'}
+  - {field: Timestamp.End, mutation: '2000', opencode_mutation: '8000'}
   - {field: Timestamp.Ingested, mutation: '3000'}
   - {field: Source.FilePath, mutation: '"/mutated/source.jsonl"'}
-  - {field: Source.Format, mutation: '"json"'}
+  - {field: Source.Format, mutation: '"json"', opencode_mutation: '"jsonl"'}
   - {field: Git.Branch, mutation: '"mutated-branch"'}
   - {field: Git.Remote, mutation: '"https://example.invalid/mutated.git"'}
   - {field: Git.Worktree, mutation: '"/mutated/worktree"'}

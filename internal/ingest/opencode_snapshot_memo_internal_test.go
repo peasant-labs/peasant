@@ -169,7 +169,7 @@ type memoCleanupStubPlan struct {
 	sessionID SessionID
 }
 
-func (p memoCleanupStubPlan) SessionID() SessionID        { return p.sessionID }
+func (p memoCleanupStubPlan) SessionID() SessionID       { return p.sessionID }
 func (p memoCleanupStubPlan) SourceGenerationID() string { return "gen-old" }
 func (p memoCleanupStubPlan) OwnerGenerationID() string  { return "gen-old" }
 

@@ -28,7 +28,18 @@ type generationSkipCase struct {
 	SegmentText        string                `yaml:"segmentText"`
 	Texts              []string              `yaml:"texts"`
 	ComparedGeneration string                `yaml:"comparedGeneration"`
-	WantDisposition    string                `yaml:"wantDisposition"`
+	// BasePrior and RefreshPrior are the prior-evidence documents of the
+	// active generation and of the refresh; absent means none (nil).
+	BasePrior       *string `yaml:"basePrior"`
+	RefreshPrior    *string `yaml:"refreshPrior"`
+	WantDisposition string  `yaml:"wantDisposition"`
+}
+
+func priorEvidenceBytes(document *string) []byte {
+	if document == nil {
+		return nil
+	}
+	return []byte(*document)
 }
 
 func (c generationSkipCase) disposition(t *testing.T) ingest.ActivationDisposition {
@@ -424,6 +435,51 @@ func TestHarmonizedSkip(t *testing.T) {
 				}
 				if got := readGenerationMetadataHash(t, s, sid, "gen_skip_base"); got != stored {
 					t.Fatal("stats-only refresh re-derived the immutable capture anchor")
+				}
+			case "prior-evidence":
+				// The commit attaches the prior document; a skip keeps the
+				// active one, so only an identical document may skip.
+				s, _ := openGenerationStore(t)
+				seedGenerationSession(t, s, string(sid))
+				v2, blobs := buildTestGeneration(t, sid, "gen_skip_base", "skip base text", "skip base input", "skip base output")
+				if _, err := s.ActivateGeneration(context.Background(), GenerationActivation{
+					Generation:     filledCandidateForValidation(t, v2, blobs),
+					Blobs:          blobs,
+					PriorEvidence:  priorEvidenceBytes(c.BasePrior),
+					IndexerVersion: 1,
+					IndexedAtMs:    100,
+				}); err != nil {
+					t.Fatalf("activate skip base: %v", err)
+				}
+				beforeGens := countSessionGenerations(t, s, sid)
+				refresh, refreshBlobs := buildTestGeneration(t, sid, "gen_skip_prior", "skip base text", "skip base input", "skip base output")
+				state, err := s.ReadIndexState(context.Background(), sid)
+				if err != nil {
+					t.Fatal(err)
+				}
+				identity, proof := skipArtifactIdentity, skipInputHash
+				outcome, err := s.ActivateGeneration(context.Background(), GenerationActivation{
+					Generation:       filledCandidateForValidation(t, refresh, refreshBlobs),
+					Blobs:            refreshBlobs,
+					PriorEvidence:    priorEvidenceBytes(c.RefreshPrior),
+					IndexerVersion:   1,
+					IndexedAtMs:      200,
+					ExpectedState:    state,
+					ArtifactIdentity: &identity,
+					IndexedInputHash: &proof,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if outcome.Disposition != c.disposition(t) {
+					t.Fatalf("prior-evidence refresh disposition = %v, want %s", outcome.Disposition, c.WantDisposition)
+				}
+				wantGens := beforeGens
+				if c.disposition(t) == ingest.ActivationCommittedNow {
+					wantGens++
+				}
+				if got := countSessionGenerations(t, s, sid); got != wantGens {
+					t.Fatalf("prior-evidence refresh left %d generation rows, want %d", got, wantGens)
 				}
 			default:
 				t.Fatalf("unknown generation skip operation %q", c.Operation)
