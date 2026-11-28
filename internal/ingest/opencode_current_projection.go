@@ -391,8 +391,9 @@ func openCodeCurrentPartOmissionDiagnostics(session DiscoveredSession, omissions
 		return nil
 	}
 	type omissionSummary struct {
-		count  int
-		reason string
+		count    int
+		location string
+		reason   string
 	}
 	byType := make(map[string]omissionSummary)
 	for _, omission := range omissions {
@@ -402,6 +403,9 @@ func openCodeCurrentPartOmissionDiagnostics(session DiscoveredSession, omissions
 		}
 		summary := byType[partType]
 		summary.count++
+		if summary.location == "" {
+			summary.location = fmt.Sprintf("message %s ordinal %d", omission.MessageID, omission.Ordinal)
+		}
 		if summary.reason == "" {
 			summary.reason = omission.Reason
 		}
@@ -418,7 +422,7 @@ func openCodeCurrentPartOmissionDiagnostics(session DiscoveredSession, omissions
 		diagnostics = append(diagnostics, DiagnosticEntry{
 			ErrorType:   string(OpenCodeUnknownPartType),
 			Location:    fmt.Sprintf("selected OpenCode session %s from %s", session.SessionID, session.SourcePath),
-			Message:     fmt.Sprintf("%d split assistant part row(s) of type %q could not be decoded and were omitted: %s; the rest of the message remains readable, but this capture is not complete", summary.count, partType, summary.reason),
+			Message:     fmt.Sprintf("%d split assistant part row(s) of type %q could not be decoded and were omitted (first: %s): %s; the rest of the message remains readable, but this capture is not complete", summary.count, partType, summary.location, summary.reason),
 			Remediation: "Upgrade Peasant when it supports this part shape, or export the session through OpenCode; do not edit the OpenCode database with Peasant.",
 		})
 	}
@@ -533,12 +537,15 @@ func readOpenCodeCurrentProjectionSlice(ctx context.Context, source OpenCodeSQLi
 }
 
 // openCodeCurrentPartOmission records one split assistant part this build could
-// not decode. Type is the part's type when the row named one, and Reason
-// explains the refusal. A part is omitted, never silently dropped: the caller
-// marks the projection partial and records a diagnostic.
+// not decode. Type is the part's type when the row named one, MessageID and
+// Ordinal name the row, and Reason explains the refusal. A part is omitted,
+// never silently dropped: the caller marks the projection partial and records a
+// diagnostic.
 type openCodeCurrentPartOmission struct {
-	Type   string
-	Reason string
+	Type      string
+	MessageID string
+	Ordinal   int64
+	Reason    string
 }
 
 // readOpenCodeCurrentProjectionSliceWithOmissions is readOpenCodeCurrentProjectionSlice
@@ -599,7 +606,7 @@ rowLoop:
 			// Its type is not trustworthy, so the omission is named generically
 			// with the source's reason.
 			projection.ContentOmitted = true
-			partOmissions = append(partOmissions, openCodeCurrentPartOmission{Type: "session_part", Reason: drop.Reason})
+			partOmissions = append(partOmissions, openCodeCurrentPartOmission{Type: "session_part", MessageID: drop.MessageID.String(), Ordinal: drop.Ordinal, Reason: drop.Reason})
 		}
 		for _, row := range page.Messages {
 			// Every read row, control or substantive, counts toward the budget: the
@@ -981,7 +988,7 @@ func normalizeOpenCodeCurrentRowWithTraversal(row OpenCodeCurrentMessageRow, reg
 				if splitParts == nil {
 					return message, err
 				}
-				*splitParts = append(*splitParts, openCodeCurrentPartOmission{Type: part.Type.String(), Reason: err.Error()})
+				*splitParts = append(*splitParts, openCodeCurrentPartOmission{Type: part.Type.String(), MessageID: part.MessageID.String(), Ordinal: part.Ordinal, Reason: err.Error()})
 			}
 		}
 		for _, content := range value.Content {

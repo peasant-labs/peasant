@@ -310,6 +310,9 @@ func TestOpenCodeCurrentSessionPartsSurviveMaterializationAndIndex(t *testing.T)
 				for _, warning := range captured.Metadata.Diagnostics.Warnings {
 					if warning.ErrorType == testCase.ExpectedOmittedWarning {
 						seen = true
+						if !strings.Contains(warning.Message, testCase.SplitMessageID) || !strings.Contains(warning.Message, "ordinal "+itoa(int(testCase.MutatePartOrdinal))) {
+							t.Errorf("omitted-part warning does not name %q ordinal %d: %q", testCase.SplitMessageID, testCase.MutatePartOrdinal, warning.Message)
+						}
 					}
 				}
 				if !seen {
