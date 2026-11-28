@@ -97,20 +97,26 @@ export const ALL_PICKER_DIRECTIONS = Object.freeze([
 type MissingPickerDirection = Exclude<PickerDirection, (typeof ALL_PICKER_DIRECTIONS)[number]>;
 const _allPickerDirections: MissingPickerDirection extends never ? true : never = true;
 
+export interface IssueFormField {
+  readonly wire: string;
+  readonly label: string;
+}
+
 /** Issue-form field ids. `wire` is both the YAML `id` and the prefill query-parameter name. */
-export const IssueFormFieldId = Object.freeze({
-  Problem: closed('problem', 'Problem Statement'),
-  Expectations: closed('expectations', 'User Requirements and Expectations'),
-  Environment: closed('environment', 'System Information'),
-} as const);
-export type IssueFormFieldId = (typeof IssueFormFieldId)[keyof typeof IssueFormFieldId];
-export const ALL_ISSUE_FORM_FIELD_IDS = Object.freeze([
+export const IssueFormFieldId: Readonly<{
+  Problem: IssueFormField;
+  Expectations: IssueFormField;
+  Environment: IssueFormField;
+}> = Object.freeze({
+  Problem: Object.freeze({ wire: 'problem', label: 'Problem Statement' }),
+  Expectations: Object.freeze({ wire: 'expectations', label: 'User Requirements and Expectations' }),
+  Environment: Object.freeze({ wire: 'environment', label: 'System Information' }),
+});
+export const ALL_ISSUE_FORM_FIELD_IDS: readonly IssueFormField[] = Object.freeze([
   IssueFormFieldId.Problem,
   IssueFormFieldId.Expectations,
   IssueFormFieldId.Environment,
-] as const);
-type MissingIssueFormFieldId = Exclude<IssueFormFieldId, (typeof ALL_ISSUE_FORM_FIELD_IDS)[number]>;
-const _allIssueFormFieldIds: MissingIssueFormFieldId extends never ? true : never = true;
+]);
 
 // -- Reducer discriminants (internal; never shown or sent) -------------------
 
@@ -281,7 +287,7 @@ export type FeedbackEvent =
 /** DOM knowledge the picker overlay needs, injected so the overlay stays host-neutral. */
 export interface ElementPickerAdapter {
   isIgnoredElement(el: Element): boolean;
-  isTooLargeRect(rect: Pick<DOMRect, 'width' | 'height'>, viewport: ViewportSize): boolean;
+  isTooLargeRect(rect: ViewportSize, viewport: ViewportSize): boolean;
   labelFor(el: Element): string;
   sectionOf(el: Element): string;
   describe(el: Element): PickedElementDraft;
@@ -313,4 +319,3 @@ void _allMaskModes;
 void _allMaskCategories;
 void _allClipboardOutcomes;
 void _allPickerDirections;
-void _allIssueFormFieldIds;

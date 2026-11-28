@@ -16,7 +16,7 @@ import {
 } from './masking';
 import { ALL_MASK_CATEGORIES, ALL_MASK_MODES, MaskCategory, MaskMode } from './types';
 
-const FIXTURE_PATH = resolve(process.cwd(), 'src/lib/feedback/testdata/masking_cases.yaml');
+const FIXTURE_PATH = 'src/lib/feedback/testdata/masking_cases.yaml';
 
 const MODE_BY_WIRE: Readonly<Record<string, MaskMode>> = Object.fromEntries(
   ALL_MASK_MODES.map((member) => [member.wire, member]),
@@ -66,7 +66,10 @@ interface CssCase {
 }
 
 function loadFixture() {
-  const root = requireRecord(parseStrictYAML(readFileSync(FIXTURE_PATH, 'utf8'), 'masking_cases'), 'masking_cases');
+  const root = requireRecord(
+    parseStrictYAML(readFileSync(resolve(process.cwd(), FIXTURE_PATH), 'utf8'), 'masking_cases'),
+    'masking_cases',
+  );
   requireExactRequiredFields(root, ['matchCases', 'cssCases'], 'masking_cases');
 
   const matchCases = loadInventory(root, 'matchCases').map((row, index) => {

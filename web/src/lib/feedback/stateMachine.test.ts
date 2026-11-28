@@ -31,6 +31,30 @@ import {
   requireUniqueNames,
 } from '@/test/strictYaml';
 
+const FIXTURE_PATH = 'src/lib/feedback/testdata/state_machine_cases.yaml';
+const CAPTURES_FIELD = 'captures';
+
+const CAPTURE_SUCCEEDED_FIELDS = ['type', CAPTURES_FIELD] as const;
+
+const EXPECTATION_FIELDS = [
+  'step',
+  'kind',
+  'attachElement',
+  'attachPage',
+  'pickedElementsCount',
+  'pickedElementIds',
+  'pendingCaptureKind',
+  'pendingElementId',
+  'maskMode',
+  CAPTURES_FIELD,
+  'captureElementIds',
+  'captureError',
+  'title',
+  'submittedUrl',
+  'clipboardOutcome',
+  'copiedCaptureId',
+] as const;
+
 const REQUIRED_CASES = [
   'open-menu-from-closed',
   'select-problem-opens-attach',
@@ -141,7 +165,7 @@ function parseEvent(raw: unknown, path: string, state: FeedbackState): FeedbackE
       requireExactFields(row, ['type'], path);
       return { type: FeedbackEventType.PickCancelled };
     case FeedbackEventType.CaptureSucceeded: {
-      requireExactRequiredFields(row, ['type', 'captures'], path);
+      requireExactRequiredFields(row, CAPTURE_SUCCEEDED_FIELDS, path);
       if (!Array.isArray(row.captures)) throw new Error(`${path}.captures must be an array`);
       let nextId = state.nextCaptureId;
       const captures = row.captures.map((item, idx) =>
@@ -227,28 +251,7 @@ interface StateAssertion {
 
 function parseExpectation(raw: unknown, path: string): StateAssertion {
   const row = requireRecord(raw, path);
-  requireExactFields(
-    row,
-    [
-      'step',
-      'kind',
-      'attachElement',
-      'attachPage',
-      'pickedElementsCount',
-      'pickedElementIds',
-      'pendingCaptureKind',
-      'pendingElementId',
-      'maskMode',
-      'captures',
-      'captureElementIds',
-      'captureError',
-      'title',
-      'submittedUrl',
-      'clipboardOutcome',
-      'copiedCaptureId',
-    ],
-    path,
-  );
+  requireExactFields(row, EXPECTATION_FIELDS, path);
   let captures: CaptureKind[] | undefined;
   if (row.captures !== undefined) {
     if (!Array.isArray(row.captures)) throw new Error(`${path}.captures must be an array`);
@@ -305,8 +308,10 @@ function parseExpectation(raw: unknown, path: string): StateAssertion {
 }
 
 function loadFixture() {
-  const path = resolve(process.cwd(), 'src/lib/feedback/testdata/state_machine_cases.yaml');
-  const root = requireRecord(parseStrictYAML(readFileSync(path, 'utf8'), 'state machine cases'), 'state machine cases');
+  const root = requireRecord(
+    parseStrictYAML(readFileSync(resolve(process.cwd(), FIXTURE_PATH), 'utf8'), 'state machine cases'),
+    'state machine cases',
+  );
   requireExactRequiredFields(root, ['cases'], 'state machine cases');
   if (!Array.isArray(root.cases)) throw new Error('state machine cases.cases must be a list');
   const rows = root.cases.map((value, index) => requireRecord(value, `cases[${index}]`));

@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { PickerDirection, type ElementPickerAdapter, type PickedElementDraft } from '@/lib/feedback/types';
-import { ElementPickerOverlay } from './ElementPickerOverlay';
+import {
+  PickerDirection,
+  type ElementBox,
+  type ElementPickerAdapter,
+  type PickedElementDraft,
+  type ViewportSize,
+} from '@/lib/feedback/types';
+import { ElementPickerLabels, ElementPickerOverlay } from './ElementPickerOverlay';
 
 interface FakeAdapterHarness {
   adapter: ElementPickerAdapter;
@@ -23,7 +29,7 @@ function createFakeAdapter(options?: {
   const stepMap = options?.stepMap ?? new Map<string, Element | null>();
 
   const isIgnoredMock = vi.fn((el: Element) => ignored.has(el) || Boolean(el.closest('[data-feedback-widget]')));
-  const isTooLargeMock = vi.fn((rect: Pick<DOMRect, 'width' | 'height'>) => {
+  const isTooLargeMock = vi.fn((rect: ViewportSize) => {
     for (const el of tooLarge) {
       const r = el.getBoundingClientRect();
       if (r.width === rect.width && r.height === rect.height) return true;
@@ -65,7 +71,7 @@ function createFakeAdapter(options?: {
   };
 }
 
-function mockRect(el: Element, rect: { top: number; left: number; width: number; height: number }) {
+function mockRect(el: Element, rect: ElementBox) {
   vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({
     top: rect.top,
     left: rect.left,
@@ -114,7 +120,7 @@ describe('ElementPickerOverlay', () => {
     rerender(<ElementPickerOverlay active adapter={adapter} onConfirm={vi.fn()} onCancel={vi.fn()} />);
     const root = document.body.querySelector('[data-feedback-widget]');
     expect(root).not.toBeNull();
-    expect(screen.getByText('pick an element · enter to choose · esc to cancel')).toBeInTheDocument();
+    expect(screen.getByText(ElementPickerLabels.StatusHint)).toBeInTheDocument();
     expect(root?.querySelectorAll('.fbw-picker-scrim')).toHaveLength(1);
     expect(root?.querySelector('.fbw-picker-ring')).toBeNull();
   });

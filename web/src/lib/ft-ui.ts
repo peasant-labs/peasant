@@ -523,8 +523,8 @@ export interface DialogProps {
   children?: ReactNode;
   footer?: ReactNode;
   returnFocusRef?: RefObject<HTMLElement | null>;
-  /** default = 420px; wide = 720px (bottom sheet below 768px). */
-  size?: 'default' | 'wide';
+  /** Omit for the default 420px width; wide = 720px (bottom sheet below 768px). */
+  size?: 'wide';
   className?: string;
   /** When false, Escape and scrim click do not close (default: true). */
   dismissible?: boolean;

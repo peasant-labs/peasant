@@ -5,6 +5,14 @@ import { Button, Checkbox, Dialog } from '@/lib/ft-ui';
 import type { FeedbackKind } from '@/lib/feedback/types';
 import './feedback-dialogs.css';
 
+export const AttachOptionsLabels = Object.freeze({
+  Cancel: 'cancel',
+  Continue: 'continue',
+  PickElement: 'pick an element on the page',
+  CapturePage: 'capture the visible page',
+  MaskNotice: 'Captures mask transcript text by default. You can review every field and preview before opening GitHub.',
+} as const);
+
 export interface AttachOptionsDialogProps {
   open: boolean;
   kind: FeedbackKind;
@@ -41,30 +49,27 @@ export function AttachOptionsDialog({
       title={kind.label}
       labelId={labelId}
       returnFocusRef={returnFocusRef}
-      size="default"
       className="fbw-attach-dialog"
       footer={
         <>
           <Button type="button" variant="ghost" onClick={onClose}>
-            cancel
+            {AttachOptionsLabels.Cancel}
           </Button>
           <Button type="button" variant="primary" onClick={onProceed}>
-            continue
+            {AttachOptionsLabels.Continue}
           </Button>
         </>
       }
     >
       <div className="fbw-attach-options">
         <Checkbox checked={attachElement} onChange={() => onToggleElement()}>
-          pick an element on the page
+          {AttachOptionsLabels.PickElement}
         </Checkbox>
         <Checkbox checked={attachPage} onChange={() => onTogglePage()}>
-          capture the visible page
+          {AttachOptionsLabels.CapturePage}
         </Checkbox>
       </div>
-      <p className="fbw-dlg-prose">
-        Captures mask transcript text by default. You can review every field and preview before opening GitHub.
-      </p>
+      <p className="fbw-dlg-prose">{AttachOptionsLabels.MaskNotice}</p>
     </Dialog>
   );
 }

@@ -10,6 +10,7 @@ import {
 import { usePublishState } from '@/contexts/PublishContext';
 import { LayoutShell } from './LayoutShell';
 import { OPEN_COMMAND_PALETTE_EVENT } from './command/CommandPalette';
+import { FeedbackLauncherLabels } from './feedback/FeedbackLauncher';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { renderToString } from 'react-dom/server';
@@ -179,7 +180,7 @@ it('mounts the feedback launcher outside <main> and omits it under ?fb=off', asy
     </LayoutShell>,
   );
 
-  const launcher = await screen.findByRole('button', { name: 'feedback' });
+  const launcher = await screen.findByRole('button', { name: FeedbackLauncherLabels.Trigger });
   const main = document.querySelector('main');
   expect(main).not.toBeNull();
   expect(main?.contains(launcher)).toBe(false);
@@ -195,5 +196,5 @@ it('mounts the feedback launcher outside <main> and omits it under ?fb=off', asy
   await act(async () => {
     await new Promise((r) => setTimeout(r, 0));
   });
-  expect(screen.queryByRole('button', { name: 'feedback' })).toBeNull();
+  expect(screen.queryByRole('button', { name: FeedbackLauncherLabels.Trigger })).toBeNull();
 });

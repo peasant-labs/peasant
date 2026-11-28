@@ -21,7 +21,19 @@ import {
   type FeedbackState,
   type PickedElementInfo,
 } from '@/lib/feedback/types';
-import { ComposeFeedbackDialog, type ComposeFeedbackDialogProps } from './ComposeFeedbackDialog';
+import {
+  ComposeFeedbackDialog,
+  ComposeFeedbackLabels,
+  captureImageAlt,
+  captureIndexLabel,
+  copyCaptureAriaLabel,
+  downloadCaptureAriaLabel,
+  removeCaptureAriaLabel,
+  type ComposeFeedbackDialogProps,
+} from './ComposeFeedbackDialog';
+
+const FIXTURE_PATH = 'src/components/feedback/testdata/compose_dialog_cases.yaml';
+const ABSENT_DESCRIPTION_FIELD = 'description';
 
 interface SubmitCase {
   name: string;
@@ -99,8 +111,10 @@ function assertRequiredInventory(
 }
 
 function loadFixture() {
-  const path = resolve(process.cwd(), 'src/components/feedback/testdata/compose_dialog_cases.yaml');
-  const root = requireRecord(parseStrictYAML(readFileSync(path, 'utf8'), 'compose dialog fixture'), 'compose dialog fixture');
+  const root = requireRecord(
+    parseStrictYAML(readFileSync(resolve(process.cwd(), FIXTURE_PATH), 'utf8'), 'compose dialog fixture'),
+    'compose dialog fixture',
+  );
   requireExactRequiredFields(
     root,
     ['submitCases', 'kindCases', 'submittedOutcomeCases', 'pickLimitCases', 'templatePreviewCases', 'submittedPreviewCases'],
@@ -353,7 +367,7 @@ describe('ComposeFeedbackDialog', () => {
         state: makeState({ step: c.step }),
       });
       render(<ComposeFeedbackDialog {...props} />);
-      const button = screen.getByRole('button', { name: 'open github issue' });
+      const button = screen.getByRole('button', { name: ComposeFeedbackLabels.OpenIssue });
       if (c.expectedEnabled) {
         expect(button).toBeEnabled();
         fireEvent.click(button);
@@ -385,8 +399,8 @@ describe('ComposeFeedbackDialog', () => {
       });
       render(<ComposeFeedbackDialog {...props} />);
       expect(screen.getByText(c.instruction)).toBeInTheDocument();
-      expect(screen.queryByLabelText(/description/i)).toBeNull();
-      const preview = screen.getByLabelText('issue template preview');
+      expect(screen.queryByLabelText(ABSENT_DESCRIPTION_FIELD, { exact: false })).toBeNull();
+      const preview = screen.getByLabelText(ComposeFeedbackLabels.TemplatePreview);
       expect(preview.tagName).toBe('PRE');
       for (const fragment of c.expectedFragments) {
         expect(preview.textContent).toContain(fragment);
@@ -408,24 +422,24 @@ describe('ComposeFeedbackDialog', () => {
       render(<ComposeFeedbackDialog {...props} />);
 
       expect(screen.getByText(c.expectedLabel)).toBeInTheDocument();
-      expect(screen.getByText(/Ctrl\/Cmd\+V/i)).toBeInTheDocument();
+      expect(screen.getByText(ComposeFeedbackLabels.PasteHint)).toBeInTheDocument();
 
-      const fallbackLink = screen.getByRole('link', { name: 'open github issue' });
+      const fallbackLink = screen.getByRole('link', { name: ComposeFeedbackLabels.OpenIssue });
       expect(fallbackLink).toHaveAttribute('href', c.submittedUrl);
 
       if (c.hasCapture) {
-        const copyBtn = screen.getByRole('button', { name: /copy image 1/i });
-        const downloadBtn = screen.getByRole('button', { name: /download image 1/i });
+        const copyBtn = screen.getByRole('button', { name: copyCaptureAriaLabel(1, CaptureKind.Element.label) });
+        const downloadBtn = screen.getByRole('button', { name: downloadCaptureAriaLabel(1, CaptureKind.Element.label) });
         fireEvent.click(copyBtn);
         fireEvent.click(downloadBtn);
         expect(props.onCopyCapture).toHaveBeenCalledWith(1);
         expect(props.onDownloadCapture).toHaveBeenCalledWith(1);
       } else {
-        expect(screen.queryByRole('button', { name: /copy image/i })).toBeNull();
-        expect(screen.queryByRole('button', { name: /download/i })).toBeNull();
+        expect(screen.queryByRole('button', { name: new RegExp(ComposeFeedbackLabels.CopyImage, 'i') })).toBeNull();
+        expect(screen.queryByRole('button', { name: new RegExp(ComposeFeedbackLabels.Download, 'i') })).toBeNull();
       }
 
-      fireEvent.click(screen.getByRole('button', { name: 'done' }));
+      fireEvent.click(screen.getByRole('button', { name: ComposeFeedbackLabels.Done }));
       expect(props.onClose).toHaveBeenCalledTimes(1);
     });
 
@@ -542,24 +556,16 @@ describe('ComposeFeedbackDialog', () => {
     });
     const { rerender } = render(<ComposeFeedbackDialog {...props} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'unmask transcript' }));
+    fireEvent.click(screen.getByRole('button', { name: ComposeFeedbackLabels.UnmaskTranscript }));
     expect(props.onRequestUnmask).not.toHaveBeenCalled();
-    expect(
-      screen.getByText(
-        'This repository is public. Unmasking may reveal prompts, code, file paths, or secrets in your screenshot.',
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByText(ComposeFeedbackLabels.UnmaskWarning)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'keep masked' }));
+    fireEvent.click(screen.getByRole('button', { name: ComposeFeedbackLabels.KeepMasked }));
     expect(props.onRequestUnmask).not.toHaveBeenCalled();
-    expect(
-      screen.queryByText(
-        'This repository is public. Unmasking may reveal prompts, code, file paths, or secrets in your screenshot.',
-      ),
-    ).toBeNull();
+    expect(screen.queryByText(ComposeFeedbackLabels.UnmaskWarning)).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: 'unmask transcript' }));
-    fireEvent.click(screen.getByRole('button', { name: 'confirm unmask' }));
+    fireEvent.click(screen.getByRole('button', { name: ComposeFeedbackLabels.UnmaskTranscript }));
+    fireEvent.click(screen.getByRole('button', { name: ComposeFeedbackLabels.ConfirmUnmask }));
     expect(props.onRequestUnmask).toHaveBeenCalledTimes(1);
 
     rerender(
@@ -573,7 +579,7 @@ describe('ComposeFeedbackDialog', () => {
         })}
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'mask transcript' }));
+    fireEvent.click(screen.getByRole('button', { name: ComposeFeedbackLabels.MaskTranscript }));
     expect(props.onRemask).toHaveBeenCalledTimes(1);
   });
 
@@ -587,12 +593,16 @@ describe('ComposeFeedbackDialog', () => {
     const { rerender, unmount } = render(<ComposeFeedbackDialog {...props} />);
     expect(createObjectURLSpy).toHaveBeenCalledTimes(1);
     expect(createObjectURLSpy).toHaveBeenCalledWith(firstCapture.blob);
-    const img = screen.getByRole('img', { name: /image 1: picked element capture/i });
+    const img = screen.getByRole('img', {
+      name: captureImageAlt(1, CaptureKind.Element.label, MaskMode.Masked.label),
+    });
     expect(img).toHaveAttribute('src', 'blob:test-capture-1');
-    expect(screen.getByText('image 1')).toBeInTheDocument();
+    expect(screen.getByText(captureIndexLabel(1))).toBeInTheDocument();
     expect(revokeObjectURLSpy).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: /remove picked element capture \(image 1\)/i }));
+    fireEvent.click(
+      screen.getByRole('button', { name: removeCaptureAriaLabel(1, CaptureKind.Element.label) }),
+    );
     expect(props.onRemoveCapture).toHaveBeenCalledWith(10);
 
     rerender(
@@ -605,7 +615,9 @@ describe('ComposeFeedbackDialog', () => {
     );
     expect(revokeObjectURLSpy).toHaveBeenCalledWith('blob:test-capture-1');
     expect(createObjectURLSpy).toHaveBeenCalledTimes(2);
-    expect(screen.getByRole('img', { name: /image 1: whole page capture/i })).toHaveAttribute('src', 'blob:test-capture-2');
+    expect(
+      screen.getByRole('img', { name: captureImageAlt(1, CaptureKind.Page.label, MaskMode.Masked.label) }),
+    ).toHaveAttribute('src', 'blob:test-capture-2');
 
     unmount();
     expect(revokeObjectURLSpy).toHaveBeenCalledWith('blob:test-capture-2');
@@ -614,27 +626,28 @@ describe('ComposeFeedbackDialog', () => {
   it('renders notices, title updates, picker reopen, and back action', () => {
     const el1 = makeElement(1);
     const el2 = makeElement(2);
+    const captureError = 'SnapDOM timed out for page capture';
     const props = makeProps({
       state: makeState({
         title: 'Initial title',
         pickedElements: [el1, el2],
-        captureError: 'SnapDOM timed out for page capture',
+        captureError,
       }),
       truncated: true,
     });
 
     render(<ComposeFeedbackDialog {...props} />);
 
-    expect(screen.getByText('SnapDOM timed out for page capture')).toBeInTheDocument();
-    expect(screen.getByText(/length limit and was truncated/i)).toBeInTheDocument();
+    expect(screen.getByText(captureError)).toBeInTheDocument();
+    expect(screen.getByText(ComposeFeedbackLabels.TruncatedNotice)).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText('title'), { target: { value: 'Updated title' } });
+    fireEvent.change(screen.getByLabelText(ComposeFeedbackLabels.Title), { target: { value: 'Updated title' } });
     expect(props.onUpdateDraft).toHaveBeenCalledWith({ title: 'Updated title' });
 
-    fireEvent.click(screen.getByRole('button', { name: 'pick another element' }));
+    fireEvent.click(screen.getByRole('button', { name: ComposeFeedbackLabels.PickAnotherElement }));
     expect(props.onReopenPicker).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole('button', { name: 'back' }));
+    fireEvent.click(screen.getByRole('button', { name: ComposeFeedbackLabels.Back }));
     expect(props.onBack).toHaveBeenCalledTimes(1);
   });
 });

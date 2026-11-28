@@ -26,6 +26,67 @@ import {
 } from '@/lib/feedback/types';
 import './feedback-dialogs.css';
 
+export const ComposeFeedbackLabels = Object.freeze({
+  SubmittedTitle: 'github issue opened',
+  Done: 'done',
+  Back: 'back',
+  Cancel: 'cancel',
+  OpenIssue: 'open github issue',
+  KindSection: 'kind',
+  FeedbackKindGroup: 'feedback kind',
+  Title: 'title',
+  TemplateIntro: 'You will write the description on GitHub. The issue opens with this template filled in:',
+  TemplatePreview: 'issue template preview',
+  UrlDetailsSummary: 'preview github issue url',
+  Capturing: 'capturing screenshot',
+  ScreenshotsAndElement: 'screenshots and element',
+  Screenshots: 'screenshots',
+  PickElement: 'pick an element',
+  PickAnotherElement: 'pick another element',
+  UnmaskTranscript: 'unmask transcript',
+  MaskTranscript: 'mask transcript',
+  KeepMasked: 'keep masked',
+  ConfirmUnmask: 'confirm unmask',
+  UnmaskWarning:
+    'This repository is public. Unmasking may reveal prompts, code, file paths, or secrets in your screenshot.',
+  TruncatedNotice:
+    'The prefilled GitHub issue URL reached the length limit and was truncated. Paste any missing details after GitHub opens.',
+  PasteHint:
+    'Paste your screenshot into the screenshot field on GitHub with Ctrl/Cmd+V, or drag and drop a downloaded PNG.',
+  FallbackPrompt: 'If the tab did not open:',
+  OnClipboard: 'on clipboard',
+  CopyImage: 'copy image',
+  Download: 'download',
+  Remove: 'remove',
+} as const);
+
+export function captureIndexLabel(imageNumber: number): string {
+  return `image ${imageNumber}`;
+}
+
+export function captureImageAlt(imageNumber: number, kindLabel: string, maskLabel: string): string {
+  return `image ${imageNumber}: ${kindLabel} capture (${maskLabel})`;
+}
+
+export function copyCaptureAriaLabel(imageNumber: number, kindLabel: string): string {
+  return `copy image ${imageNumber} (${kindLabel})`;
+}
+
+export function downloadCaptureAriaLabel(imageNumber: number, kindLabel: string): string {
+  return `download image ${imageNumber} (${kindLabel})`;
+}
+
+export function removeCaptureAriaLabel(imageNumber: number, kindLabel: string): string {
+  return `remove ${kindLabel} capture (image ${imageNumber})`;
+}
+
+export function clipboardMarkerTextFor(copiedIndex: number, totalCaptures: number): string {
+  const imageNumber = copiedIndex + 1;
+  return totalCaptures > 1
+    ? `image ${imageNumber} copied — paste it, then copy the next`
+    : `image ${imageNumber} copied — paste it into the issue`;
+}
+
 export interface ComposeFeedbackDialogProps {
   open: boolean;
   state: FeedbackState;
@@ -63,9 +124,6 @@ const OUTCOME_TONES: Readonly<Record<ClipboardOutcome['wire'], { readonly cls: s
     [ClipboardOutcome.NotNeeded.wire]: { cls: '', icon: Info },
     [ClipboardOutcome.Failed.wire]: { cls: 'is-err', icon: AlertTriangle },
   });
-
-const UNMASK_WARNING_TEXT =
-  'This repository is public. Unmasking may reveal prompts, code, file paths, or secrets in your screenshot.';
 
 /**
  * Wide feedback dialog rendering both the compose review step and the
@@ -122,21 +180,18 @@ export function ComposeFeedbackDialog({
   const isSubmitted = state.step === FeedbackStep.Submitted;
   const isCapturing = state.step === FeedbackStep.Capturing;
   const atPickLimit = state.pickedElements.length >= MAX_PICKED_ELEMENTS;
-  const pickButtonLabel = state.pickedElements.length > 0 ? 'pick another element' : 'pick an element';
+  const pickButtonLabel =
+    state.pickedElements.length > 0 ? ComposeFeedbackLabels.PickAnotherElement : ComposeFeedbackLabels.PickElement;
   const pickLimitReason = `maximum ${MAX_PICKED_ELEMENTS} elements reached`;
   const canSubmit = !isCapturing;
-  const dialogTitle = isSubmitted ? 'github issue opened' : state.kind.label;
+  const dialogTitle = isSubmitted ? ComposeFeedbackLabels.SubmittedTitle : state.kind.label;
 
   const outcomeDisplay = OUTCOME_TONES[state.clipboardOutcome.wire];
   const OutcomeIcon = outcomeDisplay.icon;
   const copiedIndex =
     state.copiedCaptureId !== null ? state.captures.findIndex((c) => c.id === state.copiedCaptureId) : -1;
   const clipboardMarkerText =
-    copiedIndex !== -1
-      ? state.captures.length > 1
-        ? `image ${copiedIndex + 1} copied — paste it, then copy the next`
-        : `image ${copiedIndex + 1} copied — paste it into the issue`
-      : null;
+    copiedIndex !== -1 ? clipboardMarkerTextFor(copiedIndex, state.captures.length) : null;
 
   return (
     <Dialog
@@ -151,16 +206,16 @@ export function ComposeFeedbackDialog({
       footer={
         isSubmitted ? (
           <Button type="button" variant="primary" onClick={onClose}>
-            done
+            {ComposeFeedbackLabels.Done}
           </Button>
         ) : (
           <div className="fbw-footer-split">
             <Button type="button" variant="ghost" disabled={isCapturing} onClick={onBack}>
-              back
+              {ComposeFeedbackLabels.Back}
             </Button>
             <div className="fbw-footer-actions">
               <Button type="button" variant="ghost" disabled={isCapturing} onClick={onClose}>
-                cancel
+                {ComposeFeedbackLabels.Cancel}
               </Button>
               <Button
                 type="button"
@@ -170,7 +225,7 @@ export function ComposeFeedbackDialog({
                 icon={ExternalLink}
                 onClick={onSubmit}
               >
-                open github issue
+                {ComposeFeedbackLabels.OpenIssue}
               </Button>
             </div>
           </div>
@@ -184,10 +239,7 @@ export function ComposeFeedbackDialog({
             <span>{state.clipboardOutcome.label}</span>
           </div>
 
-          <p className="fbw-dlg-prose">
-            Paste your screenshot into the screenshot field on GitHub with Ctrl/Cmd+V, or drag and drop a downloaded
-            PNG.
-          </p>
+          <p className="fbw-dlg-prose">{ComposeFeedbackLabels.PasteHint}</p>
 
           {clipboardMarkerText && (
             <div className="fbw-clipboard-marker" role="status">
@@ -198,7 +250,7 @@ export function ComposeFeedbackDialog({
 
           {state.captures.length > 0 && (
             <div className="fbw-section">
-              <span className="label">screenshots</span>
+              <span className="label">{ComposeFeedbackLabels.Screenshots}</span>
               <div className="fbw-captures-grid">
                 {state.captures.map((capture, index) => {
                   const imageNumber = index + 1;
@@ -209,19 +261,19 @@ export function ComposeFeedbackDialog({
                       {previewUrl && (
                         <img
                           src={previewUrl}
-                          alt={`image ${imageNumber}: ${capture.kind.label} capture (${capture.maskMode.label})`}
+                          alt={captureImageAlt(imageNumber, capture.kind.label, capture.maskMode.label)}
                           className="fbw-capture-img"
                         />
                       )}
                       <div className="fbw-capture-meta">
-                        <span className="fbw-capture-index">image {imageNumber}</span>
+                        <span className="fbw-capture-index">{captureIndexLabel(imageNumber)}</span>
                         <span className="fbw-capture-label">{capture.kind.label}</span>
                         <span className="fbw-capture-dims tnum">
                           {capture.width}×{capture.height}
                         </span>
                         {isOnClipboard && (
                           <Chip chrome tone="ok" icon={CheckCircle2}>
-                            on clipboard
+                            {ComposeFeedbackLabels.OnClipboard}
                           </Chip>
                         )}
                       </div>
@@ -231,20 +283,20 @@ export function ComposeFeedbackDialog({
                           variant="secondary"
                           size="sm"
                           icon={Copy}
-                          aria-label={`copy image ${imageNumber} (${capture.kind.label})`}
+                          aria-label={copyCaptureAriaLabel(imageNumber, capture.kind.label)}
                           onClick={() => onCopyCapture(capture.id)}
                         >
-                          copy image
+                          {ComposeFeedbackLabels.CopyImage}
                         </Button>
                         <Button
                           type="button"
                           variant="secondary"
                           size="sm"
                           icon={Download}
-                          aria-label={`download image ${imageNumber} (${capture.kind.label})`}
+                          aria-label={downloadCaptureAriaLabel(imageNumber, capture.kind.label)}
                           onClick={() => onDownloadCapture(capture.id)}
                         >
-                          download
+                          {ComposeFeedbackLabels.Download}
                         </Button>
                       </div>
                     </div>
@@ -256,14 +308,14 @@ export function ComposeFeedbackDialog({
 
           {state.submittedUrl && (
             <div className="fbw-fallback-row">
-              <span className="fbw-dlg-prose">If the tab did not open:</span>
+              <span className="fbw-dlg-prose">{ComposeFeedbackLabels.FallbackPrompt}</span>
               <a
                 href={state.submittedUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="link"
               >
-                open github issue
+                {ComposeFeedbackLabels.OpenIssue}
               </a>
             </div>
           )}
@@ -271,9 +323,9 @@ export function ComposeFeedbackDialog({
       ) : (
         <>
           <div className="fbw-field-group">
-            <span className="label">kind</span>
+            <span className="label">{ComposeFeedbackLabels.KindSection}</span>
             <Segmented
-              label="feedback kind"
+              label={ComposeFeedbackLabels.FeedbackKindGroup}
               options={ALL_FEEDBACK_KINDS.map((kind) => ({
                 value: kind.wire,
                 label: kind.label,
@@ -289,7 +341,7 @@ export function ComposeFeedbackDialog({
           </div>
 
           <Input
-            label="title"
+            label={ComposeFeedbackLabels.Title}
             value={state.title}
             disabled={isCapturing}
             onChange={(event) => onUpdateDraft({ title: event.target.value })}
@@ -297,15 +349,13 @@ export function ComposeFeedbackDialog({
           />
 
           <div className="fbw-section">
-            <p className="fbw-dlg-prose">
-              You will write the description on GitHub. The issue opens with this template filled in:
-            </p>
-            <pre className="fbw-template-preview" tabIndex={0} aria-label="issue template preview">
+            <p className="fbw-dlg-prose">{ComposeFeedbackLabels.TemplateIntro}</p>
+            <pre className="fbw-template-preview" tabIndex={0} aria-label={ComposeFeedbackLabels.TemplatePreview}>
               {issueBodyPreview}
             </pre>
             {issuePreviewUrl && (
               <details className="fbw-url-details">
-                <summary>preview github issue url</summary>
+                <summary>{ComposeFeedbackLabels.UrlDetailsSummary}</summary>
                 <code>{issuePreviewUrl}</code>
               </details>
             )}
@@ -313,7 +363,7 @@ export function ComposeFeedbackDialog({
 
           {isCapturing && (
             <div className="fbw-busy-notice">
-              <Spinner>capturing screenshot</Spinner>
+              <Spinner>{ComposeFeedbackLabels.Capturing}</Spinner>
             </div>
           )}
 
@@ -326,7 +376,7 @@ export function ComposeFeedbackDialog({
 
           <div className="fbw-section">
             <div className="fbw-section-head">
-              <span className="label">screenshots and element</span>
+              <span className="label">{ComposeFeedbackLabels.ScreenshotsAndElement}</span>
               <div className="fbw-section-actions">
                 <Button
                   type="button"
@@ -367,7 +417,7 @@ export function ComposeFeedbackDialog({
                       disabled={isCapturing}
                       onClick={() => setConfirmingUnmask(true)}
                     >
-                      unmask transcript
+                      {ComposeFeedbackLabels.UnmaskTranscript}
                     </Button>
                   ) : (
                     <Button
@@ -378,7 +428,7 @@ export function ComposeFeedbackDialog({
                       disabled={isCapturing}
                       onClick={onRemask}
                     >
-                      mask transcript
+                      {ComposeFeedbackLabels.MaskTranscript}
                     </Button>
                   )}
                 </div>
@@ -387,7 +437,7 @@ export function ComposeFeedbackDialog({
                   <div className="fbw-unmask-warning" role="alert">
                     <div className="fbw-unmask-warning-head">
                       <AlertTriangle aria-hidden="true" />
-                      <span>{UNMASK_WARNING_TEXT}</span>
+                      <span>{ComposeFeedbackLabels.UnmaskWarning}</span>
                     </div>
                     <div className="fbw-unmask-actions">
                       <Button
@@ -396,7 +446,7 @@ export function ComposeFeedbackDialog({
                         size="sm"
                         onClick={() => setConfirmingUnmask(false)}
                       >
-                        keep masked
+                        {ComposeFeedbackLabels.KeepMasked}
                       </Button>
                       <Button
                         type="button"
@@ -408,7 +458,7 @@ export function ComposeFeedbackDialog({
                           onRequestUnmask();
                         }}
                       >
-                        confirm unmask
+                        {ComposeFeedbackLabels.ConfirmUnmask}
                       </Button>
                     </div>
                   </div>
@@ -421,11 +471,11 @@ export function ComposeFeedbackDialog({
                       <div key={entry.artifact.id} className="fbw-capture-card">
                         <img
                           src={entry.url}
-                          alt={`image ${imageNumber}: ${entry.artifact.kind.label} capture (${entry.artifact.maskMode.label})`}
+                          alt={captureImageAlt(imageNumber, entry.artifact.kind.label, entry.artifact.maskMode.label)}
                           className="fbw-capture-img"
                         />
                         <div className="fbw-capture-meta">
-                          <span className="fbw-capture-index">image {imageNumber}</span>
+                          <span className="fbw-capture-index">{captureIndexLabel(imageNumber)}</span>
                           <span className="fbw-capture-label">{entry.artifact.kind.label}</span>
                           <span className="fbw-capture-dims tnum">
                             {entry.artifact.width}×{entry.artifact.height}
@@ -436,10 +486,10 @@ export function ComposeFeedbackDialog({
                             size="sm"
                             icon={Trash2}
                             disabled={isCapturing}
-                            aria-label={`remove ${entry.artifact.kind.label} capture (image ${imageNumber})`}
+                            aria-label={removeCaptureAriaLabel(imageNumber, entry.artifact.kind.label)}
                             onClick={() => onRemoveCapture(entry.artifact.id)}
                           >
-                            remove
+                            {ComposeFeedbackLabels.Remove}
                           </Button>
                         </div>
                       </div>
@@ -453,10 +503,7 @@ export function ComposeFeedbackDialog({
           {truncated && (
             <div className="fbw-trunc-notice" role="status">
               <AlertTriangle aria-hidden="true" />
-              <span>
-                The prefilled GitHub issue URL reached the length limit and was truncated. Paste any missing details
-                after GitHub opens.
-              </span>
+              <span>{ComposeFeedbackLabels.TruncatedNotice}</span>
             </div>
           )}
         </>

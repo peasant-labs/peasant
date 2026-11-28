@@ -18,7 +18,9 @@ export interface ElementPickerOverlayProps {
   onCancel: () => void;
 }
 
-const STATUS_HINT = 'pick an element · enter to choose · esc to cancel';
+export const ElementPickerLabels = Object.freeze({
+  StatusHint: 'pick an element · enter to choose · esc to cancel',
+} as const);
 
 function directionForKey(event: KeyboardEvent): PickerDirection | null {
   switch (event.key) {
@@ -37,7 +39,7 @@ function directionForKey(event: KeyboardEvent): PickerDirection | null {
   }
 }
 
-function toBox(rect: Pick<DOMRect, 'top' | 'left' | 'width' | 'height'>): ElementBox {
+function toBox(rect: ElementBox): ElementBox {
   return {
     top: rect.top,
     left: rect.left,
@@ -253,7 +255,7 @@ export function ElementPickerOverlay({ active, adapter, onConfirm, onCancel }: E
       )}
 
       <div className="fbw-picker-status" role="status" aria-hidden="true">
-        {STATUS_HINT}
+        {ElementPickerLabels.StatusHint}
       </div>
 
       <div className="sr-only fbw-sr-only" role="status" aria-live="polite">

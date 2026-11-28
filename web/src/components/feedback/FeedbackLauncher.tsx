@@ -5,6 +5,11 @@ import { Bug, Lightbulb, MessageSquarePlus } from 'lucide-react';
 import { ALL_FEEDBACK_KINDS, FeedbackKind } from '@/lib/feedback/types';
 import './feedback-widget.css';
 
+export const FeedbackLauncherLabels = Object.freeze({
+  Trigger: 'feedback',
+  Menu: 'feedback options',
+} as const);
+
 export interface FeedbackLauncherProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -166,7 +171,7 @@ export function FeedbackLauncher({ open, onOpenChange, onSelectKind, disabled = 
         ref={setTriggerRef}
         type="button"
         className="fbw-launcher"
-        aria-label="feedback"
+        aria-label={FeedbackLauncherLabels.Trigger}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={menuId}
@@ -180,7 +185,7 @@ export function FeedbackLauncher({ open, onOpenChange, onSelectKind, disabled = 
       <div
         id={menuId}
         role="menu"
-        aria-label="feedback options"
+        aria-label={FeedbackLauncherLabels.Menu}
         className="fbw-menu"
         hidden={!open}
         onKeyDown={onMenuKeyDown}

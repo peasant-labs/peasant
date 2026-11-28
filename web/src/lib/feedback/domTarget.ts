@@ -43,7 +43,7 @@ export function isIgnoredFeedbackElement(el: Element): boolean {
 }
 
 /** True when a bounding box spans effectively the entire viewport. */
-export function isTooLargeRect(rect: Pick<DOMRect, 'width' | 'height'>, viewport: ViewportSize): boolean {
+export function isTooLargeRect(rect: ViewportSize, viewport: ViewportSize): boolean {
   if (viewport.width <= 0 || viewport.height <= 0) return false;
   return (
     rect.width >= viewport.width * TOO_LARGE_WIDTH_RATIO &&

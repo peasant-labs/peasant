@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { closed } from '@peasant-labs/fairtrade/closed-value';
 import {
   parseStrictYAML,
   requireExactRequiredFields,
@@ -9,9 +10,28 @@ import {
   requireUniqueNames,
 } from '@/test/strictYaml';
 import { ALL_FEEDBACK_KINDS, type FeedbackKind } from '@/lib/feedback/types';
-import { AttachOptionsDialog } from './AttachOptionsDialog';
+import { AttachOptionsDialog, AttachOptionsLabels } from './AttachOptionsDialog';
 
-type AttachAction = 'none' | 'toggle_element' | 'toggle_page' | 'proceed' | 'cancel' | 'escape';
+const FIXTURE_PATH = 'src/components/feedback/testdata/attach_options_cases.yaml';
+
+const AttachAction = Object.freeze({
+  None: closed('none', 'none'),
+  ToggleElement: closed('toggle_element', 'toggle element'),
+  TogglePage: closed('toggle_page', 'toggle page'),
+  Proceed: closed('proceed', 'proceed'),
+  Cancel: closed('cancel', 'cancel'),
+  Escape: closed('escape', 'escape'),
+} as const);
+type AttachAction = (typeof AttachAction)[keyof typeof AttachAction];
+
+const ALL_ATTACH_ACTIONS = Object.freeze([
+  AttachAction.None,
+  AttachAction.ToggleElement,
+  AttachAction.TogglePage,
+  AttachAction.Proceed,
+  AttachAction.Cancel,
+  AttachAction.Escape,
+] as const);
 
 interface AttachCase {
   name: string;
@@ -22,11 +42,11 @@ interface AttachCase {
   action: AttachAction;
 }
 
-const VALID_ACTIONS = new Set<string>(['none', 'toggle_element', 'toggle_page', 'proceed', 'cancel', 'escape']);
-
 function loadCases(): AttachCase[] {
-  const path = resolve(process.cwd(), 'src/components/feedback/testdata/attach_options_cases.yaml');
-  const root = requireRecord(parseStrictYAML(readFileSync(path, 'utf8'), 'attach options fixture'), 'attach options fixture');
+  const root = requireRecord(
+    parseStrictYAML(readFileSync(resolve(process.cwd(), FIXTURE_PATH), 'utf8'), 'attach options fixture'),
+    'attach options fixture',
+  );
   requireExactRequiredFields(root, ['requiredNames', 'cases'], 'attach options fixture');
   const requiredNames = root.requiredNames;
   if (
@@ -60,12 +80,12 @@ function loadCases(): AttachCase[] {
     );
     const kind = ALL_FEEDBACK_KINDS.find((k) => k.wire === row.kind);
     if (!kind) throw new Error(`cases[${index}].kind is unknown: ${String(row.kind)}`);
+    const action = ALL_ATTACH_ACTIONS.find((a) => a.wire === row.action);
     if (
       typeof row.expectedTitle !== 'string' ||
       typeof row.attachElement !== 'boolean' ||
       typeof row.attachPage !== 'boolean' ||
-      typeof row.action !== 'string' ||
-      !VALID_ACTIONS.has(row.action)
+      !action
     ) {
       throw new Error(`cases[${index}] has invalid field types`);
     }
@@ -75,7 +95,7 @@ function loadCases(): AttachCase[] {
       expectedTitle: row.expectedTitle,
       attachElement: row.attachElement,
       attachPage: row.attachPage,
-      action: row.action as AttachAction,
+      action,
     };
   });
 }
@@ -109,27 +129,27 @@ describe('AttachOptionsDialog', () => {
     const dialog = screen.getByRole('dialog', { name: c.expectedTitle });
     expect(dialog).toBeInTheDocument();
 
-    const elementCheckbox = screen.getByRole('checkbox', { name: 'pick an element on the page' }) as HTMLInputElement;
-    const pageCheckbox = screen.getByRole('checkbox', { name: 'capture the visible page' }) as HTMLInputElement;
+    const elementCheckbox = screen.getByRole('checkbox', { name: AttachOptionsLabels.PickElement }) as HTMLInputElement;
+    const pageCheckbox = screen.getByRole('checkbox', { name: AttachOptionsLabels.CapturePage }) as HTMLInputElement;
     expect(elementCheckbox.checked).toBe(c.attachElement);
     expect(pageCheckbox.checked).toBe(c.attachPage);
-    expect(screen.getByText(/Captures mask transcript text by default/i)).toBeInTheDocument();
+    expect(screen.getByText(AttachOptionsLabels.MaskNotice)).toBeInTheDocument();
 
-    if (c.action === 'toggle_element') {
+    if (c.action === AttachAction.ToggleElement) {
       fireEvent.click(elementCheckbox);
       expect(onToggleElement).toHaveBeenCalledTimes(1);
       expect(onTogglePage).not.toHaveBeenCalled();
-    } else if (c.action === 'toggle_page') {
+    } else if (c.action === AttachAction.TogglePage) {
       fireEvent.click(pageCheckbox);
       expect(onTogglePage).toHaveBeenCalledTimes(1);
       expect(onToggleElement).not.toHaveBeenCalled();
-    } else if (c.action === 'proceed') {
-      fireEvent.click(screen.getByRole('button', { name: 'continue' }));
+    } else if (c.action === AttachAction.Proceed) {
+      fireEvent.click(screen.getByRole('button', { name: AttachOptionsLabels.Continue }));
       expect(onProceed).toHaveBeenCalledTimes(1);
-    } else if (c.action === 'cancel') {
-      fireEvent.click(screen.getByRole('button', { name: 'cancel' }));
+    } else if (c.action === AttachAction.Cancel) {
+      fireEvent.click(screen.getByRole('button', { name: AttachOptionsLabels.Cancel }));
       expect(onClose).toHaveBeenCalledTimes(1);
-    } else if (c.action === 'escape') {
+    } else if (c.action === AttachAction.Escape) {
       fireEvent.keyDown(document, { key: 'Escape' });
       expect(onClose).toHaveBeenCalledTimes(1);
     }

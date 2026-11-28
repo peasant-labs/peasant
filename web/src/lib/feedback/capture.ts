@@ -17,6 +17,16 @@ const MIN_ELEMENT_CAPTURE_DPR = 2;
 const DEFAULT_DARK_BACKGROUND = '#0b0b0a';
 const DEFAULT_LIGHT_BACKGROUND = '#fbfaf7';
 
+const CssColorKeyword = Object.freeze({
+  Transparent: 'transparent',
+  None: 'none',
+} as const);
+
+const DomTheme = Object.freeze({
+  Light: 'light',
+  Dark: 'dark',
+} as const);
+
 export interface SnapdomCaptureOptions {
   backgroundColor?: string | null;
   exclude?: string | ((el: Element) => boolean) | Array<string | ((el: Element) => boolean)>;
@@ -81,7 +91,7 @@ function resolveDimension(primary: number | undefined, fallback: number): number
 
 function isTransparentColor(raw: string): boolean {
   const value = raw.trim().toLowerCase();
-  if (!value || value === 'transparent' || value === 'none') {
+  if (!value || value === CssColorKeyword.Transparent || value === CssColorKeyword.None) {
     return true;
   }
   const slashAlpha = value.match(/\/\s*([0-9.]+%?)\s*\)$/);
@@ -138,7 +148,7 @@ export function resolveOpaqueBackgroundColor(doc: Document, win?: Window): strin
     }
   }
 
-  return doc.documentElement?.dataset?.theme === 'light' ? DEFAULT_LIGHT_BACKGROUND : DEFAULT_DARK_BACKGROUND;
+  return doc.documentElement?.dataset?.theme === DomTheme.Light ? DEFAULT_LIGHT_BACKGROUND : DEFAULT_DARK_BACKGROUND;
 }
 
 /**

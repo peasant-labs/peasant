@@ -11,9 +11,10 @@ import {
   requireRecord,
   requireUniqueNames,
 } from '@/test/strictYaml';
-import { FeedbackLauncher } from './FeedbackLauncher';
+import { FeedbackLauncher, FeedbackLauncherLabels } from './FeedbackLauncher';
 
-const FIXTURE_PATH = resolve(process.cwd(), 'src/components/feedback/testdata/launcher_menu_cases.yaml');
+const FIXTURE_PATH = 'src/components/feedback/testdata/launcher_menu_cases.yaml';
+const HARNESS_OUTSIDE_LABEL = 'outside';
 
 const REQUIRED_NAMES = [
   'click-toggles-radial-menu',
@@ -25,18 +26,17 @@ const REQUIRED_NAMES = [
   'click-outside-closes',
 ] as const;
 
-type KindKey = 'problem' | 'feature';
-type FocusTarget = KindKey | 'launcher';
+type FocusExpectation = { readonly launcher: true } | { readonly kind: FeedbackKind };
 
 type Step =
   | { clickTrigger: true }
   | { clickOutside: true }
   | { key: string }
   | { expectOpen: boolean }
-  | { expectActiveKind: KindKey }
-  | { expectFocused: FocusTarget }
-  | { expectSelected: KindKey }
-  | { expectTabIndex: { problem: number; feature: number } };
+  | { expectActiveKind: FeedbackKind }
+  | { expectFocused: FocusExpectation }
+  | { expectSelected: FeedbackKind }
+  | { expectTabIndex: ReadonlyArray<readonly [FeedbackKind, number]> };
 
 const STEP_KEYS = [
   'clickTrigger',
@@ -55,12 +55,57 @@ interface LauncherCase {
   steps: Step[];
 }
 
-function kindFromKey(key: KindKey): FeedbackKind {
-  return key === 'problem' ? FeedbackKind.Problem : FeedbackKind.Feature;
+function findKindByWire(wire: unknown, label: string): FeedbackKind {
+  const found = ALL_FEEDBACK_KINDS.find((k) => k.wire === wire);
+  if (!found) {
+    throw new Error(`${label} has unknown feedback kind ${JSON.stringify(wire)}`);
+  }
+  return found;
+}
+
+function parseStep(step: Record<string, unknown>, label: string): Step {
+  if ('clickTrigger' in step) return { clickTrigger: true };
+  if ('clickOutside' in step) return { clickOutside: true };
+  if ('key' in step) {
+    if (typeof step.key !== 'string') throw new Error(`${label}.key must be a string`);
+    return { key: step.key };
+  }
+  if ('expectOpen' in step) {
+    if (typeof step.expectOpen !== 'boolean') throw new Error(`${label}.expectOpen must be a boolean`);
+    return { expectOpen: step.expectOpen };
+  }
+  if ('expectActiveKind' in step) {
+    return { expectActiveKind: findKindByWire(step.expectActiveKind, `${label}.expectActiveKind`) };
+  }
+  if ('expectSelected' in step) {
+    return { expectSelected: findKindByWire(step.expectSelected, `${label}.expectSelected`) };
+  }
+  if ('expectFocused' in step) {
+    const launcherTarget = 'launcher';
+    if (step.expectFocused === launcherTarget) {
+      return { expectFocused: { launcher: true } };
+    }
+    return { expectFocused: { kind: findKindByWire(step.expectFocused, `${label}.expectFocused`) } };
+  }
+  if ('expectTabIndex' in step) {
+    const tabMap = requireRecord(step.expectTabIndex, `${label}.expectTabIndex`);
+    const entries = ALL_FEEDBACK_KINDS.map((kind) => {
+      const value = tabMap[kind.wire];
+      if (typeof value !== 'number') {
+        throw new Error(`${label}.expectTabIndex.${kind.wire} must be a number`);
+      }
+      return [kind, value] as const;
+    });
+    return { expectTabIndex: entries };
+  }
+  throw new Error(`${label} has unsupported step key`);
 }
 
 function loadFixture(): LauncherCase[] {
-  const root = requireRecord(parseStrictYAML(readFileSync(FIXTURE_PATH, 'utf8'), 'launcher menu fixture'), 'launcher menu fixture');
+  const root = requireRecord(
+    parseStrictYAML(readFileSync(resolve(process.cwd(), FIXTURE_PATH), 'utf8'), 'launcher menu fixture'),
+    'launcher menu fixture',
+  );
   requireExactRequiredFields(root, ['requiredNames', 'cases'], 'launcher menu fixture');
   const requiredNames = root.requiredNames;
   if (
@@ -98,7 +143,7 @@ function loadFixture(): LauncherCase[] {
       if (Object.keys(step).length !== 1) {
         throw new Error(`cases[${index}].steps[${stepIndex}] must hold exactly one action or assertion`);
       }
-      return step as Step;
+      return parseStep(step, `cases[${index}].steps[${stepIndex}]`);
     });
     return {
       name: row.name as string,
@@ -123,9 +168,7 @@ function Harness({
   const launcherRef = useRef<HTMLButtonElement | null>(null);
   return (
     <div>
-      <button type="button" data-testid="outside">
-        outside
-      </button>
+      <button type="button">{HARNESS_OUTSIDE_LABEL}</button>
       <FeedbackLauncher
         open={open}
         onOpenChange={setOpen}
@@ -154,8 +197,8 @@ describe('FeedbackLauncher', () => {
     const onSelectKind = vi.fn();
     const { container } = render(<Harness initialOpen={c.initialOpen} onSelectKind={onSelectKind} />);
 
-    const trigger = () => screen.getByRole('button', { name: 'feedback' });
-    const itemFor = (key: KindKey) => screen.getByRole('menuitem', { name: kindFromKey(key).label });
+    const trigger = () => screen.getByRole('button', { name: FeedbackLauncherLabels.Trigger });
+    const itemFor = (kind: FeedbackKind) => screen.getByRole('menuitem', { name: kind.label });
 
     for (const step of c.steps) {
       if ('clickTrigger' in step) {
@@ -164,7 +207,7 @@ describe('FeedbackLauncher', () => {
         });
       } else if ('clickOutside' in step) {
         act(() => {
-          fireEvent.pointerDown(screen.getByTestId('outside'));
+          fireEvent.pointerDown(screen.getByRole('button', { name: HARNESS_OUTSIDE_LABEL }));
         });
       } else if ('key' in step) {
         const active = document.activeElement ?? trigger();
@@ -181,13 +224,14 @@ describe('FeedbackLauncher', () => {
       } else if ('expectActiveKind' in step) {
         expect(itemFor(step.expectActiveKind)).toHaveAttribute('tabindex', '0');
       } else if ('expectFocused' in step) {
-        const expectedEl = step.expectFocused === 'launcher' ? trigger() : itemFor(step.expectFocused);
+        const expectedEl = 'launcher' in step.expectFocused ? trigger() : itemFor(step.expectFocused.kind);
         expect(document.activeElement).toBe(expectedEl);
       } else if ('expectSelected' in step) {
-        expect(onSelectKind).toHaveBeenCalledWith(kindFromKey(step.expectSelected));
+        expect(onSelectKind).toHaveBeenCalledWith(step.expectSelected);
       } else if ('expectTabIndex' in step) {
-        expect(itemFor('problem')).toHaveAttribute('tabindex', String(step.expectTabIndex.problem));
-        expect(itemFor('feature')).toHaveAttribute('tabindex', String(step.expectTabIndex.feature));
+        for (const [kind, tabIndex] of step.expectTabIndex) {
+          expect(itemFor(kind)).toHaveAttribute('tabindex', String(tabIndex));
+        }
       }
     }
 
@@ -202,7 +246,7 @@ describe('FeedbackLauncher', () => {
       <FeedbackLauncher open onOpenChange={onOpenChange} onSelectKind={onSelectKind} />,
     );
 
-    const trigger = screen.getByRole('button', { name: 'feedback' });
+    const trigger = screen.getByRole('button', { name: FeedbackLauncherLabels.Trigger });
     const menu = screen.getByRole('menu');
     expect(trigger).toHaveAttribute('aria-haspopup', 'menu');
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
@@ -218,7 +262,7 @@ describe('FeedbackLauncher', () => {
     const onSelectKind = vi.fn();
     render(<FeedbackLauncher open={false} onOpenChange={onOpenChange} onSelectKind={onSelectKind} disabled />);
 
-    const trigger = screen.getByRole('button', { name: 'feedback' });
+    const trigger = screen.getByRole('button', { name: FeedbackLauncherLabels.Trigger });
     expect(trigger).toBeDisabled();
     fireEvent.click(trigger);
     fireEvent.keyDown(trigger, { key: 'ArrowDown' });

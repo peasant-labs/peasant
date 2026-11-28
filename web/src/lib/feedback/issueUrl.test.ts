@@ -137,6 +137,9 @@ interface IssueFormExpectation {
   readonly expectationsExample: string;
 }
 
+const ISSUE_FORMS_PATH = 'src/lib/feedback/testdata/issue_forms.yaml';
+const ISSUE_URL_CASES_PATH = 'src/lib/feedback/testdata/issue_url_cases.yaml';
+
 const ISSUE_FORM_FIELDS = [
   'kind',
   'name',
@@ -155,8 +158,10 @@ function requireString(value: unknown, path: string): string {
 
 /** Per-kind form expectations from testdata/issue_forms.yaml; every feedback kind must have exactly one row. */
 function loadIssueFormExpectations(): Map<FeedbackKind, IssueFormExpectation> {
-  const path = resolve(process.cwd(), 'src/lib/feedback/testdata/issue_forms.yaml');
-  const root = requireRecord(parseStrictYAML(readFileSync(path, 'utf8'), 'issue forms'), 'issue forms');
+  const root = requireRecord(
+    parseStrictYAML(readFileSync(resolve(process.cwd(), ISSUE_FORMS_PATH), 'utf8'), 'issue forms'),
+    'issue forms',
+  );
   requireExactFields(root, ['forms'], 'issue forms');
   if (!Array.isArray(root.forms)) throw new Error('issue forms.forms must be an array');
   const byKind = new Map<FeedbackKind, IssueFormExpectation>();
@@ -184,8 +189,10 @@ function loadIssueFormExpectations(): Map<FeedbackKind, IssueFormExpectation> {
 }
 
 function loadFixture(): ParsedUrlCase[] {
-  const path = resolve(process.cwd(), 'src/lib/feedback/testdata/issue_url_cases.yaml');
-  const root = requireRecord(parseStrictYAML(readFileSync(path, 'utf8'), 'issue url cases'), 'issue url cases');
+  const root = requireRecord(
+    parseStrictYAML(readFileSync(resolve(process.cwd(), ISSUE_URL_CASES_PATH), 'utf8'), 'issue url cases'),
+    'issue url cases',
+  );
   requireExactRequiredFields(root, ['cases'], 'issue url cases');
   if (!Array.isArray(root.cases)) throw new Error('issue url cases.cases must be a list');
   const rows = root.cases.map((value, index) => requireRecord(value, `cases[${index}]`));

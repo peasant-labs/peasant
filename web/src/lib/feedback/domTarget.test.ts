@@ -23,7 +23,7 @@ import {
 } from './domTarget';
 import { ALL_PICKER_DIRECTIONS, PickerDirection } from './types';
 
-const FIXTURE_PATH = resolve(process.cwd(), 'src/lib/feedback/testdata/dom_target_cases.yaml');
+const FIXTURE_PATH = 'src/lib/feedback/testdata/dom_target_cases.yaml';
 
 const DIRECTION_BY_WIRE: Readonly<Record<string, PickerDirection>> = Object.fromEntries(
   ALL_PICKER_DIRECTIONS.map((member) => [member.wire, member]),
@@ -124,7 +124,10 @@ interface DescribeCase {
 }
 
 function loadFixture() {
-  const root = requireRecord(parseStrictYAML(readFileSync(FIXTURE_PATH, 'utf8'), 'dom_target_cases'), 'dom_target_cases');
+  const root = requireRecord(
+    parseStrictYAML(readFileSync(resolve(process.cwd(), FIXTURE_PATH), 'utf8'), 'dom_target_cases'),
+    'dom_target_cases',
+  );
   requireExactRequiredFields(
     root,
     ['selectors', 'tooLarge', 'snippets', 'switches', 'ignored', 'stepping', 'describe'],
