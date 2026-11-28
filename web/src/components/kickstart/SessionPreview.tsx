@@ -6,6 +6,7 @@ import {
   TranscriptTail,
   TranscriptViewer,
   adaptTranscript,
+  previewSourceBytes,
   type SegmentDirectoryVM,
 } from '@peasant-labs/fairtrade/ui';
 import type { LocalKickstartPreviewState } from '@peasant-labs/schema';
@@ -13,7 +14,6 @@ import { Button, Skeleton } from '@/lib/ft-ui';
 import { useTheme } from '@/hooks/useTheme';
 import { useKickstartSourcePreview } from '@/lib/kickstart/useKickstartSourcePreview';
 import { PreviewNoticeTone, READ_AGAIN } from '@/lib/kickstart/sourcePreview';
-import { continueTurnLabels } from '@/lib/kickstart/previewTurnLabels';
 import { cookSegment } from '@/components/session-detail/v2/lib/transcriptSegments';
 import ErrorCard from '@/components/ErrorCard';
 import PreviewSlot, { PreviewSlotContent } from './PreviewSlot';
@@ -50,7 +50,7 @@ const NO_CAPABILITIES = Object.freeze({
 /** The viewer's segment directory for the wire's open directory. */
 function directoryVM(held: LocalKickstartPreviewState): SegmentDirectoryVM {
   const wire = held.directory;
-  return {
+  const base: SegmentDirectoryVM = {
     sessionId: wire.sessionId,
     revision: wire.revision,
     complete: wire.complete,
@@ -60,6 +60,15 @@ function directoryVM(held: LocalKickstartPreviewState): SegmentDirectoryVM {
     // A position is stated against a total only once the server sent one, so
     // nothing is invented while the directory is still open.
     ...(wire.totalConversationTurns != null ? { totalConversationTurns: wire.totalConversationTurns } : {}),
+  };
+  const sourceBytes = previewSourceBytes({
+    ...base,
+    ...(wire.sourceBytesLoaded != null ? { sourceBytesLoaded: wire.sourceBytesLoaded } : {}),
+    ...(wire.sourceBytesTotal != null ? { sourceBytesTotal: wire.sourceBytesTotal } : {}),
+  });
+  return {
+    ...base,
+    ...(sourceBytes !== null ? { sourceBytesLoaded: sourceBytes.loaded, sourceBytesTotal: sourceBytes.total } : {}),
   };
 }
 
@@ -104,10 +113,19 @@ export default function SessionPreview({ sessionId, nodeId, label, scanGeneratio
 
   const viewModel = useMemo(() => {
     if (held === null || held.segments.length === 0) return null;
+    const allTurns = held.segments.flatMap((segment) => segment.turns);
+    const hasDisplayNumber = allTurns.some((turn) => turn.displayNumber != null);
+    const allHaveDisplayNumber = allTurns.every((turn) => turn.displayNumber != null);
+    // Keep viewModel compatible if segments mix served displayNumber and omitted labels;
+    // cooked segments preserve the exact per-segment wire displayNumber values.
+    const viewTurns =
+      hasDisplayNumber && !allHaveDisplayNumber
+        ? allTurns.map(({ displayNumber: _omitted, ...rest }) => rest)
+        : allTurns;
     const adapted = adaptTranscript(
       {
         ...held.header,
-        turns: held.segments.flatMap((segment) => segment.turns),
+        turns: viewTurns,
         nativeMetadata: [...(held.header.nativeMetadata ?? []), ...held.segments.flatMap((segment) => segment.nativeMetadata ?? [])],
         retainedUnknown: held.segments.flatMap((segment) => segment.retainedUnknown ?? []),
       },
@@ -137,14 +155,10 @@ export default function SessionPreview({ sessionId, nodeId, label, scanGeneratio
     };
   }, [held, label, tail]);
 
-  // Each segment is cooked alone, then given the labels the whole held
-  // session has, so turn numbers continue across loaded segments.
   const segments = useMemo(() => {
     if (held === null) return [];
-    const cooked = held.segments.map((segment) => cookSegment(held.header, segment, { tail }));
-    if (viewModel === null) return cooked;
-    return continueTurnLabels(cooked, viewModel.turns, held.segments.flatMap((segment) => segment.turns));
-  }, [held, tail, viewModel]);
+    return held.segments.map((segment) => cookSegment(held.header, segment, { tail }));
+  }, [held, tail]);
   const directory = useMemo(() => (held === null ? null : directoryVM(held)), [held]);
 
   // Every segment the directory names is already held, so a jump or a

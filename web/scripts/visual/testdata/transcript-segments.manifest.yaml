@@ -13,3 +13,4 @@ requiredNames:
   - revision-directory-fails
   - positions-mounted
   - legacy-duplicate-full-load
+  - served-display-numbers-mounted

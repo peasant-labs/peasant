@@ -48,7 +48,7 @@
     "test:directive-guard": "node scripts/test-directive-prologue.mjs"
   },
   "dependencies": {
-    "@peasant-labs/fairtrade": "0.2.1",
+    "@peasant-labs/fairtrade": "0.3.0",
     "@peasant-labs/schema": "0.63.0",
     "@xyflow/react": "^12.10.1",
     "clsx": "^2.1.1",
