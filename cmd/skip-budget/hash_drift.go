@@ -321,6 +321,29 @@ func (i tracingClaudeIndexer) BuildGenerationMetadata(ctx context.Context, input
 	return candidate, err
 }
 
+// tracingOpenCodeIndexer is the registered OpenCode indexer, timing each
+// metadata half the pipeline runs and forwarding BuildGeneration.
+type tracingOpenCodeIndexer struct {
+	*ingest.OpenCodeIndexer
+	trace *runTrace
+}
+
+var (
+	_ ingest.GenerationBuilder         = tracingOpenCodeIndexer{}
+	_ ingest.GenerationMetadataBuilder = tracingOpenCodeIndexer{}
+)
+
+func (i tracingOpenCodeIndexer) BuildGeneration(ctx context.Context, input ingest.GenerationBuildInput) (ingest.GenerationCandidate, error) {
+	return i.OpenCodeIndexer.BuildGeneration(ctx, input)
+}
+
+func (i tracingOpenCodeIndexer) BuildGenerationMetadata(ctx context.Context, input ingest.GenerationBuildInput) (ingest.GenerationMetadataCandidate, error) {
+	start := time.Now()
+	candidate, err := i.OpenCodeIndexer.BuildGenerationMetadata(ctx, input)
+	i.trace.builtHalf(input.Session.SessionID, time.Since(start), err)
+	return candidate, err
+}
+
 // forgeStoredMetadataHashes forges every active generation's stored
 // metadata_hash to another non-zero value. The immutability trigger is lifted
 // for the one update and restored from its own stored definition, and the

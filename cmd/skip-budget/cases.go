@@ -66,6 +66,10 @@ const (
 	// metadata file, so the refreshed capture carries a changed context over
 	// unchanged transcript bytes.
 	mutateContextChange
+	// mutateOpenCodeProjectName moves the adapter stamp back by one and
+	// updates only project.name in the synthetic OpenCode SQLite database,
+	// leaving worktree, git remote, HostSlug, and transcript bytes fixed.
+	mutateOpenCodeProjectName
 	// mutateNone leaves the imported base as it is. Only the new-session
 	// smoke case uses it: it times the import itself.
 	mutateNone
@@ -78,6 +82,7 @@ func (m mutation) defined() bool { return m >= mutateAdapterStamp && m <= mutate
 // each arm must have executed for the report to be evidence.
 type caseSpec struct {
 	id       upgrade.MeasurementCase
+	harness  ingest.Harness
 	mutation mutation
 	// skipLabel and baselineLabel describe what each arm executes.
 	skipLabel, baselineLabel string
@@ -96,6 +101,13 @@ type caseSpec struct {
 	// session's entries, metrics, captured stats, annotations and session
 	// row equal (arm_equivalence_allowlist.yaml names the exceptions).
 	equivalent bool
+}
+
+func (s caseSpec) targetHarness() ingest.Harness {
+	if s.harness == "" {
+		return ingest.HarnessClaudeCode
+	}
+	return s.harness
 }
 
 // withholdingClaudeAdapter is the claude-code adapter registered as one that
@@ -206,6 +218,36 @@ func caseSpecs() map[upgrade.MeasurementCase]caseSpec {
 			baselineLabel: "stored-metadata lane with the refresh skips disabled: parse and install the changed generation",
 			baseline:      disableSkips, wantLane: ingest.RefreshLaneStoredMetadata, equivalent: true,
 			check: func(n int, a arm, s sample) error {
+				if a == armSkip {
+					return expect(a, s, referencesAll(n))
+				}
+				return expect(a, s, parsesAll(n))
+			},
+		},
+		upgrade.MeasurementCaseOpenCodeHashDrift: {
+			id: upgrade.MeasurementCaseOpenCodeHashDrift, harness: ingest.HarnessOpenCode, mutation: mutateStaleMetadataHash,
+			skipLabel:     "opencode stale stored metadata hash, as shipped: cheap proof downgraded, mandatory validation proven, validated settle",
+			baselineLabel: "opencode native lane with the refresh skips disabled: parse, identical generation not installed",
+			baseline:      disableSkips, wantLane: ingest.RefreshLaneNative, equivalent: true,
+			check: func(n int, a arm, s sample) error {
+				if err := expectLane(a, s, ingest.RefreshLaneNative, n); err != nil {
+					return err
+				}
+				if a == armSkip {
+					return expect(a, s, validatesAll(n))
+				}
+				return expect(a, s, parsesAll(n))
+			},
+		},
+		upgrade.MeasurementCaseOpenCodeContextReference: {
+			id: upgrade.MeasurementCaseOpenCodeContextReference, harness: ingest.HarnessOpenCode, mutation: mutateOpenCodeProjectName,
+			skipLabel:     "opencode renamed project.name, as shipped: mandatory validation fails on the context, metadata candidate, reference planned and installed",
+			baselineLabel: "opencode native lane with the refresh skips disabled: parse and install the changed generation",
+			baseline:      disableSkips, wantLane: ingest.RefreshLaneNative, equivalent: true,
+			check: func(n int, a arm, s sample) error {
+				if err := expectLane(a, s, ingest.RefreshLaneNative, n); err != nil {
+					return err
+				}
 				if a == armSkip {
 					return expect(a, s, referencesAll(n))
 				}
@@ -387,7 +429,7 @@ func runCase(ctx context.Context, spec caseSpec, opts harnessOptions, command sa
 		return "", err
 	}
 	baseDir := filepath.Join(dir, "base")
-	shape, err := prepareBase(ctx, baseDir, opts.sessions, opts.entries, spec.mutation)
+	shape, err := prepareBase(ctx, baseDir, spec.targetHarness(), opts.sessions, opts.entries, spec.mutation)
 	if err != nil {
 		return "", fmt.Errorf("prepare %s base in %s: %w", spec.id, baseDir, err)
 	}
@@ -585,15 +627,26 @@ func openStore(dbPath, output string) (*store.Store, error) {
 //
 // A traced run (an arm sample) installs its generations under
 // armGenerationID; the untraced initial import keeps the random identities.
-func newPipeline(db *store.Store, metricsStore ingest.MetricsStore, adapters map[ingest.Harness]ingest.AdapterFactory, source, output string, profiler *ingest.IndexProfiler, configure func(*ingest.PipelineConfig), trace *runTrace) (*ingest.Pipeline, error) {
+func newPipeline(db *store.Store, metricsStore ingest.MetricsStore, harness ingest.Harness, adapters map[ingest.Harness]ingest.AdapterFactory, source, output string, profiler *ingest.IndexProfiler, configure func(*ingest.PipelineConfig), trace *runTrace) (*ingest.Pipeline, error) {
 	fsys := &ingest.OSFileSystem{}
 	indexers := ingest.NewIndexerRegistry(fsys, ingest.IndexerRegistryOptions{})
 	if trace != nil {
-		claude, ok := indexers[ingest.HarnessClaudeCode].(*ingest.ClaudeIndexer)
-		if !ok {
-			return nil, fmt.Errorf("the registered claude-code indexer is %T, not the Claude indexer the trace wraps", indexers[ingest.HarnessClaudeCode])
+		switch harness {
+		case ingest.HarnessClaudeCode:
+			claude, ok := indexers[ingest.HarnessClaudeCode].(*ingest.ClaudeIndexer)
+			if !ok {
+				return nil, fmt.Errorf("the registered claude-code indexer is %T, not the Claude indexer the trace wraps", indexers[ingest.HarnessClaudeCode])
+			}
+			indexers[ingest.HarnessClaudeCode] = tracingClaudeIndexer{ClaudeIndexer: claude, trace: trace}
+		case ingest.HarnessOpenCode:
+			opencode, ok := indexers[ingest.HarnessOpenCode].(*ingest.OpenCodeIndexer)
+			if !ok {
+				return nil, fmt.Errorf("the registered opencode indexer is %T, not the OpenCode indexer the trace wraps", indexers[ingest.HarnessOpenCode])
+			}
+			indexers[ingest.HarnessOpenCode] = tracingOpenCodeIndexer{OpenCodeIndexer: opencode, trace: trace}
+		default:
+			return nil, fmt.Errorf("unsupported traced harness %q", harness)
 		}
-		indexers[ingest.HarnessClaudeCode] = tracingClaudeIndexer{ClaudeIndexer: claude, trace: trace}
 	}
 	var generationIDs func(ingest.DiscoveredSession) string
 	if trace != nil {
@@ -601,7 +654,7 @@ func newPipeline(db *store.Store, metricsStore ingest.MetricsStore, adapters map
 	}
 	cfg := ingest.PipelineConfig{
 		Sources: map[ingest.Harness]ingest.SourceConfig{
-			ingest.HarnessClaudeCode: {Enabled: true, Paths: []ingest.ResolvedPath{ingest.ResolvedPath(source)}},
+			harness: {Enabled: true, Paths: []ingest.ResolvedPath{ingest.ResolvedPath(source)}},
 		},
 		OutputDir:     ingest.ResolvedPath(output),
 		IndexProfiler: profiler,
@@ -619,7 +672,7 @@ func newPipeline(db *store.Store, metricsStore ingest.MetricsStore, adapters map
 
 // prepareBase writes the synthetic corpus, imports it once into a managed
 // store, and applies the case's mutation. Every round copies this base.
-func prepareBase(ctx context.Context, baseDir string, sessions, entries int, m mutation) (caseShape, error) {
+func prepareBase(ctx context.Context, baseDir string, harness ingest.Harness, sessions, entries int, m mutation) (caseShape, error) {
 	if !m.defined() {
 		return caseShape{}, fmt.Errorf("mutation %d is not defined; name the case's mutation", m)
 	}
@@ -629,7 +682,18 @@ func prepareBase(ctx context.Context, baseDir string, sessions, entries int, m m
 			return caseShape{}, err
 		}
 	}
-	corpus, err := writeCorpus(source, sessions, entries)
+	var (
+		corpus int64
+		err    error
+	)
+	switch harness {
+	case ingest.HarnessClaudeCode:
+		corpus, err = writeCorpus(source, sessions, entries)
+	case ingest.HarnessOpenCode:
+		corpus, err = writeOpenCodeCorpus(source, sessions, entries)
+	default:
+		return caseShape{}, fmt.Errorf("unsupported corpus harness %q", harness)
+	}
 	if err != nil {
 		return caseShape{}, err
 	}
@@ -638,7 +702,7 @@ func prepareBase(ctx context.Context, baseDir string, sessions, entries int, m m
 		return caseShape{}, err
 	}
 	defer db.Close()
-	pipeline, err := newPipeline(db, db, ingest.DefaultAdapterRegistry, source, output, &ingest.IndexProfiler{}, nil, nil)
+	pipeline, err := newPipeline(db, db, harness, ingest.DefaultAdapterRegistry, source, output, &ingest.IndexProfiler{}, nil, nil)
 	if err != nil {
 		return caseShape{}, err
 	}
@@ -658,10 +722,10 @@ func prepareBase(ctx context.Context, baseDir string, sessions, entries int, m m
 	if shape.ActiveGenerations, err = queryInt(ctx, db, `SELECT count(*) FROM sessions WHERE active_generation_id IS NOT NULL`); err != nil {
 		return caseShape{}, err
 	}
-	target := ingest.GenerationTargets(ingest.HarvesterVersionRegistry)[ingest.HarnessClaudeCode]
+	target := ingest.GenerationTargets(ingest.HarvesterVersionRegistry)[harness]
 	switch m {
 	case mutateNone:
-	case mutateAdapterStamp, mutateStaleMetadataHash, mutateContextChange:
+	case mutateAdapterStamp, mutateStaleMetadataHash, mutateContextChange, mutateOpenCodeProjectName:
 		if err := execSQL(ctx, db, `UPDATE sessions SET adapter_version = ?`, target.AdapterVersion-1); err != nil {
 			return caseShape{}, err
 		}
@@ -679,6 +743,25 @@ func prepareBase(ctx context.Context, baseDir string, sessions, entries int, m m
 			}
 			if renamed != sessions {
 				return caseShape{}, fmt.Errorf("renamed the project in %d metadata files, want %d", renamed, sessions)
+			}
+		}
+		if m == mutateOpenCodeProjectName {
+			priorHostSlugs, err := querySessionHostSlugs(ctx, db)
+			if err != nil {
+				return caseShape{}, err
+			}
+			if len(priorHostSlugs) != sessions {
+				return caseShape{}, fmt.Errorf("read %d prior host slugs, want %d", len(priorHostSlugs), sessions)
+			}
+			changed, err := renameOpenCodeSQLiteProject(source, contextChangeProjectName)
+			if err != nil {
+				return caseShape{}, err
+			}
+			if changed == 0 {
+				return caseShape{}, fmt.Errorf("updated 0 project rows in synthetic opencode db")
+			}
+			if err := assertOpenCodeHostSlugUnchanged(ctx, source, db.InstallationSalt(), priorHostSlugs, contextChangeProjectName); err != nil {
+				return caseShape{}, err
 			}
 		}
 		if m == mutateStaleMetadataHash {
@@ -761,7 +844,7 @@ func runRound(ctx context.Context, spec caseSpec, baseDir, roundDir string, roun
 		}
 	}
 	// Discovery reads the prepared source in place: it is never written.
-	pipeline, err := newPipeline(db, counted, adapters, filepath.Join(baseDir, "source"), output, profiler, configure, trace)
+	pipeline, err := newPipeline(db, counted, spec.targetHarness(), adapters, filepath.Join(baseDir, "source"), output, profiler, configure, trace)
 	if err != nil {
 		return sample{}, err
 	}
@@ -854,6 +937,22 @@ func queryInt(ctx context.Context, db *store.Store, query string) (int64, error)
 		return 0, fmt.Errorf("query %q: %w", query, err)
 	}
 	return value, nil
+}
+
+func querySessionHostSlugs(ctx context.Context, db *store.Store) (map[ingest.SessionID]string, error) {
+	conn, err := db.Pool().Take(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer db.Pool().Put(conn)
+	slugs := map[ingest.SessionID]string{}
+	if err := sqlitex.ExecuteTransient(conn, `SELECT s.session_id, h.host_slug FROM sessions s JOIN host_slugs h ON s.opaque_host_id = h.opaque_id`, &sqlitex.ExecOptions{ResultFunc: func(stmt *sqlite.Stmt) error {
+		slugs[ingest.SessionID(stmt.ColumnText(0))] = stmt.ColumnText(1)
+		return nil
+	}}); err != nil {
+		return nil, fmt.Errorf("query session host slugs: %w", err)
+	}
+	return slugs, nil
 }
 
 func fileSize(path string) int64 {

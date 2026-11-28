@@ -85,6 +85,11 @@
 # Any other failed proof parses, so the stored-metadata lane has no further
 # skip to budget; the copy refresh that once filled that gap was measured
 # slower than the parse when metadata changed and removed.
+#
+# TODO(#1139): The orchestrator will measure OpenCode C9 (opencode-validated-settle)
+# and C10 (opencode-reference-install) at 240 x 1000 (5 rounds) on a quiet machine,
+# then add the winning rows here and emit {native, validated} / {native, referenced}
+# from upgrade.PlannedSkipPaths() to preserve the strict 1:1 bijection.
 measurementRequired: true
 requiredNames:
   - proven-settle
