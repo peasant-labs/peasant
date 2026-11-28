@@ -17,25 +17,33 @@ import (
 //go:embed testdata/opencode_preview_bound.yaml
 var openCodePreviewBoundData []byte
 
+type openCodePreviewBoundOrigin string
+
+const (
+	openCodePreviewBoundLegacy  openCodePreviewBoundOrigin = "legacy"
+	openCodePreviewBoundCurrent openCodePreviewBoundOrigin = "current"
+)
+
 // openCodePreviewBoundCase declares one bounded preview read: the payload byte
 // length of every row the source serves, in service order, the budget the read
 // runs under, and what the read must produce.
 type openCodePreviewBoundCase struct {
-	Name                 string `yaml:"name"`
-	Origin               string `yaml:"origin"`
-	MessageBytes         int    `yaml:"message_bytes"`
-	SecondMessageBytes   int    `yaml:"second_message_bytes"`
-	SecondMessageRows    []int  `yaml:"second_message_row_bytes"`
-	ExpectOrphanMessages int    `yaml:"expect_orphan_messages"`
-	RowBytes             []int  `yaml:"row_bytes"`
-	OrphanRows           int    `yaml:"orphan_rows"`
-	BudgetBytes          int64  `yaml:"budget_bytes"`
-	TotalBytes           int64  `yaml:"total_bytes"`
-	TotalRows            int64  `yaml:"total_rows"`
-	ExpectTruncated      bool   `yaml:"expect_truncated"`
-	ExpectIncludedRows   int64  `yaml:"expect_included_rows"`
-	ExpectIncludedBytes  int64  `yaml:"expect_included_bytes"`
-	ExpectProjectionRows int    `yaml:"expect_projection_rows"`
+	Name                 string                     `yaml:"name"`
+	Origin               openCodePreviewBoundOrigin `yaml:"origin"`
+	MessageBytes         int                        `yaml:"message_bytes"`
+	SecondMessageBytes   int                        `yaml:"second_message_bytes"`
+	SecondMessageRows    []int                      `yaml:"second_message_row_bytes"`
+	ExpectOrphanMessages int                        `yaml:"expect_orphan_messages"`
+	RowBytes             []int                      `yaml:"row_bytes"`
+	RowParts             [][]int                    `yaml:"row_parts"`
+	OrphanRows           int                        `yaml:"orphan_rows"`
+	BudgetBytes          int64                      `yaml:"budget_bytes"`
+	TotalBytes           int64                      `yaml:"total_bytes"`
+	TotalRows            int64                      `yaml:"total_rows"`
+	ExpectTruncated      bool                       `yaml:"expect_truncated"`
+	ExpectIncludedRows   int64                      `yaml:"expect_included_rows"`
+	ExpectIncludedBytes  int64                      `yaml:"expect_included_bytes"`
+	ExpectProjectionRows int                        `yaml:"expect_projection_rows"`
 }
 
 type openCodePreviewBoundDoc struct {
@@ -60,11 +68,17 @@ func loadOpenCodePreviewBoundDoc(t *testing.T) openCodePreviewBoundDoc {
 	}
 	present := make(map[string]struct{}, len(doc.Cases))
 	for _, testCase := range doc.Cases {
-		if testCase.Origin == "legacy" && testCase.MessageBytes <= 0 {
+		if testCase.Origin == openCodePreviewBoundLegacy && testCase.MessageBytes <= 0 {
 			t.Fatalf("legacy preview bound case %q declares no message payload, so the message read would not spend the budget", testCase.Name)
 		}
 		if testCase.Name == "" || testCase.Origin == "" || len(testCase.RowBytes) == 0 {
 			t.Fatalf("preview bound fixture has an incomplete case: %+v", testCase)
+		}
+		if len(testCase.RowParts) != 0 && len(testCase.RowParts) != len(testCase.RowBytes) {
+			t.Fatalf("preview bound case %q declares %d row-part groups for %d message rows", testCase.Name, len(testCase.RowParts), len(testCase.RowBytes))
+		}
+		if len(testCase.RowParts) != 0 && testCase.Origin != openCodePreviewBoundCurrent {
+			t.Fatalf("preview bound case %q declares split parts on a %q origin", testCase.Name, testCase.Origin)
 		}
 		if _, duplicate := present[testCase.Name]; duplicate {
 			t.Fatalf("preview bound fixture has a duplicate case name %q", testCase.Name)
@@ -121,9 +135,9 @@ func TestOpenCodePreviewBoundedReadStopsAtItsByteBudget(t *testing.T) {
 		t.Run(testCase.Name, func(t *testing.T) {
 			t.Parallel()
 			switch testCase.Origin {
-			case "legacy":
+			case openCodePreviewBoundLegacy:
 				assertLegacyPreviewBound(t, testCase)
-			case "current":
+			case openCodePreviewBoundCurrent:
 				assertCurrentPreviewBound(t, testCase)
 			default:
 				t.Fatalf("preview bound case %q has an unsupported origin %q", testCase.Name, testCase.Origin)
@@ -249,6 +263,18 @@ func assertCurrentPreviewBound(t *testing.T, testCase openCodePreviewBoundCase) 
 		source.current = append(source.current, OpenCodeCurrentMessageRow{
 			ID: messageID, SessionID: sessionID, Type: messageType, TimeCreated: 1, TimeUpdated: 1, Data: data, Seq: seq,
 		})
+		if len(testCase.RowParts) != 0 {
+			for partIndex, partSize := range testCase.RowParts[index] {
+				partType, typeErr := NewOpenCodeCurrentPartType(openCodeCurrentPartTextType)
+				if typeErr != nil {
+					t.Fatalf("build current part type: %v", typeErr)
+				}
+				partData := paddedJSONPayload(t, `{"type":"text","text":"%s"}`, partSize)
+				source.current[len(source.current)-1].Parts = append(source.current[len(source.current)-1].Parts, OpenCodeCurrentPartRow{
+					MessageID: messageID, Ordinal: int64(partIndex), Type: partType, TimeCreated: 1, TimeUpdated: 1, Data: partData,
+				})
+			}
+		}
 	}
 	size := OpenCodePayloadSize{Rows: testCase.TotalRows, Bytes: testCase.TotalBytes}
 	projection, _, truncation, err := readOpenCodeCurrentProjectionCore(t.Context(), source, sessionID, pageSize, testCase.BudgetBytes, size)

@@ -175,6 +175,7 @@ func (a *OpenCodeAdapter) materializeCurrentTranscriptSlice(ctx context.Context,
 	}
 	var projection openCodeCurrentProjection
 	var unknownControlTypes map[string]int
+	var partOmissions []openCodeCurrentPartOmission
 	var stop openCodeCurrentSliceStop
 	size := OpenCodePayloadSize{Rows: after.totalRows, Bytes: after.totalBytes}
 	if err := a.withOpenCodeSQLiteSource(ctx, session.SourcePath.String(), func(source OpenCodeSQLiteSource) error {
@@ -190,7 +191,7 @@ func (a *OpenCodeAdapter) materializeCurrentTranscriptSlice(ctx context.Context,
 			size = measured
 		}
 		var readErr error
-		projection, unknownControlTypes, _, stop, readErr = readOpenCodeCurrentProjectionSlice(ctx, source, currentID, pageSize, budgetBytes, size, after.current, ceiling)
+		projection, unknownControlTypes, partOmissions, _, stop, readErr = readOpenCodeCurrentProjectionSliceWithOmissions(ctx, source, currentID, pageSize, budgetBytes, size, after.current, ceiling)
 		return readErr
 	}); err != nil {
 		var oversized *RecordExceedsBudgetError
@@ -201,7 +202,7 @@ func (a *OpenCodeAdapter) materializeCurrentTranscriptSlice(ctx context.Context,
 		}
 		return TranscriptSlice{}, fmt.Errorf("materialize a slice of current OpenCode SQLite session %q failed while reading selected session_message rows and closing the bounded source: %w; no partial managed artifact or store row was written; fix malformed current rows in OpenCode and retry", session.SessionID, err)
 	}
-	metadata, data, err := a.finishCurrentManagedProjection(ctx, session, projection, unknownControlTypes)
+	metadata, data, err := a.finishCurrentManagedProjection(ctx, session, projection, unknownControlTypes, partOmissions)
 	if err != nil {
 		return TranscriptSlice{}, err
 	}

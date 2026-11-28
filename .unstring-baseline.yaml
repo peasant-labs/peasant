@@ -636,7 +636,6 @@ rules:
     internal/ingest/opencode_indexer_v2_test.go: 3
     internal/ingest/opencode_native_rows_test.go: 2
     internal/ingest/opencode_payload_size_test.go: 2
-    internal/ingest/opencode_preview_bound_internal_test.go: 3
     internal/ingest/opencode_projection_internal_test.go: 11
     internal/ingest/opencode_projection_test.go: 2
     internal/ingest/opencode_provenance.go: 4

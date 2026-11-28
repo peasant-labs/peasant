@@ -33,6 +33,7 @@ required_cases:
   - legacy-parts-of-an-unread-message-are-not-orphans
   - current-session-within-budget-reads-whole-session
   - current-session-over-budget-stops-at-the-first-rows
+  - current-split-parts-count-toward-the-budget
   - current-unset-budget-reads-whole-session
 cases:
   - name: legacy-session-within-budget-reads-whole-session
@@ -149,6 +150,19 @@ cases:
     expect_truncated: true
     expect_included_rows: 2
     expect_included_bytes: 400
+    expect_projection_rows: 2
+
+  - name: current-split-parts-count-toward-the-budget
+    origin: current
+    row_bytes: [100, 100, 100]
+    row_parts: [[], [200, 200], []]
+    orphan_rows: 0
+    budget_bytes: 450
+    total_bytes: 700
+    total_rows: 3
+    expect_truncated: true
+    expect_included_rows: 2
+    expect_included_bytes: 600
     expect_projection_rows: 2
 
   - name: current-unset-budget-reads-whole-session

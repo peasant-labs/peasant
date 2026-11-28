@@ -1,0 +1,48 @@
+# Regression cases for OpenCode 2.4.x split assistant parts.
+#
+# OpenCode 2.4 writes an assistant message with an empty content envelope and
+# puts reasoning/text/tool in session_part rows. OpenCode hydrates those rows
+# before any inline content, and Peasant must read the same store shape. Each
+# case names the synthetic source, the session, the split message, and the
+# observable content that must survive materialization and indexing. The mixed
+# fixture also holds a legacy inline assistant row, so both storage paths run
+# through one session.
+#
+# required_cases names the cases that must stay present. Removing one goes red
+# by name; adding a case need not appear here. The list, not a count, guards.
+required_cases:
+  - split-parts-and-inline-content
+  - undecodable-part-is-an-omission
+cases:
+  - name: split-parts-and-inline-content
+    source_fixture: opencode-24-session-parts
+    session_id: ses_opencode24parts0000000001
+    split_message_id: msg_24_split_assistant
+    legacy_message_id: msg_24_legacy_assistant
+    expected_part_ordinals: [0, 1, 2]
+    expected_part_types: [reasoning, text, tool]
+    expected_thinking: weigh the synthetic options
+    expected_split_text: running the synthetic command
+    expected_tool_name: shell
+    expected_tool_arguments: echo synthetic
+    expected_tool_result: synthetic
+    expected_inline_text: legacy inline answer
+    expect_content_omitted: false
+    mutate_part_ordinal: -1
+
+  - name: undecodable-part-is-an-omission
+    source_fixture: opencode-24-session-parts
+    session_id: ses_opencode24parts0000000001
+    split_message_id: msg_24_split_assistant
+    legacy_message_id: msg_24_legacy_assistant
+    expected_part_ordinals: [0, 2]
+    expected_part_types: [reasoning, tool]
+    expected_thinking: weigh the synthetic options
+    expected_split_text: ""
+    expected_tool_name: shell
+    expected_tool_arguments: echo synthetic
+    expected_tool_result: synthetic
+    expected_inline_text: legacy inline answer
+    expect_content_omitted: true
+    mutate_part_ordinal: 1
+    expected_omitted_warning: opencode_unknown_part_type

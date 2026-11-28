@@ -70,6 +70,24 @@ const (
 	// MaxOpenCodeCurrentPageSize is the fixed upper bound for every current
 	// session message source page.
 	MaxOpenCodeCurrentPageSize = 128
+	// openCodeCurrentPartPageSize bounds each session_part query. A message page
+	// reads its assistant parts in pages of this size, so a session's part table
+	// is never loaded whole; the parts for one message page stay bounded by that
+	// message page plus at most one message beyond the page's part-row budget.
+	openCodeCurrentPartPageSize = 256
+	// openCodeCurrentPartRowsPerMessagePage bounds the part rows one message page
+	// may carry. A page that exceeds it drops the offending message and every
+	// later message from the page and resumes after the last complete message, so
+	// the read keeps a message boundary and always makes progress. One message's
+	// own parts are always admitted, because a message is the slice unit.
+	openCodeCurrentPartRowsPerMessagePage = 8192
+	// The assistant message discriminator and the split part types this build
+	// interprets. They name the closed set the split-part read admits; a row of
+	// any other type is an accounted omission.
+	openCodeCurrentAssistantMessageType = "assistant"
+	openCodeCurrentPartTextType         = "text"
+	openCodeCurrentPartReasoningType    = "reasoning"
+	openCodeCurrentPartToolType         = "tool"
 )
 
 // OpenCodeCurrentPageSize is a validated, positive current source page size.
@@ -85,6 +103,21 @@ func NewOpenCodeCurrentPageSize(value int) (OpenCodeCurrentPageSize, error) {
 
 // Value returns the validated integer page size.
 func (s OpenCodeCurrentPageSize) Value() int { return s.value }
+
+// OpenCodeCurrentPartType is a validated session_part type. It is the closed
+// set the split assistant part read interprets: text, reasoning, or tool.
+type OpenCodeCurrentPartType struct{ value string }
+
+// NewOpenCodeCurrentPartType validates one part type token.
+func NewOpenCodeCurrentPartType(value string) (OpenCodeCurrentPartType, error) {
+	if err := validateOpenCodeCurrentToken("part type", value); err != nil {
+		return OpenCodeCurrentPartType{}, err
+	}
+	return OpenCodeCurrentPartType{value: value}, nil
+}
+
+// String returns the validated part type.
+func (partType OpenCodeCurrentPartType) String() string { return partType.value }
 
 // OpenCodeCurrentSessionID is a validated current session identifier.
 type OpenCodeCurrentSessionID struct{ value string }
@@ -199,6 +232,9 @@ type OpenCodeCurrentPageRequest struct {
 }
 
 // OpenCodeCurrentMessageRow is one detached row from the materialized current projection.
+// Parts carries the split assistant content rows a 2.4.x store writes to
+// session_part, in ordinal order. A legacy row keeps its content inline in Data
+// and carries no parts, so both shapes decode through the same projection.
 type OpenCodeCurrentMessageRow struct {
 	ID          OpenCodeCurrentMessageID
 	SessionID   OpenCodeCurrentSessionID
@@ -207,12 +243,37 @@ type OpenCodeCurrentMessageRow struct {
 	TimeUpdated int64
 	Data        string
 	Seq         OpenCodeCurrentSeq
+	Parts       []OpenCodeCurrentPartRow
+}
+
+// OpenCodeCurrentPartRow is one detached session_part row for an assistant
+// message. The type column and the type field inside Data agree; Data is the
+// encoded assistant content part, with the type column's value filled in when
+// the stored object omitted it.
+type OpenCodeCurrentPartRow struct {
+	MessageID   OpenCodeCurrentMessageID
+	Ordinal     int64
+	Type        OpenCodeCurrentPartType
+	TimeCreated int64
+	TimeUpdated int64
+	Data        string
+}
+
+// OpenCodeCurrentPartDrop records one session_part row the source could not
+// hand to the projection. The row is retained in the source but omitted from
+// the projection as an accounted omission: the caller records a diagnostic and
+// does not certify the capture complete.
+type OpenCodeCurrentPartDrop struct {
+	MessageID OpenCodeRawRowIdentifier
+	Ordinal   int64
+	Reason    string
 }
 
 // OpenCodeCurrentPage is a detached bounded current message page.
 type OpenCodeCurrentPage struct {
-	Messages []OpenCodeCurrentMessageRow
-	Next     *OpenCodeCurrentCursor
+	Messages     []OpenCodeCurrentMessageRow
+	DroppedParts []OpenCodeCurrentPartDrop
+	Next         *OpenCodeCurrentCursor
 }
 
 // OpenCodeLegacyPageSize is a validated, positive legacy source page size.

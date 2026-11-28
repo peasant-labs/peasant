@@ -193,6 +193,7 @@ func (a *OpenCodeAdapter) materializeTranscriptInput(ctx context.Context, sessio
 		}
 		var projection openCodeCurrentProjection
 		var unknown map[string]int
+		var partOmissions []openCodeCurrentPartOmission
 		eventSeqObserved := false
 		if err := a.withOpenCodeMaterializationSource(ctx, session.SourcePath.String(), captureCursor, func(source OpenCodeSQLiteSource) error {
 			var readErr error
@@ -200,7 +201,7 @@ func (a *OpenCodeAdapter) materializeTranscriptInput(ctx context.Context, sessio
 			if readErr != nil {
 				return readErr
 			}
-			projection, unknown, _, readErr = readOpenCodeCurrentProjectionCore(ctx, source, currentID, pageSize, 0, OpenCodePayloadSize{})
+			projection, unknown, partOmissions, _, readErr = readOpenCodeCurrentProjectionCoreWithOmissions(ctx, source, currentID, pageSize, 0, OpenCodePayloadSize{})
 			if readErr != nil {
 				return readErr
 			}
@@ -208,7 +209,7 @@ func (a *OpenCodeAdapter) materializeTranscriptInput(ctx context.Context, sessio
 		}); err != nil {
 			return MaterializedTranscript{}, nil, fmt.Errorf("materialize current OpenCode SQLite session %q failed while reading one captured source view: %w; no managed state was written; retry after the source is readable", session.SessionID, err)
 		}
-		metadata, data, err := a.finishCurrentManagedProjection(ctx, session, projection, unknown)
+		metadata, data, err := a.finishCurrentManagedProjection(ctx, session, projection, unknown, partOmissions)
 		if err != nil {
 			return MaterializedTranscript{}, nil, err
 		}

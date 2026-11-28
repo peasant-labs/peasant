@@ -446,6 +446,9 @@ func assertRows(t testing.TB, fixtureCase caseSpec, databasePath string) {
 	if schemaHasTable(fixtureCase.Schema, "session_message") {
 		assertTableRowCount(t, conn, "session_message", len(fixtureCase.CurrentMessages))
 	}
+	if len(fixtureCase.CurrentParts) > 0 {
+		assertTableRowCount(t, conn, "session_part", len(fixtureCase.CurrentParts))
+	}
 	assertHistoryRows(t, conn, fixtureCase)
 }
 

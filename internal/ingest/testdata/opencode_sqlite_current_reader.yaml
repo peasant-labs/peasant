@@ -30,7 +30,7 @@ validation_cases:
   - {name: reject-spaced-session, kind: session_id, text: " bad-session ", error_contains: "before source access"}
   - {name: reject-negative-cursor-sequence, kind: seq, value: -1, error_contains: "non-negative"}
 
-declared_query_plan_cases: 2
+declared_query_plan_cases: 3
 query_plan_cases:
   - name: supported-current-query-uses-ordering-index
     fixture: current-reader-pages
@@ -47,6 +47,14 @@ query_plan_cases:
     statement: 'EXPLAIN QUERY PLAN SELECT id, session_id, type, time_created, time_updated, data, seq FROM session_message WHERE session_id = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3'
     required_contains: session_message_session_seq_idx
     forbidden_contains: [SCAN session_message, USE TEMP B-TREE]
+  - name: supported-split-part-query-uses-session-message-index
+    fixture: opencode-24-session-parts
+    session_id: ses_opencode24parts0000000001
+    message_id: msg_24_split_assistant
+    page_size: 256
+    statement: 'EXPLAIN QUERY PLAN SELECT ordinal, type, time_created, time_updated, data FROM session_part WHERE session_id = ?1 AND message_id = ?2 ORDER BY ordinal LIMIT ?3'
+    required_contains: session_part_session_message_idx
+    forbidden_contains: [SCAN session_part, USE TEMP B-TREE]
 
 declared_pagination_hazards: 1
 pagination_hazards:

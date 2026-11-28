@@ -239,7 +239,7 @@ func buildSQLite(conn *sqlite.Conn, fixtureCase caseSpec) error {
 		return fmt.Errorf("keep setup temp objects in memory: %w", err)
 	}
 
-	if err := createSchema(conn, fixtureCase.Schema, fixtureCase.SessionClock, len(fixtureCase.SessionAttribution) > 0, fixtureCase.SessionExtended); err != nil {
+	if err := createSchema(conn, fixtureCase.Schema, fixtureCase.SessionClock, len(fixtureCase.SessionAttribution) > 0, fixtureCase.SessionExtended, len(fixtureCase.CurrentParts) > 0); err != nil {
 		return err
 	}
 	if (fixtureCase.Schema == schemaLegacy || fixtureCase.Schema == schemaCurrent || fixtureCase.Schema == schemaHybrid) && fixtureCase.SessionClock != sessionClockAbsent {
@@ -254,6 +254,9 @@ func buildSQLite(conn *sqlite.Conn, fixtureCase caseSpec) error {
 		return err
 	}
 	if err := insertCurrentMessages(conn, fixtureCase.CurrentMessages); err != nil {
+		return err
+	}
+	if err := insertCurrentParts(conn, fixtureCase.CurrentParts); err != nil {
 		return err
 	}
 	if err := deleteSessionRows(conn, fixtureCase.DeletedSessionRows); err != nil {
@@ -344,7 +347,7 @@ func applySessionTableLayout(conn *sqlite.Conn, fixtureCase caseSpec) error {
 	return deleteSessionRows(conn, fixtureCase.LegacyOnlyDeletedRows)
 }
 
-func createSchema(conn *sqlite.Conn, schema schemaKind, clock sessionClockMode, attribution, extended bool) error {
+func createSchema(conn *sqlite.Conn, schema schemaKind, clock sessionClockMode, attribution, extended, withParts bool) error {
 	sessionSchema := sessionTableSchema(clock, attribution, extended)
 	var script string
 	switch schema {
@@ -354,8 +357,14 @@ func createSchema(conn *sqlite.Conn, schema schemaKind, clock sessionClockMode, 
 		script = sessionSchema + legacySchemaSQL
 	case schemaCurrent:
 		script = sessionSchema + currentSchemaSQL
+		if withParts {
+			script += currentPartSchemaSQL
+		}
 	case schemaHybrid:
 		script = sessionSchema + legacySchemaSQL + currentSchemaSQL
+		if withParts {
+			script += currentPartSchemaSQL
+		}
 	case schemaCurrentMissingSeq:
 		script = currentMissingSeqSchemaSQL
 	case schemaCurrentNullableSeq:
@@ -495,6 +504,25 @@ CREATE UNIQUE INDEX session_message_session_seq_idx ON session_message(session_i
 CREATE INDEX session_message_seq_idx ON session_message(seq);
 `
 
+// currentPartSchemaSQL is the 2.4.x split assistant-part table and the index
+// OpenCode's own history read relies on. The primary key is OpenCode's
+// (message_id, ordinal), so one message's parts are ordered and unique.
+const currentPartSchemaSQL = `
+CREATE TABLE session_part (
+  message_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  ordinal INTEGER NOT NULL,
+  type TEXT NOT NULL,
+  call_id TEXT,
+  time_created INTEGER NOT NULL,
+  time_updated INTEGER NOT NULL,
+  data TEXT NOT NULL,
+  PRIMARY KEY (message_id, ordinal),
+  FOREIGN KEY (message_id) REFERENCES session_message(id) ON DELETE CASCADE
+);
+CREATE INDEX session_part_session_message_idx ON session_part(session_id, message_id, ordinal);
+`
+
 const currentMissingSeqSchemaSQL = `
 CREATE TABLE session (id TEXT PRIMARY KEY, parent_id TEXT);
 CREATE TABLE session_message (
@@ -592,6 +620,9 @@ func insertSessionRows(conn *sqlite.Conn, fixtureCase caseSpec) error {
 	for _, row := range fixtureCase.CurrentMessages {
 		observe(row.SessionID, row.TimeCreated, row.TimeUpdated)
 	}
+	for _, row := range fixtureCase.CurrentParts {
+		observe(row.SessionID, row.TimeCreated, row.TimeUpdated)
+	}
 	attribution := make(map[string]sessionAttribution, len(fixtureCase.SessionAttribution))
 	for _, row := range fixtureCase.SessionAttribution {
 		attribution[row.SessionID] = row
@@ -665,6 +696,16 @@ func insertCurrentMessages(conn *sqlite.Conn, rows []currentMessage) error {
 		const query = `INSERT INTO session_message (id, session_id, type, time_created, time_updated, data, seq) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);`
 		if err := sqlitex.Execute(conn, query, &sqlitex.ExecOptions{Args: []any{row.ID, row.SessionID, row.Type, row.TimeCreated, row.TimeUpdated, row.Data, row.Seq}}); err != nil {
 			return fmt.Errorf("insert synthetic current message %q with explicit columns: %w", row.ID, err)
+		}
+	}
+	return nil
+}
+
+func insertCurrentParts(conn *sqlite.Conn, rows []currentPart) error {
+	for _, row := range rows {
+		const query = `INSERT INTO session_part (message_id, session_id, ordinal, type, call_id, time_created, time_updated, data) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8);`
+		if err := sqlitex.Execute(conn, query, &sqlitex.ExecOptions{Args: []any{row.MessageID, row.SessionID, row.Ordinal, row.Type, nullableText(row.CallID), row.TimeCreated, row.TimeUpdated, row.Data}}); err != nil {
+			return fmt.Errorf("insert synthetic current part %q ordinal %d with explicit columns: %w", row.MessageID, row.Ordinal, err)
 		}
 	}
 	return nil

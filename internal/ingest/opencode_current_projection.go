@@ -8,12 +8,12 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
 const (
-	openCodeCurrentProjectionFormat = "peasant.opencode.current-sqlite"
-	// Version 3 adds redacted opaque evidence to normalized messages. The
+	openCodeCurrentProjectionFormat = "peasant.opencode.current-sqlite" // Version 3 adds redacted opaque evidence to normalized messages. The
 	// shared readable floor stays 1, including older control-free projections.
 	openCodeCurrentProjectionVersion = 3
 	openCodeCurrentMaterializePage   = 128
@@ -358,8 +358,10 @@ func (a *OpenCodeAdapter) currentControlOnlySessions(ctx context.Context, source
 
 // finishCurrentManagedProjection encodes a read current projection into the
 // managed JSON bytes and derives its metadata. The full-session and preview
-// prefix reads share it.
-func (a *OpenCodeAdapter) finishCurrentManagedProjection(ctx context.Context, session DiscoveredSession, projection openCodeCurrentProjection, unknownControlTypes map[string]int) (*UnifiedMetadata, []byte, error) {
+// prefix reads share it. A split part this build could not decode is an
+// accounted omission: it is reported as a warning and the projection itself
+// carries content_omitted so no capture is certified complete.
+func (a *OpenCodeAdapter) finishCurrentManagedProjection(ctx context.Context, session DiscoveredSession, projection openCodeCurrentProjection, unknownControlTypes map[string]int, partOmissions []openCodeCurrentPartOmission) (*UnifiedMetadata, []byte, error) {
 	if len(projection.Messages) == 0 {
 		return nil, nil, fmt.Errorf("materialize current OpenCode SQLite session %q from %q produced no semantic messages even though discovery enumerated it; no empty managed artifact was written; retry after OpenCode finishes its transaction or remove the stale source row", session.SessionID, session.SourcePath)
 	}
@@ -374,7 +376,53 @@ func (a *OpenCodeAdapter) finishCurrentManagedProjection(ctx context.Context, se
 		return nil, nil, err
 	}
 	metadata.Diagnostics.Warnings = append(metadata.Diagnostics.Warnings, openCodeUnknownTypeDiagnostics(session, unknownControlTypes, "control message row")...)
+	metadata.Diagnostics.Warnings = append(metadata.Diagnostics.Warnings, openCodeCurrentPartOmissionDiagnostics(session, partOmissions)...)
 	return metadata, data, nil
+}
+
+// openCodeCurrentPartOmissionDiagnostics turns the split parts a current read
+// could not carry into one warning per part type. It uses the existing
+// OpenCodeUnknownPartType code, which the capture assessment already treats as
+// an accounted omission, so the session is stored partial instead of certified
+// complete. The reason of the first row of each type is named so a reader can
+// act on it.
+func openCodeCurrentPartOmissionDiagnostics(session DiscoveredSession, omissions []openCodeCurrentPartOmission) []DiagnosticEntry {
+	if len(omissions) == 0 {
+		return nil
+	}
+	type omissionSummary struct {
+		count  int
+		reason string
+	}
+	byType := make(map[string]omissionSummary)
+	for _, omission := range omissions {
+		partType := omission.Type
+		if partType == "" {
+			partType = "unknown"
+		}
+		summary := byType[partType]
+		summary.count++
+		if summary.reason == "" {
+			summary.reason = omission.Reason
+		}
+		byType[partType] = summary
+	}
+	types := make([]string, 0, len(byType))
+	for partType := range byType {
+		types = append(types, partType)
+	}
+	sort.Strings(types)
+	diagnostics := make([]DiagnosticEntry, 0, len(types))
+	for _, partType := range types {
+		summary := byType[partType]
+		diagnostics = append(diagnostics, DiagnosticEntry{
+			ErrorType:   string(OpenCodeUnknownPartType),
+			Location:    fmt.Sprintf("selected OpenCode session %s from %s", session.SessionID, session.SourcePath),
+			Message:     fmt.Sprintf("%d split assistant part row(s) of type %q could not be decoded and were omitted: %s; the rest of the message remains readable, but this capture is not complete", summary.count, partType, summary.reason),
+			Remediation: "Upgrade Peasant when it supports this part shape, or export the session through OpenCode; do not edit the OpenCode database with Peasant.",
+		})
+	}
+	return diagnostics
 }
 
 func (a *OpenCodeAdapter) materializeCurrentTranscriptBounded(ctx context.Context, session DiscoveredSession, budgetBytes int64) (*UnifiedMetadata, []byte, MaterializeTruncation, error) {
@@ -388,6 +436,7 @@ func (a *OpenCodeAdapter) materializeCurrentTranscriptBounded(ctx context.Contex
 	}
 	var projection openCodeCurrentProjection
 	var unknownControlTypes map[string]int
+	var partOmissions []openCodeCurrentPartOmission
 	var truncation MaterializeTruncation
 	if err := a.withOpenCodeSQLiteSource(ctx, session.SourcePath.String(), func(source OpenCodeSQLiteSource) error {
 		size, sizeErr := source.CurrentSessionPayloadSize(ctx, currentID)
@@ -399,12 +448,12 @@ func (a *OpenCodeAdapter) materializeCurrentTranscriptBounded(ctx context.Contex
 			budget = budgetBytes
 		}
 		var readErr error
-		projection, unknownControlTypes, truncation, readErr = readOpenCodeCurrentProjectionCore(ctx, source, currentID, pageSize, budget, size)
+		projection, unknownControlTypes, partOmissions, truncation, readErr = readOpenCodeCurrentProjectionCoreWithOmissions(ctx, source, currentID, pageSize, budget, size)
 		return readErr
 	}); err != nil {
 		return nil, nil, MaterializeTruncation{}, fmt.Errorf("materialize bounded current OpenCode SQLite session %q failed while reading selected session_message rows and closing the bounded source: %w; no partial managed artifact or store row was written; fix malformed current rows in OpenCode and retry", session.SessionID, err)
 	}
-	metadata, data, err := a.finishCurrentManagedProjection(ctx, session, projection, unknownControlTypes)
+	metadata, data, err := a.finishCurrentManagedProjection(ctx, session, projection, unknownControlTypes, partOmissions)
 	if err != nil {
 		return nil, nil, MaterializeTruncation{}, err
 	}
@@ -425,17 +474,18 @@ func (a *OpenCodeAdapter) materializeCurrentTranscriptFirstPage(ctx context.Cont
 	}
 	var projection openCodeCurrentProjection
 	var unknownControlTypes map[string]int
+	var partOmissions []openCodeCurrentPartOmission
 	var truncation MaterializeTruncation
 	if err := a.withOpenCodeSQLiteSource(ctx, session.SourcePath.String(), func(source OpenCodeSQLiteSource) error {
 		// The zero payload size is deliberate: it fills only the totals a
 		// truncation note quotes, and the first-page read writes no note.
 		var readErr error
-		projection, unknownControlTypes, truncation, readErr = readOpenCodeCurrentProjectionCore(ctx, source, currentID, pageSize, budgetBytes, OpenCodePayloadSize{})
+		projection, unknownControlTypes, partOmissions, truncation, readErr = readOpenCodeCurrentProjectionCoreWithOmissions(ctx, source, currentID, pageSize, budgetBytes, OpenCodePayloadSize{})
 		return readErr
 	}); err != nil {
 		return nil, nil, false, fmt.Errorf("materialize the first page of current OpenCode SQLite session %q failed while reading selected session_message rows and closing the bounded source: %w; no partial managed artifact or store row was written; fix malformed current rows in OpenCode and retry", session.SessionID, err)
 	}
-	metadata, data, err := a.finishCurrentManagedProjection(ctx, session, projection, unknownControlTypes)
+	metadata, data, err := a.finishCurrentManagedProjection(ctx, session, projection, unknownControlTypes, partOmissions)
 	if err != nil {
 		return nil, nil, false, err
 	}
@@ -455,8 +505,17 @@ func readOpenCodeCurrentProjection(ctx context.Context, source OpenCodeSQLiteSou
 // name how much it left out. The full-session read and the preview prefix read
 // share this one path.
 func readOpenCodeCurrentProjectionCore(ctx context.Context, source OpenCodeSQLiteSource, sessionID OpenCodeCurrentSessionID, pageSize OpenCodeCurrentPageSize, budget int64, size OpenCodePayloadSize) (openCodeCurrentProjection, map[string]int, MaterializeTruncation, error) {
-	projection, unknownControlTypes, truncation, _, err := readOpenCodeCurrentProjectionSlice(ctx, source, sessionID, pageSize, budget, size, nil, openCodeRowCeiling{})
+	projection, unknownControlTypes, _, truncation, _, err := readOpenCodeCurrentProjectionSliceWithOmissions(ctx, source, sessionID, pageSize, budget, size, nil, openCodeRowCeiling{})
 	return projection, unknownControlTypes, truncation, err
+}
+
+// readOpenCodeCurrentProjectionCoreWithOmissions is the omission-aware core read.
+// The plain form stays for existing callers that only need the projection; the
+// production paths use this one so a split part this build cannot decode is
+// reported and the capture is never certified complete.
+func readOpenCodeCurrentProjectionCoreWithOmissions(ctx context.Context, source OpenCodeSQLiteSource, sessionID OpenCodeCurrentSessionID, pageSize OpenCodeCurrentPageSize, budget int64, size OpenCodePayloadSize) (openCodeCurrentProjection, map[string]int, []openCodeCurrentPartOmission, MaterializeTruncation, error) {
+	projection, unknownControlTypes, omissions, truncation, _, err := readOpenCodeCurrentProjectionSliceWithOmissions(ctx, source, sessionID, pageSize, budget, size, nil, openCodeRowCeiling{})
+	return projection, unknownControlTypes, omissions, truncation, err
 }
 
 // readOpenCodeCurrentProjectionSlice is the resumable form of the core read: it
@@ -469,9 +528,26 @@ func readOpenCodeCurrentProjectionCore(ctx context.Context, source OpenCodeSQLit
 // appending one slice's turns to the previous slice's can never duplicate or
 // halve a turn.
 func readOpenCodeCurrentProjectionSlice(ctx context.Context, source OpenCodeSQLiteSource, sessionID OpenCodeCurrentSessionID, pageSize OpenCodeCurrentPageSize, budget int64, size OpenCodePayloadSize, after *OpenCodeCurrentCursor, ceiling openCodeRowCeiling) (openCodeCurrentProjection, map[string]int, MaterializeTruncation, openCodeCurrentSliceStop, error) {
+	projection, unknownControlTypes, _, truncation, stop, err := readOpenCodeCurrentProjectionSliceWithOmissions(ctx, source, sessionID, pageSize, budget, size, after, ceiling)
+	return projection, unknownControlTypes, truncation, stop, err
+}
+
+// openCodeCurrentPartOmission records one split assistant part this build could
+// not decode. Type is the part's type when the row named one, and Reason
+// explains the refusal. A part is omitted, never silently dropped: the caller
+// marks the projection partial and records a diagnostic.
+type openCodeCurrentPartOmission struct {
+	Type   string
+	Reason string
+}
+
+// readOpenCodeCurrentProjectionSliceWithOmissions is readOpenCodeCurrentProjectionSlice
+// with the split-part omissions the read found.
+func readOpenCodeCurrentProjectionSliceWithOmissions(ctx context.Context, source OpenCodeSQLiteSource, sessionID OpenCodeCurrentSessionID, pageSize OpenCodeCurrentPageSize, budget int64, size OpenCodePayloadSize, after *OpenCodeCurrentCursor, ceiling openCodeRowCeiling) (openCodeCurrentProjection, map[string]int, []openCodeCurrentPartOmission, MaterializeTruncation, openCodeCurrentSliceStop, error) {
 	projection := openCodeCurrentProjection{Format: openCodeCurrentProjectionFormat, Version: openCodeCurrentProjectionVersion, SessionID: sessionID.String(), Messages: []openCodeLegacyProjectionMessage{}}
 	registry := openCodeCurrentIdentityRegistry{kinds: make(map[string]string)}
 	unknownControlTypes := make(map[string]int)
+	var partOmissions []openCodeCurrentPartOmission
 	cursor := after
 	// stop is the position of the last row this read took, which is what a
 	// continuation resumes from. It is distinct from cursor, which is the page
@@ -494,7 +570,7 @@ rowLoop:
 			if lengths, ok := source.(OpenCodeCurrentRowLengthSource); ok {
 				probed, err := lengths.CurrentMessageLengths(ctx, request)
 				if err != nil {
-					return openCodeCurrentProjection{}, nil, MaterializeTruncation{}, openCodeCurrentSliceStop{}, err
+					return openCodeCurrentProjection{}, nil, nil, MaterializeTruncation{}, openCodeCurrentSliceStop{}, err
 				}
 				tentative := readBytes
 				for i, length := range probed {
@@ -503,7 +579,7 @@ rowLoop:
 					}
 					if length.Bytes > ceiling.bytes-tentative {
 						if tentative == 0 {
-							return openCodeCurrentProjection{}, nil, MaterializeTruncation{}, openCodeCurrentSliceStop{}, &RecordExceedsBudgetError{Row: ceiling.rowsBefore + readRows + int64(i) + 1, AtLeastBytes: length.Bytes, CeilingBytes: ceiling.bytes}
+							return openCodeCurrentProjection{}, nil, nil, MaterializeTruncation{}, openCodeCurrentSliceStop{}, &RecordExceedsBudgetError{Row: ceiling.rowsBefore + readRows + int64(i) + 1, AtLeastBytes: length.Bytes, CeilingBytes: ceiling.bytes}
 						}
 						before := length.Seq
 						request.Before = &before
@@ -516,7 +592,14 @@ rowLoop:
 		}
 		page, err := source.CurrentMessages(ctx, request)
 		if err != nil {
-			return openCodeCurrentProjection{}, nil, MaterializeTruncation{}, openCodeCurrentSliceStop{}, err
+			return openCodeCurrentProjection{}, nil, nil, MaterializeTruncation{}, openCodeCurrentSliceStop{}, err
+		}
+		for _, drop := range page.DroppedParts {
+			// The source read the row but could not hand it to the projection.
+			// Its type is not trustworthy, so the omission is named generically
+			// with the source's reason.
+			projection.ContentOmitted = true
+			partOmissions = append(partOmissions, openCodeCurrentPartOmission{Type: "session_part", Reason: drop.Reason})
 		}
 		for _, row := range page.Messages {
 			// Every read row, control or substantive, counts toward the budget: the
@@ -524,25 +607,26 @@ rowLoop:
 			// how many rows survive normalization. The budget is checked BEFORE the
 			// row is taken, so a read that spent its budget exactly on the last row
 			// of the session reports no truncation: nothing was left out.
+			rowBytes := openCodeCurrentRowPayloadBytes(row)
 			if budget > 0 && readBytes >= budget {
 				truncated = true
 				break rowLoop
 			}
-			if ceiling.bytes > 0 && int64(len(row.Data)) > ceiling.bytes-readBytes {
+			if ceiling.bytes > 0 && rowBytes > ceiling.bytes-readBytes {
 				// A source without the row-length probe: the row is already in
 				// memory, but it is still never taken into the projection.
 				if readBytes == 0 {
-					return openCodeCurrentProjection{}, nil, MaterializeTruncation{}, openCodeCurrentSliceStop{}, &RecordExceedsBudgetError{Row: ceiling.rowsBefore + readRows + 1, AtLeastBytes: int64(len(row.Data)), CeilingBytes: ceiling.bytes}
+					return openCodeCurrentProjection{}, nil, nil, MaterializeTruncation{}, openCodeCurrentSliceStop{}, &RecordExceedsBudgetError{Row: ceiling.rowsBefore + readRows + 1, AtLeastBytes: rowBytes, CeilingBytes: ceiling.bytes}
 				}
 				truncated = true
 				break rowLoop
 			}
-			readBytes += int64(len(row.Data))
+			readBytes += rowBytes
 			readRows++
 			taken := NewOpenCodeCurrentCursor(row.Seq)
 			stop = &taken
 			if err := registry.add(row.ID.String(), "message row"); err != nil {
-				return openCodeCurrentProjection{}, nil, MaterializeTruncation{}, openCodeCurrentSliceStop{}, currentNormalizationError(row, "registering stable identities", err)
+				return openCodeCurrentProjection{}, nil, nil, MaterializeTruncation{}, openCodeCurrentSliceStop{}, currentNormalizationError(row, "registering stable identities", err)
 			}
 			position := openCodeUnknownPosition(sessionID.String(), "current", row.ID.String(), includedRows, traversalPosition, "")
 			if seq := row.Seq.Value(); seq > 0 {
@@ -550,7 +634,8 @@ rowLoop:
 			}
 			traversal := decodeOpenCodeCurrentTraversal([]byte(row.Data), true)
 			traversalPosition += traversal.size
-			message, err := normalizeOpenCodeCurrentRowWithTraversal(row, &registry, position, &traversal)
+			var rowOmissions []openCodeCurrentPartOmission
+			message, err := normalizeOpenCodeCurrentRowWithTraversal(row, &registry, position, &traversal, &rowOmissions)
 			if errors.Is(err, errOpenCodeSkipControlRow) {
 				// Compatibility may omit future vocabulary, but the retained
 				// projection must never certify those missing rows as complete.
@@ -565,14 +650,21 @@ rowLoop:
 				continue
 			}
 			if err != nil {
-				return openCodeCurrentProjection{}, nil, MaterializeTruncation{}, openCodeCurrentSliceStop{}, currentNormalizationError(row, "decoding the pinned SessionMessage shape", err)
+				return openCodeCurrentProjection{}, nil, nil, MaterializeTruncation{}, openCodeCurrentSliceStop{}, currentNormalizationError(row, "decoding the pinned SessionMessage shape", err)
+			}
+			if len(rowOmissions) > 0 {
+				// A split part this build cannot decode is an accounted omission:
+				// the rest of the message stays readable, but the capture is not
+				// complete and the caller must not certify it.
+				projection.ContentOmitted = true
+				partOmissions = append(partOmissions, rowOmissions...)
 			}
 			for _, evidence := range message.RetainedUnknown {
 				unknownControlTypes[evidence.Kind]++
 			}
 			projection.Messages = append(projection.Messages, message)
 			includedRows++
-			includedBytes += int64(len(row.Data))
+			includedBytes += rowBytes
 		}
 		if stopBefore {
 			// The page ended just before a row this read may not hold, so the
@@ -589,7 +681,58 @@ rowLoop:
 	if truncated {
 		truncation = MaterializeTruncation{Truncated: true, Unit: MaterializeUnitMessages, BudgetBytes: budget, IncludedBytes: includedBytes, TotalBytes: size.Bytes, IncludedRows: includedRows, TotalRows: size.Rows}
 	}
-	return projection, unknownControlTypes, truncation, openCodeCurrentSliceStop{cursor: stop, exhausted: !truncated, includedBytes: includedBytes, includedRows: includedRows}, nil
+	return projection, unknownControlTypes, partOmissions, truncation, openCodeCurrentSliceStop{cursor: stop, exhausted: !truncated, includedBytes: includedBytes, includedRows: includedRows}, nil
+}
+
+// openCodeCurrentRowPayloadBytes is the source payload one message row costs.
+// A split 2.4.x assistant message carries its content in part rows, so the
+// preview budget and its truncation totals include those bytes.
+func openCodeCurrentRowPayloadBytes(row OpenCodeCurrentMessageRow) int64 {
+	total := int64(len(row.Data))
+	for _, part := range row.Parts {
+		total += int64(len(part.Data))
+	}
+	return total
+}
+
+// openCodeCurrentMessageDataWithSplitParts returns a message row's data with
+// its session_part rows moved into content in OpenCode's hydration order: the
+// parts in ordinal order, then any inline content an older build appended.
+// A row without parts is returned byte-for-byte unchanged. Readers that decode
+// the whole row as one document (the provenance snapshot) use this; the
+// projection feeds the parts through the same part decoder instead so it can
+// report an omission without failing the rest of the message.
+func openCodeCurrentMessageDataWithSplitParts(row OpenCodeCurrentMessageRow) (string, error) {
+	if len(row.Parts) == 0 {
+		return row.Data, nil
+	}
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(row.Data), &envelope); err != nil {
+		return "", fmt.Errorf("decode current message %q before merging split parts: %w", row.ID.String(), err)
+	}
+	var inline []json.RawMessage
+	if rawContent, present := envelope["content"]; present {
+		if err := json.Unmarshal(rawContent, &inline); err != nil {
+			// A non-array content value is replaced by the parts, matching
+			// OpenCode's hydration rule.
+			inline = nil
+		}
+	}
+	content := make([]json.RawMessage, 0, len(row.Parts)+len(inline))
+	for _, part := range row.Parts {
+		content = append(content, json.RawMessage(part.Data))
+	}
+	content = append(content, inline...)
+	encoded, err := json.Marshal(content)
+	if err != nil {
+		return "", fmt.Errorf("encode current message %q merged split parts: %w", row.ID.String(), err)
+	}
+	envelope["content"] = encoded
+	merged, err := json.Marshal(envelope)
+	if err != nil {
+		return "", fmt.Errorf("encode current message %q with merged split parts: %w", row.ID.String(), err)
+	}
+	return string(merged), nil
 }
 
 // openCodeRowCeiling is the largest row one slice read may hold, and how many
@@ -651,10 +794,14 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 }
 
 func normalizeOpenCodeCurrentRowAt(row OpenCodeCurrentMessageRow, registry *openCodeCurrentIdentityRegistry, position UnknownSourcePosition) (openCodeLegacyProjectionMessage, error) {
-	return normalizeOpenCodeCurrentRowWithTraversal(row, registry, position, nil)
+	return normalizeOpenCodeCurrentRowWithTraversal(row, registry, position, nil, nil)
 }
 
-func normalizeOpenCodeCurrentRowWithTraversal(row OpenCodeCurrentMessageRow, registry *openCodeCurrentIdentityRegistry, position UnknownSourcePosition, traversal *openCodeCurrentTraversal) (openCodeLegacyProjectionMessage, error) {
+// normalizeOpenCodeCurrentRowWithTraversal normalizes one current row. When
+// splitParts names a slice, a session_part row the projector cannot decode is
+// appended there and the rest of the message stays readable; when it is nil,
+// the same failure is returned, preserving the strict direct-call behavior.
+func normalizeOpenCodeCurrentRowWithTraversal(row OpenCodeCurrentMessageRow, registry *openCodeCurrentIdentityRegistry, position UnknownSourcePosition, traversal *openCodeCurrentTraversal, splitParts *[]openCodeCurrentPartOmission) (openCodeLegacyProjectionMessage, error) {
 	message := openCodeLegacyProjectionMessage{ID: row.ID.String(), SessionID: row.SessionID.String(), TimeCreated: row.TimeCreated, TimeUpdated: row.TimeUpdated, Parts: []openCodeLegacyProjectionPart{}}
 	appendPart := func(id string, created int64, data any) error {
 		if id != "" {
@@ -823,6 +970,18 @@ func normalizeOpenCodeCurrentRowWithTraversal(row OpenCodeCurrentMessageRow, reg
 			message.Data, err = json.Marshal(normalized)
 			if err != nil {
 				return message, err
+			}
+		}
+		// OpenCode 2.4.x writes the assistant parts as their own rows and
+		// hydrates them before any inline content an older build left on the
+		// message. Feed them in ordinal order first, then the inline content, so
+		// both storage shapes decode through the same projection.
+		for _, part := range row.Parts {
+			if err := appendOpenCodeCurrentAssistantPart(&message, part, registry, appendPart); err != nil {
+				if splitParts == nil {
+					return message, err
+				}
+				*splitParts = append(*splitParts, openCodeCurrentPartOmission{Type: part.Type.String(), Reason: err.Error()})
 			}
 		}
 		for _, content := range value.Content {
@@ -1037,6 +1196,25 @@ func requireOpenCodeCurrentObjectFields(object map[string]json.RawMessage, field
 		}
 	}
 	return nil
+}
+
+// appendOpenCodeCurrentAssistantPart appends one session_part row to a message.
+// The type column is the row's authoritative discriminator; data.type must
+// agree with it, and a disagreement is malformed rather than something to
+// guess at. The part's data then goes through the same decoder as inline
+// assistant content, so both shapes share one interpretation.
+func appendOpenCodeCurrentAssistantPart(message *openCodeLegacyProjectionMessage, part OpenCodeCurrentPartRow, registry *openCodeCurrentIdentityRegistry, appendPart func(string, int64, any) error) error {
+	raw := json.RawMessage(part.Data)
+	var discriminator struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(raw, &discriminator); err != nil {
+		return fmt.Errorf("decode split part %q at ordinal %d: %w", part.MessageID.String(), part.Ordinal, err)
+	}
+	if discriminator.Type != part.Type.String() {
+		return fmt.Errorf("split part %q at ordinal %d declares type column %q but data.type %q", part.MessageID.String(), part.Ordinal, part.Type.String(), discriminator.Type)
+	}
+	return appendOpenCodeCurrentAssistantContent(message, raw, registry, appendPart)
 }
 
 func appendOpenCodeCurrentAssistantContent(message *openCodeLegacyProjectionMessage, raw json.RawMessage, registry *openCodeCurrentIdentityRegistry, appendPart func(string, int64, any) error) error {
