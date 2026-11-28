@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 
+	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/upgrade"
 )
 
@@ -185,7 +186,7 @@ func runSampleChild(ctx context.Context, f sampleFlags, sessions, entries int, o
 		s.PID = os.Getpid()
 		return json.NewEncoder(out).Encode(s)
 	}
-	shape, err := prepareBase(ctx, req.dir, sessions, entries, mutateNone)
+	shape, err := prepareBase(ctx, req.dir, ingest.HarnessClaudeCode, sessions, entries, mutateNone)
 	if err != nil {
 		return fmt.Errorf("import sample in %s: %w", req.dir, err)
 	}
