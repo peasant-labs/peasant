@@ -341,6 +341,18 @@ cases:
     options: {firstReadBytes: 1, sliceReadBytes: 1, sourceCapBytes: 300}
     expect: {continuation: cut, cutReason: oversized_record, noticeContains: ["row 2", "at least"]}
 
+  - name: sqlite-unanswered-call-at-budget-cuts-with-pending-notice
+    sqlite: current-pending-tool-budget
+    origin: opencode-current-sqlite
+    options: {firstReadBytes: 1, sliceReadBytes: 1, sourceCapBytes: 365}
+    expect: {continuation: cut, cutReason: source_budget, minPages: 2, someTurnSentPending: true, noticeContains: ["the most one preview reads", "has its result further on"]}
+
+  - name: sqlite-unanswered-call-at-oversized-budget-cuts-with-pending-notice
+    sqlite: current-pending-tool-budget
+    origin: opencode-current-sqlite
+    options: {firstReadBytes: 1, sliceReadBytes: 1, sourceCapBytes: 385}
+    expect: {continuation: cut, cutReason: source_budget, minPages: 2, someTurnSentPending: true, noticeContains: ["the most one preview reads", "has its result further on"]}
+
   - name: no-location-is-unavailable
     origin: none
     options: {firstReadBytes: 64, sliceReadBytes: 64}

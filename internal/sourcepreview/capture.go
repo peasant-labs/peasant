@@ -369,10 +369,7 @@ func (c *Capture) stepFileRanged(ctx context.Context) (Page, error) {
 	switch {
 	case page.Continuation == ContinuationCut:
 	case cut != CutNone:
-		if c.sentPending {
-			cutNotice += " " + PendingResultNotice
-		}
-		page.Continuation, page.CutReason, page.Notice = ContinuationCut, cut, cutNotice
+		page.Continuation, page.CutReason, page.Notice = ContinuationCut, cut, c.cutNotice(cutNotice)
 	case !c.sourceMore:
 		page.Continuation = ContinuationEnd
 		if info, err := c.reader.fs.Stat(path); err == nil && info.Size() > c.cursor.TotalBytes() {
@@ -380,6 +377,13 @@ func (c *Capture) stepFileRanged(ctx context.Context) (Page, error) {
 		}
 	}
 	return page, nil
+}
+
+func (c *Capture) cutNotice(notice string) string {
+	if c.sentPending {
+		return notice + " " + PendingResultNotice
+	}
+	return notice
 }
 
 // recordLimit is the largest single record any read of this capture may hold:
@@ -476,12 +480,12 @@ func (c *Capture) stepFileWhole(ctx context.Context) (Page, error) {
 func (c *Capture) stepSQLiteResumable(ctx context.Context) (Page, error) {
 	if c.started && c.sourceMore && c.marked == nil {
 		return Page{Session: c.header(nil), Continuation: ContinuationCut, CutReason: CutOriginNotResumable,
-			Notice: notResumableNotice(c.cursor.ConsumedBytes(), c.cursor.TotalBytes())}, nil
+			Notice: c.cutNotice(notResumableNotice(c.cursor.ConsumedBytes(), c.cursor.TotalBytes()))}, nil
 	}
 	budget, ceiling, exhausted := c.readBudget(c.cursor.ConsumedBytes())
 	if exhausted {
 		return Page{Session: c.header(nil), Continuation: ContinuationCut, CutReason: CutSourceBudget,
-			Notice: sourceBudgetNotice(c.cursor.ConsumedBytes(), c.cursor.TotalBytes(), c.opts.SourceCapBytes)}, nil
+			Notice: c.cutNotice(sourceBudgetNotice(c.cursor.ConsumedBytes(), c.cursor.TotalBytes(), c.opts.SourceCapBytes))}, nil
 	}
 	if c.opts.SourceCapBytes == 0 {
 		// OpenCode has no per-record size limit; an unbounded capture takes
@@ -507,7 +511,7 @@ func (c *Capture) stepSQLiteResumable(ctx context.Context) (Page, error) {
 	var oversized *ingest.RecordExceedsBudgetError
 	if errors.As(err, &oversized) {
 		cut, notice := c.classifyRecord(oversized, oversized.AtLeastBytes)
-		return Page{Session: c.header(nil), Continuation: ContinuationCut, CutReason: cut, Notice: notice}, nil
+		return Page{Session: c.header(nil), Continuation: ContinuationCut, CutReason: cut, Notice: c.cutNotice(notice)}, nil
 	}
 	if err != nil {
 		return Page{}, captureError(CloseUnreadable, err, "reading a slice of %d bytes after %d rows", budget, c.cursor.ConsumedRows())
@@ -541,7 +545,7 @@ func (c *Capture) stepSQLiteResumable(ctx context.Context) (Page, error) {
 		page.Continuation = ContinuationEnd
 	case c.marked == nil:
 		page.Continuation, page.CutReason = ContinuationCut, CutOriginNotResumable
-		page.Notice = notResumableNotice(c.cursor.ConsumedBytes(), c.cursor.TotalBytes())
+		page.Notice = c.cutNotice(notResumableNotice(c.cursor.ConsumedBytes(), c.cursor.TotalBytes()))
 	}
 	return page, nil
 }
@@ -567,7 +571,7 @@ func (c *Capture) stepSQLiteBounded(ctx context.Context) (Page, error) {
 	page.Continuation = ContinuationEnd
 	if truncation.Truncated {
 		page.Continuation, page.CutReason = ContinuationCut, CutOriginNotResumable
-		page.Notice = notResumableNotice(truncation.IncludedBytes, truncation.TotalBytes)
+		page.Notice = c.cutNotice(notResumableNotice(truncation.IncludedBytes, truncation.TotalBytes))
 	}
 	return page, nil
 }
@@ -684,6 +688,15 @@ func (c *Capture) fold(entries []schema.SessionEntry, final, prefix bool) (Page,
 	}
 	page := Page{Turns: append([]ingest.Turn(nil), turns[start:end]...), Continuation: ContinuationMore}
 	for i := range page.Turns {
+		// sentPending is sticky and stays accurate even if a budget cut
+		// releases pending turns early: on prefix (file) reads, sealedEnd
+		// holds back every turn with an unanswered call while !final (and
+		// TurnCap only narrows end), so sentPending flips only on the final
+		// page that ends the capture, leaving no later read to resolve the
+		// call or stale the flag. On non-prefix (current OpenCode SQLite)
+		// slices, each row carries its tool output inline rather than on a
+		// later row, and emitted turns are never re-sent, so an emitted
+		// unanswered call remains unanswered at any later budget cut.
 		if len(pendingCalls(page.Turns[i], results)) > 0 {
 			c.sentPending = true
 		}
@@ -707,7 +720,7 @@ func (c *Capture) fold(entries []schema.SessionEntry, final, prefix bool) (Page,
 	page.NativeMetadata = attachedMetadata(projection.NativeMetadata, page.Turns)
 	page.Session = c.header(projection.NativeMetadata)
 	if cut != CutNone {
-		page.Continuation, page.CutReason, page.Notice = ContinuationCut, cut, turnBudgetNotice(c.opts.TurnCap)
+		page.Continuation, page.CutReason, page.Notice = ContinuationCut, cut, c.cutNotice(turnBudgetNotice(c.opts.TurnCap))
 	}
 	return page, nil
 }

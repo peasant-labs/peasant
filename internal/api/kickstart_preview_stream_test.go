@@ -181,7 +181,11 @@ func TestKickstartPreviewStream(t *testing.T) {
 					forbidden = append(forbidden, captureID)
 				}
 				next := 0
+				freedCount := 0
 				for _, record := range records {
+					if record.Msg == privacy.PreviewLog.Named["freed"] {
+						freedCount++
+					}
 					for key, value := range record.attrs {
 						if !allowed[key] {
 							t.Fatalf("preview log line %q carries attribute %q outside the privacy fixture's keys", record.Msg, key)
@@ -204,6 +208,9 @@ func TestKickstartPreviewStream(t *testing.T) {
 				}
 				if next < len(tc.Logs) {
 					t.Fatalf("the preview log lacks %q (and what follows it) among %d preview lines", tc.Logs[next], len(records))
+				}
+				if slices.Contains(tc.Logs, "freed") && freedCount != 1 {
+					t.Fatalf("preview log wrote %d freed lines, want exactly 1", freedCount)
 				}
 			}
 			content := tc.Transcript
@@ -513,6 +520,9 @@ func TestKickstartPreviewStream(t *testing.T) {
 				}
 				if strings.Contains(event.Message, path) || strings.Contains(logs.String(), path) || strings.Contains(logs.String(), "synthetic preview content") {
 					t.Fatal("preview error or log disclosed source content or path")
+				}
+				if len(tc.Logs) > 0 {
+					checkLogs("")
 				}
 				return
 			}
