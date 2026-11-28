@@ -13,6 +13,7 @@ requiredNames:
   - owner-second-row-refused
   - claim-default-unclaimed-only
   - claim-all-retains-earlier-entries
+  - claim-all-counts-only-moved
   - claim-username-snapshot-only
   - claim-username-reuse-different-uuid
   - claim-reassign-other-account-retains-entries
@@ -29,6 +30,7 @@ requiredNames:
   - auto-claim-reuses-newest-automatic
   - ownership-counts-two-accounts
   - ownership-counts-signed-out
+  - ownership-counts-annotations-three-way
   - claim-annotations-never-moves-other-account
 
 cases:
@@ -89,6 +91,22 @@ cases:
       sessions:
         owner-session-a: second
         owner-session-b: second
+
+  - name: claim-all-counts-only-moved
+    steps:
+      - {kind: seed, sessions: [owner-session-a, owner-session-b, owner-session-c, owner-session-d, owner-session-e, owner-session-f, owner-session-g, owner-session-h, owner-session-i, owner-session-j, owner-session-k, owner-session-l]}
+      - {kind: signIn, user: one, username: alice}
+      - {kind: claimSessions, sessions: [owner-session-a, owner-session-b, owner-session-c], source: automatic, nowMs: 1000}
+      - {kind: signIn, user: two, username: bob}
+      - {kind: claimSessions, sessions: [owner-session-d, owner-session-e, owner-session-f, owner-session-g], source: automatic, nowMs: 2000}
+      - {kind: signIn, user: one, username: alice}
+      - {kind: claimAll, source: manual, nowMs: 3000}
+    expect:
+      claimCount: 3
+      claimed: 9
+      alreadyClaimed: 3
+      claimUserIDs: [one, two, one]
+      claimSources: [automatic, automatic, manual]
 
   - name: claim-username-snapshot-only
     steps:
@@ -305,6 +323,20 @@ cases:
       ownership:
         sessions: {total: 2, unclaimed: 0, mine: 0, others: 2}
         annotations: {total: 0, unclaimed: 0, mine: 0, others: 0}
+
+  - name: ownership-counts-annotations-three-way
+    steps:
+      - {kind: seed, sessions: [owner-session-a, owner-session-b, owner-session-c], annotations: [owner-session-a, owner-session-b, owner-session-c]}
+      - {kind: signIn, user: one, username: alice}
+      - {kind: claimAnnotations, annotations: [owner-session-a], source: automatic, nowMs: 1000}
+      - {kind: signIn, user: two, username: bob}
+      - {kind: claimAnnotations, annotations: [owner-session-b], source: automatic, nowMs: 2000}
+      - {kind: signIn, user: one, username: alice}
+    expect:
+      claimCount: 2
+      ownership:
+        sessions: {total: 3, unclaimed: 3, mine: 0, others: 0}
+        annotations: {total: 3, unclaimed: 1, mine: 1, others: 1}
 
   - name: claim-annotations-never-moves-other-account
     steps:

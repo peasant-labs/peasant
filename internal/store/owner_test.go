@@ -155,6 +155,8 @@ type localOwnerClaimExpected struct {
 	CredentialsAbsent *bool                        `yaml:"credentialsAbsent"`
 	PulledUnchanged   *bool                        `yaml:"pulledUnchanged"`
 	ClaimCount        *int                         `yaml:"claimCount"`
+	Claimed           *int                         `yaml:"claimed"`
+	AlreadyClaimed    *int                         `yaml:"alreadyClaimed"`
 	ClaimSources      []string                     `yaml:"claimSources"`
 	ClaimUsernames    []string                     `yaml:"claimUsernames"`
 	ClaimUserIDs      []string                     `yaml:"claimUserIDs"`
@@ -232,6 +234,7 @@ func runLocalOwnerClaimCase(t *testing.T, testCase localOwnerClaimCase) {
 		owner       *store.LocalOwner
 		annotations map[string]string
 		pulled      map[string]int64
+		lastClaim   *store.ClaimResult
 	}{annotations: map[string]string{}, pulled: map[string]int64{}}
 
 	for _, step := range testCase.Steps {
@@ -285,14 +288,15 @@ VALUES('village.example', 'ann-hash-a', 'pulled-a', 'remote-author', 'remote-aut
 			if !ok {
 				t.Fatalf("%s: fixture source %q is outside the closed set", step.Kind, step.Source)
 			}
+			var result store.ClaimResult
 			var err error
 			switch step.Kind {
 			case "claimDefault":
-				_, err = s.ClaimArtifacts(ctx, state.snapshot, false, source, step.NowMs)
+				result, err = s.ClaimArtifacts(ctx, state.snapshot, false, source, step.NowMs)
 			case "claimAll":
-				_, err = s.ClaimArtifacts(ctx, state.snapshot, true, source, step.NowMs)
+				result, err = s.ClaimArtifacts(ctx, state.snapshot, true, source, step.NowMs)
 			case "claimSessions":
-				_, err = s.ClaimSessionIDs(ctx, state.snapshot, step.Sessions, source, step.NowMs)
+				result, err = s.ClaimSessionIDs(ctx, state.snapshot, step.Sessions, source, step.NowMs)
 			case "claimAnnotations":
 				ids := make([]string, 0, len(step.Annotations))
 				for _, key := range step.Annotations {
@@ -302,11 +306,12 @@ VALUES('village.example', 'ann-hash-a', 'pulled-a', 'remote-author', 'remote-aut
 					}
 					ids = append(ids, id)
 				}
-				_, err = s.ClaimAnnotationIDs(ctx, state.snapshot, ids, source, step.NowMs)
+				result, err = s.ClaimAnnotationIDs(ctx, state.snapshot, ids, source, step.NowMs)
 			}
 			if err != nil {
 				t.Fatalf("%s: %v", step.Kind, err)
 			}
+			state.lastClaim = &result
 		case "insertSecondOwner":
 			err := ownerTestExecError(t, s, `INSERT INTO local_owner(id, singleton, created_at) VALUES('lo_second', 1, 2000)`)
 			if err == nil || !strings.Contains(err.Error(), step.WantError) {
@@ -362,6 +367,17 @@ VALUES('village.example', 'ann-hash-a', 'pulled-a', 'remote-author', 'remote-aut
 	}
 	if expect.ClaimCount != nil && len(claims) != *expect.ClaimCount {
 		t.Fatalf("claim entries = %d (%+v), want %d", len(claims), claims, *expect.ClaimCount)
+	}
+	if expect.Claimed != nil || expect.AlreadyClaimed != nil {
+		if state.lastClaim == nil {
+			t.Fatal("fixture expects claim counts but no claim step ran")
+		}
+		if expect.Claimed != nil && state.lastClaim.Claimed != *expect.Claimed {
+			t.Fatalf("last claim claimed = %d, want %d", state.lastClaim.Claimed, *expect.Claimed)
+		}
+		if expect.AlreadyClaimed != nil && state.lastClaim.AlreadyClaimed != *expect.AlreadyClaimed {
+			t.Fatalf("last claim alreadyClaimed = %d, want %d", state.lastClaim.AlreadyClaimed, *expect.AlreadyClaimed)
+		}
 	}
 	if expect.ClaimSources != nil {
 		got := make([]string, len(claims))

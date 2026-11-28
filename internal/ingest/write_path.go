@@ -343,6 +343,9 @@ func (p *Pipeline) mirrorDrainedBatch(ctx context.Context, results []workerResul
 			if wr.result.Error == nil && wr.artifact != nil {
 				wr.result.Error = err
 				failed[wr.result.SessionID] = true
+				if !wr.savedPairExisted {
+					p.writePendingClaimMarker(wr.result.OutputPath)
+				}
 			}
 		}
 		return failed
@@ -379,7 +382,14 @@ func (p *Pipeline) mirrorDrainedBatch(ctx context.Context, results []workerResul
 			failure := fmt.Errorf("record saved session %s: %w; the saved files were kept and the next harvest reads the session again", wr.result.SessionID, cause)
 			failed[wr.result.SessionID] = true
 			wr.result.mirrorPending = true
-			p.writePendingClaimMarker(wr.result.OutputPath)
+			// Only a pair that did not exist before this run is still
+			// first-stored evidence. A pair already on disk may belong to a
+			// session stored before the run (a rebuild, a reindex or a
+			// re-process), and a marker beside it would make the next harvest
+			// claim it.
+			if !wr.savedPairExisted {
+				p.writePendingClaimMarker(wr.result.OutputPath)
+			}
 			p.reportSessionDiagnostic(wr.result.SessionID, DiagnosticEntry{ErrorType: "artifact_mirror_pending", Location: string(wr.result.SessionID), Message: failure.Error(), Remediation: "Restore database access and rerun harvest to record the saved session."})
 			// The pair is on disk; only the row is missing. Preserve the run's
 			// file counts, but push the failure so the run reports it and does
@@ -413,13 +423,21 @@ func pendingClaimMarkerPath(sessionDir string) string {
 
 // writePendingClaimMarker records that a saved pair still needs its first
 // database mirror. It is best-effort: a missing marker only loses the automatic
-// claim, never the pair or the row.
+// claim, never the pair or the row, so a failed write is reported rather than
+// returned.
 func (p *Pipeline) writePendingClaimMarker(sessionDir string) {
 	path := pendingClaimMarkerPath(sessionDir)
 	if path == "" {
 		return
 	}
-	_ = p.fs.WriteFile(path, []byte("first-stored\n"), defaults.PrivateFilePerm)
+	if err := p.fs.WriteFile(path, []byte("first-stored\n"), defaults.PrivateFilePerm); err != nil {
+		p.reportSessionDiagnostic(SessionID(filepath.Base(sessionDir)), DiagnosticEntry{
+			ErrorType:   "artifact_pending_claim_marker",
+			Location:    path,
+			Message:     err.Error(),
+			Remediation: "Restore write access to the saved session directory so the next harvest can recognize the session as first stored.",
+		})
+	}
 }
 
 // removePendingClaimMarker clears the first-stored evidence after a successful
@@ -470,7 +488,7 @@ func (p *Pipeline) removeRelocatedSession(oldDir, sessionID string) error {
 		if name == defaults.DirSubagents.String() {
 			continue
 		}
-		if !strings.HasPrefix(name, sessionID+"--") && name != defaults.DirDebug.String() {
+		if name != pendingClaimMarkerName && !strings.HasPrefix(name, sessionID+"--") && name != defaults.DirDebug.String() {
 			continue
 		}
 		if err := p.fs.RemoveAll(filepath.Join(oldDir, name)); err != nil {

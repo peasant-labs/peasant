@@ -89,3 +89,60 @@ func TestOwnerClaimReadsUseNoTemporarySort(t *testing.T) {
 		})
 	}
 }
+
+// TestOwnerClaimsHasOnlyItsIdentityIndex pins the claim log's index set: the
+// only allowed index is the one SQLite builds for the id primary key. A new
+// named index (whatever its name) would make the reverse row-order reads cost
+// more and is not needed.
+func TestOwnerClaimsHasOnlyItsIdentityIndex(t *testing.T) {
+	t.Parallel()
+	db, err := Open(filepath.Join(t.TempDir(), "owner-claim-index.db"), WithPoolSize(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	conn, err := db.pool.Take(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.pool.Put(conn)
+
+	type claimIndex struct {
+		name   string
+		unique int64
+		origin string
+	}
+	var indexes []claimIndex
+	if err := sqlitex.ExecuteTransient(conn, `SELECT name, "unique", origin FROM pragma_index_list('owner_claims') ORDER BY seq`, &sqlitex.ExecOptions{
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			indexes = append(indexes, claimIndex{name: stmt.ColumnText(0), unique: stmt.ColumnInt64(1), origin: stmt.ColumnText(2)})
+			return nil
+		},
+	}); err != nil {
+		t.Fatalf("read owner_claims indexes: %v", err)
+	}
+	if len(indexes) == 0 {
+		t.Fatal("owner_claims has no index for its id primary key")
+	}
+	for _, index := range indexes {
+		if index.unique != 1 {
+			t.Fatalf("owner_claims index %q is not unique; only the id primary key may be indexed", index.name)
+		}
+		var columns []string
+		if err := sqlitex.ExecuteTransient(conn, `SELECT name FROM pragma_index_info(?) ORDER BY seqno`, &sqlitex.ExecOptions{
+			Args: []any{index.name},
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				columns = append(columns, stmt.ColumnText(0))
+				return nil
+			},
+		}); err != nil {
+			t.Fatalf("read columns of owner_claims index %q: %v", index.name, err)
+		}
+		if strings.Join(columns, ",") != "id" {
+			t.Fatalf("owner_claims index %q covers %v, want only the id primary key", index.name, columns)
+		}
+		if index.origin != "pk" && index.origin != "u" {
+			t.Fatalf("owner_claims index %q has origin %q; only a primary-key or unique-id index is allowed", index.name, index.origin)
+		}
+	}
+}

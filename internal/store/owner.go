@@ -88,12 +88,14 @@ type OwnerClaim struct {
 }
 
 // ClaimResult reports one claim operation. Claimed counts artifacts whose
-// current owner pointer this operation assigned; AlreadyClaimed counts requested
-// artifacts that already named the selected account, under both the default and
-// --all. A pointer to another account is not already claimed. Stored counts
-// every local artifact in scope, so an empty store is distinguishable from a
-// fully claimed one. An explicit claim always appends an entry, so ClaimID names
-// it even when Claimed is zero. An automatic claim reuses its account's newest
+// current owner pointer this operation assigned from unclaimed or another
+// account; AlreadyClaimed counts artifacts that already named the selected
+// account, under both the default and --all. A pointer to another account is
+// not already claimed, so under --all Claimed + AlreadyClaimed equals Stored.
+// Stored counts every local artifact in scope, so an empty store is
+// distinguishable from a fully claimed one. An explicit claim always appends an
+// entry, so ClaimID names it even when Claimed is zero. An automatic claim
+// reuses its account's newest
 // entry only under strict reuse; otherwise it appends a decision entry too, even
 // when every artifact it was asked to cover already carries a pointer.
 type ClaimResult struct {
@@ -394,6 +396,12 @@ func (s *Store) ClaimArtifacts(ctx context.Context, snapshot auth.CredentialSnap
 			return ClaimResult{}, err
 		}
 		result.Claimed += changed
+	}
+	if all {
+		// --all reassigns every row, including rows that already named the
+		// selected account. Only the rows that moved from unclaimed or another
+		// account are newly claimed; the rest are already the account's.
+		result.Claimed -= result.AlreadyClaimed
 	}
 	return result, nil
 }

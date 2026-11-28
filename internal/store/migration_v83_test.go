@@ -15,13 +15,13 @@ const (
 	v83FixtureUserID     = "11111111-1111-4111-8111-111111111111"
 )
 
-// TestMigrationV83AddsLocalOwnerAndClaimLog proves a populated V75 database
+// TestMigrationV83AddsLocalOwnerAndClaimLog proves a populated V78 database
 // becomes V83 without losing or rewriting any row, that the new singleton and
 // append-only constraints hold at the schema boundary, and that pulled rows stay
 // byte-identical.
 func TestMigrationV83AddsLocalOwnerAndClaimLog(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(t.TempDir(), "v75.db")
+	path := filepath.Join(t.TempDir(), "v78.db")
 	conn, err := sqlite.OpenConn(path, sqlite.OpenReadWrite, sqlite.OpenCreate)
 	if err != nil {
 		t.Fatal(err)
@@ -55,7 +55,7 @@ func TestMigrationV83AddsLocalOwnerAndClaimLog(t *testing.T) {
 
 	if err := migrateFrozenSchema(t, conn, CurrentSchemaVersion()); err != nil {
 		conn.Close()
-		t.Fatalf("migrate populated V75 database to V83: %v", err)
+		t.Fatalf("migrate populated V78 database to V83: %v", err)
 	}
 	if got := v83UserVersion(t, conn); got != 83 {
 		conn.Close()

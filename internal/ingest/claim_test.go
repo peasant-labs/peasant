@@ -118,6 +118,24 @@ func writeClaimSource(t *testing.T, root, sessionID string, modTime time.Time) s
 	return source
 }
 
+// pendingClaimMarkers returns every pending-claim marker file under root.
+func pendingClaimMarkers(t *testing.T, root string) []string {
+	t.Helper()
+	var found []string
+	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !entry.IsDir() && entry.Name() == ".pending-claim" {
+			found = append(found, path)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("walk %s for pending-claim markers: %v", root, err)
+	}
+	return found
+}
+
 // runClaimPipeline runs the production pipeline against root with a claimer that
 // records every session id it receives.
 func runClaimPipeline(t *testing.T, root string, cfg ingest.PipelineConfig) []string {
@@ -212,7 +230,7 @@ func TestAutoClaimSkipsForcedReprocess(t *testing.T) {
 
 // firstMirrorFailureStore fails the first artifact mirror and then delegates to
 // the real store. The pair is installed before the mirror, so the first run
-// leaves the saved files with no row, exactly the I3 failure path.
+// leaves the saved files with no database row.
 type firstMirrorFailureStore struct {
 	*store.Store
 	failed bool
@@ -264,6 +282,9 @@ func TestAutoClaimCarriesFirstStoredAcrossFirstMirrorFailure(t *testing.T) {
 	if first.Summary.New != 1 {
 		t.Fatalf("first run new sessions = %d, want the session counted as new", first.Summary.New)
 	}
+	if markers := pendingClaimMarkers(t, string(cfg.OutputDir)); len(markers) != 1 {
+		t.Fatalf("pending-claim markers after the failed mirror = %v, want one", markers)
+	}
 
 	second := runClaimPipelineOnStore(t, db, cfg, claimer, wrapped)
 	if len(claimed) != 1 || claimed[0] != sessionID {
@@ -272,25 +293,106 @@ func TestAutoClaimCarriesFirstStoredAcrossFirstMirrorFailure(t *testing.T) {
 	if second.Summary.Errors != 0 {
 		t.Fatalf("second run errors = %d, want the session stored cleanly", second.Summary.Errors)
 	}
+	if markers := pendingClaimMarkers(t, string(cfg.OutputDir)); len(markers) != 0 {
+		t.Fatalf("pending-claim markers after the successful mirror = %v, want none", markers)
+	}
+}
+
+// TestAutoClaimSkipsMarkerAfterRebuildMirrorFailure proves a mirror failure
+// during a rebuild does not turn a previously stored session into first-stored
+// evidence. The saved copy existed before the run, so no marker is written and
+// the next harvest still claims nothing.
+func TestAutoClaimSkipsMarkerAfterRebuildMirrorFailure(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	const sessionID = "11111111-1111-4111-8111-111111111299"
+	writeClaimSource(t, root, sessionID, time.Now().Add(-72*time.Hour))
+	cfg := claimPipelineConfig(root)
+	if first := runClaimPipeline(t, root, cfg); len(first) != 1 || first[0] != sessionID {
+		t.Fatalf("first run claimed = %v, want [%s]", first, sessionID)
+	}
+
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		if err := os.Remove(filepath.Join(root, "peasant.db") + suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
+			t.Fatal(err)
+		}
+	}
+	db, err := store.Open(filepath.Join(root, "peasant.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	wrapped := &firstMirrorFailureStore{Store: db}
+	var claimed []string
+	claimer := ingest.SessionClaimerFunc(func(_ context.Context, ids []string) error {
+		claimed = append(claimed, ids...)
+		return nil
+	})
+
+	runClaimPipelineOnStore(t, db, cfg, claimer, wrapped)
+	if len(claimed) != 0 {
+		t.Fatalf("rebuild with a failed mirror claimed = %v, want none", claimed)
+	}
+	if markers := pendingClaimMarkers(t, string(cfg.OutputDir)); len(markers) != 0 {
+		t.Fatalf("rebuild mirror failure wrote a marker beside a previously stored session: %v", markers)
+	}
+
+	next := runClaimPipelineOnStore(t, db, cfg, claimer, wrapped)
+	if len(claimed) != 0 {
+		t.Fatalf("a session stored before the run was claimed automatically: %v", claimed)
+	}
+	if next.Summary.Errors != 0 {
+		t.Fatalf("next run errors = %d, want the previously stored session recorded cleanly", next.Summary.Errors)
+	}
 }
 
 // TestAutoClaimSkipsStoredRowWithoutSavedPair proves the "no database row" half
 // of first stored: a row that already exists is not claimed again even when its
-// saved pair was deleted and the session is re-processed from the source.
+// saved pair was deleted and a changed source makes the session mirror again.
 func TestAutoClaimSkipsStoredRowWithoutSavedPair(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	const sessionID = "11111111-1111-4111-8111-111111111205"
-	writeClaimSource(t, root, sessionID, time.Now().Add(-72*time.Hour))
+	source := writeClaimSource(t, root, sessionID, time.Now().Add(-72*time.Hour))
 	cfg := claimPipelineConfig(root)
-	if first := runClaimPipeline(t, root, cfg); len(first) != 1 {
-		t.Fatalf("first run claimed = %v, want the new session", first)
+	var claimed []string
+	claimer := ingest.SessionClaimerFunc(func(_ context.Context, ids []string) error {
+		claimed = append(claimed, ids...)
+		return nil
+	})
+	runClaimPipelineWith(t, root, cfg, claimer)
+	if len(claimed) != 1 {
+		t.Fatalf("first run claimed = %v, want the new session", claimed)
 	}
+	claimed = nil
 	if err := os.RemoveAll(filepath.Join(root, "managed")); err != nil {
 		t.Fatal(err)
 	}
-	if second := runClaimPipeline(t, root, cfg); len(second) != 0 {
-		t.Fatalf("second run claimed = %v, want none for a stored row without a saved pair", second)
+	// Append a second turn so the stored row is re-processed from a changed
+	// source with its saved pair gone. Restoring the settled mtime keeps the
+	// session out of the active-only path.
+	file, err := os.OpenFile(source, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondTurn := `{"sessionId":"` + sessionID + `","type":"user","uuid":"entry-second","timestamp":"2023-11-14T22:14:20Z","cwd":"/workspace","message":{"role":"user","content":"second turn"}}` + "\n"
+	if _, err := file.WriteString(secondTurn); err != nil {
+		file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	settled := time.Now().Add(-72 * time.Hour)
+	if err := os.Chtimes(source, settled, settled); err != nil {
+		t.Fatal(err)
+	}
+	second := runClaimPipelineWith(t, root, cfg, claimer)
+	if len(claimed) != 0 {
+		t.Fatalf("second run claimed = %v, want none for a stored row without a saved pair", claimed)
+	}
+	if second.Summary.Updated != 1 {
+		t.Fatalf("second run summary = %+v, want the stored session updated", second.Summary)
 	}
 }
 

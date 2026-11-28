@@ -133,7 +133,7 @@ type userClaimReport struct {
 	Status         userShowReport          `json:"status"`
 	Claimed        int                     `json:"claimed"`
 	AlreadyClaimed int                     `json:"alreadyClaimed"`
-	ClaimID        string                  `json:"claimId,omitempty"`
+	ClaimID        string                  `json:"claimId"`
 	Outcome        *userClaimOutcomeReport `json:"outcome,omitempty"`
 }
 

@@ -236,9 +236,10 @@ func TestUserClaimDefaultThenAll(t *testing.T) {
 		t.Fatalf("claim all: %v\n%s", err, stdout)
 	}
 	var all struct {
-		Claimed int    `json:"claimed"`
-		ClaimID string `json:"claimId"`
-		Outcome struct {
+		Claimed        int    `json:"claimed"`
+		AlreadyClaimed int    `json:"alreadyClaimed"`
+		ClaimID        string `json:"claimId"`
+		Outcome        struct {
 			All  bool   `json:"all"`
 			Kind string `json:"kind"`
 		} `json:"outcome"`
@@ -246,8 +247,8 @@ func TestUserClaimDefaultThenAll(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &all); err != nil {
 		t.Fatalf("decode claim all json: %v\n%s", err, stdout)
 	}
-	if !all.Outcome.All || all.Claimed != 3 || all.ClaimID == "" || all.Outcome.Kind != string(userClaimOutcomeClaimed) {
-		t.Fatalf("claim all = %+v, want three reassigned sessions with an entry", all)
+	if !all.Outcome.All || all.Claimed != 1 || all.AlreadyClaimed != 2 || all.ClaimID == "" || all.Outcome.Kind != string(userClaimOutcomeClaimed) {
+		t.Fatalf("claim all = %+v, want one moved session, two already claimed, and an entry", all)
 	}
 	page, err := db.OwnerClaims(t.Context(), "")
 	if err != nil {
