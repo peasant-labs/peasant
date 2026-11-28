@@ -23,8 +23,9 @@ cases:
     regions: ['.swz-head', '.swz-body', '.swz-foot']
     # The selectors in front of a region that are allowed: the shared host, the
     # publish wizard's own phone rules, which let the page scroll, and the setup
-    # wizard's own body spacing.
-    allowedPrefixes: ['.wizard-host', '.share-wizard', '.ks-wizard']
+    # wizard's two body-spacing rules.
+    allowedPrefixes: ['.wizard-host', '.share-wizard']
+    allowedSelectors: ['.ks-wizard .swz-body', '.ks-wizard .swz-body:has(.ks-tree)']
   - name: every-page-that-draws-the-frame-uses-the-host-classes
     pages:
       - {file: src/components/kickstart/KickstartFlow.tsx, uses: [wizard-page, wizard-host]}

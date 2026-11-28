@@ -21,6 +21,7 @@ import (
 
 type previewRegistry struct {
 	mu             sync.Mutex
+	wg             sync.WaitGroup
 	sessions       *kickstartSessions
 	captures       map[*Conn]*webPreview
 	worker         chan struct{}
@@ -50,14 +51,21 @@ const previewFreeDisconnect = "disconnect"
 // final frame.
 const previewFreeComplete = "complete"
 
-// logFreed records that a capture's slot and everything it loaded were
-// released, with how much it had sent.
-func logFreed(p *webPreview, reason string) {
-	var retained int64
-	if p.capture != nil {
-		retained = p.capture.RetainedBytes()
-	}
-	slog.Info(previewLogFreed, "reason", reason, "seq", p.seq, "retained_bytes", retained)
+// release frees the capture's timer, source capture, and context and logs
+// previewLogFreed at most once per capture. Caller must hold r.mu.
+func (p *webPreview) release(reason string) {
+	p.freeOnce.Do(func() {
+		if p.stopIdle != nil {
+			p.stopIdle()
+		}
+		var retained int64
+		if p.capture != nil {
+			retained = p.capture.RetainedBytes()
+			go p.capture.Close()
+		}
+		slog.Info(previewLogFreed, "reason", reason, "seq", p.seq, "retained_bytes", retained)
+		p.cancel()
+	})
 }
 
 func previewCutReason(reason sourcepreview.CutReason) (schema.LocalKickstartPreviewCutReason, bool) {
@@ -98,6 +106,7 @@ func previewCloseReason(reason sourcepreview.CloseReason) (schema.LocalKickstart
 
 type webPreview struct {
 	outMu     sync.Mutex
+	freeOnce  sync.Once
 	conn      *Conn
 	sessionID string
 	id        string
@@ -177,7 +186,11 @@ func (r *previewRegistry) dispatch(ctx context.Context, conn *Conn, req schema.L
 		p.stopIdle()
 	}
 	r.mu.Unlock()
-	go r.advance(p)
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+		r.advance(p)
+	}()
 }
 
 func (r *previewRegistry) open(ctx context.Context, conn *Conn, req schema.LocalKickstartPreviewRequest) {
@@ -243,7 +256,9 @@ func (r *previewRegistry) open(ctx context.Context, conn *Conn, req schema.Local
 	if sessionID == "" {
 		sessionID = target.node.ID
 	}
+	r.wg.Add(1)
 	go func() {
+		defer r.wg.Done()
 		if previous != nil {
 			select {
 			case <-previous:
@@ -420,9 +435,7 @@ func (r *previewRegistry) send(p *webPreview, event schema.LocalKickstartPreview
 		p.opened = true
 		if event.Directory.Complete && r.captures[p.conn] == p {
 			delete(r.captures, p.conn)
-			p.cancel()
-			logFreed(p, previewFreeComplete)
-			go p.capture.Close()
+			p.release(previewFreeComplete)
 		} else if event.Kind == schema.LocalKickstartPreviewSegmentEvent && r.captures[p.conn] == p && !p.busy && p.seq == event.Seq {
 			p.last = r.sessions.env.now()
 			p.stopIdle = r.sessions.env.afterFunc(defaults.KickstartWebPreviewIdle, func() {
@@ -471,15 +484,8 @@ func (r *previewRegistry) fail(p *webPreview, err error) {
 		return
 	}
 	delete(r.captures, p.conn)
-	if p.stopIdle != nil {
-		p.stopIdle()
-	}
-	p.cancel()
 	slog.Info(previewLogClosed, "reason", string(reason), "code", string(code), "seq", p.seq)
-	logFreed(p, string(reason))
-	if p.capture != nil {
-		go p.capture.Close()
-	}
+	p.release(string(reason))
 	r.mu.Unlock()
 	p.outMu.Lock()
 	defer p.outMu.Unlock()
@@ -518,18 +524,11 @@ func (r *previewRegistry) removeIf(p *webPreview, reason schema.LocalKickstartPr
 
 func (r *previewRegistry) removeLocked(p *webPreview, reason schema.LocalKickstartPreviewCloseReason, notify bool) <-chan struct{} {
 	delete(r.captures, p.conn)
-	if p.stopIdle != nil {
-		p.stopIdle()
-	}
 	if notify {
 		slog.Info(previewLogClosed, "reason", string(reason), "seq", p.seq)
-		logFreed(p, string(reason))
+		p.release(string(reason))
 	} else {
-		logFreed(p, previewFreeDisconnect)
-	}
-	p.cancel()
-	if p.capture != nil {
-		go p.capture.Close()
+		p.release(previewFreeDisconnect)
 	}
 	if notify {
 		done := make(chan struct{})

@@ -1,0 +1,55 @@
+# Fixture cases for TestUpgradeImportBoundaryFixture
+# (internal/moduleboundary/upgrade_boundary_test.go).
+#
+# Each case materializes a synthetic module tree in a temporary directory and
+# runs checkUpgradeImportBoundary against it. requiredNames guards against
+# silently dropping any case.
+requiredNames:
+  - clean-module-with-nested-worktree
+  - nested-git-directory-without-gomod-skipped
+  - nested-module-without-git-skipped
+  - forbidden-import-in-current-module-fails
+  - forbidden-subpackage-import-fails
+  - internal-upgrade-self-import-allowed
+cases:
+  - name: clean-module-with-nested-worktree
+    files:
+      - {path: go.mod, content: "module github.com/peasant-labs/peasant\n\ngo 1.26.0\n"}
+      - {path: .git/HEAD, content: "ref: refs/heads/develop\n"}
+      - {path: cmd/peasant/cmd_migrate.go, content: "package main\n\nimport _ \"github.com/peasant-labs/peasant/internal/upgrade\"\n"}
+      - {path: internal/api/server.go, content: "package api\n"}
+      - {path: worktree/feature/.git, content: "gitdir: /synthetic/.git/worktrees/feature\n"}
+      - {path: worktree/feature/go.mod, content: "module github.com/peasant-labs/peasant\n\ngo 1.26.0\n"}
+      - {path: worktree/feature/cmd/peasant/cmd_migrate.go, content: "package main\n\nimport _ \"github.com/peasant-labs/peasant/internal/upgrade\"\n"}
+      - {path: worktree/feature/internal/api/forbidden.go, content: "package api\n\nimport _ \"github.com/peasant-labs/peasant/internal/upgrade\"\n"}
+
+  - name: nested-git-directory-without-gomod-skipped
+    files:
+      - {path: go.mod, content: "module github.com/peasant-labs/peasant\n\ngo 1.26.0\n"}
+      - {path: worktree/nested-clone/.git/HEAD, content: "ref: refs/heads/main\n"}
+      - {path: worktree/nested-clone/cmd/peasant/cmd_migrate.go, content: "package main\n\nimport _ \"github.com/peasant-labs/peasant/internal/upgrade\"\n"}
+
+  - name: nested-module-without-git-skipped
+    files:
+      - {path: go.mod, content: "module github.com/peasant-labs/peasant\n\ngo 1.26.0\n"}
+      - {path: tools/helper/go.mod, content: "module github.com/peasant-labs/helper\n\ngo 1.26.0\n"}
+      - {path: tools/helper/pkg/bad.go, content: "package pkg\n\nimport _ \"github.com/peasant-labs/peasant/internal/upgrade\"\n"}
+
+  - name: forbidden-import-in-current-module-fails
+    files:
+      - {path: go.mod, content: "module github.com/peasant-labs/peasant\n\ngo 1.26.0\n"}
+      - {path: worktree/feature/.git, content: "gitdir: /synthetic/.git/worktrees/feature\n"}
+      - {path: worktree/feature/cmd/peasant/cmd_migrate.go, content: "package main\n\nimport _ \"github.com/peasant-labs/peasant/internal/upgrade\"\n"}
+      - {path: internal/bad/bad.go, content: "package bad\n\nimport _ \"github.com/peasant-labs/peasant/internal/upgrade\"\n"}
+    errorContains: "internal/bad/bad.go imports planner github.com/peasant-labs/peasant/internal/upgrade"
+
+  - name: forbidden-subpackage-import-fails
+    files:
+      - {path: go.mod, content: "module github.com/peasant-labs/peasant\n\ngo 1.26.0\n"}
+      - {path: internal/bad/sub.go, content: "package bad\n\nimport _ \"github.com/peasant-labs/peasant/internal/upgrade/plan\"\n"}
+    errorContains: "internal/bad/sub.go imports planner github.com/peasant-labs/peasant/internal/upgrade/plan"
+
+  - name: internal-upgrade-self-import-allowed
+    files:
+      - {path: go.mod, content: "module github.com/peasant-labs/peasant\n\ngo 1.26.0\n"}
+      - {path: internal/upgrade/sub/sub.go, content: "package sub\n\nimport _ \"github.com/peasant-labs/peasant/internal/upgrade\"\n"}

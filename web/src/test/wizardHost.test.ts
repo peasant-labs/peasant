@@ -46,10 +46,15 @@ const CHECKS: Record<string, (entry: FixtureCase) => void> = {
   },
   'the-frames-regions-are-styled-only-by-the-host-and-the-publish-phone-override': (entry) => {
     const allowed = entry.allowedPrefixes as string[];
-    const offenders = selectors(read(entry.stylesheet as string))
-      .filter((selector) => (entry.regions as string[]).some((region) => selector.includes(region)))
-      .filter((selector) => !allowed.some((prefix) => selector.startsWith(`${prefix} `)));
+    const exact = new Set((entry.allowedSelectors as string[] | undefined) ?? []);
+    const regionSelectors = selectors(read(entry.stylesheet as string))
+      .filter((selector) => (entry.regions as string[]).some((region) => selector.includes(region)));
+    const offenders = regionSelectors
+      .filter((selector) => !allowed.some((prefix) => selector.startsWith(`${prefix} `)) && !exact.has(selector));
     expect(offenders, 'a rule styles a frame region without going through the host class').toEqual([]);
+    for (const selector of exact) {
+      expect(regionSelectors, `expected allowed selector ${selector} to remain in ${entry.stylesheet}`).toContain(selector);
+    }
   },
   'every-page-that-draws-the-frame-uses-the-host-classes': (entry) => {
     for (const page of entry.pages as { file: string; uses: string[] }[]) {
