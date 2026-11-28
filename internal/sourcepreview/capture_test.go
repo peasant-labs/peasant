@@ -110,6 +110,9 @@ type captureExpect struct {
 	HeaderMetadataEqualsWholeRead   bool     `yaml:"headerMetadataEqualsWholeRead"`
 	SameOnSecondRun                 bool     `yaml:"sameOnSecondRun"`
 	RetainedAfterEnd                *int64   `yaml:"retainedAfterEnd"`
+	ProgressFullAtEnd               bool     `yaml:"progressFullAtEnd"`
+	ProgressPartialAtCut            bool     `yaml:"progressPartialAtCut"`
+	ProgressZeroTotal               bool     `yaml:"progressZeroTotal"`
 }
 
 type captureCase struct {
@@ -222,6 +225,7 @@ type wholeFileFS struct{ ingest.FileSystem }
 // captureRun is everything one drive of a capture produced.
 type captureRun struct {
 	pages    []sourcepreview.Page
+	progress [][2]int64
 	err      error
 	retained int64
 }
@@ -329,7 +333,8 @@ func drive(t *testing.T, c captureCase, src source, opts sourcepreview.CaptureOp
 		return captureRun{err: err}
 	}
 	defer capture.Close()
-	run := captureRun{pages: []sourcepreview.Page{page}}
+	consumed, total := capture.Progress()
+	run := captureRun{pages: []sourcepreview.Page{page}, progress: [][2]int64{{consumed, total}}}
 	for {
 		for _, action := range c.Actions {
 			if action.AfterPage == len(run.pages) {
@@ -345,6 +350,8 @@ func drive(t *testing.T, c captureCase, src source, opts sourcepreview.CaptureOp
 			break
 		}
 		run.pages = append(run.pages, next)
+		consumed, total := capture.Progress()
+		run.progress = append(run.progress, [2]int64{consumed, total})
 		if len(run.pages) > 10_000 {
 			t.Fatalf("the capture handed out more than 10000 pages without ending")
 		}
@@ -744,6 +751,30 @@ func checkCapture(t *testing.T, c captureCase, src source, opts sourcepreview.Ca
 	}
 	if e.RetainedAfterEnd != nil && run.retained != *e.RetainedAfterEnd {
 		t.Fatalf("the capture still retains %d bytes after it ended, want %d", run.retained, *e.RetainedAfterEnd)
+	}
+	if run.err == nil && len(run.progress) > 0 {
+		firstTotal := run.progress[0][1]
+		prevConsumed := int64(0)
+		for i, step := range run.progress {
+			consumed, total := step[0], step[1]
+			if total != firstTotal {
+				t.Fatalf("page %d total bytes changed from %d to %d", i+1, firstTotal, total)
+			}
+			if consumed < 0 || consumed > total || consumed < prevConsumed {
+				t.Fatalf("page %d progress (%d, %d) violates 0 <= prev(%d) <= consumed <= total", i+1, consumed, total, prevConsumed)
+			}
+			prevConsumed = consumed
+		}
+		final := run.progress[len(run.progress)-1]
+		if e.ProgressFullAtEnd && (final[1] <= 0 || final[0] != final[1]) {
+			t.Fatalf("final progress = (%d, %d), want positive total with consumed == total", final[0], final[1])
+		}
+		if e.ProgressPartialAtCut && (final[1] <= 0 || final[0] >= final[1]) {
+			t.Fatalf("cut progress = (%d, %d), want positive total with consumed < total", final[0], final[1])
+		}
+		if e.ProgressZeroTotal && (final[0] != 0 || final[1] != 0) {
+			t.Fatalf("whole-origin progress = (%d, %d), want (0, 0)", final[0], final[1])
+		}
 	}
 }
 

@@ -48,8 +48,8 @@
     "test:directive-guard": "node scripts/test-directive-prologue.mjs"
   },
   "dependencies": {
-    "@peasant-labs/fairtrade": "0.2.1",
-    "@peasant-labs/schema": "0.58.1",
+    "@peasant-labs/fairtrade": "0.3.0",
+    "@peasant-labs/schema": "0.63.0",
     "@xyflow/react": "^12.10.1",
     "clsx": "^2.1.1",
     "diff": "^9.0.0",
@@ -75,14 +75,14 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.0.0",
+    "eslint": "9.39.1",
+    "eslint-plugin-unstring": "0.4.0",
     "jsdom": "^26.0.0",
     "puppeteer-core": "^25.2.1",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.0",
-    "vitest": "^2.0.0",
-    "yaml": "2.9.0",
-    "eslint": "9.39.1",
     "typescript-eslint": "8.46.4",
-    "eslint-plugin-unstring": "0.4.0"
+    "vitest": "^2.0.0",
+    "yaml": "2.9.0"
   }
 }

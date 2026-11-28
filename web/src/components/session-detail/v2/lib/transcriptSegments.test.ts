@@ -8,6 +8,7 @@ import type {
 import { parseStrictYAML, requireExactRequiredFields, requireRecord, requireUniqueNames } from '@/test/strictYaml';
 import {
   parseTranscriptDirectory,
+  parseTranscriptSegment,
   type TranscriptSegmentDirectory,
   type TranscriptSegmentRef,
 } from './transcriptSegments';
@@ -97,5 +98,49 @@ describe('parseTranscriptDirectory conversation turn positions', () => {
     expect(call).toHaveLength(1);
     const text = String(call[0]);
     for (const part of row.warn) expect(text).toContain(part);
+  });
+});
+
+const segmentDisplayFixture = requireRecord(
+  parseStrictYAML(
+    readFileSync(resolve(process.cwd(), DIR, 'transcript_segment_display_numbers.yaml'), 'utf8'),
+    'transcript_segment_display_numbers.yaml',
+  ),
+  'transcript_segment_display_numbers.yaml',
+);
+const segmentDisplayManifest = requireRecord(
+  parseStrictYAML(
+    readFileSync(resolve(process.cwd(), DIR, 'transcript_segment_display_numbers.manifest.yaml'), 'utf8'),
+    'transcript_segment_display_numbers.manifest.yaml',
+  ),
+  'transcript_segment_display_numbers.manifest.yaml',
+);
+
+requireExactRequiredFields(segmentDisplayFixture, ['path', 'cases'], 'transcript_segment_display_numbers.yaml');
+requireExactRequiredFields(segmentDisplayManifest, ['requiredNames'], 'transcript_segment_display_numbers.manifest.yaml');
+const segmentPath = segmentDisplayFixture.path as string;
+type SegmentDisplayCase = { name: string; segment: unknown; wantErrorContains: string };
+const segmentDisplayCases = (segmentDisplayFixture.cases as unknown[]).map((row, index) => {
+  const record = requireRecord(row, `displayNumber cases[${index}]`);
+  requireExactRequiredFields(record, ['name', 'segment', 'wantErrorContains'], `displayNumber cases[${index}]`);
+  return record as unknown as SegmentDisplayCase;
+});
+requireUniqueNames(segmentDisplayCases as unknown as Record<string, unknown>[], 'displayNumber cases');
+
+describe('parseTranscriptSegment displayNumber', () => {
+  it('holds every required fixture row', () => {
+    const names = segmentDisplayCases.map((row) => row.name);
+    const required = segmentDisplayManifest.requiredNames as string[];
+    expect(required.filter((name) => !names.includes(name))).toEqual([]);
+  });
+
+  it.each(segmentDisplayCases.map((row) => [row.name, row] as const))('%s', (_name, row) => {
+    if (row.wantErrorContains.length > 0) {
+      expect(() => parseTranscriptSegment(row.segment, segmentPath)).toThrow(row.wantErrorContains);
+      return;
+    }
+    const parsed = parseTranscriptSegment(row.segment, segmentPath);
+    const wireTurns = (row.segment as { turns: Array<{ displayNumber?: string }> }).turns;
+    expect(parsed.turns.map((turn) => turn.displayNumber)).toEqual(wireTurns.map((turn) => turn.displayNumber));
   });
 });

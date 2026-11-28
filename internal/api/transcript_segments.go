@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 	"sync"
 
@@ -57,10 +58,11 @@ func newSegmentCacheKey(id ingest.SessionID, revision string) segmentCacheKey {
 // counts. The eight-entry LRU caps the whole cache, so even a 10,000-turn
 // session holds tens of kilobytes per directory entry.
 type segmentDirectory struct {
-	revision    string
-	totalTurns  int
-	refs        []schema.TranscriptSegmentRef
-	entryCounts []int
+	revision       string
+	totalTurns     int
+	refs           []schema.TranscriptSegmentRef
+	entryCounts    []int
+	displayNumbers []string
 	// turns is what the window resolver reads: identity and role, never
 	// content, so a jump stops at its extents without folding the session again.
 	turns []schema.TranscriptWindowTurn
@@ -215,15 +217,44 @@ func (p *segmentProducer) buildDirectory(ctx context.Context, id ingest.SessionI
 	for i := range turns {
 		meta[i] = schema.TranscriptWindowTurn{Index: turns[i].Index, Role: turns[i].Role}
 	}
+	displayNumbers, _ := transcript.PartitionDisplayNumbers(turns, segmentPartitionHarness(entries))
 	return segmentDirectory{
-		revision:    revision,
-		totalTurns:  totalTurns,
-		refs:        refs,
-		entryCounts: transcript.SegmentEntryCounts(entries, refs),
-		turns:       meta,
+		revision:       revision,
+		totalTurns:     totalTurns,
+		refs:           refs,
+		entryCounts:    transcript.SegmentEntryCounts(entries, refs),
+		displayNumbers: displayNumbers,
+		turns:          meta,
 
 		totalConversationTurns: total,
 	}, nil
+}
+
+func segmentPartitionHarness(entries []schema.SessionEntry) schema.Harness {
+	for _, entry := range entries {
+		if entry.Harness != "" {
+			return entry.Harness
+		}
+	}
+	return ""
+}
+
+func segmentDisplayNumbers(directory segmentDirectory, filtered []ingest.Turn) ([]string, bool) {
+	if len(filtered) == 0 || len(directory.displayNumbers) != len(directory.turns) {
+		return nil, false
+	}
+	start, ok := slices.BinarySearchFunc(directory.turns, filtered[0].Index, func(turn schema.TranscriptWindowTurn, target int) int {
+		return turn.Index - target
+	})
+	if !ok || start+len(filtered) > len(directory.turns) {
+		return nil, false
+	}
+	for i := range filtered {
+		if directory.turns[start+i].Index != filtered[i].Index {
+			return nil, false
+		}
+	}
+	return directory.displayNumbers[start : start+len(filtered)], true
 }
 
 // foldEntries uses the same attachment join as full detail. Both directory and
@@ -411,6 +442,11 @@ func (s *Server) handleTranscriptSegment(w http.ResponseWriter, r *http.Request)
 	}
 
 	rows := transcript.SegmentTurnRows(filtered, transcript.DefaultServedDocumentBudget())
+	if displayNumbers, hasNumbers := segmentDisplayNumbers(directory, filtered); hasNumbers && len(displayNumbers) == len(rows) {
+		for i := range rows {
+			rows[i].DisplayNumber = displayNumbers[i]
+		}
+	}
 	byteLength := 0
 	for i := range rows {
 		byteLength += rows[i].ByteLength

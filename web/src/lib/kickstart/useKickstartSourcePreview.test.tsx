@@ -43,7 +43,12 @@ interface PreviewStep {
   expectNoticeTone?: { tone: PreviewNoticeTone; text: string; readAgainInside?: boolean };
   expectStateInPane?: string;
   expectPreviewColumn?: PreviewColumnCheck;
-  expectMinimap?: { bands: number };
+  expectMinimap?: {
+    bands: number;
+    hollowTail?: boolean;
+    loadedPercent?: number;
+    ariaValueTextIncludes?: string;
+  };
 }
 /** What the preview column holds: the viewer alone, or one state in the viewer's slot. */
 interface PreviewColumnCheck {
@@ -91,6 +96,8 @@ const Timeline = Object.freeze({
   Pinned: '.txn-sticky',
   Minimap: '.txn-minimap',
   Band: '.txn-minimap-seg',
+  Loaded: '.txn-minimap-loaded',
+  HollowTail: '.txn-minimap-tail',
   SegmentTicks: '.txn-scrub',
 });
 const CASE_KEYS = ['name', 'stream', 'steps', 'server', 'fakeTimers'];
@@ -271,7 +278,7 @@ async function runPreviewStep(step: PreviewStep, spec: StreamSpec, state: Conver
     }
   }
   if (step.expectMinimap !== undefined) {
-    const { bands } = step.expectMinimap;
+    const { bands, hollowTail, loadedPercent, ariaValueTextIncludes } = step.expectMinimap;
     // The timeline pins once the trace scrolls past its header.
     await scrollToEnd(mounted, at);
     const pinned = await waitFor(() => {
@@ -284,6 +291,19 @@ async function runPreviewStep(step: PreviewStep, spec: StreamSpec, state: Conver
     expect(sliders.length, `${at}: the pinned timeline is one slider`).toBe(1);
     expect(sliders[0]!.matches(Timeline.Minimap), `${at}: the slider is the minimap (class ${sliders[0]!.className})`).toBe(true);
     expect(sliders[0]!.getAttribute('aria-valuemax'), `${at}: the minimap spans the loaded turns`).toBe(String(bands - 1));
+    if (hollowTail !== undefined) {
+      const tailEl = pinned.querySelector(Timeline.HollowTail);
+      if (hollowTail) expect(tailEl, `${at}: the minimap draws a hollow tail`).not.toBeNull();
+      else expect(tailEl, `${at}: the minimap omits the hollow tail`).toBeNull();
+    }
+    if (loadedPercent !== undefined) {
+      const loadedEl = pinned.querySelector<HTMLElement>(Timeline.Loaded);
+      expect(loadedEl, `${at}: the minimap draws the loaded portion`).not.toBeNull();
+      expect(loadedEl!.style.width, `${at}: loaded percentage width`).toBe(`${loadedPercent}%`);
+    }
+    if (ariaValueTextIncludes !== undefined) {
+      expect(sliders[0]!.getAttribute('aria-valuetext') ?? '', `${at}: minimap aria-valuetext`).toContain(ariaValueTextIncludes);
+    }
     expect(pinned.querySelector(Timeline.SegmentTicks), `${at}: a preview draws no segment ticks`).toBeNull();
     expect((pinned.textContent ?? '').trim(), `${at}: the pinned timeline carries no caption`).toBe('');
   }

@@ -146,6 +146,16 @@ func newCapture(ctx context.Context, reader *Reader, listing onboarding.SessionL
 // such error except ErrBusy the capture is closed.
 func (c *Capture) Next(ctx context.Context) (Page, error) {
 	if !c.mu.TryLock() {
+		if c.closed.Load() || c.parent.Err() != nil {
+			c.mu.Lock()
+			if !c.closed.Swap(true) {
+				c.cancel()
+				c.unwatch()
+			}
+			c.clearLocked()
+			c.mu.Unlock()
+			return Page{}, captureError(CloseClosed, nil, "")
+		}
 		return Page{}, captureError(CloseBusy, nil, "")
 	}
 	defer c.mu.Unlock()
@@ -234,13 +244,12 @@ func (c *Capture) unwatch() {
 
 // Progress reports how much of the source the capture has consumed and the
 // source's total as measured when it was read, in bytes. A surface uses it to
-// say how much of a session a capture that can load more has loaded so far.
-// The total is zero for an origin read once, whole; a capture that ended
-// reports zero consumed.
+// report loaded source bytes while reading or after ending. The total is zero
+// for an origin read once, whole.
 func (c *Capture) Progress() (consumed, total int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.consumed(), c.cursor.TotalBytes()
+	return c.cursor.ConsumedBytes(), c.cursor.TotalBytes()
 }
 
 // RetainedBytes reports what the capture holds in memory between reads: the

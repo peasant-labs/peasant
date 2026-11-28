@@ -105,23 +105,26 @@ func previewCloseReason(reason sourcepreview.CloseReason) (schema.LocalKickstart
 }
 
 type webPreview struct {
-	outMu     sync.Mutex
-	freeOnce  sync.Once
-	conn      *Conn
-	sessionID string
-	id        string
-	requestID string
-	revision  string
-	ctx       context.Context
-	cancel    context.CancelFunc
-	stopIdle  func() bool
-	last      time.Time
-	busy      bool
-	opened    bool
-	seq       uint32
-	capture   *sourcepreview.Capture
-	segmenter *sourcepreview.Segmenter
-	page      sourcepreview.Page
+	outMu         sync.Mutex
+	freeOnce      sync.Once
+	conn          *Conn
+	sessionID     string
+	id            string
+	requestID     string
+	revision      string
+	ctx           context.Context
+	cancel        context.CancelFunc
+	stopIdle      func() bool
+	last          time.Time
+	busy          bool
+	opened        bool
+	seq           uint32
+	capture       *sourcepreview.Capture
+	segmenter     *sourcepreview.Segmenter
+	page          sourcepreview.Page
+	hasByteExtent bool
+	bytesLoaded   int64
+	bytesTotal    int64
 }
 
 func newPreviewRegistry(sessions *kickstartSessions) *previewRegistry {
@@ -299,6 +302,7 @@ func (r *previewRegistry) start(p *webPreview, listings []onboarding.SessionList
 	p.page = page
 	p.segmenter.Push(page)
 	consumed, total := capture.Progress()
+	p.initByteExtent(consumed, total)
 	slog.Info(previewLogOpened, "turns", len(page.Turns), "source_bytes", consumed, "source_total_bytes", total, "continuation", page.Continuation.String())
 	header, err := transcript.SessionToDetailValidated(&page.Session)
 	if err != nil {
@@ -329,6 +333,7 @@ func (r *previewRegistry) advance(p *webPreview) {
 		p.page = page
 		p.segmenter.Push(page)
 	}
+	p.syncByteExtent()
 	final := p.page.Continuation != sourcepreview.ContinuationMore
 	segment, ok, err := p.segmenter.Next(final)
 	if errors.Is(err, sourcepreview.ErrSerializedBudget) {
@@ -392,10 +397,49 @@ func (p *webPreview) directory(complete bool) *schema.LocalKickstartPreviewDirec
 	}
 	conversation := p.segmenter.LoadedConversationTurns()
 	d := &schema.LocalKickstartPreviewDirectory{SessionID: schema.SessionID(p.page.Session.ID), Revision: p.revision, Complete: complete, LoadedSegments: len(refs), LoadedTurns: p.segmenter.LoadedTurns(), LoadedConversationTurns: &conversation, Segments: refs}
+	if loaded, total, ok := p.byteExtent(); ok {
+		d.SourceBytesLoaded, d.SourceBytesTotal = &loaded, &total
+	}
 	if complete {
 		d.TotalSegments, d.TotalTurns, d.TotalConversationTurns = &d.LoadedSegments, &d.LoadedTurns, &conversation
 	}
 	return d
+}
+
+const previewMaxByteExtent = 9007199254740991
+
+func (p *webPreview) initByteExtent(consumed, total int64) {
+	if total <= 0 || total > previewMaxByteExtent {
+		return
+	}
+	if consumed < 0 {
+		consumed = 0
+	} else if consumed > total {
+		consumed = total
+	}
+	p.hasByteExtent = true
+	p.bytesTotal = total
+	p.bytesLoaded = consumed
+}
+
+func (p *webPreview) syncByteExtent() {
+	if !p.hasByteExtent {
+		return
+	}
+	consumed, _ := p.capture.Progress()
+	if consumed > p.bytesTotal {
+		consumed = p.bytesTotal
+	}
+	if consumed > p.bytesLoaded {
+		p.bytesLoaded = consumed
+	}
+}
+
+func (p *webPreview) byteExtent() (loaded, total int, ok bool) {
+	if !p.hasByteExtent {
+		return 0, 0, false
+	}
+	return int(p.bytesLoaded), int(p.bytesTotal), true
 }
 
 func (r *previewRegistry) send(p *webPreview, event schema.LocalKickstartPreviewEvent) error {

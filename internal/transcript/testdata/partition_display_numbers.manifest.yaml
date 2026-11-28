@@ -1,0 +1,12 @@
+requiredNames:
+  - task-and-sub-numbering
+  - segment-starts-at-9a-and-9b
+  - adjacent-duplicate-without-tools
+  - adjacent-duplicate-with-tools-replaces-prior
+  - short-system-and-empty-turns
+  - unkept-leading-segment-defers-to-next-segment
+  - pi-harness-keeps-short-system-and-duplicates
+  - base26-subturn-rollover
+  - uncookable-returns-false
+  - no-kept-turns-returns-false
+  - invalid-harness-returns-false

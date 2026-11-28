@@ -35,6 +35,12 @@ var segmentTurnsFixtureYAML []byte
 //go:embed testdata/segment_turns.manifest.yaml
 var segmentTurnsManifestYAML []byte
 
+//go:embed testdata/partition_display_numbers.yaml
+var partitionDisplayNumbersFixtureYAML []byte
+
+//go:embed testdata/partition_display_numbers.manifest.yaml
+var partitionDisplayNumbersManifestYAML []byte
+
 type segmentTurnSpec struct {
 	Index          int    `yaml:"index"`
 	Role           string `yaml:"role"`
@@ -521,6 +527,132 @@ func TestCheckConversationTurnsFixtureCases(t *testing.T) {
 			for _, fragment := range want.MessageContains {
 				if !strings.Contains(fault.Error(), fragment) {
 					t.Fatalf("fault message does not hold %q: %s", fragment, fault.Error())
+				}
+			}
+		})
+	}
+}
+
+type partitionDisplayNumberTurnSpec struct {
+	Index          int    `yaml:"index"`
+	Role           string `yaml:"role"`
+	Content        string `yaml:"content"`
+	ToolCount      int    `yaml:"toolCount,omitempty"`
+	SourceEntryRef string `yaml:"sourceEntryRef,omitempty"`
+}
+
+type partitionDisplayNumberStreamSegment struct {
+	Ok      bool     `yaml:"ok"`
+	Numbers []string `yaml:"numbers,omitempty"`
+}
+
+type partitionDisplayNumberCase struct {
+	Name               string                                `yaml:"name"`
+	Harness            string                                `yaml:"harness"`
+	Turns              []partitionDisplayNumberTurnSpec      `yaml:"turns"`
+	SplitAt            []int                                 `yaml:"splitAt,omitempty"`
+	WantOk             bool                                  `yaml:"wantOk"`
+	WantNumbers        []string                              `yaml:"wantNumbers,omitempty"`
+	WantStreamSegments []partitionDisplayNumberStreamSegment `yaml:"wantStreamSegments,omitempty"`
+}
+
+type partitionDisplayNumberFixture struct {
+	Cases []partitionDisplayNumberCase `yaml:"cases"`
+}
+
+func TestPartitionDisplayNumbersFixtureCases(t *testing.T) {
+	t.Parallel()
+	fixture, err := decodeYAML[partitionDisplayNumberFixture](partitionDisplayNumbersFixtureYAML, "partition display numbers fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := testutil.DecodeRequiredNamesManifest(partitionDisplayNumbersManifestYAML, "partition display numbers")
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, len(fixture.Cases))
+	for i, fixtureCase := range fixture.Cases {
+		names[i] = fixtureCase.Name
+	}
+	if err := testutil.ValidateRequiredNames(manifest, names, "partition display numbers"); err != nil {
+		t.Fatal(err)
+	}
+	for _, fixtureCase := range fixture.Cases {
+		fixtureCase := fixtureCase
+		t.Run(fixtureCase.Name, func(t *testing.T) {
+			t.Parallel()
+			turns := make([]ingest.Turn, len(fixtureCase.Turns))
+			for i, spec := range fixtureCase.Turns {
+				role, err := segmentTurnSpec{Role: spec.Role}.role()
+				if err != nil {
+					t.Fatal(err)
+				}
+				turn := ingest.Turn{
+					Index:          spec.Index,
+					Role:           role,
+					EntryType:      schema.EntryTypeText,
+					Content:        spec.Content,
+					SourceEntryRef: spec.SourceEntryRef,
+				}
+				for j := range spec.ToolCount {
+					turn.ToolCalls = append(turn.ToolCalls, ingest.ToolCall{
+						ID:   fmt.Sprintf("call-%d-%d", spec.Index, j),
+						Name: "Bash",
+					})
+				}
+				turns[i] = turn
+			}
+			harness := schema.Harness(fixtureCase.Harness)
+			numbers, ok := PartitionDisplayNumbers(turns, harness)
+			if ok != fixtureCase.WantOk {
+				t.Fatalf("PartitionDisplayNumbers ok = %v, want %v (numbers=%v)", ok, fixtureCase.WantOk, numbers)
+			}
+			if !fixtureCase.WantOk {
+				if numbers != nil {
+					t.Fatalf("PartitionDisplayNumbers numbers = %v, want nil", numbers)
+				}
+				return
+			}
+			if len(numbers) != len(fixtureCase.WantNumbers) {
+				t.Fatalf("PartitionDisplayNumbers len = %d, want %d (%v)", len(numbers), len(fixtureCase.WantNumbers), numbers)
+			}
+			for i := range numbers {
+				if numbers[i] != fixtureCase.WantNumbers[i] {
+					t.Fatalf("turn %d displayNumber = %q, want %q (all=%v)", i, numbers[i], fixtureCase.WantNumbers[i], numbers)
+				}
+			}
+			if len(fixtureCase.SplitAt) > 0 {
+				var state PartitionNumberState
+				var streamed []string
+				start := 0
+				splits := append(append([]int(nil), fixtureCase.SplitAt...), len(turns))
+				for idx, end := range splits {
+					segNumbers, segOk := state.NextSegment(turns[start:end], harness)
+					if len(fixtureCase.WantStreamSegments) > 0 {
+						wantSeg := fixtureCase.WantStreamSegments[idx]
+						if segOk != wantSeg.Ok {
+							t.Fatalf("segment %d NextSegment(%d:%d) ok = %v, want %v", idx, start, end, segOk, wantSeg.Ok)
+						}
+						if wantSeg.Ok && strings.Join(segNumbers, ",") != strings.Join(wantSeg.Numbers, ",") {
+							t.Fatalf("segment %d NextSegment numbers = %v, want %v", idx, segNumbers, wantSeg.Numbers)
+						}
+					} else {
+						if !segOk {
+							t.Fatalf("NextSegment(%d:%d) returned ok=false", start, end)
+						}
+						streamed = append(streamed, segNumbers...)
+					}
+					start = end
+				}
+				if len(fixtureCase.WantStreamSegments) == 0 {
+					if len(streamed) != len(fixtureCase.WantNumbers) {
+						t.Fatalf("streamed len = %d, want %d (%v)", len(streamed), len(fixtureCase.WantNumbers), streamed)
+					}
+					for i := range streamed {
+						if streamed[i] != fixtureCase.WantNumbers[i] {
+							t.Fatalf("streamed turn %d displayNumber = %q, want %q (all=%v)", i, streamed[i], fixtureCase.WantNumbers[i], streamed)
+						}
+					}
 				}
 			}
 		})

@@ -123,7 +123,8 @@ func TestKickstartPreviewStream(t *testing.T) {
 			// Logs names the preview log lines the case must write, in order.
 			Logs []string `yaml:"logs"`
 			// FreedReason is the reason the freed line must carry.
-			FreedReason string `yaml:"freedReason"`
+			FreedReason      string `yaml:"freedReason"`
+			ExpectByteExtent string `yaml:"expectByteExtent"`
 		} `yaml:"cases"`
 	}
 	if err := testutil.DecodeNamedFixtureYAML(streamFixture, &fixture); err != nil {
@@ -158,7 +159,7 @@ func TestKickstartPreviewStream(t *testing.T) {
 			oldLogger := slog.Default()
 			slog.SetDefault(slog.New(slog.NewJSONHandler(logs, nil)))
 			t.Cleanup(func() { slog.SetDefault(oldLogger) })
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			path := filepath.Join(t.TempDir(), "session.jsonl")
 			t.Cleanup(func() {
@@ -300,6 +301,8 @@ func TestKickstartPreviewStream(t *testing.T) {
 			case "truncate-between-loads", "every-more-answered":
 				// Small reads, so each load past the first reads the source again.
 				hub.previews.captureOptions = sourcepreview.CaptureOptions{FirstReadBytes: 64 << 10, SliceReadBytes: 1 << 20, SourceCapBytes: defaults.KickstartWebPreviewSourceCapBytes}
+			case "source-cap-partial":
+				hub.previews.captureOptions = sourcepreview.CaptureOptions{FirstReadBytes: 4096, SliceReadBytes: 4096, SourceCapBytes: 32768}
 			}
 			idReached, idRelease := make(chan struct{}), make(chan struct{})
 			if tc.Operation == "refuse-reopen" {
@@ -535,9 +538,30 @@ func TestKickstartPreviewStream(t *testing.T) {
 				}
 				return
 			}
+			checkWireByteExtent := func(dir *schema.LocalKickstartPreviewDirectory, prevLoaded, expectedTotal int) (int, int) {
+				t.Helper()
+				if dir == nil || dir.SourceBytesLoaded == nil || dir.SourceBytesTotal == nil {
+					t.Fatalf("wire directory is missing sourceBytesLoaded/sourceBytesTotal: %+v", dir)
+				}
+				loaded, total := *dir.SourceBytesLoaded, *dir.SourceBytesTotal
+				if total <= 0 || loaded < 0 || loaded > total {
+					t.Fatalf("wire byte extent out of bounds: loaded=%d total=%d", loaded, total)
+				}
+				if expectedTotal > 0 && total != expectedTotal {
+					t.Fatalf("wire byte extent total changed from %d to %d", expectedTotal, total)
+				}
+				if prevLoaded > 0 && loaded < prevLoaded {
+					t.Fatalf("wire byte extent decreased from %d to %d", prevLoaded, loaded)
+				}
+				return loaded, total
+			}
+			var prevWireLoaded, wantWireTotal int
 			var state schema.LocalKickstartPreviewState
 			for range 2 {
 				event := read()
+				if tc.ExpectByteExtent != "" {
+					prevWireLoaded, wantWireTotal = checkWireByteExtent(event.Directory, prevWireLoaded, wantWireTotal)
+				}
 				state, err = schema.MergeLocalKickstartPreview(state, event)
 				if err != nil {
 					t.Fatalf("invalid frame: %v", err)
@@ -571,7 +595,12 @@ func TestKickstartPreviewStream(t *testing.T) {
 			}()
 			switch tc.Operation {
 			case "":
-			case "every-more-answered":
+				if tc.ExpectByteExtent == "single-read-complete" {
+					if prevWireLoaded != wantWireTotal {
+						t.Fatalf("single-read wire loaded=%d, want equal to total=%d", prevWireLoaded, wantWireTotal)
+					}
+				}
+			case "every-more-answered", "source-cap-partial":
 				// Every load until the capture ends gets exactly one frame.
 				for loads := 0; !state.Directory.Complete; loads++ {
 					if loads > 200 {
@@ -579,6 +608,9 @@ func TestKickstartPreviewStream(t *testing.T) {
 					}
 					more()
 					event := read()
+					if tc.ExpectByteExtent != "" {
+						prevWireLoaded, wantWireTotal = checkWireByteExtent(event.Directory, prevWireLoaded, wantWireTotal)
+					}
 					if event.Kind == schema.LocalKickstartPreviewClosed {
 						t.Fatalf("load %d closed the capture with %s", loads+1, event.Reason)
 					}
@@ -588,6 +620,16 @@ func TestKickstartPreviewStream(t *testing.T) {
 					}
 					state = next
 					barrier()
+				}
+				switch tc.ExpectByteExtent {
+				case "monotonic-to-complete":
+					if prevWireLoaded != wantWireTotal {
+						t.Fatalf("complete byte extent loaded=%d, want total=%d", prevWireLoaded, wantWireTotal)
+					}
+				case "capped-partial":
+					if prevWireLoaded >= wantWireTotal {
+						t.Fatalf("capped byte extent loaded=%d, want < total=%d", prevWireLoaded, wantWireTotal)
+					}
 				}
 			case "truncate-between-loads":
 				more()
@@ -893,5 +935,20 @@ func TestPreviewFrameCapRefusesBeforeQueueing(t *testing.T) {
 	case <-conn.writeCh:
 		t.Fatal("oversized frame entered the write queue")
 	default:
+	}
+}
+
+func TestPreviewByteExtentZeroTotalOmitsExtent(t *testing.T) {
+	p := &webPreview{}
+	p.initByteExtent(0, 0)
+	if _, _, ok := p.byteExtent(); ok {
+		t.Fatal("zero total reported a byte extent, want omitted")
+	}
+	dir := &schema.LocalKickstartPreviewDirectory{}
+	if loaded, total, ok := p.byteExtent(); ok {
+		dir.SourceBytesLoaded, dir.SourceBytesTotal = &loaded, &total
+	}
+	if dir.SourceBytesLoaded != nil || dir.SourceBytesTotal != nil {
+		t.Fatalf("directory carried unexpected byte extent: %+v", dir)
 	}
 }

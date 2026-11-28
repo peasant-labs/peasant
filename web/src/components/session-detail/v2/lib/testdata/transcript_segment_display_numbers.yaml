@@ -1,0 +1,55 @@
+path: /api/v1/sessions/77777777-7777-4777-8777-777777777777/transcript/segments/0
+cases:
+  - name: valid-display-numbers-on-all-turns
+    segment:
+      index: 0
+      revision: "4213"
+      firstTurn: 0
+      lastTurn: 12
+      byteLength: 2048
+      hasOlder: false
+      hasNewer: true
+      turns:
+        - {index: 0, role: user, content: "one", truncated: false, byteLength: 512, displayNumber: "1"}
+        - {index: 4, role: assistant, content: "two", truncated: false, byteLength: 512, displayNumber: "9a"}
+        - {index: 8, role: assistant, content: "three", truncated: false, byteLength: 512, displayNumber: "9b"}
+        - {index: 12, role: assistant, content: "four", truncated: false, byteLength: 512, displayNumber: "10aa"}
+    wantErrorContains: ""
+  - name: all-display-numbers-absent
+    segment:
+      index: 0
+      revision: "4213"
+      firstTurn: 0
+      lastTurn: 4
+      byteLength: 1024
+      hasOlder: false
+      hasNewer: false
+      turns:
+        - {index: 0, role: user, content: "one", truncated: false, byteLength: 512}
+        - {index: 4, role: assistant, content: "two", truncated: false, byteLength: 512}
+    wantErrorContains: ""
+  - name: mixed-display-numbers-rejected
+    segment:
+      index: 0
+      revision: "4213"
+      firstTurn: 0
+      lastTurn: 4
+      byteLength: 1024
+      hasOlder: false
+      hasNewer: false
+      turns:
+        - {index: 0, role: user, content: "one", truncated: false, byteLength: 512, displayNumber: "1"}
+        - {index: 4, role: assistant, content: "two", truncated: false, byteLength: 512}
+    wantErrorContains: "all turns in a segment or none"
+  - name: invalid-display-number-pattern-rejected
+    segment:
+      index: 0
+      revision: "4213"
+      firstTurn: 0
+      lastTurn: 0
+      byteLength: 512
+      hasOlder: false
+      hasNewer: false
+      turns:
+        - {index: 0, role: user, content: "one", truncated: false, byteLength: 512, displayNumber: "0a"}
+    wantErrorContains: "displayNumber is invalid"

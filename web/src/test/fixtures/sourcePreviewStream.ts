@@ -29,6 +29,7 @@ import {
 export interface StreamTurn {
   readonly role: typeof Role.User | typeof Role.Assistant;
   readonly text: string;
+  readonly displayNumber?: string;
 }
 
 export interface StreamSpec {
@@ -57,6 +58,7 @@ function wireTurn(turn: StreamTurn, index: number): Json {
     depth: 0,
     timestamp: new Date(START + index * 1000).toISOString(),
     truncated: false,
+    ...(turn.displayNumber !== undefined ? { displayNumber: turn.displayNumber } : {}),
   };
   return { ...base, byteLength: new TextEncoder().encode(JSON.stringify(base)).length };
 }
@@ -104,7 +106,13 @@ function refs(segments: Json[][], count: number): Json[] {
   });
 }
 
-function directory(spec: StreamSpec, segments: Json[][], loaded: number, complete: boolean): Json {
+function directory(
+  spec: StreamSpec,
+  segments: Json[][],
+  loaded: number,
+  complete: boolean,
+  sourceBytes?: { readonly loaded?: number; readonly total?: number },
+): Json {
   const held = segments.slice(0, loaded);
   const loadedTurns = held.reduce((sum, turns) => sum + turns.length, 0);
   const conversation = held.flat().filter((turn) => isConversationTurn(turn as never)).length;
@@ -117,6 +125,8 @@ function directory(spec: StreamSpec, segments: Json[][], loaded: number, complet
     loadedConversationTurns: conversation,
     segments: refs(segments, loaded),
   };
+  if (sourceBytes?.loaded !== undefined) d.sourceBytesLoaded = sourceBytes.loaded;
+  if (sourceBytes?.total !== undefined) d.sourceBytesTotal = sourceBytes.total;
   if (complete) {
     d.totalSegments = loaded;
     d.totalTurns = loadedTurns;
@@ -147,6 +157,8 @@ export interface FrameRequest {
   readonly closed?: LocalKickstartPreviewCloseReason;
   readonly code?: string;
   readonly message?: string;
+  /** Optional wire byte-extent pair (`sourceBytesLoaded` / `sourceBytesTotal`) on the open directory. */
+  readonly sourceBytes?: { readonly loaded?: number; readonly total?: number };
   /** Answer a request id instead of the capture (a refusal of an open). */
   readonly refuse?: true;
   /** Send it as another capture's frame. */
@@ -175,7 +187,7 @@ export function buildFrame(spec: StreamSpec, request: FrameRequest, at: { seq: n
       captureId,
       seq: 0,
       header: header(spec, 0),
-      directory: directory(spec, segments, 0, false),
+      directory: directory(spec, segments, 0, false, request.sourceBytes),
       continuation: LocalKickstartPreviewContinuation.More,
     });
   }
@@ -189,7 +201,7 @@ export function buildFrame(spec: StreamSpec, request: FrameRequest, at: { seq: n
     captureId,
     seq: at.seq,
     header: header(spec, loadedTurns),
-    directory: directory(spec, segments, loaded, complete),
+    directory: directory(spec, segments, loaded, complete, request.sourceBytes),
     continuation: request.final ?? LocalKickstartPreviewContinuation.More,
   };
   if (carries) {

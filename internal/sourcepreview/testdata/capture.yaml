@@ -198,7 +198,7 @@ cases:
   - name: file-first-page-is-a-prefix-of-the-whole-read
     transcript: long-conversation
     options: {firstReadBytes: 900, sliceReadBytes: 900}
-    expect: {continuation: end, equalsWholeRead: true, firstPageIsProperPrefix: true, minPages: 3}
+    expect: {continuation: end, equalsWholeRead: true, firstPageIsProperPrefix: true, minPages: 3, progressFullAtEnd: true}
 
   # The boundary falls between the call and its result: a per-slice fold would
   # lose the output.
@@ -314,13 +314,13 @@ cases:
     transcript: tool-call-conversation
     noRange: true
     options: {firstReadBytes: 64, sliceReadBytes: 64}
-    expect: {continuation: end, equalsWholeRead: true, pages: 1}
+    expect: {continuation: end, equalsWholeRead: true, pages: 1, progressZeroTotal: true}
 
   - name: sqlite-current-pages-share-one-index-space
     sqlite: semantic-parity-current
     origin: opencode-current-sqlite
     options: {firstReadBytes: 1, sliceReadBytes: 1}
-    expect: {continuation: end, minPages: 2, uniqueAscendingTurns: true, equalsWholeReadText: true}
+    expect: {continuation: end, minPages: 2, uniqueAscendingTurns: true, equalsWholeReadText: true, progressFullAtEnd: true}
 
   - name: sqlite-legacy-reads-once-and-cuts-not-resumable
     sqlite: legacy-scrollable-session
@@ -372,12 +372,12 @@ cases:
   - name: web-source-cap-cuts-with-notice
     transcript: long-conversation
     options: {firstReadBytes: 1000, sliceReadBytes: 1000, sourceCapBytes: 3000}
-    expect: {continuation: cut, cutReason: source_budget, noticeContains: ["the most one preview reads"], prefixOfWholeRead: true}
+    expect: {continuation: cut, cutReason: source_budget, noticeContains: ["the most one preview reads"], prefixOfWholeRead: true, progressPartialAtCut: true}
 
   - name: turn-cap-cuts-with-notice
     transcript: long-conversation
     options: {firstReadBytes: 1000, sliceReadBytes: 1000, turnCap: 5}
-    expect: {continuation: cut, cutReason: turn_budget, turns: 5, noticeContains: ["after 5 turns"], prefixOfWholeRead: true}
+    expect: {continuation: cut, cutReason: turn_budget, turns: 5, noticeContains: ["after 5 turns"], prefixOfWholeRead: true, progressPartialAtCut: true}
 
   - name: zero-source-cap-is-unbounded
     transcript: long-conversation

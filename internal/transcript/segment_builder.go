@@ -1,7 +1,13 @@
 package transcript
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/schema"
@@ -105,6 +111,337 @@ func SegmentTurnRows(folded []ingest.Turn, budget ServedDocumentBudget) []schema
 		}
 	}
 	return rows
+}
+
+// PartitionDisplayNumbers computes the wire displayNumber for every turn in a
+// partition using schema.CookTranscriptRows over the whole partition, never
+// over a single segment's turns. Returns nil, false when the partition has no
+// valid harness, no kept turns, or CookTranscriptRows refuses the partition.
+// Unkept turns (empty, short system banners, or adjacent duplicates folded by
+// CookTranscriptRows) inherit their kept neighbor's label so every served
+// segment satisfies the contract's all-or-none segment numbering invariant.
+func PartitionDisplayNumbers(folded []ingest.Turn, harness schema.Harness) ([]string, bool) {
+	if len(folded) == 0 || !slices.Contains(schema.AllHarnesses, harness) {
+		return nil, false
+	}
+	verdicts, err := cookTurnVerdicts(folded, harness)
+	if err != nil {
+		return nil, false
+	}
+	keptLabels := make([]string, len(verdicts))
+	for i, verdict := range verdicts {
+		if verdict.Keep {
+			keptLabels[i] = verdict.DisplayNumber
+		}
+	}
+	return fillDisplayNumbers(folded, verdicts, keptLabels)
+}
+
+// PartitionNumberState tracks incremental displayNumber assignment across
+// consecutive streamed segments without retaining earlier turn text. Calling
+// NextSegment for each contiguous cut produces the same labels as calling
+// PartitionDisplayNumbers over the full partition at once.
+type PartitionNumberState struct {
+	hasKept  bool
+	disabled bool
+	task     int
+	sub      int
+	lastKept ingest.Turn
+}
+
+// NextSegment computes the displayNumber for each turn in the next segment of
+// a partition, continuing task and sub counters across segment boundaries.
+func (s *PartitionNumberState) NextSegment(turns []ingest.Turn, harness schema.Harness) ([]string, bool) {
+	if s.disabled || len(turns) == 0 || !slices.Contains(schema.AllHarnesses, harness) {
+		return nil, false
+	}
+	if !s.hasKept {
+		verdicts, err := cookTurnVerdicts(turns, harness)
+		if err != nil {
+			s.disabled = true
+			return nil, false
+		}
+		keptLabels := make([]string, len(verdicts))
+		lastKeptIdx := -1
+		for i, verdict := range verdicts {
+			if !verdict.Keep || verdict.DisplayNumber == "" {
+				continue
+			}
+			task, sub, ok := parseDisplayNumber(verdict.DisplayNumber)
+			if !ok {
+				s.disabled = true
+				return nil, false
+			}
+			keptLabels[i] = verdict.DisplayNumber
+			s.task, s.sub = task, sub
+			lastKeptIdx = i
+		}
+		if lastKeptIdx < 0 {
+			return nil, false
+		}
+		s.hasKept = true
+		s.lastKept = stripTurnForCook(turns[lastKeptIdx])
+		return fillDisplayNumbers(turns, verdicts, keptLabels)
+	}
+
+	batch := make([]ingest.Turn, 1+len(turns))
+	batch[0] = s.lastKept
+	copy(batch[1:], turns)
+	verdicts, err := cookTurnVerdicts(batch, harness)
+	if err != nil {
+		s.disabled = true
+		return nil, false
+	}
+	prevLabel := formatDisplayNumber(s.task, s.sub)
+	keptLabels := make([]string, len(verdicts))
+	havePrevCook := false
+	prevCookTask := 0
+	lastKeptIdx := 0
+	if verdicts[0].Keep && verdicts[0].DisplayNumber != "" {
+		cookTask, _, ok := parseDisplayNumber(verdicts[0].DisplayNumber)
+		if !ok {
+			s.disabled = true
+			return nil, false
+		}
+		keptLabels[0] = prevLabel
+		prevCookTask = cookTask
+		havePrevCook = true
+	}
+	for i := 1; i < len(verdicts); i++ {
+		if !verdicts[i].Keep || verdicts[i].DisplayNumber == "" {
+			continue
+		}
+		cookTask, _, ok := parseDisplayNumber(verdicts[i].DisplayNumber)
+		if !ok {
+			s.disabled = true
+			return nil, false
+		}
+		if !havePrevCook {
+			havePrevCook = true
+			prevCookTask = cookTask
+			keptLabels[i] = prevLabel
+		} else {
+			if cookTask > prevCookTask {
+				s.task++
+				s.sub = 0
+			} else {
+				s.sub++
+			}
+			prevCookTask = cookTask
+			keptLabels[i] = formatDisplayNumber(s.task, s.sub)
+		}
+		lastKeptIdx = i
+	}
+	if lastKeptIdx > 0 {
+		s.lastKept = stripTurnForCook(batch[lastKeptIdx])
+	}
+	numbers, ok := fillDisplayNumbers(batch, verdicts, keptLabels)
+	if !ok {
+		return nil, false
+	}
+	return numbers[1:], true
+}
+
+func cookTurnVerdicts(folded []ingest.Turn, harness schema.Harness) ([]schema.CookedTurn, error) {
+	turns := stripTurnsForCookDetail(folded)
+	raw, err := json.Marshal(struct {
+		Turns []schema.TurnDetail `json:"turns"`
+	}{Turns: turns})
+	if err != nil {
+		return nil, err
+	}
+	cookTurns, err := schema.NewTranscriptCookTurns(raw)
+	if err != nil {
+		return nil, err
+	}
+	return schema.CookTranscriptRows(cookTurns, harness)
+}
+
+// stripTurnsForCookDetail retains only the fields schema.CookTranscriptRows inspects
+// so 32 MiB tool payloads are neither copied nor marshaled during numbering.
+func stripTurnsForCookDetail(folded []ingest.Turn) []schema.TurnDetail {
+	turns := make([]schema.TurnDetail, len(folded))
+	for i, t := range folded {
+		var toolCalls []schema.ToolCallDetail
+		if len(t.ToolCalls) > 0 {
+			toolCalls = make([]schema.ToolCallDetail, len(t.ToolCalls))
+			for j, tc := range t.ToolCalls {
+				toolCalls[j] = schema.ToolCallDetail{
+					CallEntryRef:     schema.SourceEntryRef(tc.CallEntryRef),
+					ResultEntryRef:   schema.SourceEntryRef(tc.ResultEntryRef),
+					CallProvenance:   tc.CallProvenance,
+					ResultProvenance: tc.ResultProvenance,
+					Usage:            tc.Usage,
+					ID:               tc.ID,
+					Name:             tc.Name,
+				}
+			}
+		}
+		var parts []schema.TurnContentPart
+		for _, part := range contentPartsFromTurn(t) {
+			if part.Type == schema.TurnPartTypeImage {
+				parts = append(parts, part)
+			}
+		}
+		turns[i] = schema.TurnDetail{
+			ContentParts:   parts,
+			ControlKind:    t.ControlKind,
+			SourceEntryRef: schema.SourceEntryRef(t.SourceEntryRef),
+			Provenance:     t.Provenance,
+			Usage:          t.Usage,
+			Index:          t.Index,
+			Role:           t.Role,
+			Content:        compactCookContent(t.Content),
+			ToolCalls:      toolCalls,
+			Depth:          t.Depth,
+		}
+	}
+	return turns
+}
+
+func stripTurnForCook(t ingest.Turn) ingest.Turn {
+	stripped := ingest.Turn{
+		Index:          t.Index,
+		Role:           t.Role,
+		Content:        compactCookContent(t.Content),
+		Depth:          t.Depth,
+		ControlKind:    t.ControlKind,
+		SourceEntryRef: t.SourceEntryRef,
+		Provenance:     t.Provenance,
+		Usage:          t.Usage,
+	}
+	for _, part := range t.Parts {
+		if part.Kind == ingest.TurnPartImage {
+			stripped.Parts = append(stripped.Parts, part)
+		}
+	}
+	if len(t.ToolCalls) > 0 {
+		stripped.ToolCalls = make([]ingest.ToolCall, len(t.ToolCalls))
+		for i, tc := range t.ToolCalls {
+			stripped.ToolCalls[i] = ingest.ToolCall{
+				ID:               tc.ID,
+				Name:             tc.Name,
+				CallEntryRef:     tc.CallEntryRef,
+				ResultEntryRef:   tc.ResultEntryRef,
+				CallProvenance:   tc.CallProvenance,
+				ResultProvenance: tc.ResultProvenance,
+				Usage:            tc.Usage,
+			}
+		}
+	}
+	return stripped
+}
+
+// compactCookContent replaces long non-blank content with a deterministic
+// printable ASCII digest so CookTranscriptRows avoids escaping and scanning
+// megabytes of repeated text while preserving non-empty, >=8-unit, and
+// exact-duplicate semantics.
+func compactCookContent(content string) string {
+	const minCompactBytes = 96
+	if len(content) <= minCompactBytes || !hasVisibleASCIIBlock(content, 8) {
+		return content
+	}
+	sum := sha256.Sum256([]byte(content))
+	return "peasant-cook-sha256:" + hex.EncodeToString(sum[:])
+}
+
+func hasVisibleASCIIBlock(s string, minRun int) bool {
+	run := 0
+	for i := 0; i < len(s); i++ {
+		b := s[i]
+		if b >= '!' && b <= '~' {
+			run++
+			if run >= minRun {
+				return true
+			}
+		} else {
+			run = 0
+		}
+	}
+	return false
+}
+
+func fillDisplayNumbers(turns []ingest.Turn, verdicts []schema.CookedTurn, keptLabels []string) ([]string, bool) {
+	firstKept := ""
+	for i, verdict := range verdicts {
+		if verdict.Keep && keptLabels[i] != "" {
+			firstKept = keptLabels[i]
+			break
+		}
+	}
+	if firstKept == "" {
+		return nil, false
+	}
+	numbers := make([]string, len(verdicts))
+	lastKept := ""
+	for i, verdict := range verdicts {
+		if verdict.Keep && keptLabels[i] != "" {
+			numbers[i] = keptLabels[i]
+			lastKept = keptLabels[i]
+			continue
+		}
+		if inheritsNextKeptDisplayNumber(turns, verdicts, keptLabels, i) {
+			numbers[i] = keptLabels[i+1]
+			continue
+		}
+		if lastKept != "" {
+			numbers[i] = lastKept
+		} else {
+			numbers[i] = firstKept
+		}
+	}
+	return numbers, true
+}
+
+func inheritsNextKeptDisplayNumber(turns []ingest.Turn, verdicts []schema.CookedTurn, keptLabels []string, i int) bool {
+	if i+1 >= len(verdicts) {
+		return false
+	}
+	if !verdicts[i+1].Keep || keptLabels[i+1] == "" {
+		return false
+	}
+	if turns[i].Role != turns[i+1].Role {
+		return false
+	}
+	return turns[i].Content == turns[i+1].Content && strings.TrimSpace(turns[i].Content) != ""
+}
+
+func formatDisplayNumber(task, sub int) string {
+	label := strconv.Itoa(task)
+	if sub <= 0 {
+		return label
+	}
+	var buf [32]byte
+	i := len(buf)
+	for n := sub; n > 0; {
+		n--
+		i--
+		buf[i] = byte('a' + n%26)
+		n /= 26
+	}
+	return label + string(buf[i:])
+}
+
+func parseDisplayNumber(label string) (task, sub int, ok bool) {
+	split := 0
+	for split < len(label) && label[split] >= '0' && label[split] <= '9' {
+		split++
+	}
+	if split == 0 {
+		return 0, 0, false
+	}
+	n, err := strconv.Atoi(label[:split])
+	if err != nil || n <= 0 {
+		return 0, 0, false
+	}
+	for i := split; i < len(label); i++ {
+		c := label[i]
+		if c < 'a' || c > 'z' {
+			return 0, 0, false
+		}
+		sub = sub*26 + int(c-'a'+1)
+	}
+	return n, sub, true
 }
 
 // FoldedTurnByteLength returns the pre-bound JSON size of one folded turn. It is

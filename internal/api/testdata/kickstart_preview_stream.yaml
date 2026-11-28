@@ -34,8 +34,11 @@ requiredNames:
   - preview-logs-open-segments-close-and-free
   - socket-disconnect-logs-capture-freed
   - idle-expiry-logs-capture-freed
+  - byte-extent-monotonic-to-complete
+  - byte-extent-source-cap-partial
 cases:
   - name: open-sends-first-segment-unasked
+    expectByteExtent: single-read-complete
     transcript: |
       {"type":"user","uuid":"u1","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"synthetic preview content"}}
       {"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"synthetic response"}]}}
@@ -86,3 +89,5 @@ cases:
   - {name: preview-logs-open-segments-close-and-free, long: true, operation: close-preview, logs: [opened, sent, closed, freed], freedReason: closed_by_client}
   - {name: socket-disconnect-logs-capture-freed, long: true, operation: disconnect, logs: [opened, sent, freed], freedReason: disconnect}
   - {name: idle-expiry-logs-capture-freed, long: true, operation: expire, logs: [opened, sent, closed, freed], freedReason: idle}
+  - {name: byte-extent-monotonic-to-complete, long: true, operation: every-more-answered, expectByteExtent: monotonic-to-complete}
+  - {name: byte-extent-source-cap-partial, long: true, operation: source-cap-partial, expectByteExtent: capped-partial}

@@ -13,6 +13,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/sourcepreview"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/transcript"
+	"github.com/peasant-labs/schema"
 )
 
 //go:embed testdata/segmenter.yaml
@@ -36,19 +37,20 @@ type segmenterCase struct {
 	} `yaml:"segmenter"`
 	Drive  string `yaml:"drive"`
 	Expect struct {
-		MinSegments                int      `yaml:"minSegments"`
-		Segments                   int      `yaml:"segments"`
-		EachWithinBudget           bool     `yaml:"eachWithinBudget"`
-		EqualsContractCut          bool     `yaml:"equalsContractCut"`
-		OversizedAloneAndTruncated bool     `yaml:"oversizedAloneAndTruncated"`
-		FirstSegmentShort          bool     `yaml:"firstSegmentShort"`
-		FirstSegmentHasNewer       bool     `yaml:"firstSegmentHasNewer"`
-		RefsContiguous             bool     `yaml:"refsContiguous"`
-		LastHasNoNewer             bool     `yaml:"lastHasNoNewer"`
-		StillPendingAfterOne       bool     `yaml:"stillPendingAfterOne"`
-		SerializedCut              bool     `yaml:"serializedCut"`
-		NoticeContains             []string `yaml:"noticeContains"`
-		WithinFrameCap             int      `yaml:"withinFrameCap"`
+		MinSegments                  int      `yaml:"minSegments"`
+		Segments                     int      `yaml:"segments"`
+		EachWithinBudget             bool     `yaml:"eachWithinBudget"`
+		EqualsContractCut            bool     `yaml:"equalsContractCut"`
+		DisplayNumbersMatchPartition bool     `yaml:"displayNumbersMatchPartition"`
+		OversizedAloneAndTruncated   bool     `yaml:"oversizedAloneAndTruncated"`
+		FirstSegmentShort            bool     `yaml:"firstSegmentShort"`
+		FirstSegmentHasNewer         bool     `yaml:"firstSegmentHasNewer"`
+		RefsContiguous               bool     `yaml:"refsContiguous"`
+		LastHasNoNewer               bool     `yaml:"lastHasNoNewer"`
+		StillPendingAfterOne         bool     `yaml:"stillPendingAfterOne"`
+		SerializedCut                bool     `yaml:"serializedCut"`
+		NoticeContains               []string `yaml:"noticeContains"`
+		WithinFrameCap               int      `yaml:"withinFrameCap"`
 	} `yaml:"expect"`
 }
 
@@ -233,6 +235,21 @@ func checkSegments(t *testing.T, c segmenterCase, run segmentRun) {
 		want, _ := transcript.CutSegments(run.turns, c.Segmenter.BudgetBytes)
 		if asJSON(refs) != asJSON(want) {
 			t.Fatalf("the preview cut\n%s\ndiffers from the contract cut of the same turns\n%s", asJSON(refs), asJSON(want))
+		}
+	}
+	if e.DisplayNumbersMatchPartition {
+		wantNumbers, ok := transcript.PartitionDisplayNumbers(run.turns, schema.HarnessClaudeCode)
+		if !ok {
+			t.Fatal("PartitionDisplayNumbers returned ok=false on generated session")
+		}
+		var gotNumbers []string
+		for _, segment := range segments {
+			for _, row := range segment.Segment.Turns {
+				gotNumbers = append(gotNumbers, row.DisplayNumber)
+			}
+		}
+		if asJSON(gotNumbers) != asJSON(wantNumbers) {
+			t.Fatalf("streamed displayNumbers differ from full-partition PartitionDisplayNumbers")
 		}
 	}
 	if e.OversizedAloneAndTruncated {

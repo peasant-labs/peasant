@@ -45,11 +45,15 @@ type SegmentCase = {
   repeatedTurns?: number[];
   captions?: string[];
   header?: string;
+  displayNumbers?: Record<string, string>;
+  expectedTurnLabels?: Record<string, string>;
 };
 
 /** Rows that state conversation turn positions, and the fields only they carry. */
 const POSITION_CASES: readonly string[] = ['positions-mounted', 'legacy-duplicate-full-load'];
 const POSITION_FIELDS = ['totalConversationTurns', 'systemTurns', 'toolTurns', 'repeatedTurns', 'captions', 'header'] as const;
+const DISPLAY_NUMBER_CASES: readonly string[] = ['served-display-numbers-mounted'];
+const DISPLAY_NUMBER_FIELDS = ['displayNumbers', 'expectedTurnLabels'] as const;
 
 const reads: string[] = [];
 const scanRequests = vi.hoisted(() => vi.fn());
@@ -139,6 +143,7 @@ function loadCases(): SegmentCase[] {
     if (row.name === 'load-more-prepends') fields.push('heldTurn');
     if (row.name === 'revision-directory-fails') fields.push('clearedTurns', 'expectError');
     if (POSITION_CASES.includes(String(row.name))) fields.push(...POSITION_FIELDS);
+    if (DISPLAY_NUMBER_CASES.includes(String(row.name))) fields.push(...DISPLAY_NUMBER_FIELDS);
     requireExactRequiredFields(row, fields, `transcript segment cases[${index}]`);
     if (row.name !== names[index]) throw new Error(`transcript segment cases[${index}] is ${String(row.name)}, want ${names[index]}`);
     return row as SegmentCase;
@@ -155,6 +160,7 @@ function turnWire(index: number, plan: SegmentCase) {
   const system = plan.name === 'system-only' || plan.systemTurns?.includes(index) === true;
   const tool = plan.toolTurns?.includes(index) === true;
   const content = bounded ? (servePreBoundInline ? plan.preBoundContent : plan.clippedContent) : plan.name === 'system-only' ? 'system entry is available' : system ? `system notice ${index}` : `turn ${source}`;
+  const displayNumber = plan.displayNumbers?.[String(index)];
   return {
     index,
     role: system ? 'system' : tool ? 'tool' : source % 2 === 0 ? 'user' : 'assistant',
@@ -165,6 +171,7 @@ function turnWire(index: number, plan: SegmentCase) {
     toolCalls: [],
     truncated: bounded ? !servePreBoundInline : false,
     byteLength: bounded ? plan.preBoundContent!.length : 32,
+    ...(displayNumber !== undefined ? { displayNumber } : {}),
   };
 }
 
@@ -500,6 +507,14 @@ describe('SessionDetailV2 segmented transcript', () => {
       }
       if (POSITION_CASES.includes(plan.name)) {
         await waitFor(() => assertPositions(view.container, plan));
+      }
+      if (plan.expectedTurnLabels !== undefined) {
+        const want = Object.entries(plan.expectedTurnLabels).map(([index, label]) => [index, label]);
+        const read = () => Object.keys(plan.expectedTurnLabels!).map((index) => {
+          const card = view.container.querySelector(`article[data-turn="${index}"]`);
+          return [index, card?.querySelector('.txn-turnnum')?.textContent?.replace(/\s+/g, '') ?? '(not drawn)'];
+        });
+        await waitFor(() => expect(read(), `${plan.name} turn labels`).toEqual(want));
       }
       if (plan.name === 'per-field-bound') {
         const card = view.container.querySelector(`[data-turn="${plan.mountedTurns[0]}"]`);
