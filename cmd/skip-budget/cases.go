@@ -484,7 +484,7 @@ func runCase(ctx context.Context, spec caseSpec, opts harnessOptions, command sa
 	}
 	report.Notes = append(report.Notes,
 		"Each sample runs in its own child process on a fresh heap: it copies the prepared base outside the timed region and times one pipeline run; arms alternate order by round.",
-		"Settle counts are settles the store accepted, counted by a store wrapper; candidates, validations and validated answers come from the same wrapper and the traced Claude indexer; parses are index-log attempts with a measured parse duration.",
+		"Settle counts are settles the store accepted, counted by a store wrapper; candidates, validations and validated answers come from the same wrapper and the traced indexer; parses are index-log attempts with a measured parse duration.",
 		"INDEX includes settlement; no separate settle duration is persisted.")
 	if spec.equivalent {
 		report.Breakdown = breakdown(report.Skip.Samples)

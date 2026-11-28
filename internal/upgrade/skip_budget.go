@@ -47,10 +47,9 @@ func PlannedSkipPaths() ([]SkipPath, error) {
 		switch lane {
 		case ingest.RefreshLaneNone:
 		case ingest.RefreshLaneNative:
-			// TODO(#1139): emit SkipPath{lane, SkipValidated} and
-			// SkipPath{lane, SkipReferenced} once the orchestrator measures
-			// C9/C10 at 240x1000 and adds the winning rows to skip_budget.yaml
-			// (TestEveryPlannedSkipHasBudget enforces a strict 1:1 bijection).
+			// A native source always validates first: the stored digest cannot
+			// see the live database, so there is no proven settle on this lane.
+			paths = append(paths, SkipPath{lane, SkipValidated}, SkipPath{lane, SkipReferenced})
 		case ingest.RefreshLaneStoredMetadata:
 			paths = append(paths, SkipPath{lane, SkipProven}, SkipPath{lane, SkipValidated}, SkipPath{lane, SkipReferenced})
 		case ingest.RefreshLaneStoredIndex:
