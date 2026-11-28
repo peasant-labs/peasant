@@ -899,8 +899,6 @@ func TestOpenCodeValidatorAgreesWithTheParseSkip(t *testing.T) {
 	if err := testutil.DecodeFixtureYAML(contextChangesBytes, &changes); err != nil {
 		t.Fatal(err)
 	}
-	inventory := loadMetadataInventory(t)
-	_ = inventory
 	inventoryByJSON := map[string]bool{}
 	var jsonFields []string
 	var collectJSON func(reflect.Type, string)

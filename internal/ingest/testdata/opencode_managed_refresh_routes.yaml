@@ -30,10 +30,10 @@ cases:
     given: current-layout OpenCode session with a new message added to live SQLite before EXTRACT+WRITE
     then: kept.transcript is false, refresh_proof Total=0, and full parse installs with session_detail parity
   - name: legacy-sqlite-stays-format-1
-    given: legacy OpenCode SQLite session (even with format-2 WithHarvesterVersions override)
-    then: generationTargetApplicable is false, refresh_proof Total=0, and session stays on format-1 native path
+    given: legacy OpenCode SQLite session refreshed under the registry versions after an adapter bump (the format-2 override fallback is covered by TestSessionVersionTargetFallsBackForInapplicableOriginUnderOverride)
+    then: generationTargetApplicable is false, refresh_proof Total=0, one format-1 parse, and the session stays on the format-1 native path
   - name: json-tree-stays-format-1
-    given: OpenCode JSON-tree session (even with format-2 WithHarvesterVersions override)
+    given: OpenCode JSON-tree session refreshed under the registry versions after an adapter bump (the format-2 override fallback is covered by TestSessionVersionTargetFallsBackForInapplicableOriginUnderOverride)
     then: generationTargetApplicable is false, refresh_proof Total=0, and session stays on format-1 native path
   - name: control-only-current-falls-back-to-legacy-format-1
     given: OpenCode control-only current SQLite copy whose legacy sibling wins canonical selection

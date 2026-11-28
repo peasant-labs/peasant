@@ -684,7 +684,6 @@ func TestOpenCodeMetadataHalfMatchesTheBuilder(t *testing.T) {
 	if len(erroring.ErroringBranches) != 0 {
 		t.Fatalf("opencode_erroring_branches.manifest.yaml must be empty, got %d entries", len(erroring.ErroringBranches))
 	}
-	listedErroring := map[string]bool{}
 	corpus := openCodeHalfCorpus(t)
 	names := map[string]bool{}
 	for _, row := range corpus {
@@ -707,9 +706,6 @@ func TestOpenCodeMetadataHalfMatchesTheBuilder(t *testing.T) {
 			want := document.Outcomes[row.name]
 			if want == "" {
 				want = halfOutcomeEqual
-			}
-			if listedErroring[row.name] {
-				want = halfOutcomeHalfErrors
 			}
 			if got != want {
 				t.Fatalf("outcome %s, want %s (half error %v, builder error %v)", got, want, observed.halfErr, observed.buildErr)
@@ -838,8 +834,10 @@ func TestOpenCodeHalfThenBuildLeavesInputsUnchanged(t *testing.T) {
 }
 
 // TestOpenCodeRefusalAfterTheHalfLeavesNoGeneration runs every corpus row
-// classified as builder-refuses-after-half through a real pipeline + real store
-// and asserts active_generation_id == "".
+// classified as builder-refuses-after-half: the metadata half succeeds and the
+// full builder refuses, so a refresh that validated would still parse and
+// refuse. The pipeline consequence (the active generation is kept) is asserted
+// on a real store by the incomplete-over-complete refresh route.
 func TestOpenCodeRefusalAfterTheHalfLeavesNoGeneration(t *testing.T) {
 	document := loadOpenCodeMetadataHalfDocument(t)
 	rows := 0
@@ -856,19 +854,10 @@ func TestOpenCodeRefusalAfterTheHalfLeavesNoGeneration(t *testing.T) {
 			if _, err := idx.BuildGeneration(ctx, input); err == nil {
 				t.Fatal("BuildGeneration succeeded, want post-half refusal")
 			}
-			// Verify on a real pipeline + store that a failing OpenCode first import
-			// leaves active_generation_id == "".
-			root := t.TempDir()
-			db := openManagedRefreshPipelineStore(t, filepath.Join(root, "db"), filepath.Join(root, "managed"))
-			t.Cleanup(func() { _ = db.Close() })
-			active := managedRefreshPipelineRows(t, db, `SELECT COALESCE(active_generation_id,'') FROM sessions WHERE session_id = ?`, input.Session.SessionID)
-			if len(active) > 0 && active[0] != "" {
-				t.Fatalf("session %s installed generation %s; a builder refusal must leave none", input.Session.SessionID, active[0])
-			}
 		})
 	}
 	if rows == 0 {
-		t.Skip("no corpus row refuses after the half")
+		t.Fatal("no corpus row refuses after the half; the fixture lost its builder-refuses-after-half case")
 	}
 }
 
