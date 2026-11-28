@@ -552,10 +552,10 @@ harnesses:
           - {<<: *text, kind: network_proxy.rule_saved}
           - {<<: *text, kind: user_verification.notice}
   opencode:
-    adapter_version: 4
-    indexer_version: 20
+    adapter_version: 5
+    indexer_version: 21
     index_version: 1
-    native_versions: {adapter_version: 5, indexer_version: 21, index_version: 2}
+    native_versions: {adapter_version: 6, indexer_version: 22, index_version: 2}
     fallback: &fallback
       status: retained-unknown
       preview: no
