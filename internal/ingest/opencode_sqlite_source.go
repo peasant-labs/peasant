@@ -70,16 +70,17 @@ const (
 	// MaxOpenCodeCurrentPageSize is the fixed upper bound for every current
 	// session message source page.
 	MaxOpenCodeCurrentPageSize = 128
-	// openCodeCurrentPartPageSize bounds each session_part query. A message page
-	// reads its assistant parts in pages of this size, so a session's part table
-	// is never loaded whole; the parts for one message page stay bounded by that
-	// message page plus at most one message beyond the page's part-row budget.
+	// openCodeCurrentPartPageSize bounds each session_part query for one
+	// assistant message. A message's parts are read in pages of this size, so a
+	// session's part table is never loaded whole and one huge message still reads
+	// in bounded steps.
 	openCodeCurrentPartPageSize = 256
 	// openCodeCurrentPartRowsPerMessagePage bounds the part rows one message page
-	// may carry. A page that exceeds it drops the offending message and every
-	// later message from the page and resumes after the last complete message, so
-	// the read keeps a message boundary and always makes progress. One message's
-	// own parts are always admitted, because a message is the slice unit.
+	// may carry. A completed message that reaches the cap is kept whole and the
+	// page stops before the next row; a later assistant message is not read once
+	// the cap is already spent. Either way the page ends at a message boundary and
+	// resumes there. One message's own parts are always admitted, because a
+	// message is the slice unit.
 	openCodeCurrentPartRowsPerMessagePage = 8192
 	// The assistant message discriminator and the split part types this build
 	// interprets. They name the closed set the split-part read admits; a row of
