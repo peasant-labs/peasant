@@ -1,0 +1,20 @@
+requiredNames:
+  - empty-defaults-unclaimed
+  - one
+  - unclaimed-word
+  - two
+  - all-word
+  - three
+  - not-now-word
+  - unknown
+  - unknown-number
+cases:
+  - {name: empty-defaults-unclaimed, input: "", want: unclaimed, ok: true}
+  - {name: one, input: "1\n", want: unclaimed, ok: true}
+  - {name: unclaimed-word, input: " unclaimed ", want: unclaimed, ok: true}
+  - {name: two, input: "2\n", want: all, ok: true}
+  - {name: all-word, input: "ALL", want: all, ok: true}
+  - {name: three, input: "3\n", want: not_now, ok: true}
+  - {name: not-now-word, input: "not now", want: not_now, ok: true}
+  - {name: unknown, input: "yes", ok: false}
+  - {name: unknown-number, input: "4", ok: false}

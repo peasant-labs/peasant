@@ -1055,7 +1055,6 @@ rules:
     cmd/peasant/push_door_redaction_test.go: 1
     cmd/peasant/republish_audience_test.go: 1
     internal/api/active_publication_test.go: 2
-    internal/api/annotation_handler_test.go: 9
     internal/api/attachment_route_test.go: 3
     internal/api/attribution_repair_test.go: 2
     internal/api/collective_observations_test.go: 8
@@ -1078,7 +1077,6 @@ rules:
     internal/api/session_detail_bounds_test.go: 1
     internal/api/session_detail_route_test.go: 3
     internal/api/session_extras_test.go: 13
-    internal/api/session_reindex_test.go: 2
     internal/api/settings_handler_test.go: 1
     internal/api/stored_target_lookup_scope_test.go: 2
     internal/api/sync_custom_pattern_failures_test.go: 2

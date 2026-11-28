@@ -1,0 +1,10 @@
+requiredNames:
+  - user-show-no-network
+  - user-claim-json-parity
+  - user-ownership-parity
+  - claim-command-completes-prompt
+cases:
+  - {name: user-show-no-network}
+  - {name: user-claim-json-parity}
+  - {name: user-ownership-parity}
+  - {name: claim-command-completes-prompt}

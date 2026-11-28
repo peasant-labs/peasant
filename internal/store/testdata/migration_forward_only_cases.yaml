@@ -1,0 +1,4 @@
+requiredNames:
+  - migration-forward-only
+cases:
+  - {name: migration-forward-only}

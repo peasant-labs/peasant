@@ -162,6 +162,7 @@ var upgradeStepCatalog = map[int]upgradeCatalogEntry{
 	80:                     {stampEffect: StampEffectNone, title: "add the missing publication capture outcome", cost: UpgradeCostQuick},
 	81:                     {stampEffect: StampEffectNone, title: "separate source diagnostic lanes", cost: UpgradeCostScalesWithRows},
 	82:                     {stampEffect: StampEffectNone, title: "let a generation reference another generation's parsed rows", cost: UpgradeCostQuick},
+	83:                     {stampEffect: StampEffectNone, title: "add the local owner and the append-only claim log", cost: UpgradeCostQuick},
 }
 
 // upgradeRecountCatalogEntry describes one recount a migration can leave

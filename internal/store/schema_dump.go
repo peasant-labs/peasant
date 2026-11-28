@@ -700,6 +700,9 @@ func canonicalSchemaDump(conn *sqlite.Conn) ([]byte, error) {
 		if table == "_install_salt" {
 			continue // random per install; the schema above is still compared
 		}
+		if table == "local_owner" {
+			continue // runtime identity, not schema; DDL above is still compared
+		}
 		keyColumn := clockKeyColumnFor(table)
 		order, err := canonicalRowOrder(conn, table, meta[table])
 		if err != nil {

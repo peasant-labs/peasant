@@ -1,0 +1,12 @@
+# Query-plan cases for the append-only claim-log reads. Write order (rowid) is
+# the only order key: every case must be a reverse row-order read that stops at
+# its LIMIT, with no temporary sort and no claim-log index.
+requiredNames:
+  - page-first
+  - page-older
+  - strict-reuse
+
+cases:
+  - name: page-first
+  - name: page-older
+  - name: strict-reuse

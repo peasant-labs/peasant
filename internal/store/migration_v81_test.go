@@ -124,9 +124,9 @@ VALUES(?,'claude-code','fixture-model','source-lanes-host','source-lanes-project
 				t.Fatalf("opening the predecessor returned %v, want a schema-behind refusal", err)
 			}
 			plan := mustPlan(t, path)
-			stepsAfter80 := len(plan.Steps) == 2 && plan.Steps[0].Version == 81 && plan.Steps[1] == schemaStep(mappingSetSchemaVersion)
-			if plan.From != 80 || plan.To != 82 || !stepsAfter80 {
-				t.Fatalf("upgrade plan = %+v; want step 81 then the quick mapping-set step, from 80 to 82", plan)
+			stepsAfter80 := len(plan.Steps) == 3 && plan.Steps[0].Version == 81 && plan.Steps[1] == schemaStep(mappingSetSchemaVersion) && plan.Steps[2] == schemaStep(localOwnerSchemaVersion)
+			if plan.From != 80 || plan.To != 83 || !stepsAfter80 {
+				t.Fatalf("upgrade plan = %+v; want step 81, the quick mapping-set step, then the owner step, from 80 to 83", plan)
 			}
 			if plan.HasLongStep() != planCase.WantLong {
 				t.Fatalf("upgrade plan = %+v; want step 81 long=%t", plan, planCase.WantLong)

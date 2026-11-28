@@ -13,6 +13,12 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 )
 
+// pendingClaimMarkerName marks a saved pair whose first database mirror write
+// failed. The pair is on disk with no row, so the next harvest would otherwise
+// see a saved pair and treat the session as old. The marker carries the "first
+// stored" evidence across that failure, and a successful mirror removes it.
+const pendingClaimMarkerName = ".pending-claim"
+
 // installedPair is the file names a session install writes, all as bytes the
 // worker holds in memory. The transcript, its debug outputs and any private
 // source-capture marker install first; the metadata installs last, so the
@@ -337,6 +343,9 @@ func (p *Pipeline) mirrorDrainedBatch(ctx context.Context, results []workerResul
 			if wr.result.Error == nil && wr.artifact != nil {
 				wr.result.Error = err
 				failed[wr.result.SessionID] = true
+				if !wr.savedPairExisted {
+					p.writePendingClaimMarker(wr.result.OutputPath)
+				}
 			}
 		}
 		return failed
@@ -362,6 +371,8 @@ func (p *Pipeline) mirrorDrainedBatch(ctx context.Context, results []workerResul
 		for _, wr := range page {
 			outcome, ok := byID[wr.result.SessionID]
 			if ok && outcome.Err == nil && outcome.Mirrored {
+				wr.result.FirstStored = outcome.FirstStored
+				p.removePendingClaimMarker(wr.result.OutputPath)
 				continue
 			}
 			cause := error(errArtifactNotMirrored)
@@ -371,6 +382,14 @@ func (p *Pipeline) mirrorDrainedBatch(ctx context.Context, results []workerResul
 			failure := fmt.Errorf("record saved session %s: %w; the saved files were kept and the next harvest reads the session again", wr.result.SessionID, cause)
 			failed[wr.result.SessionID] = true
 			wr.result.mirrorPending = true
+			// Only a pair that did not exist before this run is still
+			// first-stored evidence. A pair already on disk may belong to a
+			// session stored before the run (a rebuild, a reindex or a
+			// re-process), and a marker beside it would make the next harvest
+			// claim it.
+			if !wr.savedPairExisted {
+				p.writePendingClaimMarker(wr.result.OutputPath)
+			}
 			p.reportSessionDiagnostic(wr.result.SessionID, DiagnosticEntry{ErrorType: "artifact_mirror_pending", Location: string(wr.result.SessionID), Message: failure.Error(), Remediation: "Restore database access and rerun harvest to record the saved session."})
 			// The pair is on disk; only the row is missing. Preserve the run's
 			// file counts, but push the failure so the run reports it and does
@@ -391,6 +410,61 @@ func (p *Pipeline) mirrorDrainedBatch(ctx context.Context, results []workerResul
 	}
 	flush()
 	return failed
+}
+
+// pendingClaimMarkerPath returns the marker path beside a session directory, or
+// "" for a worker that never resolved one.
+func pendingClaimMarkerPath(sessionDir string) string {
+	if sessionDir == "" {
+		return ""
+	}
+	return filepath.Join(sessionDir, pendingClaimMarkerName)
+}
+
+// writePendingClaimMarker records that a saved pair still needs its first
+// database mirror. It is best-effort: a missing marker only loses the automatic
+// claim, never the pair or the row, so a failed write is reported rather than
+// returned.
+func (p *Pipeline) writePendingClaimMarker(sessionDir string) {
+	path := pendingClaimMarkerPath(sessionDir)
+	if path == "" {
+		return
+	}
+	if err := p.fs.WriteFile(path, []byte("first-stored\n"), defaults.PrivateFilePerm); err != nil {
+		p.reportSessionDiagnostic(SessionID(filepath.Base(sessionDir)), DiagnosticEntry{
+			ErrorType:   "artifact_pending_claim_marker",
+			Location:    path,
+			Message:     err.Error(),
+			Remediation: "Restore write access to the saved session directory so the next harvest can recognize the session as first stored.",
+		})
+	}
+}
+
+// removePendingClaimMarker clears the first-stored evidence after a successful
+// mirror. A marker already pruned by a pair install is not an error.
+func (p *Pipeline) removePendingClaimMarker(sessionDir string) {
+	path := pendingClaimMarkerPath(sessionDir)
+	if path == "" {
+		return
+	}
+	if err := p.fs.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		p.reportSessionDiagnostic(SessionID(filepath.Base(sessionDir)), DiagnosticEntry{
+			ErrorType:   "artifact_pending_claim_cleanup",
+			Location:    path,
+			Message:     err.Error(),
+			Remediation: "Remove the stale pending-claim marker beside the saved session.",
+		})
+	}
+}
+
+// pendingClaimMarkerPresent reports whether a saved pair carries the
+// first-stored evidence from a failed mirror.
+func (p *Pipeline) pendingClaimMarkerPresent(metadataPath string) bool {
+	if metadataPath == "" {
+		return false
+	}
+	_, err := p.fs.Stat(filepath.Join(filepath.Dir(metadataPath), pendingClaimMarkerName))
+	return err == nil
 }
 
 // removeRelocatedSession clears a session's previous location after its pair
@@ -414,7 +488,7 @@ func (p *Pipeline) removeRelocatedSession(oldDir, sessionID string) error {
 		if name == defaults.DirSubagents.String() {
 			continue
 		}
-		if !strings.HasPrefix(name, sessionID+"--") && name != defaults.DirDebug.String() {
+		if name != pendingClaimMarkerName && !strings.HasPrefix(name, sessionID+"--") && name != defaults.DirDebug.String() {
 			continue
 		}
 		if err := p.fs.RemoveAll(filepath.Join(oldDir, name)); err != nil {
@@ -510,7 +584,7 @@ func (p *Pipeline) reconcileScannedPairs(ctx context.Context, scanned []reindexT
 			}
 			continue
 		}
-		page = append(page, ArtifactMirrorRequest{Artifact: artifact})
+		page = append(page, ArtifactMirrorRequest{Artifact: artifact, SavedPairExisted: true})
 		if len(page) == MirrorPageSize {
 			flush()
 		}
@@ -530,5 +604,6 @@ func mirrorRequestFor(wr *workerResult) ArtifactMirrorRequest {
 		SchedulingParentResolved: wr.schedulingResolved,
 		SchedulingParentID:       wr.schedulingParentID,
 		TranscriptKept:           wr.transcriptKept,
+		SavedPairExisted:         wr.savedPairExisted,
 	}
 }

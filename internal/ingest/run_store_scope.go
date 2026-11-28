@@ -107,6 +107,6 @@ func (p *Pipeline) cleanupOrphanProjects(ctx context.Context, logPrefix string) 
 			"what", "failed to remove project rows with zero sessions",
 			"why", "DB error during DELETE from projects or daily_summary_by_project",
 			"user_impact", "stale project names may appear in the session viewer filter list",
-			"how_to_fix", "re-run peasant ingest; if persistent, delete the DB at ~/.local/share/peasant/peasant.db and re-ingest")
+			"how_to_fix", "re-run peasant ingest; if persistent, delete the DB at ~/.local/share/peasant/peasant.db and re-ingest; local ownership claims are lost with the database, but the local owner id is kept in local-owner.json beside it")
 	}
 }

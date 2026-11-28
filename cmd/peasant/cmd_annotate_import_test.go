@@ -172,6 +172,7 @@ func TestCLI_AnnotateImportRoundTrip(t *testing.T) {
 	// Now create a fresh DB for import (to prove the import creates new annotations).
 	dataHome2 := t.TempDir()
 	seedTestSessionInto(t, dataHome2, testSessionUUID)
+	saveUserCommandCredentials(t, dataHome2)
 
 	// Import from the JSONL file.
 	stdout, stderr, err := executeAnnotateImportCmd(t, dataHome2, []string{"import", "--from-file", jsonlPath})
@@ -204,6 +205,69 @@ func TestCLI_AnnotateImportRoundTrip(t *testing.T) {
 	if !found {
 		t.Errorf("expected annotation with type_id=%s value=approve; got rows: %+v",
 			testutil.TestTypeIDSessionApproval, rows)
+	}
+	page, err := db2.OwnerClaims(ctx, "")
+	if err != nil {
+		t.Fatalf("claims after import: %v", err)
+	}
+	if len(page.Claims) != 1 || page.Claims[0].Source != store.ClaimSourceAutomatic {
+		t.Fatalf("claims after import = %+v, want one automatic entry", page.Claims)
+	}
+	counts, err := db2.OwnershipCounts(ctx, &store.OwnershipAccount{VillageURL: "https://village.example/team", UserID: "11111111-1111-4111-8111-111111111111"})
+	if err != nil {
+		t.Fatalf("ownership after import: %v", err)
+	}
+	if counts.MineAnnotations < 1 {
+		t.Fatalf("ownership after import = %+v, want the imported annotation claimed", counts)
+	}
+}
+
+// TestAnnotateImportClaimsNewAnnotation proves an imported annotation with no
+// earlier one is claimed automatically: the import appends one automatic entry
+// and the selected account owns the new annotation.
+func TestAnnotateImportClaimsNewAnnotation(t *testing.T) {
+	t.Parallel()
+	dataHome := t.TempDir()
+	seedTestSessionInto(t, dataHome, testSessionUUID)
+	saveUserCommandCredentials(t, dataHome)
+
+	record := export.ExportedAnnotation{
+		SessionID:     testSessionUUID,
+		TypeID:        testutil.TestTypeIDSessionApproval,
+		Value:         "approve",
+		Annotator:     "fresh-import-annotator",
+		AnnotatorKind: schema.AnnotatorHuman.String(),
+		CreatedAt:     1000,
+	}
+	path := filepath.Join(t.TempDir(), "fresh.jsonl")
+	writeJSONLFile(t, path, []export.ExportedAnnotation{record})
+
+	stdout, stderr, err := executeAnnotateImportCmd(t, dataHome, []string{"import", "--from-file", path})
+	if err != nil {
+		t.Fatalf("annotate import: unexpected error: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "imported 1 of 1 annotations") {
+		t.Fatalf("import stdout = %q, want one imported annotation", stdout)
+	}
+
+	db := openTestDB(t, dataHome)
+	ctx := context.Background()
+	page, err := db.OwnerClaims(ctx, "")
+	if err != nil {
+		t.Fatalf("claims after import: %v", err)
+	}
+	if len(page.Claims) != 1 || page.Claims[0].Source != store.ClaimSourceAutomatic {
+		t.Fatalf("claims after import = %+v, want one automatic entry", page.Claims)
+	}
+	counts, err := db.OwnershipCounts(ctx, &store.OwnershipAccount{
+		VillageURL: "https://village.example/team",
+		UserID:     "11111111-1111-4111-8111-111111111111",
+	})
+	if err != nil {
+		t.Fatalf("ownership after import: %v", err)
+	}
+	if counts.TotalAnnotations != 1 || counts.UnclaimedAnnotations != 0 || counts.MineAnnotations != 1 || counts.OthersAnnotations != 0 {
+		t.Fatalf("annotation ownership after import = %+v, want the one new annotation claimed by the account", counts)
 	}
 }
 
@@ -861,3 +925,45 @@ func TestCLI_AnnotateImportSupersede(t *testing.T) {
 
 // ptrFloat64 returns a pointer to the given float64. Test helper.
 func ptrFloat64(v float64) *float64 { return &v }
+
+// TestAnnotateImportSupersedeClaimsNewAnnotation proves the supersede path
+// claims the replacement annotation, not only the first import.
+func TestAnnotateImportSupersedeClaimsNewAnnotation(t *testing.T) {
+	t.Parallel()
+	dataHome := t.TempDir()
+	seedTestSessionInto(t, dataHome, testSessionUUID)
+	saveUserCommandCredentials(t, dataHome)
+
+	if _, err := executeAnnotateCmd(t, dataHome, []string{"create", testSessionUUID, testutil.TestTypeIDSessionApproval, "approve"}); err != nil {
+		t.Fatalf("seed the first annotation: %v", err)
+	}
+	db := openTestDB(t, dataHome)
+	exported, err := export.ExportAnnotations(t.Context(), db, testSessionUUID)
+	if err != nil {
+		t.Fatalf("export annotations: %v", err)
+	}
+	if len(exported) != 1 {
+		t.Fatalf("exported annotations = %d, want one", len(exported))
+	}
+	exported[0].Value = "deny"
+	path := filepath.Join(t.TempDir(), "supersede.jsonl")
+	writeJSONLFile(t, path, exported)
+
+	stdout, stderr, err := executeAnnotateImportCmd(t, dataHome, []string{"import", "--from-file", path})
+	if err != nil {
+		t.Fatalf("import the superseding annotation: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "imported 1 of 1 annotations") {
+		t.Fatalf("import stdout = %q, want one superseding annotation", stdout)
+	}
+
+	counts, err := db.OwnershipCounts(t.Context(), &store.OwnershipAccount{VillageURL: "https://village.example/team", UserID: "11111111-1111-4111-8111-111111111111"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The first import was claimed when it was created, and the supersede adds
+	// the replacement. Both must point at the selected account.
+	if counts.TotalAnnotations != 2 || counts.MineAnnotations != 2 || counts.OthersAnnotations != 0 {
+		t.Fatalf("annotation ownership after the supersede = %+v, want both the original and the replacement claimed by the account", counts)
+	}
+}

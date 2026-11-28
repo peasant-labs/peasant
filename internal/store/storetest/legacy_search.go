@@ -119,7 +119,7 @@ CREATE TABLE session_source_unavailability (
 // the chain from 75 creates them again instead of colliding.
 func BuildCleanV75Store(t *testing.T, path string) {
 	t.Helper()
-	s, err := store.Open(path)
+	s, err := store.Open(path, store.WithSkipLocalOwnerBootstrap())
 	if err != nil {
 		t.Fatalf("open the current schema to build a v75 store: %v", err)
 	}
@@ -141,6 +141,16 @@ func BuildCleanV75Store(t *testing.T, path string) {
 	if err := sqlitex.ExecuteScript(conn, legacySearchIndexScript+undoImportProfileScript+undoSourceDiagnosticLanesScript+undoMappingSetScript+`
 INSERT INTO session_entries_fts(session_entries_fts) VALUES('rebuild');
 DROP TABLE pending_recounts;
+-- The store was built at head. Remove the later local-owner artifacts so the
+-- file is a coherent V75 database: in particular sessions must not already
+-- carry owner_claim_id when V78 rebuilds the table.
+DROP TRIGGER IF EXISTS sessions_parent_state_au;
+DROP INDEX IF EXISTS idx_sessions_owner_claim;
+DROP INDEX IF EXISTS idx_annotations_owner_claim;
+DROP TABLE IF EXISTS owner_claims;
+DROP TABLE IF EXISTS local_owner;
+ALTER TABLE sessions DROP COLUMN owner_claim_id;
+ALTER TABLE annotations DROP COLUMN owner_claim_id;
 PRAGMA user_version = 75;`, nil); err != nil {
 		t.Fatalf("restore the v75 search index shape: %v", err)
 	}
@@ -202,6 +212,13 @@ func BuildQuickV78Store(t *testing.T, path string) {
 		}
 	}()
 	if err := sqlitex.ExecuteScript(conn, undoImportProfileScript+undoSourceDiagnosticLanesScript+undoMappingSetScript+`
+DROP TRIGGER IF EXISTS sessions_parent_state_au;
+DROP INDEX IF EXISTS idx_sessions_owner_claim;
+DROP INDEX IF EXISTS idx_annotations_owner_claim;
+DROP TABLE IF EXISTS owner_claims;
+DROP TABLE IF EXISTS local_owner;
+ALTER TABLE sessions DROP COLUMN owner_claim_id;
+ALTER TABLE annotations DROP COLUMN owner_claim_id;
 PRAGMA user_version = 78;`, nil); err != nil {
 		t.Fatalf("restore the v78 shape: %v", err)
 	}

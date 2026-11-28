@@ -88,8 +88,8 @@ func loadMigrationV82Cases(t *testing.T) []migrationV82Case {
 }
 
 func TestMigrationV82AddsTheMappingSetColumn(t *testing.T) {
-	if store.MappingSetSchemaVersionForTest != 82 || store.CurrentSchemaVersion() != 82 {
-		t.Fatalf("the mapping-set migration is %d and the head is %d; this test pins both at 82", store.MappingSetSchemaVersionForTest, store.CurrentSchemaVersion())
+	if store.MappingSetSchemaVersionForTest != 82 || store.CurrentSchemaVersion() != 83 {
+		t.Fatalf("the mapping-set migration is %d and the head is %d; this test pins them at 82 and 83", store.MappingSetSchemaVersionForTest, store.CurrentSchemaVersion())
 	}
 	for _, c := range loadMigrationV82Cases(t) {
 		t.Run(c.Name, func(t *testing.T) {
@@ -111,8 +111,8 @@ func TestMigrationV82AddsTheMappingSetColumn(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if plan.From != 81 || plan.To != 82 || len(plan.Steps) != 1 {
-					t.Fatalf("plan = %+v, want one step from 81 to 82", plan)
+				if plan.From != 81 || plan.To != 83 || len(plan.Steps) != 2 {
+					t.Fatalf("plan = %+v, want the mapping-set step then the owner step from 81 to 83", plan)
 				}
 				step := plan.Steps[0]
 				quick := step.Cost == store.UpgradeCostQuick && !plan.HasLongStep()
@@ -131,18 +131,18 @@ func TestMigrationV82AddsTheMappingSetColumn(t *testing.T) {
 	}
 }
 
-// upgradeV82 upgrades a schema-81 store and checks it lands at 82.
+// upgradeV82 upgrades a schema-81 store through mapping-set step 82 to the head.
 func upgradeV82(t *testing.T, path string) {
 	t.Helper()
 	report, err := store.Upgrade(t.Context(), path, store.UpgradeOptions{})
 	if err != nil {
 		t.Fatalf("upgrade: %v", err)
 	}
-	if report.From != 81 || report.To != 82 {
-		t.Fatalf("upgrade report = %d -> %d, want 81 -> 82", report.From, report.To)
+	if report.From != 81 || report.To != store.CurrentSchemaVersion() {
+		t.Fatalf("upgrade report = %d -> %d, want 81 -> %d", report.From, report.To, store.CurrentSchemaVersion())
 	}
-	if version, err := store.SchemaVersionAt(path); err != nil || version != 82 {
-		t.Fatalf("store is at schema %d (%v), want 82", version, err)
+	if version, err := store.SchemaVersionAt(path); err != nil || version != store.CurrentSchemaVersion() {
+		t.Fatalf("store is at schema %d (%v), want %d", version, err, store.CurrentSchemaVersion())
 	}
 }
 
@@ -273,6 +273,16 @@ func runV82CorpusPredecessor(t *testing.T) {
 				t.Fatal(err)
 			}
 			v82Exec(t, conn, `ALTER TABLE session_generations DROP COLUMN mapping_set_id`)
+			// The corpus store is built at the current head, which also carries
+			// the later local-owner migration. Remove those objects so the
+			// predecessor really is a schema-81 store.
+			v82Exec(t, conn, `DROP TRIGGER IF EXISTS sessions_parent_state_au`)
+			v82Exec(t, conn, `DROP INDEX IF EXISTS idx_sessions_owner_claim`)
+			v82Exec(t, conn, `DROP INDEX IF EXISTS idx_annotations_owner_claim`)
+			v82Exec(t, conn, `DROP TABLE IF EXISTS owner_claims`)
+			v82Exec(t, conn, `DROP TABLE IF EXISTS local_owner`)
+			v82Exec(t, conn, `ALTER TABLE sessions DROP COLUMN owner_claim_id`)
+			v82Exec(t, conn, `ALTER TABLE annotations DROP COLUMN owner_claim_id`)
 			v82Exec(t, conn, `PRAGMA user_version = 81`)
 			if err := conn.Close(); err != nil {
 				t.Fatal(err)

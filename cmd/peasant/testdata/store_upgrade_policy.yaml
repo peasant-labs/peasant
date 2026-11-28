@@ -454,7 +454,7 @@ pushCases:
 # entryCases run the real entry functions with no terminal. store: affected
 # is the minimal schema-75 fixture with stale search results (a long plan);
 # clean and real-quick are the schema-78 store with no sessions (a quick
-# plan, 79 through 82 with an empty source ledger, that a real upgrade finishes); current is a real head store;
+# plan, 79 through 83 with an empty source ledger, that a real upgrade finishes); current is a real head store;
 # real-v75-long is a real schema-75 store whose search repair rebuilds.
 # wantOpened requires the entry point to upgrade the store and open it at
 # the head schema.

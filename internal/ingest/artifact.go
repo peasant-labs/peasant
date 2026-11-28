@@ -231,6 +231,11 @@ type ArtifactMirrorRequest struct {
 	// index input proof names the transcript bytes and is kept. False keeps
 	// the conservative rule: a changed pair identity clears the proof.
 	TranscriptKept bool
+	// SavedPairExisted reports that this run found, rather than created, the
+	// session's saved pair under the output directory. Together with the row
+	// check inside the mirror transaction it decides FirstStored: a rebuild
+	// from saved copies, a reindex, and a forced re-process all answer true.
+	SavedPairExisted bool
 }
 
 // ArtifactMirrorResult reports committed success for one session, including
@@ -239,6 +244,11 @@ type ArtifactMirrorResult struct {
 	SessionID SessionID
 	Mirrored  bool
 	Err       error
+	// FirstStored is true only when, before this run, the session had no
+	// sessions row and no saved pair; it is the one fact automatic claiming
+	// reads. The mirror decides it inside the row transaction from the prior
+	// row plus the request's SavedPairExisted flag.
+	FirstStored bool
 }
 
 // ArtifactMirrorStore records a written pair, its seeds, commit bindings and

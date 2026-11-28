@@ -40,7 +40,7 @@ import (
 // stale template. v2: a fresh database is now created from the committed
 // baseline snapshot, so the recipe changed even though the resulting schema
 // did not.
-const cacheScheme = "v2"
+const cacheScheme = "v3"
 
 // buildDirMaxAge bounds orphaned build-* debris: a killed run's worst trace
 // is a build-* dir and a tiny lock file, reaped here on the next successful
@@ -273,7 +273,7 @@ func buildCachedGolden(t *testing.T, dir, final string) (string, bool) {
 		}
 	}()
 	built := filepath.Join(buildDir, "golden.db")
-	s, err := store.Open(built)
+	s, err := store.Open(built, store.WithSkipLocalOwnerBootstrap())
 	if err != nil {
 		t.Fatalf("storetest: create golden DB: %v", err)
 	}
@@ -414,7 +414,7 @@ func buildGoldenIn(t *testing.T, dir string) string {
 	t.Helper()
 	path := filepath.Join(dir, "golden.db")
 	// Open (runs all migrations), then close immediately.
-	s, err := store.Open(path)
+	s, err := store.Open(path, store.WithSkipLocalOwnerBootstrap())
 	if err != nil {
 		// A managed-root build may fail where the classic temp build
 		// succeeds (e.g. transient pressure on the override filesystem); let
