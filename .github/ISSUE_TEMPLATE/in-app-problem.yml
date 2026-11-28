@@ -18,6 +18,11 @@ body:
         <!-- paste image -->
 
         <!-- what happened -->
+        <!-- example:
+        1. open a session from home.
+        2. click "share".
+        3. the dialog closes and the session is not shared. no error is shown.
+        -->
     validations:
       required: true
   - type: textarea
@@ -27,6 +32,10 @@ body:
       description: Describe the expected behaviour and what would resolve this for you.
       value: |
         <!-- what was the expected behaviour, bullet points. -->
+        <!-- example:
+        - the dialog stays open until sharing finishes.
+        - if sharing fails, an error says why and how to fix it.
+        -->
 
         <!-- optional: what would ensure user satisfaction -->
     validations:

@@ -18,6 +18,7 @@ body:
         <!-- paste image -->
 
         <!-- what is the problem or need? -->
+        <!-- example: in a long session, I lose my place every time I open a tool call. -->
     validations:
       required: true
   - type: textarea
@@ -27,6 +28,10 @@ body:
       description: Describe what peasant should do instead and what would satisfy the need.
       value: |
         <!-- what should peasant do instead? bullet points. -->
+        <!-- example:
+        - opening a tool call keeps my scroll position.
+        - a "back to where I was" control returns me to the last turn I read.
+        -->
 
         <!-- optional: what would ensure user satisfaction -->
     validations:
