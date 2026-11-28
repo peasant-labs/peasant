@@ -13,7 +13,8 @@ import (
 )
 
 const (
-	openCodeCurrentProjectionFormat = "peasant.opencode.current-sqlite" // Version 3 adds redacted opaque evidence to normalized messages. The
+	openCodeCurrentProjectionFormat = "peasant.opencode.current-sqlite"
+	// Version 3 adds redacted opaque evidence to normalized messages. The
 	// shared readable floor stays 1, including older control-free projections.
 	openCodeCurrentProjectionVersion = 3
 	openCodeCurrentMaterializePage   = 128
