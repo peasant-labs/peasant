@@ -11,3 +11,5 @@ requiredNames:
   - positions-paged-second-page
   - positions-withheld-on-failed-self-check
   - positions-withheld-on-negative-count
+  - display-numbers-across-segments
+  - display-numbers-missing-harness-omits-labels

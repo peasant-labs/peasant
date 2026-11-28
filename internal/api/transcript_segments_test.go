@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -20,6 +21,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
+	"github.com/peasant-labs/schema/route"
 	"gopkg.in/yaml.v3"
 )
 
@@ -533,9 +535,28 @@ func TestTranscriptDirectoryPagingCap(t *testing.T) {
 type segmentTurnFixture struct {
 	Index              int    `yaml:"index"`
 	Role               string `yaml:"role"`
+	Content            string `yaml:"content,omitempty"`
 	ContentBytes       int    `yaml:"contentBytes"`
 	ToolArgumentsBytes []int  `yaml:"toolArgumentsBytes,omitempty"`
 	ToolResultBytes    []int  `yaml:"toolResultBytes,omitempty"`
+}
+
+type segmentDisplayNumberExpectation struct {
+	Index   int      `yaml:"index"`
+	Numbers []string `yaml:"numbers"`
+}
+
+type segmentDisplayNumberCaseExpectation struct {
+	Omitted  bool                              `yaml:"omitted,omitempty"`
+	Segments []segmentDisplayNumberExpectation `yaml:"segments,omitempty"`
+}
+
+type segmentDisplayNumberCase struct {
+	Name         string                              `yaml:"name"`
+	BudgetBytes  int                                 `yaml:"budgetBytes"`
+	ClearHarness bool                                `yaml:"clearHarness,omitempty"`
+	Turns        []segmentTurnFixture                `yaml:"turns"`
+	Expected     segmentDisplayNumberCaseExpectation `yaml:"expected"`
 }
 
 type segmentCaseExpectation struct {
@@ -565,9 +586,10 @@ type segmentDirectoryCase struct {
 }
 
 type segmentReadFixture struct {
-	DirectoryCases []segmentDirectoryCase `yaml:"directory_cases"`
-	SegmentCases   []segmentReadCase      `yaml:"segment_cases"`
-	PositionCases  []segmentPositionCase  `yaml:"position_cases"`
+	DirectoryCases     []segmentDirectoryCase     `yaml:"directory_cases"`
+	SegmentCases       []segmentReadCase          `yaml:"segment_cases"`
+	PositionCases      []segmentPositionCase      `yaml:"position_cases"`
+	DisplayNumberCases []segmentDisplayNumberCase `yaml:"display_number_cases"`
 }
 
 func loadSegmentReadFixture(t *testing.T) segmentReadFixture {
@@ -592,6 +614,9 @@ func loadSegmentReadFixture(t *testing.T) segmentReadFixture {
 	for _, fixtureCase := range fixture.PositionCases {
 		names = append(names, fixtureCase.Name)
 	}
+	for _, fixtureCase := range fixture.DisplayNumberCases {
+		names = append(names, fixtureCase.Name)
+	}
 	if err := testutil.ValidateRequiredNames(manifest, names, "transcript segments"); err != nil {
 		t.Fatal(err)
 	}
@@ -606,7 +631,10 @@ func entriesFromSegmentFixture(t *testing.T, turns []segmentTurnFixture) []schem
 		if err != nil {
 			t.Fatal(err)
 		}
-		content := strings.Repeat("t", turn.ContentBytes)
+		content := turn.Content
+		if content == "" && turn.ContentBytes > 0 {
+			content = strings.Repeat("t", turn.ContentBytes)
+		}
 		index := turn.Index
 		timestamp := int64(1_700_000_000_000 + index)
 		entries = append(entries, schema.SessionEntry{
@@ -752,6 +780,70 @@ func TestTranscriptSegmentFixtureCases(t *testing.T) {
 				}
 				if turn.ByteLength != fixtureCase.Expected.TurnByteLength {
 					t.Fatalf("turn %d byteLength = %d, want %d", turn.Index, turn.ByteLength, fixtureCase.Expected.TurnByteLength)
+				}
+			}
+		})
+	}
+}
+
+func TestTranscriptDisplayNumberFixtureCases(t *testing.T) {
+	t.Parallel()
+	fixture := loadSegmentReadFixture(t)
+	for _, fixtureCase := range fixture.DisplayNumberCases {
+		fixtureCase := fixtureCase
+		t.Run(fixtureCase.Name, func(t *testing.T) {
+			t.Parallel()
+			entries := entriesFromSegmentFixture(t, fixtureCase.Turns)
+			if fixtureCase.ClearHarness {
+				for i := range entries {
+					entries[i].Harness = ""
+				}
+			}
+			reader := newFakeSegmentReader(entries)
+			server := newTestServerForSegments(t, reader)
+			server.segments.budget = fixtureCase.BudgetBytes
+			dirPath, err := route.LocalGetSessionTranscriptSegmentsPath(transcriptTestSessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			dirRequest := httptest.NewRequest(http.MethodGet, dirPath, nil)
+			dirRequest.SetPathValue("id", transcriptTestSessionID)
+			dirRecorder := httptest.NewRecorder()
+			server.handleTranscriptSegments(dirRecorder, dirRequest)
+			if dirRecorder.Code != http.StatusOK {
+				t.Fatalf("directory status = %d, body %s", dirRecorder.Code, dirRecorder.Body.String())
+			}
+			if fixtureCase.Expected.Omitted {
+				recorder, body := getTranscriptSegment(t, server, "0")
+				if recorder.Code != http.StatusOK {
+					t.Fatalf("segment status = %d, body %s", recorder.Code, body)
+				}
+				var segment schema.TranscriptSegment
+				if err := json.Unmarshal(body, &segment); err != nil {
+					t.Fatalf("decode segment: %v", err)
+				}
+				for _, turn := range segment.Turns {
+					if turn.DisplayNumber != "" {
+						t.Fatalf("turn %d displayNumber = %q, want empty", turn.Index, turn.DisplayNumber)
+					}
+				}
+				return
+			}
+			for _, wantSeg := range fixtureCase.Expected.Segments {
+				recorder, body := getTranscriptSegment(t, server, strconv.Itoa(wantSeg.Index))
+				if recorder.Code != http.StatusOK {
+					t.Fatalf("segment %d status = %d, body %s", wantSeg.Index, recorder.Code, body)
+				}
+				var segment schema.TranscriptSegment
+				if err := json.Unmarshal(body, &segment); err != nil {
+					t.Fatalf("decode segment %d: %v", wantSeg.Index, err)
+				}
+				got := make([]string, len(segment.Turns))
+				for i, turn := range segment.Turns {
+					got[i] = turn.DisplayNumber
+				}
+				if strings.Join(got, ",") != strings.Join(wantSeg.Numbers, ",") {
+					t.Fatalf("segment %d displayNumbers = %v, want %v", wantSeg.Index, got, wantSeg.Numbers)
 				}
 			}
 		})

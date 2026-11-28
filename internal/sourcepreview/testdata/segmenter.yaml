@@ -23,6 +23,7 @@ requiredNames:
   - one-segment-per-more
   - serialized-cap-cuts-with-notice
   - frame-never-exceeds-cap
+  - display-numbers-match-partition-across-segments
 
 cases:
   - name: segments-cut-at-the-contract-budget
@@ -39,7 +40,7 @@ cases:
     capture: {firstReadBytes: 67108864, sliceReadBytes: 67108864}
     segmenter: {budgetBytes: 1048576}
     drive: drain
-    expect: {minSegments: 3, equalsContractCut: true}
+    expect: {minSegments: 3, equalsContractCut: true, displayNumbersMatchPartition: true}
 
   - name: oversized-turn-alone-in-its-segment
     generate: {pairs: 6, answerBytes: 200, hugeAnswerBytes: 40000}
@@ -84,3 +85,10 @@ cases:
     segmenter: {budgetBytes: 1048576, frameCapBytes: 65536}
     drive: drain
     expect: {withinFrameCap: 65536, oversizedAloneAndTruncated: true}
+
+  - name: display-numbers-match-partition-across-segments
+    generate: {pairs: 200, answerBytes: 3000}
+    capture: {firstReadBytes: 65536, sliceReadBytes: 65536}
+    segmenter: {budgetBytes: 16384}
+    drive: perMore
+    expect: {minSegments: 10, refsContiguous: true, displayNumbersMatchPartition: true}

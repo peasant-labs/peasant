@@ -57,6 +57,7 @@ export type TranscriptSegmentDirectory = {
 export type TranscriptTurnWire = TurnDetail & {
   truncated: boolean;
   byteLength: number;
+  displayNumber?: string;
 };
 
 export type TranscriptSegment = {
@@ -236,6 +237,8 @@ export function parseTranscriptDirectory(value: unknown, path: string): Transcri
   };
 }
 
+const DISPLAY_NUMBER_PATTERN = /^[1-9][0-9]*[a-z]*$/;
+
 function parseTurn(value: unknown, path: string, position: number): TranscriptTurnWire {
   if (!isRecord(value)) fail(path, 200, `turns[${position}] is not an object`);
   const index = safeCount(value.index, path, `turns[${position}].index`);
@@ -246,7 +249,20 @@ function parseTurn(value: unknown, path: string, position: number): TranscriptTu
     fail(path, 200, `turns[${position}].truncated is not a boolean`);
   }
   const byteLength = safeCount(value.byteLength, path, `turns[${position}].byteLength`);
-  return { ...(value as unknown as TurnDetail), index, truncated: value.truncated, byteLength };
+  let displayNumber: string | undefined;
+  if (value.displayNumber !== undefined) {
+    if (typeof value.displayNumber !== 'string' || !DISPLAY_NUMBER_PATTERN.test(value.displayNumber)) {
+      fail(path, 200, `turns[${position}].displayNumber is invalid`);
+    }
+    displayNumber = value.displayNumber;
+  }
+  return {
+    ...(value as unknown as TurnDetail),
+    index,
+    truncated: value.truncated,
+    byteLength,
+    ...(displayNumber === undefined ? {} : { displayNumber }),
+  };
 }
 
 export function parseTranscriptSegment(value: unknown, path: string): TranscriptSegment {
@@ -266,6 +282,10 @@ export function parseTranscriptSegment(value: unknown, path: string): Transcript
     fail(path, 200, 'the segment carries content outside its turns');
   }
   const turns = value.turns.map((turn, position) => parseTurn(turn, path, position));
+  const numbered = turns.filter((turn) => turn.displayNumber !== undefined).length;
+  if (numbered > 0 && numbered !== turns.length) {
+    fail(path, 200, 'displayNumber must be present on all turns in a segment or none');
+  }
   if (turns[0]?.index !== firstTurn || turns[turns.length - 1]?.index !== lastTurn) {
     fail(path, 200, `declared range [${firstTurn}, ${lastTurn}] does not match the turns served`);
   }

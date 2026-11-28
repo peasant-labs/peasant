@@ -1,0 +1,144 @@
+cases:
+  - name: task-and-sub-numbering
+    harness: claude-code
+    turns:
+      - {index: 0, role: user, content: "first prompt"}
+      - {index: 1, role: assistant, content: "first answer"}
+      - {index: 2, role: assistant, content: "follow-up tool step"}
+      - {index: 3, role: user, content: "second prompt"}
+      - {index: 4, role: assistant, content: "second answer"}
+    splitAt: [3]
+    wantOk: true
+    wantNumbers: ["1", "1a", "1b", "2", "2a"]
+
+  - name: segment-starts-at-9a-and-9b
+    harness: claude-code
+    turns:
+      - {index: 0, role: user, content: "u1"}
+      - {index: 1, role: user, content: "u2"}
+      - {index: 2, role: user, content: "u3"}
+      - {index: 3, role: user, content: "u4"}
+      - {index: 4, role: user, content: "u5"}
+      - {index: 5, role: user, content: "u6"}
+      - {index: 6, role: user, content: "u7"}
+      - {index: 7, role: user, content: "u8"}
+      - {index: 8, role: user, content: "u9"}
+      - {index: 9, role: assistant, content: "sub a"}
+      - {index: 10, role: assistant, content: "sub b"}
+    splitAt: [9]
+    wantOk: true
+    wantNumbers: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "9a", "9b"]
+
+  - name: adjacent-duplicate-without-tools
+    harness: claude-code
+    turns:
+      - {index: 0, role: user, content: "question"}
+      - {index: 1, role: assistant, content: "same reply"}
+      - {index: 2, role: assistant, content: "same reply"}
+      - {index: 3, role: user, content: "next question"}
+    splitAt: [2]
+    wantOk: true
+    wantNumbers: ["1", "1a", "1a", "2"]
+
+  - name: adjacent-duplicate-with-tools-replaces-prior
+    harness: claude-code
+    turns:
+      - {index: 0, role: user, content: "first"}
+      - {index: 1, role: user, content: "repeated"}
+      - {index: 2, role: user, content: "repeated", toolCount: 1}
+      - {index: 3, role: assistant, content: "done"}
+    splitAt: [2]
+    wantOk: true
+    wantNumbers: ["1", "2", "2", "2a"]
+
+  - name: short-system-and-empty-turns
+    harness: claude-code
+    turns:
+      - {index: 0, role: assistant, content: ""}
+      - {index: 1, role: system, content: "ok"}
+      - {index: 2, role: user, content: "real prompt"}
+      - {index: 3, role: assistant, content: ""}
+      - {index: 4, role: assistant, content: "answer"}
+    splitAt: [3]
+    wantOk: true
+    wantNumbers: ["1", "1", "1", "1", "1a"]
+
+  - name: unkept-leading-segment-defers-to-next-segment
+    harness: claude-code
+    turns:
+      - {index: 0, role: assistant, content: ""}
+      - {index: 1, role: system, content: "ok"}
+      - {index: 2, role: user, content: "real prompt"}
+      - {index: 3, role: assistant, content: ""}
+      - {index: 4, role: assistant, content: "answer"}
+    splitAt: [2]
+    wantOk: true
+    wantNumbers: ["1", "1", "1", "1", "1a"]
+    wantStreamSegments:
+      - {ok: false}
+      - {ok: true, numbers: ["1", "1", "1a"]}
+
+  - name: pi-harness-keeps-short-system-and-duplicates
+    harness: pi
+    turns:
+      - {index: 0, role: system, content: "ok"}
+      - {index: 1, role: assistant, content: "same"}
+      - {index: 2, role: assistant, content: "same"}
+    splitAt: [1, 2]
+    wantOk: true
+    wantNumbers: ["1", "1a", "1b"]
+
+  - name: base26-subturn-rollover
+    harness: claude-code
+    turns:
+      - {index: 0, role: user, content: "root"}
+      - {index: 1, role: assistant, content: "s1"}
+      - {index: 2, role: assistant, content: "s2"}
+      - {index: 3, role: assistant, content: "s3"}
+      - {index: 4, role: assistant, content: "s4"}
+      - {index: 5, role: assistant, content: "s5"}
+      - {index: 6, role: assistant, content: "s6"}
+      - {index: 7, role: assistant, content: "s7"}
+      - {index: 8, role: assistant, content: "s8"}
+      - {index: 9, role: assistant, content: "s9"}
+      - {index: 10, role: assistant, content: "s10"}
+      - {index: 11, role: assistant, content: "s11"}
+      - {index: 12, role: assistant, content: "s12"}
+      - {index: 13, role: assistant, content: "s13"}
+      - {index: 14, role: assistant, content: "s14"}
+      - {index: 15, role: assistant, content: "s15"}
+      - {index: 16, role: assistant, content: "s16"}
+      - {index: 17, role: assistant, content: "s17"}
+      - {index: 18, role: assistant, content: "s18"}
+      - {index: 19, role: assistant, content: "s19"}
+      - {index: 20, role: assistant, content: "s20"}
+      - {index: 21, role: assistant, content: "s21"}
+      - {index: 22, role: assistant, content: "s22"}
+      - {index: 23, role: assistant, content: "s23"}
+      - {index: 24, role: assistant, content: "s24"}
+      - {index: 25, role: assistant, content: "s25"}
+      - {index: 26, role: assistant, content: "s26"}
+      - {index: 27, role: assistant, content: "s27"}
+      - {index: 28, role: user, content: "next"}
+    splitAt: [26, 27]
+    wantOk: true
+    wantNumbers: ["1", "1a", "1b", "1c", "1d", "1e", "1f", "1g", "1h", "1i", "1j", "1k", "1l", "1m", "1n", "1o", "1p", "1q", "1r", "1s", "1t", "1u", "1v", "1w", "1x", "1y", "1z", "1aa", "2"]
+
+  - name: uncookable-returns-false
+    harness: claude-code
+    turns:
+      - {index: 0, role: user, content: "prompt", sourceEntryRef: "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"}
+    wantOk: false
+
+  - name: no-kept-turns-returns-false
+    harness: claude-code
+    turns:
+      - {index: 0, role: assistant, content: ""}
+      - {index: 1, role: system, content: "short"}
+    wantOk: false
+
+  - name: invalid-harness-returns-false
+    harness: ""
+    turns:
+      - {index: 0, role: user, content: "prompt"}
+    wantOk: false

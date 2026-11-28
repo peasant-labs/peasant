@@ -136,3 +136,33 @@ position_cases:
       totalSegments: 3
       pages: 1
       withheld: {rule: continuity, segment: 1}
+display_number_cases:
+  # Segment 1 starts on sub-turn 9a, carries a short system turn that CookTranscriptRows
+  # drops (so it inherits 9a), and finishes with 9b.
+  - name: display-numbers-across-segments
+    budgetBytes: 120
+    turns:
+      - {index: 0, role: user, content: "user task 1"}
+      - {index: 4, role: user, content: "user task 2"}
+      - {index: 8, role: user, content: "user task 3"}
+      - {index: 12, role: user, content: "user task 4"}
+      - {index: 16, role: user, content: "user task 5"}
+      - {index: 20, role: user, content: "user task 6"}
+      - {index: 24, role: user, content: "user task 7"}
+      - {index: 28, role: user, content: "user task 8"}
+      - {index: 32, role: user, content: "user task 9"}
+      - {index: 36, role: assistant, content: "first subturn answer"}
+      - {index: 40, role: system, content: "ok"}
+      - {index: 44, role: assistant, content: "distinct follow-up subturn"}
+    expected:
+      segments:
+        - {index: 0, numbers: ["1", "2", "3", "4", "5", "6", "7", "8", "9"]}
+        - {index: 1, numbers: ["9a", "9a", "9b"]}
+  - name: display-numbers-missing-harness-omits-labels
+    budgetBytes: 1024
+    clearHarness: true
+    turns:
+      - {index: 0, role: user, content: "prompt"}
+      - {index: 4, role: assistant, content: "reply"}
+    expected:
+      omitted: true

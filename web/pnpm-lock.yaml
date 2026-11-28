@@ -12,8 +12,8 @@ importers:
         specifier: 0.2.1
         version: 0.2.1(@types/react@19.2.17)(@xyflow/react@12.11.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(immer@11.1.8)(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react-dom@19.2.7(react@19.2.7))(react-is@18.3.1)(react@19.2.7)(redux@5.0.1)(supports-color@7.2.0)
       '@peasant-labs/schema':
-        specifier: 0.58.1
-        version: 0.58.1
+        specifier: 0.63.0
+        version: 0.63.0
       '@xyflow/react':
         specifier: ^12.10.1
         version: 12.11.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(immer@11.1.8)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -723,6 +723,10 @@ packages:
 
   '@peasant-labs/schema@0.58.1':
     resolution: {integrity: sha512-CeZMr3D8Wk7ZNVR9P5WhO/OOnwBlj85zlBKhn+w9S9UAuPPs/mfXJBT72jj4FjpdWbmQtYGYRhJQdNUsEW/wcw==}
+    engines: {node: '>=26'}
+
+  '@peasant-labs/schema@0.63.0':
+    resolution: {integrity: sha512-9yIkGHjrRSuMVEoz6ZWyFUOevtvKprYbOCR2IN9+8aX2BObQnf8gBS33TDMENZVOnTwNwg4Upcsh8NYnLDiMzQ==}
     engines: {node: '>=26'}
 
   '@playwright/test@1.63.0':
@@ -3560,6 +3564,11 @@ snapshots:
       - supports-color
 
   '@peasant-labs/schema@0.58.1':
+    dependencies:
+      yaml: 2.9.0
+      zod: 4.4.3
+
+  '@peasant-labs/schema@0.63.0':
     dependencies:
       yaml: 2.9.0
       zod: 4.4.3

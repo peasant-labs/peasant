@@ -42,18 +42,20 @@ var ErrFrameExceedsCap = errors.New("one segment of this session is larger than 
 // another source read, so first paint never waits on a second read. Preview
 // segment boundaries are therefore local to the capture.
 type Segmenter struct {
-	revision   string
-	opts       SegmenterOptions
-	bound      transcript.ServedDocumentBudget
-	turns      []ingest.Turn
-	sizes      []int
-	metadata   []schema.NativeMetadataRecord
-	retained   []RetainedRecord
-	refs       []schema.TranscriptSegmentRef
-	loaded     int
-	conv       int
-	serialized int64
-	done       bool
+	revision    string
+	opts        SegmenterOptions
+	bound       transcript.ServedDocumentBudget
+	harness     schema.Harness
+	numberState transcript.PartitionNumberState
+	turns       []ingest.Turn
+	sizes       []int
+	metadata    []schema.NativeMetadataRecord
+	retained    []RetainedRecord
+	refs        []schema.TranscriptSegmentRef
+	loaded      int
+	conv        int
+	serialized  int64
+	done        bool
 }
 
 // NewSegmenter builds a segmenter for one capture. revision is the capture's
@@ -81,6 +83,9 @@ func NewSegmenter(revision string, opts SegmenterOptions) (*Segmenter, error) {
 
 // Push buffers a page's sealed turns and records.
 func (s *Segmenter) Push(page Page) {
+	if s.harness == "" && page.Session.Harness != "" {
+		s.harness = page.Session.Harness
+	}
 	for _, turn := range page.Turns {
 		s.turns = append(s.turns, turn)
 		s.sizes = append(s.sizes, transcript.FoldedTurnByteLength(turn))
@@ -112,6 +117,11 @@ func (s *Segmenter) Next(final bool) (segment Segment, ok bool, err error) {
 	}
 	turns := s.turns[:count]
 	rows := transcript.SegmentTurnRows(turns, s.bound)
+	if displayNumbers, ok := s.numberState.NextSegment(turns, s.harness); ok && len(displayNumbers) == len(rows) {
+		for i := range rows {
+			rows[i].DisplayNumber = displayNumbers[i]
+		}
+	}
 	index := len(s.refs)
 	ref := schema.TranscriptSegmentRef{Index: index, FirstTurn: turns[0].Index, LastTurn: turns[count-1].Index, ByteLength: total,
 		ConversationTurns: &schema.ConversationTurnSpan{Before: s.conv}}

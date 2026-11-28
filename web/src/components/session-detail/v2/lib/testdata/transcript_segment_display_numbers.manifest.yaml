@@ -1,0 +1,5 @@
+requiredNames:
+  - valid-display-numbers-on-all-turns
+  - all-display-numbers-absent
+  - mixed-display-numbers-rejected
+  - invalid-display-number-pattern-rejected
