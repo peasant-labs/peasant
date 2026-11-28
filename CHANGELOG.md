@@ -6,6 +6,13 @@ All notable changes to Peasant are recorded here. The format follows
 GitHub Releases, which hold the signed artifacts and checksums. A version that
 was tagged but not published links to its tag instead.
 
+## [0.24.0] - 2026-11-28
+
+- preview a raw session while choosing sessions to import (#1144)
+- install a context change by referencing the existing parsed generation (#1179)
+- store every agent reply as one entry with its thinking and tool calls as children (#1094)
+- preview review follow-ups and skip nested worktrees in the import boundary test (#1186)
+
 ## [0.23.0] - 2026-11-21
 
 - settle a context-only change after validating it instead of parsing (#1149)
