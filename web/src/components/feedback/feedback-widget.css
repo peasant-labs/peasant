@@ -1,0 +1,242 @@
+/* In-app feedback widget styles: tokens only, square (radius 0), static-first motion,
+   both themes via [data-theme]. */
+
+.fbw-launcher-root {
+  position: fixed;
+  right: var(--sp-4);
+  bottom: var(--sp-4);
+  z-index: var(--z-dropdown);
+}
+
+.fbw-launcher {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: var(--control-h);
+  height: var(--control-h);
+  margin: 0;
+  padding: 0;
+  border: var(--bd-strong);
+  border-radius: 0;
+  background: var(--surface-elev);
+  color: var(--ink);
+  box-shadow: var(--overlay-shadow);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  line-height: 1;
+  cursor: pointer;
+  appearance: none;
+}
+
+.fbw-launcher .lucide {
+  width: var(--ic-md);
+  height: var(--ic-md);
+  flex: none;
+}
+
+.fbw-launcher:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.fbw-launcher:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.fbw-menu {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+}
+
+.fbw-menu[hidden] {
+  display: none;
+}
+
+.fbw-menu-item {
+  pointer-events: auto;
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  box-sizing: border-box;
+  width: calc(var(--sp-8) * 2);
+  min-height: calc(var(--sp-8) * 2);
+  margin: 0;
+  padding: var(--sp-3);
+  border: var(--bd-strong);
+  border-radius: 0;
+  background: var(--surface-elev);
+  color: var(--ink);
+  box-shadow: var(--overlay-shadow);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  line-height: var(--lh-mono);
+  text-transform: lowercase;
+  text-align: center;
+  cursor: pointer;
+  appearance: none;
+}
+
+.fbw-menu-item .lucide {
+  width: var(--ic-md);
+  height: var(--ic-md);
+  flex: none;
+}
+
+.fbw-menu-item:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* Fan orthogonally around the launcher on >=480px without tile overlap (<=248px from right edge). */
+.fbw-menu-item--above {
+  right: 0;
+  bottom: calc(var(--control-h) + var(--sp-2));
+}
+
+.fbw-menu-item--left {
+  bottom: 0;
+  right: calc(var(--sp-8) * 2 + var(--sp-2));
+}
+
+@media (pointer: coarse) {
+  .fbw-launcher {
+    width: var(--target-comfortable);
+    height: var(--target-comfortable);
+  }
+
+  .fbw-menu-item {
+    min-width: var(--target-comfortable);
+    min-height: var(--target-comfortable);
+  }
+
+  .fbw-menu-item--above {
+    bottom: calc(var(--target-comfortable) + var(--sp-2));
+  }
+}
+
+@media (width < 480px) {
+  .fbw-menu {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: var(--sp-2);
+    bottom: calc(var(--control-h) + var(--sp-2));
+  }
+
+  .fbw-menu-item--above,
+  .fbw-menu-item--left {
+    position: static;
+  }
+}
+
+@media (width < 480px) and (pointer: coarse) {
+  .fbw-menu {
+    bottom: calc(var(--target-comfortable) + var(--sp-2));
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .fbw-launcher:not(:disabled):hover,
+  .fbw-menu-item:hover {
+    background: var(--surface-hover);
+    color: var(--ink-strong);
+    border-color: var(--amber-dim);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fbw-launcher,
+  .fbw-menu-item {
+    transition:
+      background var(--dur-1) var(--ease-standard),
+      border-color var(--dur-1) var(--ease-standard),
+      color var(--dur-1) var(--ease-standard),
+      transform var(--dur-1) var(--ease-out);
+  }
+
+  .fbw-launcher:not(:disabled):active,
+  .fbw-menu-item:active {
+    transform: scale(0.97);
+  }
+
+  .fbw-menu-item {
+    animation: fbw-fan-in var(--dur-2) var(--ease-out) both;
+  }
+
+  @keyframes fbw-fan-in {
+    from {
+      opacity: 0;
+      transform: translateY(var(--sp-1));
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}
+
+/* ── Element picker overlay ─────────────────────────────────────────────── */
+
+.fbw-picker-root {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-tooltip);
+  pointer-events: none;
+}
+
+.fbw-picker-scrim {
+  position: fixed;
+  display: block;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--canvas) 78%, transparent);
+}
+
+.fbw-picker-ring {
+  position: fixed;
+  box-sizing: border-box;
+  pointer-events: none;
+  border: var(--stroke-emphasis) solid var(--amber);
+  border-radius: 0;
+}
+
+.fbw-picker-status {
+  position: fixed;
+  top: var(--sp-4);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1;
+  box-sizing: border-box;
+  max-width: calc(100vw - var(--sp-8));
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: var(--bd-strong);
+  border-radius: 0;
+  background: var(--surface-elev);
+  color: var(--ink);
+  box-shadow: var(--overlay-shadow);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  line-height: var(--lh-mono);
+  text-transform: lowercase;
+  text-align: center;
+  pointer-events: none;
+}
+
+.fbw-sr-only {
+  position: absolute;
+  width: var(--stroke-hairline);
+  height: var(--stroke-hairline);
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}

@@ -1,0 +1,106 @@
+submitCases:
+  requiredNames:
+    - compose-enables-submit
+    - capturing-step-disables-submit
+  cases:
+    - name: compose-enables-submit
+      step: compose
+      expectedEnabled: true
+    - name: capturing-step-disables-submit
+      step: capturing
+      expectedEnabled: false
+
+kindCases:
+  requiredNames:
+    - problem-to-feature-switch
+    - feature-to-problem-switch
+  cases:
+    - name: problem-to-feature-switch
+      initialKind: problem
+      targetKind: feature
+      expectedTitle: report a problem
+    - name: feature-to-problem-switch
+      initialKind: feature
+      targetKind: problem
+      expectedTitle: request a feature
+
+submittedOutcomeCases:
+  requiredNames:
+    - copied-outcome-with-fallback-link
+    - downloaded-outcome-with-fallback-link
+    - not-needed-outcome-without-captures
+    - failed-outcome-shows-recovery-buttons
+  cases:
+    - name: copied-outcome-with-fallback-link
+      outcome: copied
+      expectedLabel: "image copied; paste it into the issue"
+      submittedUrl: "https://github.com/peasant-labs/peasant/issues/new?template=in-app-problem.yml"
+      hasCapture: true
+    - name: downloaded-outcome-with-fallback-link
+      outcome: downloaded
+      expectedLabel: "image downloaded; drop it into the issue"
+      submittedUrl: "https://github.com/peasant-labs/peasant/issues/new?template=in-app-feature.yml"
+      hasCapture: true
+    - name: not-needed-outcome-without-captures
+      outcome: not-needed
+      expectedLabel: "no image attached"
+      submittedUrl: "https://github.com/peasant-labs/peasant/issues/new?template=in-app-problem.yml"
+      hasCapture: false
+    - name: failed-outcome-shows-recovery-buttons
+      outcome: failed
+      expectedLabel: "the image could not be copied or downloaded"
+      submittedUrl: "https://github.com/peasant-labs/peasant/issues/new?template=in-app-problem.yml"
+      hasCapture: true
+
+pickLimitCases:
+  requiredNames:
+    - zero-elements-shows-pick-an-element
+    - below-limit-allows-another-pick
+    - pick-limit-reached
+  cases:
+    - name: zero-elements-shows-pick-an-element
+      pickedCount: 0
+      expectedLabel: "pick an element"
+      expectedDisabled: false
+    - name: below-limit-allows-another-pick
+      pickedCount: 2
+      expectedLabel: "pick another element"
+      expectedDisabled: false
+    - name: pick-limit-reached
+      pickedCount: 5
+      expectedLabel: "pick another element"
+      expectedDisabled: true
+      expectedReason: "maximum 5 elements reached"
+
+templatePreviewCases:
+  requiredNames:
+    - compose-shows-template-preview
+  cases:
+    - name: compose-shows-template-preview
+      instruction: "You will write the description on GitHub. The issue opens with this template filled in:"
+      bodyPreview: "# Bug Report\n\n## Problem Statement\n\n<!-- paste image -->\n\n<!-- what happened -->\n\n## User Requirements and Expectations\n\n<!-- what was the expected behaviour, bullet points. -->\n\n<!-- optional: what would ensure user satisfaction -->\n\n## System Information\n\n```text\npeasant version: 0.9.4\nroute: /sessions/abc123\n```\n"
+      expectedFragments:
+        - "# Bug Report"
+        - "## Problem Statement"
+        - "<!-- what happened -->"
+        - "## User Requirements and Expectations"
+        - "## System Information"
+        - "peasant version: 0.9.4"
+
+submittedPreviewCases:
+  requiredNames:
+    - submitted-pane-keeps-previews
+    - copy-marker-moves
+  cases:
+    - name: submitted-pane-keeps-previews
+      captureCount: 2
+      initialCopiedIndex: 1
+      expectedMarker: "image 1 copied — paste it, then copy the next"
+      copyTargetIndex: 1
+      expectedNextMarker: "image 1 copied — paste it, then copy the next"
+    - name: copy-marker-moves
+      captureCount: 3
+      initialCopiedIndex: 1
+      expectedMarker: "image 1 copied — paste it, then copy the next"
+      copyTargetIndex: 2
+      expectedNextMarker: "image 2 copied — paste it, then copy the next"

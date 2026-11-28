@@ -1,0 +1,51 @@
+requiredNames:
+  - problem-kind-initial-unchecked
+  - feature-kind-both-checked
+  - toggle-element-triggers-callback
+  - toggle-page-triggers-callback
+  - proceed-triggers-callback
+  - cancel-triggers-close
+  - escape-triggers-close
+cases:
+  - name: problem-kind-initial-unchecked
+    kind: problem
+    expectedTitle: report a problem
+    attachElement: false
+    attachPage: false
+    action: none
+  - name: feature-kind-both-checked
+    kind: feature
+    expectedTitle: request a feature
+    attachElement: true
+    attachPage: true
+    action: none
+  - name: toggle-element-triggers-callback
+    kind: problem
+    expectedTitle: report a problem
+    attachElement: false
+    attachPage: true
+    action: toggle_element
+  - name: toggle-page-triggers-callback
+    kind: feature
+    expectedTitle: request a feature
+    attachElement: true
+    attachPage: false
+    action: toggle_page
+  - name: proceed-triggers-callback
+    kind: problem
+    expectedTitle: report a problem
+    attachElement: false
+    attachPage: false
+    action: proceed
+  - name: cancel-triggers-close
+    kind: feature
+    expectedTitle: request a feature
+    attachElement: false
+    attachPage: false
+    action: cancel
+  - name: escape-triggers-close
+    kind: problem
+    expectedTitle: report a problem
+    attachElement: true
+    attachPage: true
+    action: escape

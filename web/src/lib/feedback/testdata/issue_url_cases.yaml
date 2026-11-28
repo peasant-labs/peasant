@@ -1,0 +1,375 @@
+cases:
+  - name: problem-selects-problem-template
+    input:
+      kind: problem
+      title: "Button clipped on narrow viewport"
+      elements: []
+      imageCount: 0
+      context:
+        route: "/sessions/abc"
+        viewport: { width: 390, height: 844 }
+        theme: dark
+        appVersion: "0.9.1"
+        userAgent: "TestBrowser/1.0"
+    expect:
+      template: "in-app-problem.yml"
+      truncated: false
+      params:
+        template: "in-app-problem.yml"
+        title: "Button clipped on narrow viewport"
+      forbiddenParams: [labels, "labels[]", expectations, element, description, screenshot]
+      bodyContains:
+        - "# Bug Report"
+        - "## Problem Statement"
+        - "<!-- paste image -->"
+        - "<!-- what happened -->"
+        - "## User Requirements and Expectations"
+        - "<!-- what was the expected behaviour, bullet points. -->"
+        - "<!-- optional: what would ensure user satisfaction -->"
+        - "## System Information"
+        - "peasant version: 0.9.1"
+
+  - name: feature-selects-feature-template
+    input:
+      kind: feature
+      title: "Add keyboard shortcut hint"
+      elements: []
+      imageCount: 0
+      context:
+        route: "/"
+        viewport: { width: 1440, height: 900 }
+        theme: light
+        appVersion: "0.9.1"
+        userAgent: "TestBrowser/1.0"
+    expect:
+      template: "in-app-feature.yml"
+      truncated: false
+      params:
+        template: "in-app-feature.yml"
+        title: "Add keyboard shortcut hint"
+      forbiddenParams: [labels, "labels[]", expectations, element, description, screenshot]
+      bodyContains:
+        - "# Feature Request"
+        - "<!-- what is the problem or need? -->"
+        - "<!-- what should peasant do instead? bullet points. -->"
+        - "<!-- optional: what would ensure user satisfaction -->"
+
+  - name: body-bug-heading
+    input:
+      kind: problem
+      title: "Bug layout issue"
+      elements: []
+      imageCount: 0
+      context:
+        route: "/sessions/1"
+        viewport: { width: 1280, height: 800 }
+        theme: dark
+        appVersion: "0.14.0"
+        userAgent: "TestBrowser/1.0"
+    expect:
+      template: "in-app-problem.yml"
+      truncated: false
+      bodyStartsWith: "# Bug Report\n\n## Problem Statement\n\n"
+      bodyContains:
+        - "## Problem Statement\n\n<!-- paste image -->\n\n<!-- what happened -->"
+        - "## User Requirements and Expectations\n\n<!-- what was the expected behaviour, bullet points. -->\n<!-- example:\n- the dialog stays open until sharing finishes.\n- if sharing fails, an error says why and how to fix it.\n-->\n\n<!-- optional: what would ensure user satisfaction -->"
+        - "## System Information\n\n```text\npeasant version: 0.14.0\n"
+      bodyOrder:
+        - "# Bug Report"
+        - "## Problem Statement"
+        - "## User Requirements and Expectations"
+        - "## System Information"
+
+  - name: body-feature-heading
+    input:
+      kind: feature
+      title: "Feature request"
+      elements: []
+      imageCount: 0
+      context:
+        route: "/sessions/1"
+        viewport: { width: 1280, height: 800 }
+        theme: light
+        appVersion: "0.14.0"
+        userAgent: "TestBrowser/1.0"
+    expect:
+      template: "in-app-feature.yml"
+      truncated: false
+      bodyStartsWith: "# Feature Request\n\n## Problem Statement\n\n"
+      bodyContains:
+        - "## Problem Statement\n\n<!-- paste image -->\n\n<!-- what is the problem or need? -->"
+        - "## User Requirements and Expectations\n\n<!-- what should peasant do instead? bullet points. -->\n<!-- example:\n- opening a tool call keeps my scroll position.\n- a \"back to where I was\" control returns me to the last turn I read.\n-->\n\n<!-- optional: what would ensure user satisfaction -->"
+        - "## System Information\n\n```text\npeasant version: 0.14.0\n"
+      bodyOrder:
+        - "# Feature Request"
+        - "## Problem Statement"
+        - "## User Requirements and Expectations"
+        - "## System Information"
+
+  - name: body-image-placeholders-numbered
+    input:
+      kind: problem
+      title: "Three captures"
+      elements:
+        - id: 1
+          selector: "main > button.a"
+          label: "button.a"
+          section: "Toolbar"
+          textSnippet: "First"
+          box: { top: 10, left: 20, width: 100, height: 32 }
+        - id: 2
+          selector: "main > button.b"
+          label: "button.b"
+          section: "Toolbar"
+          textSnippet: "Second"
+          box: { top: 50, left: 20, width: 100, height: 32 }
+      imageCount: 3
+      context:
+        route: "/sessions/1"
+        viewport: { width: 1280, height: 800 }
+        theme: dark
+        appVersion: "0.14.0"
+        userAgent: "TestBrowser/1.0"
+    expect:
+      template: "in-app-problem.yml"
+      truncated: false
+      bodyContains:
+        - "<!-- paste image 1 -->\n<!-- paste image 2 -->\n<!-- paste image 3 -->"
+      bodyExcludes:
+        - "<!-- paste image -->"
+
+  - name: body-elements-collapsed
+    input:
+      kind: problem
+      title: "Collapsed elements"
+      elements:
+        - id: 1
+          selector: "aside.asb > button[aria-label='settings']"
+          label: "button settings"
+          section: "sidebar"
+          textSnippet: "settings"
+          box: { top: 820, left: 12, width: 36, height: 36 }
+        - id: 2
+          selector: "main > div.toolbar"
+          label: "div.toolbar"
+          section: "main"
+          textSnippet: "filters"
+          box: { top: 40, left: 240, width: 480, height: 40 }
+      imageCount: 2
+      context:
+        route: "/settings"
+        viewport: { width: 1280, height: 800 }
+        theme: dark
+        appVersion: "0.9.2"
+        userAgent: "Firefox/130.0"
+    expect:
+      template: "in-app-problem.yml"
+      truncated: false
+      bodyContains:
+        - "<details><summary>picked elements</summary>\n\n```text\nelement 1 (image 1): button settings"
+        - "\n```\n\n```text\nelement 2 (image 2): div.toolbar"
+        - "\n```\n\n</details>\n\n<!-- what happened -->"
+
+  - name: prefill-problem-matches-body-section
+    input:
+      kind: problem
+      title: "Prefill parity"
+      elements:
+        - id: 1
+          selector: "main > button.save"
+          label: "button.save"
+          section: "Composer"
+          textSnippet: "Save"
+          box: { top: 40, left: 80, width: 110, height: 36 }
+      imageCount: 2
+      context:
+        route: "/sessions/42"
+        viewport: { width: 1280, height: 800 }
+        theme: dark
+        appVersion: "0.14.0"
+        userAgent: "TestBrowser/2.0"
+    expect:
+      template: "in-app-problem.yml"
+      truncated: false
+      forbiddenParams: [labels, "labels[]", expectations, element, description, screenshot]
+      problemMatchesBodySection: true
+      problemContains:
+        - "<!-- paste image 1 -->\n<!-- paste image 2 -->"
+        - "<details><summary>picked elements</summary>"
+        - "element 1 (image 1): button.save"
+        - "</details>\n\n<!-- what happened -->"
+      environmentStartsWith: "peasant version: 0.14.0\n"
+      environmentContains:
+        - "route: /sessions/42"
+        - "viewport: 1280x800"
+        - "theme: dark"
+        - "browser: TestBrowser/2.0"
+
+  - name: omits-details-when-no-elements
+    input:
+      kind: problem
+      title: "Scroll jumps on load"
+      elements: []
+      imageCount: 0
+      context:
+        route: "/sessions/xyz"
+        viewport: { width: 1440, height: 900 }
+        theme: dark
+        appVersion: unknown
+        userAgent: "Chrome/130.0"
+    expect:
+      template: "in-app-problem.yml"
+      truncated: false
+      forbiddenParams: [labels, "labels[]", expectations, element, description, screenshot]
+      bodyExcludes:
+        - "<details>"
+
+  - name: never-emits-labels
+    input:
+      kind: feature
+      title: "Export transcript summary"
+      elements:
+        - id: 1
+          selector: "main > header"
+          label: "session header"
+          section: "main"
+          textSnippet: "session-1"
+          box: { top: 0, left: 200, width: 1000, height: 64 }
+      imageCount: 1
+      context:
+        route: "/sessions/1"
+        viewport: { width: 1440, height: 900 }
+        theme: light
+        appVersion: "1.0.0"
+        userAgent: "Safari/18.0"
+    expect:
+      template: "in-app-feature.yml"
+      truncated: false
+      forbiddenParams: [labels, "labels[]", expectations, element, description, screenshot]
+
+  - name: empty-title-falls-back-to-kind-label
+    input:
+      kind: feature
+      title: "   "
+      elements: []
+      imageCount: 0
+      context:
+        route: "/"
+        viewport: { width: 1280, height: 720 }
+        theme: light
+        appVersion: "0.9.1"
+        userAgent: "Chrome/130.0"
+    expect:
+      template: "in-app-feature.yml"
+      truncated: false
+      params:
+        title: "request a feature"
+
+  - name: drops-trailing-elements-when-elements-exceed-cap
+    maxLength: 2307
+    input:
+      kind: problem
+      title: "Overflow"
+      elements:
+        - id: 1
+          selector: "main > button.first"
+          label: "button.first"
+          section: "toolbar"
+          textSnippet: "First element fits under the cap."
+          box: { top: 20, left: 30, width: 100, height: 32 }
+        - id: 2
+          selector: "div.very-deep-container > ul > li:nth-child(42) > button.action-trigger"
+          label: "button.second"
+          section: "transcript"
+          textSnippet: "Second element gets dropped when the tight URL cap is reached."
+          box: { top: 200, left: 300, width: 120, height: 40 }
+        - id: 3
+          selector: "div.very-deep-container > ul > li:nth-child(43) > button.action-other"
+          label: "button.third"
+          section: "transcript"
+          textSnippet: "Third element also gets dropped when the tight URL cap is reached."
+          box: { top: 260, left: 300, width: 120, height: 40 }
+      imageCount: 3
+      context:
+        route: "/s"
+        viewport: { width: 800, height: 600 }
+        theme: dark
+        appVersion: "1.0.0"
+        userAgent: "UA"
+    expect:
+      template: "in-app-problem.yml"
+      truncated: true
+      maxUrlLength: 2307
+      problemMatchesBodySection: true
+      problemContains:
+        - "<!-- paste image 1 -->\n<!-- paste image 2 -->\n<!-- paste image 3 -->"
+        - "element 1 (image 1): button.first"
+        - "2 more elements omitted"
+      problemExcludes:
+        - "button.second"
+        - "button.third"
+      bodyContains:
+        - "element 1 (image 1): button.first"
+        - "2 more elements omitted"
+      environmentContains:
+        - "peasant version: 1.0.0"
+        - "route: /s"
+        - "viewport: 800x600"
+        - "theme: dark"
+        - "browser: UA"
+
+  - name: shortens-element-snippet-when-single-element-exceeds-cap
+    maxLength: 1857
+    input:
+      kind: problem
+      title: "Snippet trim"
+      elements:
+        - id: 1
+          selector: "main > button.long"
+          label: "button.long"
+          section: "toolbar"
+          textSnippet: "A very long text snippet inside the picked element that will be shortened once trailing elements are already gone."
+          box: { top: 20, left: 30, width: 100, height: 32 }
+      imageCount: 1
+      context:
+        route: "/s"
+        viewport: { width: 800, height: 600 }
+        theme: dark
+        appVersion: "1.0.0"
+        userAgent: "UA"
+    expect:
+      template: "in-app-problem.yml"
+      truncated: true
+      maxUrlLength: 1857
+      problemMatchesBodySection: true
+      problemContains:
+        - "<!-- paste image 1 -->"
+        - "element 1 (image 1): button.long"
+        - "… [truncated]"
+      bodyContains:
+        - "element 1 (image 1): button.long"
+        - "… [truncated]"
+      environmentContains:
+        - "peasant version: 1.0.0"
+        - "route: /s"
+
+  - name: strips-query-and-hash-from-route
+    input:
+      kind: problem
+      title: "Route leak check"
+      elements: []
+      imageCount: 0
+      context:
+        route: "/sessions/abc?secret=token#frag"
+        viewport: { width: 1024, height: 768 }
+        theme: dark
+        appVersion: "1.0.0"
+        userAgent: "UA"
+    expect:
+      template: "in-app-problem.yml"
+      truncated: false
+      environmentContains:
+        - "route: /sessions/abc"
+      environmentExcludes:
+        - "secret=token"
+        - "#frag"

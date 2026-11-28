@@ -77,6 +77,7 @@ import {
   StepWizardFrame,
   ConsentDialog as FtConsentDialog,
   ConsentSummary as FtConsentSummary,
+  Dialog as FtDialog,
   Treemap as FtTreemap,
   squarify,
   MapCanvas as FtMapCanvas,
@@ -507,6 +508,28 @@ export interface ConsentDialogProps {
   returnFocusRef?: RefObject<HTMLElement>;
 }
 export const ConsentDialog = FtConsentDialog as unknown as ComponentType<ConsentDialogProps>;
+
+/**
+ * Generic portaled modal: scrim + bordered panel with a mono head title, body,
+ * and optional footer. Focus-trapped with focus return; Escape and scrim click
+ * call `onClose` unless `dismissible` is false.
+ */
+export interface DialogProps {
+  open: boolean;
+  onClose: () => void;
+  /** Mono lowercase head title. */
+  title: ReactNode;
+  labelId?: string;
+  children?: ReactNode;
+  footer?: ReactNode;
+  returnFocusRef?: RefObject<HTMLElement | null>;
+  /** Omit for the default 420px width; wide = 720px (bottom sheet below 768px). */
+  size?: 'wide';
+  className?: string;
+  /** When false, Escape and scrim click do not close (default: true). */
+  dismissible?: boolean;
+}
+export const Dialog = FtDialog as unknown as ComponentType<DialogProps>;
 
 // -- Treemap ----------------------------------------------------------------
 

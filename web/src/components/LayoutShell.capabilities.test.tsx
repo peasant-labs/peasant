@@ -10,6 +10,7 @@ import {
 import { usePublishState } from '@/contexts/PublishContext';
 import { LayoutShell } from './LayoutShell';
 import { OPEN_COMMAND_PALETTE_EVENT } from './command/CommandPalette';
+import { FeedbackLauncherLabels } from './feedback/FeedbackLauncher';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { renderToString } from 'react-dom/server';
@@ -96,6 +97,7 @@ describe('static shell hydration', () => {
 
 afterEach(() => {
   cleanup();
+  window.history.replaceState({}, '', '/');
   vi.unstubAllGlobals();
   globalThis.WebSocket = originalWebSocket;
   vi.resetAllMocks();
@@ -168,4 +170,31 @@ it('is the composition that supplies the publish provider: a consumer outside th
     return null;
   }
   expect(() => render(<BareConsumer />)).toThrow(/PublishProvider/);
+});
+
+it('mounts the feedback launcher outside <main> and omits it under ?fb=off', async () => {
+  mockHttp(UI_CAPABILITY_CASES[0]);
+  render(
+    <LayoutShell>
+      <div>page content</div>
+    </LayoutShell>,
+  );
+
+  const launcher = await screen.findByRole('button', { name: FeedbackLauncherLabels.Trigger });
+  const main = document.querySelector('main');
+  expect(main).not.toBeNull();
+  expect(main?.contains(launcher)).toBe(false);
+  expect(launcher.closest('[data-feedback-widget]')).not.toBeNull();
+
+  cleanup();
+  window.history.replaceState({}, '', '/?fb=off');
+  render(
+    <LayoutShell>
+      <div>page content</div>
+    </LayoutShell>,
+  );
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 0));
+  });
+  expect(screen.queryByRole('button', { name: FeedbackLauncherLabels.Trigger })).toBeNull();
 });

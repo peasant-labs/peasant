@@ -2,6 +2,16 @@
 
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { Check, Crosshair, MessageSquarePlus, X } from 'lucide-react';
+import {
+  feedbackDisabled,
+  feedbackLabelFor,
+  feedbackSectionOf,
+  feedbackSelectorFor,
+  feedbackTargetFrom,
+  isIgnoredFeedbackElement,
+  isTooLargeRect,
+} from '@/lib/feedback/domTarget';
+import type { LegacyDomTarget } from '@/lib/feedback/types';
 
 /**
  * In-page inspect + user feedback tool — a development iteration aid.
@@ -28,29 +38,14 @@ import { Check, Crosshair, MessageSquarePlus, X } from 'lucide-react';
 /** Peasant Local API route that appends a UI annotation to `llm/ui-feedback.md`. */
 const FEEDBACK_ROUTE = '/api/v1/local/feedback';
 const FEEDBACK_SAVED_TOAST = 'saved to llm/ui-feedback.md';
-/** Characters of `outerHTML` kept for the stored DOM snippet (the route keeps 800). */
-const SNIPPET_MAX_CHARS = 400;
-/** Classes kept in the cheap hover label and in each selector step. */
-const CLASS_LIMIT = 3;
-/** Ancestor steps kept in the generated selector. */
-const SELECTOR_DEPTH_LIMIT = 6;
 /** The popup may not sit under the persistent product header. */
 const POPUP_MIN_TOP = 64;
 const POPUP_BOTTOM_RESERVE = 260;
 const TOAST_MS = 2500;
 const SAVE_SHORTCUT = '⌘↵';
 
-/** Query parameter that turns the tool off for the page. */
-const DISABLE_PARAM = 'fb';
-const DISABLE_VALUE = 'off';
-
 /** The element description posted with a note. */
-export interface FeedbackTarget {
-  selector: string;
-  label: string;
-  section: string;
-  snippet: string;
-}
+export type FeedbackTarget = LegacyDomTarget;
 
 /** The request body of `POST /api/v1/local/feedback`. */
 export interface FeedbackPayload {
@@ -61,81 +56,13 @@ export interface FeedbackPayload {
   comment: string;
 }
 
-/** True when the page loaded with the disable switch, e.g. `?fb=off`. */
-export function feedbackDisabled(search: string): boolean {
-  return new URLSearchParams(search).get(DISABLE_PARAM) === DISABLE_VALUE;
-}
-
-/**
- * A stable-ish CSS selector: an id when one exists, otherwise a bounded ancestor
- * chain with up to {@link CLASS_LIMIT} classes per step and an `:nth-of-type`
- * disambiguator when siblings share a tag.
- */
-export function feedbackSelectorFor(el: Element): string {
-  if (el.id) return '#' + el.id;
-  const parts: string[] = [];
-  let node: Element | null = el;
-  let depth = 0;
-  while (node && node.nodeType === 1 && node !== document.body && depth++ < SELECTOR_DEPTH_LIMIT) {
-    const current: Element = node;
-    let part = current.tagName.toLowerCase();
-    if (current.classList.length) {
-      part += '.' + Array.from(current.classList).slice(0, CLASS_LIMIT).join('.');
-    }
-    const parent = current.parentElement;
-    if (parent) {
-      const sameTag = Array.from(parent.children).filter((child) => child.tagName === current.tagName);
-      if (sameTag.length > 1) part += `:nth-of-type(${sameTag.indexOf(current) + 1})`;
-    }
-    parts.unshift(part);
-    if (current.id) {
-      parts[0] = '#' + current.id;
-      break;
-    }
-    node = parent;
-  }
-  return parts.join(' > ');
-}
-
-/**
- * A cheap label for the hover tag and the payload fallback: tag, id, and the first
- * {@link CLASS_LIMIT} classes. It must never touch `textContent` — the hover path
- * runs on every pointer move.
- */
-export function feedbackLabelFor(el: Element): string {
-  const classes = Array.from(el.classList).slice(0, CLASS_LIMIT);
-  return el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + (classes.length ? '.' + classes.join('.') : '');
-}
-
-/**
- * The owning section of an element: the nearest `<section>` ancestor, named by its
- * `aria-label`, its first heading, or its id. Empty when no section scopes it.
- */
-export function feedbackSectionOf(el: Element): string {
-  let node: Element | null = el;
-  while (node && node !== document.body) {
-    if (node.tagName === 'SECTION') {
-      const label = node.getAttribute('aria-label');
-      if (label && label.trim()) return label.trim();
-      const heading = node.querySelector(':scope > h1, :scope > h2, :scope > h3, :scope > h4') ?? node.querySelector('h1, h2, h3, h4');
-      const headingText = (heading?.textContent ?? '').trim();
-      if (headingText) return headingText;
-      if (node.id) return '#' + node.id;
-    }
-    node = node.parentElement;
-  }
-  return '';
-}
-
-/** Builds the full element description. Picks only — never the hover path. */
-export function feedbackTargetFrom(el: Element): FeedbackTarget {
-  return {
-    selector: feedbackSelectorFor(el),
-    label: feedbackLabelFor(el),
-    section: feedbackSectionOf(el),
-    snippet: el.outerHTML.slice(0, SNIPPET_MAX_CHARS),
-  };
-}
+export {
+  feedbackDisabled,
+  feedbackLabelFor,
+  feedbackSectionOf,
+  feedbackSelectorFor,
+  feedbackTargetFrom,
+};
 
 /** Builds the request body for a picked element. */
 export function feedbackPayloadFor(el: Element, route: string, comment: string): FeedbackPayload {
@@ -235,13 +162,6 @@ function InspectFeedbackTool() {
     if (!armed) return;
     document.body.classList.add('fbk-arming');
 
-    const badCheap = (el: Element): boolean =>
-      el.tagName === 'HTML' || el.tagName === 'BODY' || el.id === 'root' || el.id === '__next';
-
-    // getBoundingClientRect() forces a synchronous reflow, so this runs on click only.
-    const tooBig = (rect: DOMRect): boolean =>
-      rect.width >= window.innerWidth * 0.97 && rect.height >= window.innerHeight * 0.92;
-
     let rafId = 0;
     let pending: Element | null = null;
     let hoverEl: Element | null = null;
@@ -287,7 +207,7 @@ function InspectFeedbackTool() {
         return;
       }
       if (el === hoverEl) return;
-      if (badCheap(el) || el.closest('[data-fb]')) {
+      if (isIgnoredFeedbackElement(el)) {
         clearHover();
         return;
       }
@@ -298,7 +218,13 @@ function InspectFeedbackTool() {
 
     const onClick = (event: MouseEvent) => {
       const el = event.target instanceof Element ? event.target : null;
-      if (!el || el.closest('[data-fb]') || badCheap(el) || tooBig(el.getBoundingClientRect())) return;
+      if (
+        !el ||
+        isIgnoredFeedbackElement(el) ||
+        isTooLargeRect(el.getBoundingClientRect(), { width: window.innerWidth, height: window.innerHeight })
+      ) {
+        return;
+      }
       event.preventDefault();
       event.stopPropagation();
       // Drop the highlight before describing the element, or the description would

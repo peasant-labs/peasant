@@ -1,0 +1,71 @@
+requiredNames:
+  - click-toggles-radial-menu
+  - arrow-keys-cycle-both-tiles
+  - escape-closes-and-restores-focus
+  - enter-invokes-selected-kind
+  - space-invokes-selected-kind
+  - home-end-jump-tiles
+  - click-outside-closes
+cases:
+  - name: click-toggles-radial-menu
+    initialOpen: false
+    steps:
+      - clickTrigger: true
+      - expectOpen: true
+      - expectFocused: problem
+      - clickTrigger: true
+      - expectOpen: false
+  - name: arrow-keys-cycle-both-tiles
+    initialOpen: true
+    steps:
+      - expectActiveKind: problem
+      - expectTabIndex:
+          problem: 0
+          feature: -1
+      - key: ArrowDown
+      - expectActiveKind: feature
+      - expectFocused: feature
+      - expectTabIndex:
+          problem: -1
+          feature: 0
+      - key: ArrowRight
+      - expectActiveKind: problem
+      - expectFocused: problem
+      - key: ArrowLeft
+      - expectActiveKind: feature
+      - expectFocused: feature
+      - key: ArrowUp
+      - expectActiveKind: problem
+      - expectFocused: problem
+  - name: escape-closes-and-restores-focus
+    initialOpen: true
+    steps:
+      - expectFocused: problem
+      - key: Escape
+      - expectOpen: false
+      - expectFocused: launcher
+  - name: enter-invokes-selected-kind
+    initialOpen: true
+    steps:
+      - key: ArrowDown
+      - key: Enter
+      - expectSelected: feature
+  - name: space-invokes-selected-kind
+    initialOpen: true
+    steps:
+      - key: " "
+      - expectSelected: problem
+  - name: home-end-jump-tiles
+    initialOpen: true
+    steps:
+      - key: End
+      - expectActiveKind: feature
+      - expectFocused: feature
+      - key: Home
+      - expectActiveKind: problem
+      - expectFocused: problem
+  - name: click-outside-closes
+    initialOpen: true
+    steps:
+      - clickOutside: true
+      - expectOpen: false

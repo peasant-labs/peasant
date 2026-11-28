@@ -128,6 +128,11 @@ class ChannelStore {
 
 interface WebSocketContextValue {
   connected: boolean;
+  /**
+   * The peasant binary version the server reported in its `connected` frame,
+   * or null before the first frame. It is display data only.
+   */
+  serverVersion: string | null;
   /** The socket's fault: a frame failure, a socket error, or a non-topic refusal. */
   connectionFault: WebFault | null;
   store: ChannelStore;
@@ -188,6 +193,7 @@ const WebSocketContext = createContext<WebSocketContextValue | null>(null);
 
 export function WebSocketProvider({ children }: { children: ReactNode }) {
   const [connected, setConnected] = useState(false);
+  const [serverVersion, setServerVersion] = useState<string | null>(null);
   const [connectionFault, setConnectionFault] = useState<WebFault | null>(null);
 
   // Stable refs — never trigger React re-renders.
@@ -289,6 +295,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
 
       switch (msg.type) {
         case MessageType.Connected:
+          if (msg.version) setServerVersion(msg.version);
           // The socket is alive, but a valid message is not a recovery signal
           // for a retained data fault; only a reconnect clears a connection
           // fault, and only the same operation's success clears a data fault.
@@ -565,6 +572,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   const value: WebSocketContextValue = useMemo(
     () => ({
       connected,
+      serverVersion,
       connectionFault,
       store: storeRef.current,
       wsSubscribe,
@@ -577,7 +585,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       abandonKickstartPreview,
       reconnect,
     }),
-    [connected, connectionFault, wsSubscribe, wsUnsubscribe, wsRefresh, sendRaw, onKickstartEvent, sendKickstartPreview, onKickstartPreview, abandonKickstartPreview, reconnect],
+    [connected, serverVersion, connectionFault, wsSubscribe, wsUnsubscribe, wsRefresh, sendRaw, onKickstartEvent, sendKickstartPreview, onKickstartPreview, abandonKickstartPreview, reconnect],
   );
 
   return (
@@ -711,7 +719,12 @@ export function useChannel<T = unknown>(
  */
 export function useConnectionState() {
   const ctx = useWsContext();
-  return { connected: ctx.connected, connectionFault: ctx.connectionFault, reconnect: ctx.reconnect };
+  return {
+    connected: ctx.connected,
+    serverVersion: ctx.serverVersion,
+    connectionFault: ctx.connectionFault,
+    reconnect: ctx.reconnect,
+  };
 }
 
 /**
