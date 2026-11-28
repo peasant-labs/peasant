@@ -12,12 +12,22 @@ export const MAX_ISSUE_URL_LENGTH = 7500;
 export const DEFAULT_REPO_ISSUES_URL = 'https://github.com/peasant-labs/peasant/issues/new';
 
 const TRUNCATION_SUFFIX = '… [truncated]';
-const DESCRIPTION_PLACEHOLDER_COMMENT = '<!-- Describe it here. -->';
-const SCREENSHOTS_BODY_LINE = 'Paste the copied images here.';
+const SINGLE_IMAGE_PLACEHOLDER = '<!-- paste image -->';
+const SATISFACTION_COMMENT = '<!-- optional: what would ensure user satisfaction -->';
 
-const DESCRIPTION_HEADING_BY_KIND: Readonly<Record<FeedbackKind['wire'], string>> = Object.freeze({
-  [FeedbackKind.Problem.wire]: 'What happened?',
-  [FeedbackKind.Feature.wire]: 'What would you like to see?',
+const TOP_HEADING_BY_KIND: Readonly<Record<FeedbackKind['wire'], string>> = Object.freeze({
+  [FeedbackKind.Problem.wire]: '# Bug Report',
+  [FeedbackKind.Feature.wire]: '# Feature Request',
+});
+
+const PROBLEM_PROMPT_BY_KIND: Readonly<Record<FeedbackKind['wire'], string>> = Object.freeze({
+  [FeedbackKind.Problem.wire]: '<!-- what happened -->',
+  [FeedbackKind.Feature.wire]: '<!-- what is the problem or need? -->',
+});
+
+const EXPECTATIONS_PROMPT_BY_KIND: Readonly<Record<FeedbackKind['wire'], string>> = Object.freeze({
+  [FeedbackKind.Problem.wire]: '<!-- what was the expected behaviour, bullet points. -->',
+  [FeedbackKind.Feature.wire]: '<!-- what should peasant do instead? bullet points. -->',
 });
 
 export interface IssueUrlResult {
@@ -64,53 +74,57 @@ function formatOmittedNote(omittedCount: number): string {
   return `${omittedCount} more ${omittedCount === 1 ? 'element' : 'elements'} omitted`;
 }
 
-export function formatElementsBlock(
-  elements: readonly PickedElementInfo[],
-  keptCount: number = elements.length,
-  includeOmittedNote = true,
-): string {
-  if (elements.length === 0) {
-    return '';
-  }
-  const clamped = Math.max(0, Math.min(keptCount, elements.length));
-  const blocks = elements.slice(0, clamped).map((el, index) => formatElementBlock(el, index));
-  const omittedCount = elements.length - clamped;
-  if (omittedCount > 0 && includeOmittedNote) {
-    blocks.push(formatOmittedNote(omittedCount));
-  }
-  return blocks.join('\n\n');
-}
-
 function fenceTextBlock(content: string): string {
   const longestFence = Math.max(2, ...(content.match(/`+/g) ?? []).map((run) => run.length));
   const fence = '`'.repeat(longestFence + 1);
   return `${fence}text\n${content}\n${fence}`;
 }
 
-function formatIssueBody(
+function formatImagePlaceholders(imageCount: number): string {
+  if (imageCount <= 0) {
+    return SINGLE_IMAGE_PLACEHOLDER;
+  }
+  return Array.from({ length: imageCount }, (_, index) => `<!-- paste image ${index + 1} -->`).join('\n');
+}
+
+function formatProblemSectionContent(
   kind: FeedbackKind,
+  imageCount: number,
   elements: readonly PickedElementInfo[],
   keptCount: number,
-  environmentText: string,
-  includeOmittedNote = true,
+  includeDetails = true,
 ): string {
-  const sections: string[] = [
-    `### ${DESCRIPTION_HEADING_BY_KIND[kind.wire]}\n\n${DESCRIPTION_PLACEHOLDER_COMMENT}\n`,
-    `### App context\n\n${fenceTextBlock(environmentText)}`,
-  ];
-  if (elements.length > 0) {
+  const parts: string[] = [formatImagePlaceholders(imageCount)];
+
+  if (elements.length > 0 && includeDetails) {
     const clamped = Math.max(0, Math.min(keptCount, elements.length));
     const elementParts = elements.slice(0, clamped).map((el, index) => fenceTextBlock(formatElementBlock(el, index)));
     const omittedCount = elements.length - clamped;
-    if (omittedCount > 0 && includeOmittedNote) {
+    if (omittedCount > 0) {
       elementParts.push(formatOmittedNote(omittedCount));
     }
-    if (elementParts.length > 0) {
-      sections.push(`### Picked elements\n\n${elementParts.join('\n\n')}`);
-    }
+    parts.push(`<details><summary>picked elements</summary>\n\n${elementParts.join('\n\n')}\n\n</details>`);
   }
-  sections.push(`### Screenshots\n\n${SCREENSHOTS_BODY_LINE}`);
-  return sections.join('\n\n');
+
+  parts.push(PROBLEM_PROMPT_BY_KIND[kind.wire]);
+  return parts.join('\n\n');
+}
+
+function formatExpectationsSectionContent(kind: FeedbackKind): string {
+  return `${EXPECTATIONS_PROMPT_BY_KIND[kind.wire]}\n\n${SATISFACTION_COMMENT}`;
+}
+
+function formatIssueBody(
+  kind: FeedbackKind,
+  problemContent: string,
+  environmentText: string,
+): string {
+  return [
+    TOP_HEADING_BY_KIND[kind.wire],
+    `## ${IssueFormFieldId.Problem.label}\n\n${problemContent}`,
+    `## ${IssueFormFieldId.Expectations.label}\n\n${formatExpectationsSectionContent(kind)}`,
+    `## ${IssueFormFieldId.Environment.label}\n\n${fenceTextBlock(environmentText)}`,
+  ].join('\n\n');
 }
 
 function sliceCodeUnitSafe(text: string, maxUnits: number): string {
@@ -175,16 +189,20 @@ export function buildGitHubIssueUrl(
     elements: readonly PickedElementInfo[],
     keptCount: number,
     titleText: string,
-    includeOmittedNote = true,
+    includeDetails = true,
   ): { url: string; payload: string } => {
-    const elementFieldText = formatElementsBlock(elements, keptCount, includeOmittedNote);
-    const bodyText = formatIssueBody(input.kind, elements, keptCount, environmentText, includeOmittedNote);
+    const problemContent = formatProblemSectionContent(
+      input.kind,
+      input.imageCount,
+      elements,
+      keptCount,
+      includeDetails,
+    );
+    const bodyText = formatIssueBody(input.kind, problemContent, environmentText);
     const params = new URLSearchParams();
     params.set('template', template);
     params.set('title', titleText);
-    if (elementFieldText !== '') {
-      params.set(IssueFormFieldId.Element.wire, elementFieldText);
-    }
+    params.set(IssueFormFieldId.Problem.wire, problemContent);
     params.set(IssueFormFieldId.Environment.wire, environmentText);
     params.set('body', bodyText);
     return {
@@ -238,8 +256,8 @@ export function buildGitHubIssueUrl(
     }
   }
 
-  // Last-resort cap fallback for tiny custom maxLength: drop omission note, then shrink title;
-  // template and environment are never cut.
+  // Last-resort cap fallback for tiny custom maxLength: drop details block, then shrink title;
+  // template, image placeholders, and environment are never cut.
   let fallback = encodeUrl(input.elements, 0, title, false);
   if (fallback.url.length > maxLength) {
     const shrunkTitle = shrinkFieldToFit(

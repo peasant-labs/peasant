@@ -99,16 +99,14 @@ const _allPickerDirections: MissingPickerDirection extends never ? true : never 
 
 /** Issue-form field ids. `wire` is both the YAML `id` and the prefill query-parameter name. */
 export const IssueFormFieldId = Object.freeze({
-  Description: closed('description', 'description'),
-  Element: closed('element', 'picked element'),
-  Screenshot: closed('screenshot', 'screenshot'),
-  Environment: closed('environment', 'app context'),
+  Problem: closed('problem', 'Problem Statement'),
+  Expectations: closed('expectations', 'User Requirements and Expectations'),
+  Environment: closed('environment', 'System Information'),
 } as const);
 export type IssueFormFieldId = (typeof IssueFormFieldId)[keyof typeof IssueFormFieldId];
 export const ALL_ISSUE_FORM_FIELD_IDS = Object.freeze([
-  IssueFormFieldId.Description,
-  IssueFormFieldId.Element,
-  IssueFormFieldId.Screenshot,
+  IssueFormFieldId.Problem,
+  IssueFormFieldId.Expectations,
   IssueFormFieldId.Environment,
 ] as const);
 type MissingIssueFormFieldId = Exclude<IssueFormFieldId, (typeof ALL_ISSUE_FORM_FIELD_IDS)[number]>;
@@ -222,6 +220,7 @@ export interface IssueDraftInput {
   readonly kind: FeedbackKind;
   readonly title: string;
   readonly elements: readonly PickedElementInfo[];
+  readonly imageCount: number;
   readonly context: FeedbackContextInfo;
 }
 

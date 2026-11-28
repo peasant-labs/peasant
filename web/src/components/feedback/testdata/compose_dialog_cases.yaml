@@ -78,10 +78,13 @@ templatePreviewCases:
   cases:
     - name: compose-shows-template-preview
       instruction: "You will write the description on GitHub. The issue opens with this template filled in:"
-      bodyPreview: "### What happened?\n\n<!-- Describe it here. -->\n\n### App context\n\n```text\npeasant version: 0.9.4\nroute: /sessions/abc123\n```\n"
+      bodyPreview: "# Bug Report\n\n## Problem Statement\n\n<!-- paste image -->\n\n<!-- what happened -->\n\n## User Requirements and Expectations\n\n<!-- what was the expected behaviour, bullet points. -->\n\n<!-- optional: what would ensure user satisfaction -->\n\n## System Information\n\n```text\npeasant version: 0.9.4\nroute: /sessions/abc123\n```\n"
       expectedFragments:
-        - "### What happened?"
-        - "<!-- Describe it here. -->"
+        - "# Bug Report"
+        - "## Problem Statement"
+        - "<!-- what happened -->"
+        - "## User Requirements and Expectations"
+        - "## System Information"
         - "peasant version: 0.9.4"
 
 submittedPreviewCases:

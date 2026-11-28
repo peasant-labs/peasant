@@ -219,6 +219,7 @@ export function FeedbackWidget(): ReactElement | null {
       kind: state.kind,
       title: state.title,
       elements: state.pickedElements,
+      imageCount: state.captures.length,
       context: readFeedbackContext(theme, serverVersion),
     });
 
@@ -310,6 +311,7 @@ export function FeedbackWidget(): ReactElement | null {
         kind: state.kind,
         title: state.title,
         elements: state.pickedElements,
+        imageCount: state.captures.length,
         context,
       })
     : null;

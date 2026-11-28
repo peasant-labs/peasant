@@ -112,10 +112,16 @@ describe('FeedbackWidget', () => {
     expect(parsed.searchParams.has('labels')).toBe(false);
     expect(parsed.searchParams.has('labels[]')).toBe(false);
     expect(parsed.searchParams.has('description')).toBe(false);
+    expect(parsed.searchParams.has('expectations')).toBe(false);
+    expect(parsed.searchParams.has('element')).toBe(false);
+    expect(parsed.searchParams.has('screenshot')).toBe(false);
     expect(parsed.searchParams.get('title')).toBe('Sidebar button clipped');
+    expect(parsed.searchParams.get('problem')).toBe('<!-- paste image -->\n\n<!-- what happened -->');
     expect(parsed.searchParams.get('environment')?.startsWith('peasant version: 0.12.3\n')).toBe(true);
     expect(parsed.searchParams.get('environment')).toContain('route: /sessions/test-123');
-    expect(parsed.searchParams.get('body')).toContain('### What happened?\n\n<!-- Describe it here. -->');
+    expect(parsed.searchParams.get('body')).toContain('# Bug Report\n\n## Problem Statement\n\n<!-- paste image -->');
+    expect(parsed.searchParams.get('body')).toContain('## User Requirements and Expectations');
+    expect(parsed.searchParams.get('body')).toContain('## System Information');
     expect(parsed.searchParams.get('body')).toContain('peasant version: 0.12.3');
 
     // Still transitions to Submitted even when window.open returns null (popup blocked).
@@ -279,6 +285,8 @@ describe('FeedbackWidget', () => {
     fireEvent.click(removeFirstBtn);
     const templatePreview = screen.getByLabelText('issue template preview');
     expect(templatePreview.textContent).not.toContain('button#first-btn');
+    expect(templatePreview.textContent).toContain('<!-- paste image 1 -->\n<!-- paste image 2 -->');
+    expect(templatePreview.textContent).toContain('<details><summary>picked elements</summary>');
     expect(templatePreview.textContent).toContain('element 1 (image 1): button#second-btn');
     expect(screen.getByRole('img', { name: /image 1: picked element capture/i })).toBeInTheDocument();
     expect(screen.getByRole('img', { name: /image 2: whole page capture/i })).toBeInTheDocument();

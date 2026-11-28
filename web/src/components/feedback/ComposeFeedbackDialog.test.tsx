@@ -307,7 +307,8 @@ function makeProps(overrides: Partial<ComposeFeedbackDialogProps> = {}): Compose
   return {
     open: true,
     state: makeState(),
-    issueBodyPreview: '### What happened?\n\n<!-- Describe it here. -->\n\n### App context\n\n```text\npeasant version: 0.9.4\n```',
+    issueBodyPreview:
+      '# Bug Report\n\n## Problem Statement\n\n<!-- paste image -->\n\n<!-- what happened -->\n\n## User Requirements and Expectations\n\n<!-- what was the expected behaviour, bullet points. -->\n\n<!-- optional: what would ensure user satisfaction -->\n\n## System Information\n\n```text\npeasant version: 0.9.4\n```',
     issuePreviewUrl: 'https://github.com/peasant-labs/peasant/issues/new?template=in-app-problem.yml',
     truncated: false,
     onChangeKind: vi.fn(),

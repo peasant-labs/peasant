@@ -1,12 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import YAML from 'yaml';
 import {
   ALL_FEEDBACK_KINDS,
   ALL_ISSUE_FORM_FIELD_IDS,
+  FeedbackKind,
   IssueFormFieldId,
   type FeedbackContextInfo,
-  type FeedbackKind,
   type IssueDraftInput,
   type PickedElementInfo,
 } from '@/lib/feedback/types';
@@ -29,11 +30,12 @@ import {
 const REQUIRED_CASES = [
   'problem-selects-problem-template',
   'feature-selects-feature-template',
-  'prefills-all-field-ids',
-  'omits-empty-element-field',
+  'body-bug-heading',
+  'body-feature-heading',
+  'body-image-placeholders-numbered',
+  'body-elements-collapsed',
+  'prefill-problem-matches-body-section',
   'never-emits-labels',
-  'body-has-empty-description-prompt',
-  'body-starts-context-with-version',
   'drops-trailing-elements-when-elements-exceed-cap',
   'shortens-element-snippet-when-single-element-exceeds-cap',
 ] as const;
@@ -93,12 +95,14 @@ interface ParsedUrlCase {
     readonly template: string;
     readonly truncated: boolean;
     readonly params?: Record<string, string>;
-    readonly absentParams?: readonly string[];
     readonly forbiddenParams?: readonly string[];
     readonly maxUrlLength?: number;
-    readonly elementContains?: readonly string[];
-    readonly elementExcludes?: readonly string[];
+    readonly problemMatchesBodySection?: boolean;
+    readonly problemContains?: readonly string[];
+    readonly problemExcludes?: readonly string[];
+    readonly bodyStartsWith?: string;
     readonly bodyContains?: readonly string[];
+    readonly bodyExcludes?: readonly string[];
     readonly bodyOrder?: readonly string[];
     readonly environmentStartsWith?: string;
     readonly environmentContains?: readonly string[];
@@ -145,9 +149,12 @@ function loadFixture(): ParsedUrlCase[] {
     const rawInput = requireRecord(row.input, `${casePath}.input`);
     requireExactRequiredFields(
       rawInput,
-      ['kind', 'title', 'elements', 'context'],
+      ['kind', 'title', 'elements', 'imageCount', 'context'],
       `${casePath}.input`,
     );
+    if (typeof rawInput.imageCount !== 'number') {
+      throw new Error(`${casePath}.input.imageCount must be a number`);
+    }
 
     const rawExpect = requireRecord(row.expect, `${casePath}.expect`);
     requireExactFields(
@@ -156,12 +163,14 @@ function loadFixture(): ParsedUrlCase[] {
         'template',
         'truncated',
         'params',
-        'absentParams',
         'forbiddenParams',
         'maxUrlLength',
-        'elementContains',
-        'elementExcludes',
+        'problemMatchesBodySection',
+        'problemContains',
+        'problemExcludes',
+        'bodyStartsWith',
         'bodyContains',
+        'bodyExcludes',
         'bodyOrder',
         'environmentStartsWith',
         'environmentContains',
@@ -180,32 +189,35 @@ function loadFixture(): ParsedUrlCase[] {
         kind: findKindByWire(rawInput.kind, `${casePath}.input.kind`),
         title: String(rawInput.title ?? ''),
         elements: parseElements(rawInput.elements, `${casePath}.input.elements`),
+        imageCount: rawInput.imageCount,
         context: parseContext(rawInput.context, `${casePath}.input.context`),
       },
       expect: {
         template: rawExpect.template,
         truncated: rawExpect.truncated,
         params: rawExpect.params !== undefined ? parseStringRecord(rawExpect.params, `${casePath}.expect.params`) : undefined,
-        absentParams:
-          rawExpect.absentParams !== undefined
-            ? parseStringList(rawExpect.absentParams, `${casePath}.expect.absentParams`)
-            : undefined,
         forbiddenParams:
           rawExpect.forbiddenParams !== undefined
             ? parseStringList(rawExpect.forbiddenParams, `${casePath}.expect.forbiddenParams`)
             : undefined,
         maxUrlLength: typeof rawExpect.maxUrlLength === 'number' ? rawExpect.maxUrlLength : undefined,
-        elementContains:
-          rawExpect.elementContains !== undefined
-            ? parseStringList(rawExpect.elementContains, `${casePath}.expect.elementContains`)
+        problemMatchesBodySection: rawExpect.problemMatchesBodySection === true,
+        problemContains:
+          rawExpect.problemContains !== undefined
+            ? parseStringList(rawExpect.problemContains, `${casePath}.expect.problemContains`)
             : undefined,
-        elementExcludes:
-          rawExpect.elementExcludes !== undefined
-            ? parseStringList(rawExpect.elementExcludes, `${casePath}.expect.elementExcludes`)
+        problemExcludes:
+          rawExpect.problemExcludes !== undefined
+            ? parseStringList(rawExpect.problemExcludes, `${casePath}.expect.problemExcludes`)
             : undefined,
+        bodyStartsWith: typeof rawExpect.bodyStartsWith === 'string' ? rawExpect.bodyStartsWith : undefined,
         bodyContains:
           rawExpect.bodyContains !== undefined
             ? parseStringList(rawExpect.bodyContains, `${casePath}.expect.bodyContains`)
+            : undefined,
+        bodyExcludes:
+          rawExpect.bodyExcludes !== undefined
+            ? parseStringList(rawExpect.bodyExcludes, `${casePath}.expect.bodyExcludes`)
             : undefined,
         bodyOrder:
           rawExpect.bodyOrder !== undefined
@@ -226,6 +238,17 @@ function loadFixture(): ParsedUrlCase[] {
   });
 }
 
+function extractProblemSectionFromBody(body: string): string {
+  const startMarker = `## ${IssueFormFieldId.Problem.label}\n\n`;
+  const endMarker = `\n\n## ${IssueFormFieldId.Expectations.label}`;
+  const startIdx = body.indexOf(startMarker);
+  const endIdx = body.indexOf(endMarker);
+  if (startIdx === -1 || endIdx === -1 || endIdx <= startIdx) {
+    throw new Error('Body missing Problem Statement or Expectations section markers');
+  }
+  return body.slice(startIdx + startMarker.length, endIdx);
+}
+
 const fixtureCases = loadFixture();
 
 describe('feedback issueUrl', () => {
@@ -244,39 +267,44 @@ describe('feedback issueUrl', () => {
         expect(parsed.searchParams.get(key)).toBe(value);
       }
     }
-    if (testCase.expect.absentParams) {
-      for (const key of testCase.expect.absentParams) {
-        expect(parsed.searchParams.has(key)).toBe(false);
-      }
-    }
     if (testCase.expect.forbiddenParams) {
       for (const key of testCase.expect.forbiddenParams) {
         expect(parsed.searchParams.has(key)).toBe(false);
       }
     }
-    if (testCase.expect.elementContains) {
-      const elem = parsed.searchParams.get(IssueFormFieldId.Element.wire) ?? '';
-      for (const fragment of testCase.expect.elementContains) {
-        expect(elem).toContain(fragment);
+    if (testCase.expect.problemMatchesBodySection) {
+      const problemParam = parsed.searchParams.get(IssueFormFieldId.Problem.wire) ?? '';
+      expect(problemParam).toBe(extractProblemSectionFromBody(result.body));
+    }
+    if (testCase.expect.problemContains) {
+      const problemParam = parsed.searchParams.get(IssueFormFieldId.Problem.wire) ?? '';
+      for (const fragment of testCase.expect.problemContains) {
+        expect(problemParam).toContain(fragment);
       }
     }
-    if (testCase.expect.elementExcludes) {
-      const elem = parsed.searchParams.get(IssueFormFieldId.Element.wire) ?? '';
-      for (const fragment of testCase.expect.elementExcludes) {
-        expect(elem).not.toContain(fragment);
+    if (testCase.expect.problemExcludes) {
+      const problemParam = parsed.searchParams.get(IssueFormFieldId.Problem.wire) ?? '';
+      for (const fragment of testCase.expect.problemExcludes) {
+        expect(problemParam).not.toContain(fragment);
       }
+    }
+    if (testCase.expect.bodyStartsWith) {
+      expect(result.body.startsWith(testCase.expect.bodyStartsWith)).toBe(true);
     }
     if (testCase.expect.bodyContains) {
-      const body = parsed.searchParams.get('body') ?? '';
       for (const fragment of testCase.expect.bodyContains) {
-        expect(body).toContain(fragment);
+        expect(result.body).toContain(fragment);
+      }
+    }
+    if (testCase.expect.bodyExcludes) {
+      for (const fragment of testCase.expect.bodyExcludes) {
+        expect(result.body).not.toContain(fragment);
       }
     }
     if (testCase.expect.bodyOrder) {
-      const body = parsed.searchParams.get('body') ?? '';
       let lastIndex = -1;
       for (const heading of testCase.expect.bodyOrder) {
-        const idx = body.indexOf(heading);
+        const idx = result.body.indexOf(heading);
         expect(idx).toBeGreaterThan(lastIndex);
         lastIndex = idx;
       }
@@ -298,9 +326,11 @@ describe('feedback issueUrl', () => {
       }
     }
 
-    // Never prefill screenshot or description.
-    expect(parsed.searchParams.has(IssueFormFieldId.Screenshot.wire)).toBe(false);
-    expect(parsed.searchParams.has(IssueFormFieldId.Description.wire)).toBe(false);
+    // Never prefill expectations, element, description, or screenshot.
+    expect(parsed.searchParams.has(IssueFormFieldId.Expectations.wire)).toBe(false);
+    expect(parsed.searchParams.has('element')).toBe(false);
+    expect(parsed.searchParams.has('description')).toBe(false);
+    expect(parsed.searchParams.has('screenshot')).toBe(false);
   });
 
   it('formatElementBlock returns empty string for null and templateForKind matches kind.template', () => {
@@ -331,6 +361,7 @@ describe('feedback issueUrl', () => {
         textSnippet: '😀'.repeat(600),
         box: { top: idx * 40, left: 20, width: 300, height: 40 },
       })),
+      imageCount: 5,
       context: {
         route: '/',
         viewport: { width: 1440, height: 900 },
@@ -346,48 +377,85 @@ describe('feedback issueUrl', () => {
     expect(first.url.length).toBeLessThanOrEqual(MAX_ISSUE_URL_LENGTH);
   });
 
-  it('validates GitHub issue-form YAML templates against schema rules and IssueFormFieldId', () => {
-    const expectedFieldIds = new Set(ALL_ISSUE_FORM_FIELD_IDS.map((field) => field.wire));
-    const expectedLabelsByKind = new Map<string, readonly string[]>([
-      ['in-app-problem.yml', ['bug', 'ui/ux']],
-      ['in-app-feature.yml', ['enhancement', 'ui/ux']],
+  it('form-ids-and-labels-match', () => {
+    const expectedIds = ALL_ISSUE_FORM_FIELD_IDS.map((field) => field.wire);
+    const expectedLabels = ALL_ISSUE_FORM_FIELD_IDS.map((field) => field.label);
+    const expectedMeta = new Map<
+      FeedbackKind,
+      { readonly name: string; readonly type: string; readonly labels: readonly string[]; readonly problemPrompt: string; readonly expectationsPrompt: string }
+    >([
+      [
+        FeedbackKind.Problem,
+        {
+          name: 'Bug report (in-app)',
+          type: 'Bug',
+          labels: ['bug', 'ui/ux'],
+          problemPrompt: '<!-- what happened -->',
+          expectationsPrompt: '<!-- what was the expected behaviour, bullet points. -->',
+        },
+      ],
+      [
+        FeedbackKind.Feature,
+        {
+          name: 'Feature request (in-app)',
+          type: 'Feature',
+          labels: ['enhancement', 'ui/ux'],
+          problemPrompt: '<!-- what is the problem or need? -->',
+          expectationsPrompt: '<!-- what should peasant do instead? bullet points. -->',
+        },
+      ],
     ]);
 
     for (const kind of ALL_FEEDBACK_KINDS) {
       const templatePath = resolve(process.cwd(), '../.github/ISSUE_TEMPLATE', kind.template);
-      const doc = requireRecord(
-        parseStrictYAML(readFileSync(templatePath, 'utf8'), kind.template),
-        kind.template,
-      );
-      expect(typeof doc.name).toBe('string');
-      expect((doc.name as string).length).toBeGreaterThan(0);
+      const doc = requireRecord(YAML.parse(readFileSync(templatePath, 'utf8')), kind.template);
+      const expected = expectedMeta.get(kind)!;
+
+      expect(doc.name).toBe(expected.name);
+      expect(doc.type).toBe(expected.type);
+      expect(doc.labels).toEqual(expected.labels);
       expect(typeof doc.description).toBe('string');
       expect((doc.description as string).length).toBeGreaterThan(0);
-      expect(doc.labels).toEqual(expectedLabelsByKind.get(kind.template));
       expect(Array.isArray(doc.body)).toBe(true);
 
-      const seenIds = new Set<string>();
-      for (const [idx, rawBlock] of (doc.body as unknown[]).entries()) {
-        const block = requireRecord(rawBlock, `${kind.template}.body[${idx}]`);
-        expect(typeof block.type).toBe('string');
-        if (block.type === 'markdown') {
-          expect('id' in block).toBe(false);
-          const attrs = requireRecord(block.attributes, `${kind.template}.body[${idx}].attributes`);
-          expect(typeof attrs.value).toBe('string');
-        } else {
-          expect(block.type).toBe('textarea');
-          expect(typeof block.id).toBe('string');
-          const id = block.id as string;
-          expect(seenIds.has(id)).toBe(false);
-          seenIds.add(id);
-          const attrs = requireRecord(block.attributes, `${kind.template}.body[${idx}].attributes`);
-          expect(typeof attrs.label).toBe('string');
-          if (id === IssueFormFieldId.Environment.wire) {
-            expect(String(attrs.description)).toContain('peasant version');
-          }
+      const blocks = doc.body as unknown[];
+      const warningBlock = requireRecord(blocks[0], `${kind.template}.body[0]`);
+      expect(warningBlock.type).toBe('markdown');
+      expect('id' in warningBlock).toBe(false);
+
+      const textareaBlocks = blocks.slice(1);
+      const actualIds: string[] = [];
+      const actualLabels: string[] = [];
+
+      for (const [idx, rawBlock] of textareaBlocks.entries()) {
+        const block = requireRecord(rawBlock, `${kind.template}.body[${idx + 1}]`);
+        expect(block.type).toBe('textarea');
+        expect(typeof block.id).toBe('string');
+        actualIds.push(block.id as string);
+
+        const attrs = requireRecord(block.attributes, `${kind.template}.body[${idx + 1}].attributes`);
+        expect(typeof attrs.label).toBe('string');
+        actualLabels.push(attrs.label as string);
+        expect('render' in attrs).toBe(false);
+        expect(typeof attrs.value).toBe('string');
+
+        const validations = requireRecord(block.validations, `${kind.template}.body[${idx + 1}].validations`);
+        expect(validations.required).toBe(true);
+
+        if (block.id === IssueFormFieldId.Problem.wire) {
+          expect(attrs.value).toContain('<!-- paste image -->');
+          expect(attrs.value).toContain(expected.problemPrompt);
+        } else if (block.id === IssueFormFieldId.Expectations.wire) {
+          expect(attrs.value).toContain(expected.expectationsPrompt);
+          expect(attrs.value).toContain('<!-- optional: what would ensure user satisfaction -->');
+        } else if (block.id === IssueFormFieldId.Environment.wire) {
+          expect(attrs.value).toContain('<!-- user system -->');
+          expect(String(attrs.description)).toContain('peasant version');
         }
       }
-      expect(seenIds).toEqual(expectedFieldIds);
+
+      expect(actualIds).toEqual(expectedIds);
+      expect(actualLabels).toEqual(expectedLabels);
     }
   });
 });
