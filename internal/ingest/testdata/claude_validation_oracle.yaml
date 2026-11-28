@@ -99,6 +99,9 @@ cases:
   - name: owner-source-removed
     change: none
     removeBeforeValidation: [-workspace/22222222-2222-4222-8222-222222222222.jsonl]
+    # Removed at this session's own proof, so its capture always precedes the
+    # removal and its metadata half always runs.
+    removeAtProofOf: 99d59925-36bc-424c-a789-8be54d9702ba
     expect:
       99d59925-36bc-424c-a789-8be54d9702ba: {validator: unsupported, parse: refuse}
 

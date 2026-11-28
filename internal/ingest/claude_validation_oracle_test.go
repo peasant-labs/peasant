@@ -73,13 +73,18 @@ type oracleSessionObservation struct {
 }
 
 type oracleCase struct {
-	Name                   string                       `yaml:"name"`
-	Change                 oracleChange                 `yaml:"change"`
-	Sessions               []string                     `yaml:"sessions"`
-	SeedWithout            []string                     `yaml:"seedWithout"`
-	CreateBeforeRefresh    []string                     `yaml:"createBeforeRefresh"`
-	RemoveBeforeValidation []string                     `yaml:"removeBeforeValidation"`
-	Expect                 map[string]oracleExpectation `yaml:"expect"`
+	Name                   string       `yaml:"name"`
+	Change                 oracleChange `yaml:"change"`
+	Sessions               []string     `yaml:"sessions"`
+	SeedWithout            []string     `yaml:"seedWithout"`
+	CreateBeforeRefresh    []string     `yaml:"createBeforeRefresh"`
+	RemoveBeforeValidation []string     `yaml:"removeBeforeValidation"`
+	// RemoveAtProofOf, when set, removes RemoveBeforeValidation only at that
+	// session's own proof: after its capture and before its validation. Unset,
+	// the first proof or build of any session removes them, so a session
+	// captured later may refuse before its validation runs.
+	RemoveAtProofOf string                       `yaml:"removeAtProofOf"`
+	Expect          map[string]oracleExpectation `yaml:"expect"`
 	// InstallFirst parses the change in before the oracle's refresh, so the
 	// oracle compares against a generation that already carries it.
 	InstallFirst bool `yaml:"installFirst"`
@@ -262,13 +267,15 @@ func (i seamClaudeIndexer) BuildGeneration(ctx context.Context, input ingest.Gen
 }
 
 // oracleProveSeam runs a seam before each cheap proof, after the capture.
+// When only is set, the seam runs only before that session's proof.
 type oracleProveSeam struct {
 	*halfValidatingStore
 	before func()
+	only   ingest.SessionID
 }
 
 func (s *oracleProveSeam) ProveCapturedGenerationUnchanged(ctx context.Context, request ingest.ManagedGenerationUnchangedProof) (ingest.UnchangedProof, error) {
-	if s.before != nil {
+	if s.before != nil && (s.only == "" || s.only == request.SessionID) {
 		s.before()
 	}
 	return s.halfValidatingStore.ProveCapturedGenerationUnchanged(ctx, request)
@@ -511,7 +518,11 @@ func runOracleCase(t *testing.T, document oracleDocument, c oracleCase) oracleOb
 		return func() { once.Do(func() { removeOracleFiles(t, seed.source, c.RemoveBeforeValidation) }) }
 	}
 	removeV := remove(v)
-	runOraclePipeline(t, &oracleProveSeam{halfValidatingStore: validating, before: removeV}, refreshSource(v), v.output, false, removeV, halves)
+	buildV := removeV
+	if c.RemoveAtProofOf != "" {
+		buildV = nil
+	}
+	runOraclePipeline(t, &oracleProveSeam{halfValidatingStore: validating, before: removeV, only: ingest.SessionID(c.RemoveAtProofOf)}, refreshSource(v), v.output, false, buildV, halves)
 	validating.assertWiring(t)
 
 	p := seedOracleStore(t, document, c)
