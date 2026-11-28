@@ -124,6 +124,28 @@ cases:
       - kind: manifest-modified-match
         path: sqlite.go
     want: "SQLite native pointer expressions differ from audited upstream source"
+  - name: pointer-line-extra-in-modified-file
+    steps:
+      - kind: file-append
+        path: sqlite.go
+        text: "\nvar extraProbe = unsafe.Pointer(extraBase)\n"
+      - kind: manifest-modified-match
+        path: sqlite.go
+    want: "SQLite native pointer expressions differ from audited upstream source"
+  - name: patch-file-missing
+    steps:
+      - kind: file-remove
+        path: connection-lifetime.patch
+    match: contains
+    want: "read the SQLite documented patch at"
+    because: "the failure text embeds the case's temporary copy path and the operating-system error, so only the stable prefix is asserted"
+  - name: owned-go-file-unreadable
+    steps:
+      - kind: file-unreadable
+        path: connection_lifetime_test.go
+    match: contains
+    want: "list the SQLite fork at"
+    because: "the failure text embeds the case's temporary copy path and the operating-system error, so only the stable prefix is asserted"
   - name: repo-import-unaudited-driver
     steps:
       - kind: repo-import
