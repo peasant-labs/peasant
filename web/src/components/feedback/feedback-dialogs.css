@@ -88,7 +88,10 @@
 
 .fbw-capture-img {
   display: block;
-  width: 100%;
+  /* Never upscale a small capture: it would blur. Shrink large ones to fit. */
+  width: auto;
+  max-width: 100%;
+  margin-inline: auto;
   max-height: calc(var(--sp-8) * 4);
   object-fit: contain;
   background: var(--canvas);

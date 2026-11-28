@@ -141,8 +141,10 @@ describe('capture', () => {
     document.body.appendChild(target);
 
     const seenBackgrounds: Array<string | null | undefined> = [];
+    const seenDprs: Array<number | undefined> = [];
     const snapdomMock: SnapdomFn = vi.fn(async (_el, options) => {
       seenBackgrounds.push(options?.backgroundColor);
+      seenDprs.push(options?.dpr);
       return {
         meta: { w0: 120, h0: 48, targetW: 120, targetH: 48 },
         toBlob: async () => new Blob(['png'], { type: 'image/png' }),
@@ -180,6 +182,8 @@ describe('capture', () => {
     );
 
     expect(seenBackgrounds).toEqual(['rgb(15, 16, 18)', 'rgb(240, 240, 235)', '#141413', '#0b0b0a']);
+    // Element captures render at least 2x so small targets stay legible.
+    expect(seenDprs.every((dpr) => dpr !== undefined && dpr >= 2)).toBe(true);
     for (const bg of seenBackgrounds) {
       expect(bg).toBeTruthy();
       expect(bg).not.toBe('transparent');

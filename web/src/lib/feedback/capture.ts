@@ -13,6 +13,7 @@ const PNG_MIME = 'image/png';
 const DEFAULT_PNG_FILENAME = 'peasant-feedback.png';
 const OBJECT_URL_REVOKE_DELAY_MS = 1000;
 
+const MIN_ELEMENT_CAPTURE_DPR = 2;
 const DEFAULT_DARK_BACKGROUND = '#0b0b0a';
 const DEFAULT_LIGHT_BACKGROUND = '#fbfaf7';
 
@@ -183,12 +184,16 @@ export async function captureFeedbackArtifacts(
     const errors: string[] = [];
     const exclude = [...FEEDBACK_EXCLUDE_SELECTORS];
     const backgroundColor = resolveOpaqueBackgroundColor(doc, win);
+    // Picked elements are often a few dozen CSS pixels wide; render them at
+    // least 2x so text stays legible when the image is pasted into an issue.
+    const elementCaptureDpr = Math.max(MIN_ELEMENT_CAPTURE_DPR, win?.devicePixelRatio ?? 1);
     let nextId = request.nextCaptureId ?? 1;
 
     for (const target of request.elements) {
       try {
         const result = await snapdomFn(target.el, {
           backgroundColor,
+          dpr: elementCaptureDpr,
           exclude,
           excludeMode: 'remove',
           format: 'png',
