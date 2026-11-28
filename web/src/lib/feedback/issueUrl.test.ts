@@ -133,9 +133,20 @@ interface IssueFormExpectation {
   readonly labels: readonly string[];
   readonly problemPrompt: string;
   readonly expectationsPrompt: string;
+  readonly problemExample: string;
+  readonly expectationsExample: string;
 }
 
-const ISSUE_FORM_FIELDS = ['kind', 'name', 'type', 'labels', 'problemPrompt', 'expectationsPrompt'] as const;
+const ISSUE_FORM_FIELDS = [
+  'kind',
+  'name',
+  'type',
+  'labels',
+  'problemPrompt',
+  'expectationsPrompt',
+  'problemExample',
+  'expectationsExample',
+] as const;
 
 function requireString(value: unknown, path: string): string {
   if (typeof value !== 'string' || value.length === 0) throw new Error(`${path} must be a non-empty string`);
@@ -162,6 +173,9 @@ function loadIssueFormExpectations(): Map<FeedbackKind, IssueFormExpectation> {
       labels: row.labels.map((label, i) => requireString(label, `${rowPath}.labels[${i}]`)),
       problemPrompt: requireString(row.problemPrompt, `${rowPath}.problemPrompt`),
       expectationsPrompt: requireString(row.expectationsPrompt, `${rowPath}.expectationsPrompt`),
+      // YAML block scalars end with a newline; the forms and the app compare without it.
+      problemExample: requireString(row.problemExample, `${rowPath}.problemExample`).trimEnd(),
+      expectationsExample: requireString(row.expectationsExample, `${rowPath}.expectationsExample`).trimEnd(),
     });
   });
   const missing = ALL_FEEDBACK_KINDS.filter((kind) => !byKind.has(kind)).map((kind) => kind.wire);
@@ -462,15 +476,25 @@ describe('feedback issueUrl', () => {
 
         if (block.id === IssueFormFieldId.Problem.wire) {
           expect(attrs.value).toContain('<!-- paste image -->');
-          expect(attrs.value).toContain(expected.problemPrompt);
+          expect(attrs.value).toContain(`${expected.problemPrompt}\n${expected.problemExample}`);
         } else if (block.id === IssueFormFieldId.Expectations.wire) {
-          expect(attrs.value).toContain(expected.expectationsPrompt);
+          expect(attrs.value).toContain(`${expected.expectationsPrompt}\n${expected.expectationsExample}`);
           expect(attrs.value).toContain('<!-- optional: what would ensure user satisfaction -->');
         } else if (block.id === IssueFormFieldId.Environment.wire) {
           expect(attrs.value).toContain('<!-- user system -->');
           expect(String(attrs.description)).toContain('peasant version');
         }
       }
+
+      const appBody = buildGitHubIssueUrl({
+        kind,
+        title: '',
+        elements: [],
+        imageCount: 0,
+        context: { route: '/', viewport: { width: 1, height: 1 }, theme: 'dark', appVersion: 'v', userAgent: 'ua' },
+      }).body;
+      expect(appBody).toContain(`${expected.problemPrompt}\n${expected.problemExample}`);
+      expect(appBody).toContain(`${expected.expectationsPrompt}\n${expected.expectationsExample}`);
 
       expect(actualIds).toEqual(expectedIds);
       expect(actualLabels).toEqual(expectedLabels);

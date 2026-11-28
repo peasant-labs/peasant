@@ -116,7 +116,9 @@ describe('FeedbackWidget', () => {
     expect(parsed.searchParams.has('element')).toBe(false);
     expect(parsed.searchParams.has('screenshot')).toBe(false);
     expect(parsed.searchParams.get('title')).toBe('Sidebar button clipped');
-    expect(parsed.searchParams.get('problem')).toBe('<!-- paste image -->\n\n<!-- what happened -->');
+    expect(parsed.searchParams.get('problem')).toBe(
+      '<!-- paste image -->\n\n<!-- what happened -->\n' + '<!-- example:\n1. open a session from home.\n2. click "share".\n3. the dialog closes and the session is not shared. no error is shown.\n-->',
+    );
     expect(parsed.searchParams.get('environment')?.startsWith('peasant version: 0.12.3\n')).toBe(true);
     expect(parsed.searchParams.get('environment')).toContain('route: /sessions/test-123');
     expect(parsed.searchParams.get('body')).toContain('# Bug Report\n\n## Problem Statement\n\n<!-- paste image -->');

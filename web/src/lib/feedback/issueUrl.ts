@@ -30,6 +30,18 @@ const EXPECTATIONS_PROMPT_BY_KIND: Readonly<Record<FeedbackKind['wire'], string>
   [FeedbackKind.Feature.wire]: '<!-- what should peasant do instead? bullet points. -->',
 });
 
+// Each prompt is followed by a worked example, also as an HTML comment, so the
+// example guides the reporter on GitHub without showing in the posted issue.
+const PROBLEM_EXAMPLE_BY_KIND: Readonly<Record<FeedbackKind['wire'], string>> = Object.freeze({
+  [FeedbackKind.Problem.wire]: "<!-- example:\n1. open a session from home.\n2. click \"share\".\n3. the dialog closes and the session is not shared. no error is shown.\n-->",
+  [FeedbackKind.Feature.wire]: "<!-- example: in a long session, I lose my place every time I open a tool call. -->",
+});
+
+const EXPECTATIONS_EXAMPLE_BY_KIND: Readonly<Record<FeedbackKind['wire'], string>> = Object.freeze({
+  [FeedbackKind.Problem.wire]: "<!-- example:\n- the dialog stays open until sharing finishes.\n- if sharing fails, an error says why and how to fix it.\n-->",
+  [FeedbackKind.Feature.wire]: "<!-- example:\n- opening a tool call keeps my scroll position.\n- a \"back to where I was\" control returns me to the last turn I read.\n-->",
+});
+
 export interface IssueUrlResult {
   readonly url: string;
   readonly body: string;
@@ -106,12 +118,12 @@ function formatProblemSectionContent(
     parts.push(`<details><summary>picked elements</summary>\n\n${elementParts.join('\n\n')}\n\n</details>`);
   }
 
-  parts.push(PROBLEM_PROMPT_BY_KIND[kind.wire]);
+  parts.push(`${PROBLEM_PROMPT_BY_KIND[kind.wire]}\n${PROBLEM_EXAMPLE_BY_KIND[kind.wire]}`);
   return parts.join('\n\n');
 }
 
 function formatExpectationsSectionContent(kind: FeedbackKind): string {
-  return `${EXPECTATIONS_PROMPT_BY_KIND[kind.wire]}\n\n${SATISFACTION_COMMENT}`;
+  return `${EXPECTATIONS_PROMPT_BY_KIND[kind.wire]}\n${EXPECTATIONS_EXAMPLE_BY_KIND[kind.wire]}\n\n${SATISFACTION_COMMENT}`;
 }
 
 function formatIssueBody(

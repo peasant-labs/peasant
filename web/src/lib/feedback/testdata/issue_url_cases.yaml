@@ -72,7 +72,7 @@ cases:
       bodyStartsWith: "# Bug Report\n\n## Problem Statement\n\n"
       bodyContains:
         - "## Problem Statement\n\n<!-- paste image -->\n\n<!-- what happened -->"
-        - "## User Requirements and Expectations\n\n<!-- what was the expected behaviour, bullet points. -->\n\n<!-- optional: what would ensure user satisfaction -->"
+        - "## User Requirements and Expectations\n\n<!-- what was the expected behaviour, bullet points. -->\n<!-- example:\n- the dialog stays open until sharing finishes.\n- if sharing fails, an error says why and how to fix it.\n-->\n\n<!-- optional: what would ensure user satisfaction -->"
         - "## System Information\n\n```text\npeasant version: 0.14.0\n"
       bodyOrder:
         - "# Bug Report"
@@ -98,7 +98,7 @@ cases:
       bodyStartsWith: "# Feature Request\n\n## Problem Statement\n\n"
       bodyContains:
         - "## Problem Statement\n\n<!-- paste image -->\n\n<!-- what is the problem or need? -->"
-        - "## User Requirements and Expectations\n\n<!-- what should peasant do instead? bullet points. -->\n\n<!-- optional: what would ensure user satisfaction -->"
+        - "## User Requirements and Expectations\n\n<!-- what should peasant do instead? bullet points. -->\n<!-- example:\n- opening a tool call keeps my scroll position.\n- a \"back to where I was\" control returns me to the last turn I read.\n-->\n\n<!-- optional: what would ensure user satisfaction -->"
         - "## System Information\n\n```text\npeasant version: 0.14.0\n"
       bodyOrder:
         - "# Feature Request"
@@ -266,7 +266,7 @@ cases:
         title: "request a feature"
 
   - name: drops-trailing-elements-when-elements-exceed-cap
-    maxLength: 1850
+    maxLength: 2307
     input:
       kind: problem
       title: "Overflow"
@@ -299,7 +299,7 @@ cases:
     expect:
       template: "in-app-problem.yml"
       truncated: true
-      maxUrlLength: 1850
+      maxUrlLength: 2307
       problemMatchesBodySection: true
       problemContains:
         - "<!-- paste image 1 -->\n<!-- paste image 2 -->\n<!-- paste image 3 -->"
@@ -319,7 +319,7 @@ cases:
         - "browser: UA"
 
   - name: shortens-element-snippet-when-single-element-exceeds-cap
-    maxLength: 1400
+    maxLength: 1857
     input:
       kind: problem
       title: "Snippet trim"
@@ -340,7 +340,7 @@ cases:
     expect:
       template: "in-app-problem.yml"
       truncated: true
-      maxUrlLength: 1400
+      maxUrlLength: 1857
       problemMatchesBodySection: true
       problemContains:
         - "<!-- paste image 1 -->"
