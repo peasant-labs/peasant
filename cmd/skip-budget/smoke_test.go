@@ -316,8 +316,10 @@ func testRunSamples(t *testing.T, c smokeSampleCase) {
 // skipBreakdownOutcome is the one outcome every skip-arm session of an
 // equivalence case reaches.
 var skipBreakdownOutcome = map[upgrade.MeasurementCase]sessionOutcome{
-	upgrade.MeasurementCaseHashDrift:        outcomeValidated,
-	upgrade.MeasurementCaseContextReference: outcomeReferenced,
+	upgrade.MeasurementCaseHashDrift:                outcomeValidated,
+	upgrade.MeasurementCaseContextReference:         outcomeReferenced,
+	upgrade.MeasurementCaseOpenCodeHashDrift:        outcomeValidated,
+	upgrade.MeasurementCaseOpenCodeContextReference: outcomeReferenced,
 }
 
 // assertSkipBreakdown requires the skip arm's breakdown to name every session

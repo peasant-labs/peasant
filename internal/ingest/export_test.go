@@ -83,6 +83,18 @@ func SetClaudeMetadataHalfMutationForTest(t testing.TB, mutate func(GenerationBu
 	t.Cleanup(func() { claudeMetadataHalfMutationForTest = previous })
 }
 
+// SetOpenCodeMetadataHalfMutationForTest installs a mutation of the OpenCode
+// metadata half's output or incomplete-provenance refusal for the rest of the
+// test and removes it on cleanup. Only BuildGenerationMetadata applies it. A
+// test that sets it must not run in parallel with another test that builds a
+// metadata candidate.
+func SetOpenCodeMetadataHalfMutationForTest(t testing.TB, mutate func(GenerationBuildInput, *GenerationMetadataCandidate, *error)) {
+	t.Helper()
+	previous := openCodeMetadataHalfMutationForTest
+	openCodeMetadataHalfMutationForTest = mutate
+	t.Cleanup(func() { openCodeMetadataHalfMutationForTest = previous })
+}
+
 // WithParseInputContextFieldsForTest replaces the per-harness list of
 // captured metadata fields the parsed rows depend on.
 // This function is only available in test builds.

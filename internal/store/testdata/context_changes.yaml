@@ -14,9 +14,12 @@
 # Claude computes a metadata candidate: it copies project, git, host, cwd,
 # purpose, parent relationships and redaction context from the recorded
 # metadata and sets the root to nil, because the captured artifact carries no
-# native root evidence. Codex and OpenCode compute no metadata candidate yet,
-# so the validator answers unsupported and the refresh parses. Pi has no
-# managed generation and is not listed.
+# native root evidence. OpenCode computes a metadata candidate: it copies
+# project, git, host, cwd, purpose, parent relationships, rootSessionId and
+# redaction context from the recorded metadata and derives context_from from any
+# native fork. Codex computes no metadata candidate yet, so the validator answers
+# unsupported and the refresh parses. Pi has no managed generation and is not
+# listed.
 #
 # The routes are the expectation the reference install and the pipeline route
 # tests assert; a row whose observed route differs is a finding, not a fixture
@@ -40,64 +43,66 @@ changes:
     field: project.name
     before: reader-corpus
     after: reader-corpus-renamed
-    routes: {claude-code: reference, codex: parse:validate-unsupported, opencode: parse:validate-unsupported}
+    routes: {claude-code: reference, codex: parse:validate-unsupported, opencode: reference}
   - name: project-hash
     field: project.hash
     before: 1111111111111111111111111111111111111111111111111111111111111111
     after: 2222222222222222222222222222222222222222222222222222222222222222
-    routes: {claude-code: reference, codex: parse:validate-unsupported, opencode: parse:validate-unsupported}
+    routes: {claude-code: reference, codex: parse:validate-unsupported, opencode: reference}
   - name: git-branch
     field: git.branch
     before: main
     after: feature/synthetic
-    routes: {claude-code: reference, codex: parse:validate-unsupported, opencode: parse:validate-unsupported}
+    routes: {claude-code: reference, codex: parse:validate-unsupported, opencode: reference}
   - name: git-remote
     field: git.remote
     before: https://example.invalid/synthetic/before.git
     after: https://example.invalid/synthetic/after.git
-    routes: {claude-code: reference, codex: parse:validate-unsupported, opencode: parse:validate-unsupported}
+    routes: {claude-code: reference, codex: parse:validate-unsupported, opencode: reference}
   - name: git-worktree
     field: git.worktree
     before: /synthetic/worktrees/before
     after: /synthetic/worktrees/after
-    routes: {claude-code: reference, codex: parse:validate-unsupported, opencode: parse:validate-unsupported}
+    routes: {claude-code: reference, codex: parse:validate-unsupported, opencode: reference}
   - name: host-slug
     field: hostSlug
     before: reader-host
     after: reader-host-moved
-    routes: {claude-code: reference, codex: parse:validate-unsupported, opencode: parse:validate-unsupported}
+    routes: {claude-code: reference, codex: parse:validate-unsupported, opencode: reference}
   - name: cwd
     field: cwd
     before: /synthetic/reader-corpus
     after: /synthetic/reader-corpus-moved
-    routes: {claude-code: reference, codex: parse:validate-unsupported, opencode: parse:validate-unsupported}
+    routes: {claude-code: reference, codex: parse:validate-unsupported, opencode: reference}
   - name: purpose
     field: purpose
     before: ""
     after: delegated_work
-    routes: {claude-code: reference, codex: parse:validate-unsupported, opencode: parse:validate-unsupported}
+    routes: {claude-code: reference, codex: parse:validate-unsupported, opencode: reference}
   # Claude sets the root to nil from the transcript, so a recorded root change
   # leaves the candidate context equal to the stored one.
+  # OpenCode preserves RecordedMetadata.RootSessionID, so at the store/validator
+  # level a recorded root change routes to reference.
   - name: root-session
     field: rootSessionId
     before: ""
     after: abc00000-0000-4000-8000-0000000000aa
-    routes: {claude-code: settle, codex: parse:validate-unsupported, opencode: parse:validate-unsupported}
+    routes: {claude-code: settle, codex: parse:validate-unsupported, opencode: reference}
   # A recorded started_by relationship naming a parent session.
   - name: parent-session
     field: relationships
     before: ""
     after: started_by:abc00000-0000-4000-8000-0000000000ab
-    routes: {claude-code: reference, codex: parse:validate-unsupported, opencode: parse:validate-unsupported}
+    routes: {claude-code: reference, codex: parse:validate-unsupported, opencode: reference}
   - name: redaction-level
     field: redaction.level
     before: standard
     after: minimal
-    routes: {claude-code: reference, codex: parse:validate-unsupported, opencode: parse:validate-unsupported}
+    routes: {claude-code: reference, codex: parse:validate-unsupported, opencode: reference}
   # parentUuid is part of the recorded metadata but no generation column or
   # child table holds it, so the stored context cannot differ.
   - name: inventory-field-not-persisted
     field: parentUuid
     before: ""
     after: abc00000-0000-4000-8000-0000000000ac
-    routes: {claude-code: settle, codex: parse:validate-unsupported, opencode: parse:validate-unsupported}
+    routes: {claude-code: settle, codex: parse:validate-unsupported, opencode: settle}

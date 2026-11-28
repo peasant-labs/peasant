@@ -1,0 +1,80 @@
+decideRefreshCases:
+  - name: can-extract-declared-stamped
+    adapterCanExtract: true
+    adapterUndeclared: false
+    adapterStampPresent: true
+    wantReason: adapter_behind
+    wantLane: stored-metadata
+    wantAdapterUndeclared: false
+  - name: can-extract-declared-unstamped
+    adapterCanExtract: true
+    adapterUndeclared: false
+    adapterStampPresent: false
+    wantReason: adapter_stamp_absent
+    wantLane: stored-metadata
+    wantAdapterUndeclared: false
+  - name: can-extract-undeclared-stamped
+    adapterCanExtract: true
+    adapterUndeclared: true
+    adapterStampPresent: true
+    wantReason: adapter_behind_native_only
+    wantLane: native
+    wantAdapterUndeclared: true
+  - name: can-extract-undeclared-unstamped
+    adapterCanExtract: true
+    adapterUndeclared: true
+    adapterStampPresent: false
+    wantReason: adapter_behind_native_only
+    wantLane: native
+    wantAdapterUndeclared: true
+  - name: native-only-declared-stamped
+    adapterCanExtract: false
+    adapterUndeclared: false
+    adapterStampPresent: true
+    wantReason: adapter_behind_native_only
+    wantLane: native
+    wantAdapterUndeclared: false
+  - name: native-only-declared-unstamped
+    adapterCanExtract: false
+    adapterUndeclared: false
+    adapterStampPresent: false
+    wantReason: adapter_behind_native_only
+    wantLane: native
+    wantAdapterUndeclared: false
+  - name: native-only-undeclared-stamped
+    adapterCanExtract: false
+    adapterUndeclared: true
+    adapterStampPresent: true
+    wantReason: adapter_behind_native_only
+    wantLane: native
+    wantAdapterUndeclared: true
+  - name: native-only-undeclared-unstamped
+    adapterCanExtract: false
+    adapterUndeclared: true
+    adapterStampPresent: false
+    wantReason: adapter_behind_native_only
+    wantLane: native
+    wantAdapterUndeclared: true
+
+laneProfiles:
+  - name: stored-extraction-with-metadata-half
+    adapterCanExtract: true
+    indexerHasMetadataHalf: true
+    acceptedReasons:
+      - adapter_behind
+      - adapter_stamp_absent
+  - name: stored-extraction-without-metadata-half
+    adapterCanExtract: true
+    indexerHasMetadataHalf: false
+    acceptedReasons:
+      - adapter_behind
+      - adapter_stamp_absent
+  - name: native-only-with-metadata-half
+    adapterCanExtract: false
+    indexerHasMetadataHalf: true
+    acceptedReasons:
+      - adapter_behind_native_only
+  - name: native-only-without-metadata-half
+    adapterCanExtract: false
+    indexerHasMetadataHalf: false
+    acceptedReasons: []

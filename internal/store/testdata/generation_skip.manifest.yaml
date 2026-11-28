@@ -12,3 +12,7 @@ requiredNames:
   - file-backed-never-skips
   - stats-only-change-updates-in-place
   - metadata-hash-stats-excluded
+  - prior-evidence-identical-skips
+  - prior-evidence-changed-commits
+  - prior-evidence-absent-skips
+  - prior-evidence-absent-equals-empty

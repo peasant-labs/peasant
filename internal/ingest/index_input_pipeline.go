@@ -39,6 +39,7 @@ type CapturedIndexInput struct {
 	managedGenerationRefresh bool
 	transcript               []byte
 	tree                     *openCodeJSONInput
+	openCodeSnapshot         *memoizedOpenCodeSnapshotAccess
 }
 
 // Only OpenCode's native JSON layout needs a provider-specific capture method.

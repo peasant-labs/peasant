@@ -74,7 +74,7 @@ func (s *Store) ActivateGenerationBatch(ctx context.Context, activations []Gener
 			results[i].Err = activeErr
 			continue
 		}
-		unchanged := active.found && refreshEqualsActive(p, active.view)
+		unchanged := active.found && refreshEqualsActive(p, a.PriorEvidence, active.view)
 		if already != nil || repair || unchanged {
 			results[i].Outcome, results[i].Err = s.ActivateGeneration(ctx, a)
 			continue

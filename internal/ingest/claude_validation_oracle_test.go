@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -72,13 +73,18 @@ type oracleSessionObservation struct {
 }
 
 type oracleCase struct {
-	Name                   string                       `yaml:"name"`
-	Change                 oracleChange                 `yaml:"change"`
-	Sessions               []string                     `yaml:"sessions"`
-	SeedWithout            []string                     `yaml:"seedWithout"`
-	CreateBeforeRefresh    []string                     `yaml:"createBeforeRefresh"`
-	RemoveBeforeValidation []string                     `yaml:"removeBeforeValidation"`
-	Expect                 map[string]oracleExpectation `yaml:"expect"`
+	Name                   string       `yaml:"name"`
+	Change                 oracleChange `yaml:"change"`
+	Sessions               []string     `yaml:"sessions"`
+	SeedWithout            []string     `yaml:"seedWithout"`
+	CreateBeforeRefresh    []string     `yaml:"createBeforeRefresh"`
+	RemoveBeforeValidation []string     `yaml:"removeBeforeValidation"`
+	// RemoveAtProofOf, when set, removes RemoveBeforeValidation only at that
+	// session's own proof: after its capture and before its validation. Unset,
+	// the first proof or build of any session removes them, so a session
+	// captured later may refuse before its validation runs.
+	RemoveAtProofOf string                       `yaml:"removeAtProofOf"`
+	Expect          map[string]oracleExpectation `yaml:"expect"`
 	// InstallFirst parses the change in before the oracle's refresh, so the
 	// oracle compares against a generation that already carries it.
 	InstallFirst bool `yaml:"installFirst"`
@@ -111,6 +117,9 @@ type oracleDocument struct {
 type metadataInventoryRow struct {
 	Field    string `yaml:"field"`
 	Mutation string `yaml:"mutation"`
+	// OpenCodeMutation replaces Mutation in the OpenCode oracle when the
+	// shared value equals the OpenCode corpus value.
+	OpenCodeMutation string `yaml:"opencode_mutation"`
 }
 
 func loadOracleDocument(t *testing.T) oracleDocument {
@@ -212,18 +221,27 @@ func metadataLeaf(metadata *schema.UnifiedMetadata, path string) (reflect.Value,
 // nothing.
 func applyInventoryMutation(t *testing.T, row metadataInventoryRow, sid string, metadata *schema.UnifiedMetadata) {
 	t.Helper()
+	if err := setInventoryMutation(row, sid, metadata); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// setInventoryMutation is applyInventoryMutation without the test failure, for
+// callers that run on a pipeline goroutine where t.Fatal must not be called.
+func setInventoryMutation(row metadataInventoryRow, sid string, metadata *schema.UnifiedMetadata) error {
 	leaf, err := metadataLeaf(metadata, row.Field)
 	if err != nil {
-		t.Fatal(err)
+		return err
 	}
 	mutated := reflect.New(leaf.Type())
 	if err := json.Unmarshal([]byte(row.Mutation), mutated.Interface()); err != nil {
-		t.Fatalf("inventory row %s: decode the mutation %s: %v", row.Field, row.Mutation, err)
+		return fmt.Errorf("inventory row %s: decode the mutation %s: %w", row.Field, row.Mutation, err)
 	}
 	if reflect.DeepEqual(leaf.Interface(), mutated.Elem().Interface()) {
-		t.Fatalf("inventory row %s: the mutation equals the corpus value of session %s", row.Field, sid)
+		return fmt.Errorf("inventory row %s: the mutation equals the corpus value of session %s", row.Field, sid)
 	}
 	leaf.Set(mutated.Elem())
+	return nil
 }
 
 // seamClaudeIndexer runs a seam before each managed build, the point in a
@@ -249,13 +267,15 @@ func (i seamClaudeIndexer) BuildGeneration(ctx context.Context, input ingest.Gen
 }
 
 // oracleProveSeam runs a seam before each cheap proof, after the capture.
+// When only is set, the seam runs only before that session's proof.
 type oracleProveSeam struct {
 	*halfValidatingStore
 	before func()
+	only   ingest.SessionID
 }
 
 func (s *oracleProveSeam) ProveCapturedGenerationUnchanged(ctx context.Context, request ingest.ManagedGenerationUnchangedProof) (ingest.UnchangedProof, error) {
-	if s.before != nil {
+	if s.before != nil && (s.only == "" || s.only == request.SessionID) {
 		s.before()
 	}
 	return s.halfValidatingStore.ProveCapturedGenerationUnchanged(ctx, request)
@@ -498,7 +518,11 @@ func runOracleCase(t *testing.T, document oracleDocument, c oracleCase) oracleOb
 		return func() { once.Do(func() { removeOracleFiles(t, seed.source, c.RemoveBeforeValidation) }) }
 	}
 	removeV := remove(v)
-	runOraclePipeline(t, &oracleProveSeam{halfValidatingStore: validating, before: removeV}, refreshSource(v), v.output, false, removeV, halves)
+	buildV := removeV
+	if c.RemoveAtProofOf != "" {
+		buildV = nil
+	}
+	runOraclePipeline(t, &oracleProveSeam{halfValidatingStore: validating, before: removeV, only: ingest.SessionID(c.RemoveAtProofOf)}, refreshSource(v), v.output, false, buildV, halves)
 	validating.assertWiring(t)
 
 	p := seedOracleStore(t, document, c)

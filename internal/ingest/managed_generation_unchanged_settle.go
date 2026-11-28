@@ -121,13 +121,55 @@ type ManagedGenerationUnchangedSettleOutcome struct {
 	GenerationID string
 }
 
-// managedGenerationRefreshLane reports whether a stored-metadata result is a
-// candidate for the unchanged proof and settle. It is the adapter-behind /
-// adapter-stamp-absent lane ONLY: an indexer bump reads the stored transcript
-// and belongs to the stored-index lane, and --force or --reindex are deliberate
-// full rebuilds. A native-only adapter never reaches the stored-metadata lane
-// because decideRefresh routes it native, and a strict format-1 target has no
-// managed generation to settle. A measurement baseline
+// indexerSupportsMetadataHalf reports whether the harness's registered
+// indexer implements GenerationMetadataBuilder.
+func (p *Pipeline) indexerSupportsMetadataHalf(harness Harness) bool {
+	if p.indexers == nil {
+		return false
+	}
+	_, ok := p.indexers[harness].(GenerationMetadataBuilder)
+	return ok
+}
+
+// supportsManagedGenerationRefresh reports whether an adapter-behind
+// session for harness may enter the managed-generation proof/validation/
+// reference path.
+func (p *Pipeline) supportsManagedGenerationRefresh(harness Harness) bool {
+	return p.adapterDeclaresChangeScope(harness) &&
+		(p.adapterSupportsStoredExtraction(harness) || p.indexerSupportsMetadataHalf(harness))
+}
+
+// isManagedGenerationAdapterRefresh is the one structural predicate shared by
+// managedGenerationRefreshLane and processNativeSessionWithMeta's timestamp
+// preservation. It is deliberately independent of DisableRefreshSkips so
+// skip and baseline arms produce byte-identical timestamps.
+func (p *Pipeline) isManagedGenerationAdapterRefresh(session DiscoveredSession, decision RefreshDecision) bool {
+	if p.config.Force || p.config.Reindex {
+		return false
+	}
+	if !generationTargetApplicable(session) || p.sessionVersionTarget(session).IndexVersion == strictIndexFormat {
+		return false
+	}
+	if decision.AdapterUndeclared || !p.adapterDeclaresChangeScope(session.Harness) {
+		return false
+	}
+	switch decision.Reason {
+	case RefreshReasonAdapterBehind, RefreshReasonAdapterStampAbsent:
+		return p.adapterSupportsStoredExtraction(session.Harness)
+	case RefreshReasonAdapterBehindNativeOnly:
+		return !p.adapterSupportsStoredExtraction(session.Harness) && p.indexerSupportsMetadataHalf(session.Harness)
+	default:
+		return false
+	}
+}
+
+// managedGenerationRefreshLane reports whether a refresh decision is a
+// candidate for the unchanged proof and settle. It covers stored-metadata
+// refreshes (adapter-behind / adapter-stamp-absent) and native-only adapter
+// refreshes when the indexer implements GenerationMetadataBuilder. An indexer
+// bump reads the stored transcript and belongs to the stored-index lane,
+// --force or --reindex are deliberate full rebuilds, and a strict format-1
+// target has no managed generation to settle. A measurement baseline
 // (PipelineConfig.DisableRefreshSkips) declines the candidate, so the unchanged
 // proof and its settle stay unused.
 //
@@ -135,14 +177,11 @@ type ManagedGenerationUnchangedSettleOutcome struct {
 // the captured proof and the store is the final authority; a failed proof or a
 // refused settle sends the session to the ordinary parse path.
 func (p *Pipeline) managedGenerationRefreshLane(session DiscoveredSession, decision RefreshDecision) bool {
-	if decision.Reason != RefreshReasonAdapterBehind && decision.Reason != RefreshReasonAdapterStampAbsent {
-		return false
-	}
-	if p.config.Force || p.config.Reindex || p.config.DisableRefreshSkips {
+	if p.config.DisableRefreshSkips {
 		return false
 	}
 	if _, ok := p.metricsStore.(ManagedGenerationUnchangedProver); !ok {
 		return false
 	}
-	return p.sessionVersionTarget(session).IndexVersion != strictIndexFormat
+	return p.isManagedGenerationAdapterRefresh(session, decision)
 }

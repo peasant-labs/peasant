@@ -45,7 +45,11 @@ func PlannedSkipPaths() ([]SkipPath, error) {
 	var paths []SkipPath
 	for _, lane := range ingest.AllRefreshLanes {
 		switch lane {
-		case ingest.RefreshLaneNone, ingest.RefreshLaneNative:
+		case ingest.RefreshLaneNone:
+		case ingest.RefreshLaneNative:
+			// A native source always validates first: the stored digest cannot
+			// see the live database, so there is no proven settle on this lane.
+			paths = append(paths, SkipPath{lane, SkipValidated}, SkipPath{lane, SkipReferenced})
 		case ingest.RefreshLaneStoredMetadata:
 			paths = append(paths, SkipPath{lane, SkipProven}, SkipPath{lane, SkipValidated}, SkipPath{lane, SkipReferenced})
 		case ingest.RefreshLaneStoredIndex:
@@ -90,6 +94,16 @@ const (
 	// a new generation that reads the stored parse) runs against the
 	// baseline parse.
 	MeasurementCaseContextReference MeasurementCase = "C8"
+	// MeasurementCaseOpenCodeHashDrift is an OpenCode adapter bump over
+	// current-layout generations whose stored metadata hash is stale: the
+	// cheap proof is downgraded for mandatory validation, and the validated
+	// settle runs against the baseline parse.
+	MeasurementCaseOpenCodeHashDrift MeasurementCase = "C9"
+	// MeasurementCaseOpenCodeContextReference is an OpenCode adapter bump
+	// with a project.name-only mutation in the native SQLite database (with
+	// worktree, git remote, and HostSlug fixed): the validator fails on the
+	// context and the reference install runs against the baseline parse.
+	MeasurementCaseOpenCodeContextReference MeasurementCase = "C10"
 )
 
 // AllMeasurementCases lists every case in matrix order.
@@ -100,6 +114,8 @@ var AllMeasurementCases = []MeasurementCase{
 	MeasurementCaseUndeclaredProducer,
 	MeasurementCaseHashDrift,
 	MeasurementCaseContextReference,
+	MeasurementCaseOpenCodeHashDrift,
+	MeasurementCaseOpenCodeContextReference,
 }
 
 // NewMeasurementCase validates a raw case id at an input boundary.

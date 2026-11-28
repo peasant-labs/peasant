@@ -496,25 +496,28 @@ func claudeBuilderMetadataJSON(t *testing.T, idx *ingest.ClaudeIndexer, input in
 	return encoded
 }
 
-// TestCodexHasNoMetadataHalf pins that only Claude builds a metadata
-// candidate: the Codex indexer, with or without its graph, does not implement
-// the capability, so a Codex session has no candidate and parses.
+// TestCodexHasNoMetadataHalf pins that only Claude and OpenCode build a
+// metadata candidate: the Codex indexer, with or without its graph, does not
+// implement the capability, so a Codex session has no candidate and parses.
 func TestCodexHasNoMetadataHalf(t *testing.T) {
 	registry := ingest.NewIndexerRegistry(&ingest.OSFileSystem{}, ingest.IndexerRegistryOptions{})
 	if _, ok := registry[ingest.HarnessClaudeCode].(ingest.GenerationMetadataBuilder); !ok {
 		t.Fatal("the registered Claude indexer does not build a metadata candidate")
 	}
+	if _, ok := registry[ingest.HarnessOpenCode].(ingest.GenerationMetadataBuilder); !ok {
+		t.Fatal("the registered OpenCode indexer does not build a metadata candidate")
+	}
 	builders := 0
 	for harness, indexer := range registry {
 		if _, ok := indexer.(ingest.GenerationMetadataBuilder); ok {
 			builders++
-			if harness != ingest.HarnessClaudeCode {
-				t.Errorf("the %s indexer builds a metadata candidate; only Claude does", harness)
+			if harness != ingest.HarnessClaudeCode && harness != ingest.HarnessOpenCode {
+				t.Errorf("the %s indexer builds a metadata candidate; only Claude and OpenCode do", harness)
 			}
 		}
 	}
-	if builders != 1 {
-		t.Fatalf("%d registered indexers build a metadata candidate, want only Claude", builders)
+	if builders != 2 {
+		t.Fatalf("%d registered indexers build a metadata candidate, want Claude and OpenCode", builders)
 	}
 	for _, indexer := range []any{ingest.NewCodexIndexer(&ingest.OSFileSystem{}), ingest.NewCodexIndexer(&ingest.OSFileSystem{}, ingest.WithCodexHistoryCapture(true))} {
 		if _, ok := indexer.(ingest.GenerationMetadataBuilder); ok {

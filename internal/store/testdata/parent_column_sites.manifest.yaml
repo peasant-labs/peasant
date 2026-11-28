@@ -103,3 +103,4 @@ requiredForeign:
   - ingest-testfixture-session
   - ingest-testfixture-session-attribution
   - ingest-testfixture-session-extended
+  - skip-budget-opencode-corpus-schema

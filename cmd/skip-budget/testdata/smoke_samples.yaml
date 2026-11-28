@@ -39,6 +39,12 @@ requiredNames:
   - run-context-reference-arms
   - run-context-reference-refusing-store
   - run-context-reference-unequal-arms
+  - run-opencode-hash-drift-arms
+  - run-opencode-hash-drift-refusing-store
+  - run-opencode-hash-drift-unequal-arms
+  - run-opencode-context-reference-arms
+  - run-opencode-context-reference-refusing-store
+  - run-opencode-context-reference-unequal-arms
 cases:
   - name: smoke-shape
     sample: new-session-import
@@ -123,5 +129,37 @@ cases:
   - name: run-context-reference-unequal-arms
     sample: case-arm
     case: C8
+    child: run-unequal-arms
+    wantError: "arm equivalence: the skip and baseline arms left different state"
+  - name: run-opencode-hash-drift-arms
+    sample: case-arm
+    case: C9
+    child: run
+    rounds: 2
+    wantOrder: [skip, baseline, baseline, skip]
+  - name: run-opencode-hash-drift-refusing-store
+    sample: case-arm
+    case: C9
+    child: run-refusing-store
+    wantError: skip arm executed
+  - name: run-opencode-hash-drift-unequal-arms
+    sample: case-arm
+    case: C9
+    child: run-unequal-arms
+    wantError: "arm equivalence: the skip and baseline arms left different state"
+  - name: run-opencode-context-reference-arms
+    sample: case-arm
+    case: C10
+    child: run
+    rounds: 2
+    wantOrder: [skip, baseline, baseline, skip]
+  - name: run-opencode-context-reference-refusing-store
+    sample: case-arm
+    case: C10
+    child: run-refusing-store
+    wantError: skip arm executed
+  - name: run-opencode-context-reference-unequal-arms
+    sample: case-arm
+    case: C10
     child: run-unequal-arms
     wantError: "arm equivalence: the skip and baseline arms left different state"

@@ -85,12 +85,53 @@
 # Any other failed proof parses, so the stored-metadata lane has no further
 # skip to budget; the copy refresh that once filled that gap was measured
 # slower than the parse when metadata changed and removed.
+#
+# opencode-validated-settle (C9, OpenCode adapter bump over current-layout
+#   native sessions with a stale stored metadata hash; the cheap proof is
+#   downgraded because the stored digest cannot see the live native database,
+#   the mandatory validation proves the context, and the validated settle runs):
+#   (1360.467 + 3219.020) / 11147.165 = 0.411. All 1,200 session runs validated
+#   and settled; zero parses. Wall medians: 9551.316 ms against 17743.867 ms
+#   (ratio 0.538).
+#   Wall min–max: skip 9100.528–11857.219 ms; baseline 16220.093–19318.061 ms.
+#   INDEX min–max: skip 2722.907–4162.081 ms; baseline 10362.620–12413.416 ms.
+#   Skip proof min–max: 1125.023–1551.226 ms.
+#   The baseline parses with the refresh skips disabled and, with prior
+#   evidence compared exactly, installs no duplicate of the identical
+#   generation. As for C7, settle (skip INDEX) already holds the snapshot read,
+#   the metadata candidate and the validation; medianValidateMs (31800.173 ms;
+#   per session median 125.498 ms) is a sum across parallel workers and is not
+#   added again.
+#
+# opencode-reference-install (C10, OpenCode adapter bump with a project.name
+#   change in the native database, worktree, remote and host slug fixed; the
+#   validation fails on the context, and the reference plan and install run):
+#   (1092.476 + 4734.648) / 29657.453 = 0.196. All 1,200 session runs
+#   referenced; zero parses. Wall medians: 12651.353 ms against 37118.583 ms
+#   (ratio 0.341).
+#   Wall min–max: skip 11739.900–13855.263 ms; baseline 31185.030–39251.363 ms.
+#   INDEX min–max: skip 4230.596–5989.932 ms; baseline 22683.453–30487.493 ms.
+#   Skip proof min–max: 1054.828–1659.158 ms.
+#   medianValidateMs (31649.219 ms; per session median 110.834 ms) and
+#   medianReferenceMs (63515.039 ms; per session median 8.466 ms) are sums
+#   across parallel workers and are not added again.
+#
+# Both OpenCode rows: head a5a29b2f4 with that head as base, shape 240 x 1000
+#   (267,616,256 corpusBytes, 240,000 importedEntries, 240 activeGenerations),
+#   five rounds, one process per arm sample, dirtyWorktree false. The machine
+#   was not idle (other work on the host): load averages 14.63/22.72/27.17 at
+#   the C9 start, 9.93/16.75/23.92 between the cases, and 18.86/16.14/21.25 at
+#   the C10 end. The maintainer accepted a busy machine. An earlier run of both
+#   cases at 0f689aa7d, before develop was merged and under heavier load (about
+#   30), measured 0.496 and 0.207.
 measurementRequired: true
 requiredNames:
   - proven-settle
   - stored-index
   - validated-settle
   - reference-install
+  - opencode-validated-settle
+  - opencode-reference-install
 budgets:
   - name: proven-settle
     lane: stored-metadata
@@ -143,6 +184,32 @@ budgets:
       base: ea7c73a06
       command: 'nix develop --command env GOTOOLCHAIN=go1.26.0 go run -tags skipbudget ./cmd/skip-budget -case C8 -base ea7c73a06 -root /tmp/opencode/c8 -sessions 240 -entries 1000 -rounds 5'
       date: '2026-11-21T16:51:06Z'
+      samples: 5
+  - name: opencode-validated-settle
+    lane: native
+    disposition: validated
+    cases: [C9]
+    proof: 1360.467
+    settle: 3219.020
+    avoided: 11147.165
+    provenance:
+      head: a5a29b2f4eda6fc1e2b0bc5ea0d674853de36352
+      base: a5a29b2f4
+      command: 'nix develop --command env GOTOOLCHAIN=go1.26.0 go run -tags skipbudget ./cmd/skip-budget -case C9 -base a5a29b2f4 -root /tmp/opencode/c9c10-final/C9 -sessions 240 -entries 1000 -rounds 5'
+      date: '2026-11-28T13:18:51Z'
+      samples: 5
+  - name: opencode-reference-install
+    lane: native
+    disposition: referenced
+    cases: [C10]
+    proof: 1092.476
+    settle: 4734.648
+    avoided: 29657.453
+    provenance:
+      head: a5a29b2f4eda6fc1e2b0bc5ea0d674853de36352
+      base: a5a29b2f4
+      command: 'nix develop --command env GOTOOLCHAIN=go1.26.0 go run -tags skipbudget ./cmd/skip-budget -case C10 -base a5a29b2f4 -root /tmp/opencode/c9c10-final/C10 -sessions 240 -entries 1000 -rounds 5'
+      date: '2026-11-28T13:22:19Z'
       samples: 5
 dispositions: [proven, validated, referenced, index]
 unknownDispositions: [copied, ""]

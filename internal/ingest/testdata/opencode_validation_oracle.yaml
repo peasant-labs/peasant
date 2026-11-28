@@ -1,0 +1,58 @@
+# Named cases for TestOpenCodeValidatorAgreesWithTheParseSkip and
+# TestOpenCodeMetadataHalfMutationsFailTheOracle.
+#
+# Session IDs used by the golden OpenCode corpus:
+#   ordinary:       ses_3cd91f52effeXd3QAJ54jOyzn1
+#   fork-parent:    ses_3cd91f52effeXd3QAJ54jOrc01
+#   fork-child:     ses_3cd91f52effeXd3QAJ54jOrc02 (fork_session_id = fork-parent)
+#   subagent-fork:  ses_3cd91f52effeXd3QAJ54jOrc03 (parent_id + fork_session_id = fork-parent)
+cases:
+  - name: ordinary-unchanged
+    corpus: ordinary
+    expect:
+      ses_3cd91f52effeXd3QAJ54jOyzn1: {validator: proven, parse: skip}
+
+  - name: native-fork-present
+    corpus: fork
+    expect:
+      ses_3cd91f52effeXd3QAJ54jOrc01: {validator: proven, parse: skip}
+      ses_3cd91f52effeXd3QAJ54jOrc02: {validator: proven, parse: skip}
+
+  - name: subagent-plus-native-fork
+    corpus: subagent-fork
+    expect:
+      ses_3cd91f52effeXd3QAJ54jOrc01: {validator: proven, parse: skip}
+      ses_3cd91f52effeXd3QAJ54jOrc03: {validator: not-proven, mismatch: metadata-context, parse: install}
+
+  - name: fork-parent-deleted-retained-prefix
+    corpus: fork
+    deleteParentRowsBeforeRefresh: ses_3cd91f52effeXd3QAJ54jOrc01
+    expect:
+      # The parent lost its own rows: no full capture, so the refresh refuses
+      # and the last good generation stays active.
+      ses_3cd91f52effeXd3QAJ54jOrc01: {validator: not-asked, parse: refuse}
+      ses_3cd91f52effeXd3QAJ54jOrc02: {validator: proven, parse: skip}
+
+  - name: candidate-stats-differ-from-recorded
+    corpus: ordinary
+    change: record-stale-stats
+    expect:
+      ses_3cd91f52effeXd3QAJ54jOyzn1: {validator: proven, parse: skip}
+
+  - name: native-db-message-appended
+    corpus: ordinary
+    postExtractMutation: append-message
+    expect:
+      ses_3cd91f52effeXd3QAJ54jOyzn1: {validator: not-proven, mismatch: metadata-context, parse: install}
+
+  - name: native-db-removed-before-validation
+    corpus: ordinary
+    postExtractMutation: remove-db
+    expect:
+      ses_3cd91f52effeXd3QAJ54jOyzn1: {validator: unsupported, parse: refuse}
+
+  - name: incomplete-over-complete-refusal
+    corpus: ordinary
+    postExtractMutation: append-incomplete-message
+    expect:
+      ses_3cd91f52effeXd3QAJ54jOyzn1: {validator: unsupported, parse: refuse}

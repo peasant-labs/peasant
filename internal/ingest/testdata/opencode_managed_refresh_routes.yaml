@@ -1,0 +1,55 @@
+cases:
+  - name: stamp-only-validated-settles
+    given: current-layout OpenCode session with adapter stamp behind target and no source changes
+    then: cheap proof records Done=0, mandatory validator proves context, validated settle succeeds with 0 parses and session_detail byte parity
+  - name: stale-hash-validated-settles
+    given: current-layout OpenCode session with adapter stamp behind and forged stored metadata_hash
+    then: cheap proof records Done=0, mandatory validator proves context, validated settle succeeds with 0 parses and session_detail byte parity
+  - name: native-fork-validated-settles
+    given: current-layout OpenCode fork child with NativeFork pointer and adapter stamp behind
+    then: cheap proof records Done=0, mandatory validator derives context_from and proves context, validated settle succeeds with 0 parses and session_detail byte parity
+  - name: live-db-mutated-after-extract-parses
+    given: current-layout OpenCode session whose live SQLite DB receives a new message at the post-EXTRACT+WRITE / pre-validation seam
+    then: cheap proof records Done=0, mandatory validator catches SourceEvidenceDigest mismatch, reference refuses, and fallback parse installs with session_detail parity
+  - name: context-change-references
+    given: current-layout OpenCode session whose project.name changed in SQLite while worktree and remote stayed fixed
+    then: cheap proof records Done=0, mandatory validator returns not-proven on metadata-context, reference install succeeds with 0 parses and session_detail byte parity
+  - name: relocated-host-slug-parses
+    given: current-layout OpenCode session whose HostSlug changed via git remote/worktree
+    then: kept.transcript is false (!installedHere), refresh_proof Total=0, and full parse installs with session_detail parity
+  - name: redacted-unchanged-config-preserves-redacted-at-and-settles
+    given: current-layout OpenCode session redacted with a real redact.Engine and refreshed with identical redactor config
+    then: RedactedAtMs is preserved across unchanged-transcript refresh, validated settle succeeds with 0 parses and session_detail byte parity
+  - name: redacted-changed-config-updates-redacted-at-and-references
+    given: current-layout OpenCode session redacted with a real redact.Engine and refreshed with a changed RuleSetVersion
+    then: RedactedAtMs is updated, reference install succeeds with 0 parses and session_detail byte parity
+  - name: validator-error-parses
+    given: current-layout OpenCode session whose store returns an I/O error from ValidateManagedGenerationUnchanged
+    then: cheap proof records Done=0, refresh_validate_unsupported=1, fallback parse installs with session_detail parity
+  - name: native-source-changed-parses
+    given: current-layout OpenCode session with a new message added to live SQLite before EXTRACT+WRITE
+    then: kept.transcript is false, refresh_proof Total=0, and full parse installs with session_detail parity
+  - name: legacy-sqlite-stays-format-1
+    given: legacy OpenCode SQLite session refreshed under the registry versions after an adapter bump (the format-2 override fallback is covered by TestSessionVersionTargetFallsBackForInapplicableOriginUnderOverride)
+    then: generationTargetApplicable is false, refresh_proof Total=0, one format-1 parse, and the session stays on the format-1 native path
+  - name: json-tree-stays-format-1
+    given: OpenCode JSON-tree session refreshed under the registry versions after an adapter bump (the format-2 override fallback is covered by TestSessionVersionTargetFallsBackForInapplicableOriginUnderOverride)
+    then: generationTargetApplicable is false, refresh_proof Total=0, and session stays on format-1 native path
+  - name: control-only-current-falls-back-to-legacy-format-1
+    given: OpenCode control-only current SQLite copy whose legacy sibling wins canonical selection
+    then: generationTargetApplicable is false, refresh_proof Total=0, and session stays on format-1 native path
+  - name: undeclared-opencode-adapter-parses
+    given: current-layout OpenCode session with a ChangeScopeWithholder adapter
+    then: AdapterUndeclared is true, refresh_proof Total=0, and full parse installs with session_detail parity
+  - name: incomplete-over-complete-refuses-and-preserves-active
+    given: current-layout OpenCode session with an unfinished own row injected at the post-EXTRACT+WRITE / pre-validation seam
+    then: cheap proof records Done=0, half refuses OpenCodeIncompleteProvenanceError, refresh_validate_unsupported=1, fallback parse refuses, and active generation is unchanged
+  - name: disable-refresh-skips-parses
+    given: current-layout OpenCode session with DisableRefreshSkips enabled
+    then: refresh_proof Total=0 and full parse runs
+  - name: force-parses
+    given: current-layout OpenCode session with Force enabled
+    then: refresh_proof Total=0 and full parse runs
+  - name: reindex-parses
+    given: current-layout OpenCode session with Reindex enabled
+    then: refresh_proof Total=0 and full parse runs

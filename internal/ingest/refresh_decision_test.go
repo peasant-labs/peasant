@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -112,5 +113,75 @@ func TestRefreshReasonsUseTheOutcomeVocabulary(t *testing.T) {
 				t.Errorf("refresh outcome %q is absent from the fixture: %v", outcome.Code(), err)
 			}
 		}
+	}
+}
+
+//go:embed testdata/refresh_decision_adapter_matrix.yaml
+var refreshDecisionAdapterMatrixYAML []byte
+
+//go:embed testdata/refresh_decision_adapter_matrix.manifest.yaml
+var refreshDecisionAdapterMatrixManifestYAML []byte
+
+type refreshDecisionAdapterMatrixFixture struct {
+	DecideRefreshCases []struct {
+		Name                  string               `yaml:"name"`
+		AdapterCanExtract     bool                 `yaml:"adapterCanExtract"`
+		AdapterUndeclared     bool                 `yaml:"adapterUndeclared"`
+		AdapterStampPresent   bool                 `yaml:"adapterStampPresent"`
+		WantReason            ingest.RefreshReason `yaml:"wantReason"`
+		WantLane              ingest.RefreshLane   `yaml:"wantLane"`
+		WantAdapterUndeclared bool                 `yaml:"wantAdapterUndeclared"`
+	} `yaml:"decideRefreshCases"`
+	LaneProfiles []struct {
+		Name                   string                 `yaml:"name"`
+		AdapterCanExtract      bool                   `yaml:"adapterCanExtract"`
+		IndexerHasMetadataHalf bool                   `yaml:"indexerHasMetadataHalf"`
+		AcceptedReasons        []ingest.RefreshReason `yaml:"acceptedReasons"`
+	} `yaml:"laneProfiles"`
+}
+
+func TestDecideRefreshAdapterMatrix(t *testing.T) {
+	var fixture refreshDecisionAdapterMatrixFixture
+	decoder := yaml.NewDecoder(strings.NewReader(string(refreshDecisionAdapterMatrixYAML)))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&fixture); err != nil {
+		t.Fatalf("decode refresh_decision_adapter_matrix.yaml: %v", err)
+	}
+	manifest, err := testutil.DecodeRequiredNamesManifest(refreshDecisionAdapterMatrixManifestYAML, "refresh decision adapter matrix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var actualNames []string
+	for _, c := range fixture.DecideRefreshCases {
+		actualNames = append(actualNames, c.Name)
+	}
+	for _, p := range fixture.LaneProfiles {
+		actualNames = append(actualNames, p.Name)
+	}
+	if err := testutil.ValidateRequiredNames(manifest, actualNames, "refresh decision adapter matrix"); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixture.DecideRefreshCases) != 8 {
+		t.Fatalf("decideRefreshCases count = %d, want 8", len(fixture.DecideRefreshCases))
+	}
+	for _, c := range fixture.DecideRefreshCases {
+		t.Run(c.Name, func(t *testing.T) {
+			got := ingest.DecideRefresh(ingest.RefreshEvidence{
+				StoredRow:           true,
+				AdapterVersion:      4,
+				AdapterTarget:       5,
+				AdapterCanExtract:   c.AdapterCanExtract,
+				AdapterUndeclared:   c.AdapterUndeclared,
+				AdapterStampPresent: c.AdapterStampPresent,
+			})
+			want := ingest.RefreshDecision{
+				Reason:            c.WantReason,
+				Lane:              c.WantLane,
+				AdapterUndeclared: c.WantAdapterUndeclared,
+			}
+			if got != want {
+				t.Fatalf("DecideRefresh() = %+v, want %+v", got, want)
+			}
+		})
 	}
 }
