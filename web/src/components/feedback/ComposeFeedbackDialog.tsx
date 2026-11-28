@@ -19,9 +19,9 @@ import {
   ClipboardOutcome,
   FeedbackKind,
   FeedbackStep,
+  MAX_PICKED_ELEMENTS,
   MaskMode,
   type CaptureArtifact,
-  type CaptureKind,
   type FeedbackContextInfo,
   type FeedbackState,
 } from '@/lib/feedback/types';
@@ -35,14 +35,14 @@ export interface ComposeFeedbackDialogProps {
   truncated: boolean;
   onChangeKind(kind: FeedbackKind): void;
   onUpdateDraft(patch: { title?: string; description?: string }): void;
-  onRemoveCapture(kind: CaptureKind): void;
+  onRemoveCapture(id: number): void;
   onRequestUnmask(): void;
   onRemask(): void;
   onReopenPicker(): void;
   onBack(): void;
   onSubmit(): void;
-  onCopyCapture(kind: CaptureKind): void;
-  onDownloadCapture(kind: CaptureKind): void;
+  onCopyCapture(id: number): void;
+  onDownloadCapture(id: number): void;
   onClose(): void;
   returnFocusRef?: RefObject<HTMLElement | null>;
 }
@@ -98,6 +98,7 @@ export function ComposeFeedbackDialog({
 }: ComposeFeedbackDialogProps): ReactElement {
   const labelId = useId();
   const descriptionId = useId();
+  const pickLimitReasonId = useId();
   const [confirmingUnmask, setConfirmingUnmask] = useState(false);
   const [previews, setPreviews] = useState<readonly CapturePreviewEntry[]>([]);
 
@@ -127,6 +128,9 @@ export function ComposeFeedbackDialog({
 
   const isSubmitted = state.step === FeedbackStep.Submitted;
   const isCapturing = state.step === FeedbackStep.Capturing;
+  const atPickLimit = state.pickedElements.length >= MAX_PICKED_ELEMENTS;
+  const pickButtonLabel = state.pickedElements.length > 0 ? 'pick another element' : 'pick an element';
+  const pickLimitReason = `maximum ${MAX_PICKED_ELEMENTS} elements reached`;
   const canSubmit = !isCapturing && state.description.trim().length > 0;
   const dialogTitle = isSubmitted ? 'github issue opened' : state.kind.label;
 
@@ -188,38 +192,42 @@ export function ComposeFeedbackDialog({
             <div className="fbw-section">
               <span className="label">screenshots</span>
               <div className="fbw-submitted-captures">
-                {state.captures.map((capture) => (
-                  <div key={capture.kind.wire} className="fbw-submitted-capture-row">
-                    <div className="fbw-submitted-capture-info">
-                      <span className="fbw-capture-label">{capture.kind.label}</span>
-                      <span className="fbw-capture-dims tnum">
-                        {capture.width}×{capture.height}
-                      </span>
+                {state.captures.map((capture, index) => {
+                  const imageNumber = index + 1;
+                  return (
+                    <div key={capture.id} className="fbw-submitted-capture-row">
+                      <div className="fbw-submitted-capture-info">
+                        <span className="fbw-capture-index">image {imageNumber}</span>
+                        <span className="fbw-capture-label">{capture.kind.label}</span>
+                        <span className="fbw-capture-dims tnum">
+                          {capture.width}×{capture.height}
+                        </span>
+                      </div>
+                      <div className="fbw-submitted-capture-actions">
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          icon={Copy}
+                          aria-label={`copy image ${imageNumber} (${capture.kind.label})`}
+                          onClick={() => onCopyCapture(capture.id)}
+                        >
+                          copy image
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          icon={Download}
+                          aria-label={`download image ${imageNumber} (${capture.kind.label})`}
+                          onClick={() => onDownloadCapture(capture.id)}
+                        >
+                          download
+                        </Button>
+                      </div>
                     </div>
-                    <div className="fbw-submitted-capture-actions">
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        icon={Copy}
-                        aria-label={`copy image for ${capture.kind.label}`}
-                        onClick={() => onCopyCapture(capture.kind)}
-                      >
-                        copy image
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        icon={Download}
-                        aria-label={`download ${capture.kind.label} image`}
-                        onClick={() => onDownloadCapture(capture.kind)}
-                      >
-                        download
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -304,11 +312,18 @@ export function ComposeFeedbackDialog({
                   variant="secondary"
                   size="sm"
                   icon={Crosshair}
-                  disabled={isCapturing}
+                  disabled={isCapturing || atPickLimit}
+                  aria-describedby={atPickLimit ? pickLimitReasonId : undefined}
+                  title={atPickLimit ? pickLimitReason : undefined}
                   onClick={onReopenPicker}
                 >
-                  pick an element
+                  {pickButtonLabel}
                 </Button>
+                {atPickLimit && (
+                  <span id={pickLimitReasonId} className="fbw-capture-dims">
+                    {pickLimitReason}
+                  </span>
+                )}
               </div>
             </div>
 
@@ -379,32 +394,36 @@ export function ComposeFeedbackDialog({
                 )}
 
                 <div className="fbw-captures-grid">
-                  {previews.map((entry) => (
-                    <div key={entry.artifact.kind.wire} className="fbw-capture-card">
-                      <img
-                        src={entry.url}
-                        alt={`${entry.artifact.kind.label} capture (${entry.artifact.maskMode.label})`}
-                        className="fbw-capture-img"
-                      />
-                      <div className="fbw-capture-meta">
-                        <span className="fbw-capture-label">{entry.artifact.kind.label}</span>
-                        <span className="fbw-capture-dims tnum">
-                          {entry.artifact.width}×{entry.artifact.height}
-                        </span>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          icon={Trash2}
-                          disabled={isCapturing}
-                          aria-label={`remove ${entry.artifact.kind.label} capture`}
-                          onClick={() => onRemoveCapture(entry.artifact.kind)}
-                        >
-                          remove
-                        </Button>
+                  {previews.map((entry, index) => {
+                    const imageNumber = index + 1;
+                    return (
+                      <div key={entry.artifact.id} className="fbw-capture-card">
+                        <img
+                          src={entry.url}
+                          alt={`image ${imageNumber}: ${entry.artifact.kind.label} capture (${entry.artifact.maskMode.label})`}
+                          className="fbw-capture-img"
+                        />
+                        <div className="fbw-capture-meta">
+                          <span className="fbw-capture-index">image {imageNumber}</span>
+                          <span className="fbw-capture-label">{entry.artifact.kind.label}</span>
+                          <span className="fbw-capture-dims tnum">
+                            {entry.artifact.width}×{entry.artifact.height}
+                          </span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            icon={Trash2}
+                            disabled={isCapturing}
+                            aria-label={`remove ${entry.artifact.kind.label} capture (image ${imageNumber})`}
+                            onClick={() => onRemoveCapture(entry.artifact.id)}
+                          >
+                            remove
+                          </Button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </>
             )}
@@ -425,13 +444,20 @@ export function ComposeFeedbackDialog({
             <dl className="fbw-context-dl" aria-label="auto-attached context">
               <dt>route</dt>
               <dd>{context.route}</dd>
-              <dt>element</dt>
+              <dt>{state.pickedElements.length === 1 ? 'element' : 'elements'}</dt>
               <dd>
-                {state.pickedElement ? (
-                  <div className="fbw-context-element">
-                    <div>{state.pickedElement.selector}</div>
-                    {state.pickedElement.section && <div>{state.pickedElement.section}</div>}
-                    {state.pickedElement.textSnippet && <div>{state.pickedElement.textSnippet}</div>}
+                {state.pickedElements.length > 0 ? (
+                  <div className="fbw-context-elements">
+                    {state.pickedElements.map((el, index) => (
+                      <div key={el.id} className="fbw-context-element">
+                        <div>
+                          element {index + 1} (image {index + 1}): {el.label}
+                        </div>
+                        <div>{el.selector}</div>
+                        {el.section && <div>{el.section}</div>}
+                        {el.textSnippet && <div>{el.textSnippet}</div>}
+                      </div>
+                    ))}
                   </div>
                 ) : (
                   'none'

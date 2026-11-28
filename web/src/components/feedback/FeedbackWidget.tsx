@@ -18,10 +18,12 @@ import {
   FeedbackEventType,
   FeedbackStep,
   MaskMode,
+  PendingCaptureKind,
   type CaptureArtifact,
+  type CaptureElementTarget,
   type FeedbackContextInfo,
   type FeedbackKind,
-  type PickedElementInfo,
+  type PickedElementDraft,
 } from '@/lib/feedback/types';
 
 function readFeedbackContext(theme: string, serverVersion: string | null): FeedbackContextInfo {
@@ -39,15 +41,14 @@ function readFeedbackContext(theme: string, serverVersion: string | null): Feedb
 }
 
 function primaryCaptureToCopy(captures: readonly CaptureArtifact[]): CaptureArtifact | null {
-  return (
-    captures.find((artifact) => artifact.kind === CaptureKind.Element) ??
-    captures.find((artifact) => artifact.kind === CaptureKind.Page) ??
-    null
-  );
+  return captures[0] ?? null;
 }
 
-function captureFilename(feedbackKind: FeedbackKind, captureKind: CaptureKind): string {
-  return `peasant-feedback-${feedbackKind.wire}-${captureKind.wire}.png`;
+function captureFilename(feedbackKind: FeedbackKind, artifact: CaptureArtifact, imageNumber: number): string {
+  if (artifact.kind === CaptureKind.Element) {
+    return `peasant-feedback-${feedbackKind.wire}-element-${imageNumber}.png`;
+  }
+  return `peasant-feedback-${feedbackKind.wire}-${artifact.kind.wire}.png`;
 }
 
 /**
@@ -62,7 +63,7 @@ export function FeedbackWidget(): ReactElement | null {
   const { serverVersion } = useConnectionState();
 
   const launcherRef = useRef<HTMLButtonElement | null>(null);
-  const pickedElementRef = useRef<Element | null>(null);
+  const pickedElementsMapRef = useRef<Map<number, Element>>(new Map());
   const mountedRef = useRef(true);
   const submittingRef = useRef(false);
 
@@ -87,14 +88,39 @@ export function FeedbackWidget(): ReactElement | null {
   }, [state.step]);
 
   useEffect(() => {
-    if (!enabled || state.step !== FeedbackStep.Capturing) return;
+    if (!enabled || state.step !== FeedbackStep.Capturing || !state.pendingCapture) return;
     let cancelled = false;
-    const targetElement = state.pickedElement ? pickedElementRef.current : null;
+
+    const pending = state.pendingCapture;
+    let elements: CaptureElementTarget[];
+    let capturePage: boolean;
+
+    switch (pending.kind) {
+      case PendingCaptureKind.Element: {
+        const el = pickedElementsMapRef.current.get(pending.elementId);
+        elements = el ? [{ id: pending.elementId, el }] : [];
+        capturePage = pending.includePage;
+        break;
+      }
+      case PendingCaptureKind.All: {
+        elements = state.pickedElements.flatMap((info) => {
+          const el = pickedElementsMapRef.current.get(info.id);
+          return el ? [{ id: info.id, el }] : [];
+        });
+        capturePage = state.attachPage;
+        break;
+      }
+      default: {
+        const exhaustive: never = pending;
+        return exhaustive;
+      }
+    }
 
     void captureFeedbackArtifacts({
-      element: targetElement,
-      capturePage: state.attachPage,
+      elements,
+      capturePage,
       maskMode: state.maskMode,
+      nextCaptureId: state.nextCaptureId,
     })
       .then((result) => {
         if (cancelled) return;
@@ -122,7 +148,15 @@ export function FeedbackWidget(): ReactElement | null {
     return () => {
       cancelled = true;
     };
-  }, [enabled, state.step, state.pickedElement, state.attachPage, state.maskMode]);
+  }, [
+    enabled,
+    state.step,
+    state.pendingCapture,
+    state.pickedElements,
+    state.attachPage,
+    state.maskMode,
+    state.nextCaptureId,
+  ]);
 
   const pickerAdapter = useMemo(
     () => createBrowserPickerAdapter((el) => isInsideMaskedElement(el, state.maskMode)),
@@ -130,7 +164,7 @@ export function FeedbackWidget(): ReactElement | null {
   );
 
   const handleCloseAll = useCallback(() => {
-    pickedElementRef.current = null;
+    pickedElementsMapRef.current.clear();
     dispatch({ type: FeedbackEventType.CloseAll });
   }, []);
 
@@ -139,6 +173,7 @@ export function FeedbackWidget(): ReactElement | null {
       dispatch({ type: FeedbackEventType.OpenMenu });
       return;
     }
+    pickedElementsMapRef.current.clear();
     dispatch({ type: FeedbackEventType.CloseAll });
   }, []);
 
@@ -147,27 +182,34 @@ export function FeedbackWidget(): ReactElement | null {
   }, []);
 
   const handleProceedFromAttach = useCallback(() => {
-    if (!state.attachElement) {
-      pickedElementRef.current = null;
+    if (!state.attachElement && !state.attachPage) {
+      pickedElementsMapRef.current.clear();
     }
     dispatch({ type: FeedbackEventType.ProceedFromAttach });
-  }, [state.attachElement]);
+  }, [state.attachElement, state.attachPage]);
 
-  const handlePickConfirm = useCallback((el: Element, info: PickedElementInfo) => {
-    pickedElementRef.current = el;
-    dispatch({ type: FeedbackEventType.PickConfirmed, element: info });
-  }, []);
+  const handlePickConfirm = useCallback(
+    (el: Element, info: PickedElementDraft) => {
+      pickedElementsMapRef.current.set(state.nextElementId, el);
+      dispatch({ type: FeedbackEventType.PickConfirmed, element: info });
+    },
+    [state.nextElementId],
+  );
 
   const handlePickCancel = useCallback(() => {
     dispatch({ type: FeedbackEventType.PickCancelled });
   }, []);
 
-  const handleRemoveCapture = useCallback((kind: CaptureKind) => {
-    if (kind === CaptureKind.Element) {
-      pickedElementRef.current = null;
-    }
-    dispatch({ type: FeedbackEventType.RemoveCapture, kind });
-  }, []);
+  const handleRemoveCapture = useCallback(
+    (id: number) => {
+      const target = state.captures.find((artifact) => artifact.id === id);
+      if (target && target.kind === CaptureKind.Element && target.elementId !== null) {
+        pickedElementsMapRef.current.delete(target.elementId);
+      }
+      dispatch({ type: FeedbackEventType.RemoveCapture, id });
+    },
+    [state.captures],
+  );
 
   const handleSubmit = useCallback(() => {
     if (!canSubmitFeedback(state) || submittingRef.current) return;
@@ -177,7 +219,7 @@ export function FeedbackWidget(): ReactElement | null {
       kind: state.kind,
       title: state.title,
       description: state.description,
-      element: state.pickedElement,
+      elements: state.pickedElements,
       context: readFeedbackContext(theme, serverVersion),
     });
 
@@ -220,8 +262,8 @@ export function FeedbackWidget(): ReactElement | null {
   }, [state, theme, serverVersion]);
 
   const handleCopyCapture = useCallback(
-    (kind: CaptureKind) => {
-      const artifact = state.captures.find((item) => item.kind === kind);
+    (id: number) => {
+      const artifact = state.captures.find((item) => item.id === id);
       if (!artifact) return;
       void copyPngToClipboard(artifact.blob);
     },
@@ -229,10 +271,11 @@ export function FeedbackWidget(): ReactElement | null {
   );
 
   const handleDownloadCapture = useCallback(
-    (kind: CaptureKind) => {
-      const artifact = state.captures.find((item) => item.kind === kind);
-      if (!artifact) return;
-      downloadPngBlob(artifact.blob, captureFilename(state.kind, kind));
+    (id: number) => {
+      const index = state.captures.findIndex((item) => item.id === id);
+      if (index === -1) return;
+      const artifact = state.captures[index];
+      downloadPngBlob(artifact.blob, captureFilename(state.kind, artifact, index + 1));
     },
     [state.captures, state.kind],
   );
@@ -250,7 +293,7 @@ export function FeedbackWidget(): ReactElement | null {
         kind: state.kind,
         title: state.title,
         description: state.description,
-        element: state.pickedElement,
+        elements: state.pickedElements,
         context,
       })
     : null;

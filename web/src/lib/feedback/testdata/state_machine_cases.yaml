@@ -29,7 +29,7 @@ cases:
           step: compose
           attachElement: false
           attachPage: false
-          pickedElement: null
+          pickedElementsCount: 0
           captures: []
 
   - name: attach-page-only-enters-capturing
@@ -42,6 +42,7 @@ cases:
           step: capturing
           attachElement: false
           attachPage: true
+          pendingCaptureKind: all
 
   - name: attach-element-enters-picking
     steps:
@@ -74,7 +75,7 @@ cases:
       - event: { type: select_kind, kind: problem }
       - event: { type: toggle_attach_page }
       - event: { type: proceed_from_attach }
-      - event: { type: capture_failed, error: "snapdom render failed", partialCaptures: [element] }
+      - event: { type: capture_failed, error: "snapdom render failed", partialCaptures: [{ kind: element, elementId: 1 }] }
         expect:
           step: compose
           captureError: "snapdom render failed"
@@ -86,11 +87,12 @@ cases:
       - event: { type: select_kind, kind: problem }
       - event: { type: toggle_attach_page }
       - event: { type: proceed_from_attach }
-      - event: { type: capture_succeeded, captures: [page] }
+      - event: { type: capture_succeeded, captures: [{ kind: page }] }
       - event: { type: set_mask_mode, maskMode: unmasked }
         expect:
           step: capturing
           maskMode: unmasked
+          pendingCaptureKind: all
           captureError: null
 
   - name: change-kind-preserves-draft
@@ -113,9 +115,9 @@ cases:
       - event: { type: toggle_attach_element }
       - event: { type: proceed_from_attach }
       - event: { type: pick_confirmed }
-      - event: { type: capture_succeeded, captures: [element, page] }
+      - event: { type: capture_succeeded, captures: [{ kind: element, elementId: 1 }, { kind: page }] }
       - event: { type: set_mask_mode, maskMode: unmasked }
-      - event: { type: capture_succeeded, captures: [element, page] }
+      - event: { type: capture_succeeded, captures: [{ kind: element, elementId: 1 }, { kind: page }] }
       - event: { type: update_draft, title: "Add filter", description: "Filter by status" }
       - event: { type: submit_succeeded, url: "https://github.com/peasant-labs/peasant/issues/new?template=in-app-feature.yml", clipboardOutcome: copied }
       - event: { type: close_all }
@@ -124,7 +126,7 @@ cases:
           kind: problem
           attachElement: false
           attachPage: false
-          pickedElement: null
+          pickedElementsCount: 0
           maskMode: masked
           captures: []
           captureError: null
@@ -133,7 +135,7 @@ cases:
           submittedUrl: null
           clipboardOutcome: not-needed
 
-  - name: remove-capture-drops-matching-kind
+  - name: remove-element-capture-removes-element
     steps:
       - event: { type: open_menu }
       - event: { type: select_kind, kind: problem }
@@ -141,11 +143,22 @@ cases:
       - event: { type: toggle_attach_page }
       - event: { type: proceed_from_attach }
       - event: { type: pick_confirmed }
-      - event: { type: capture_succeeded, captures: [element, page] }
-      - event: { type: remove_capture, kind: element }
+      - event: { type: capture_succeeded, captures: [{ kind: element, elementId: 1 }, { kind: page }] }
+      - event: { type: reopen_picker }
+      - event: { type: pick_confirmed }
+      - event: { type: capture_succeeded, captures: [{ kind: element, elementId: 2 }] }
+      - event: { type: remove_capture, id: 1 }
         expect:
           step: compose
-          captures: [page]
+          captures: [element, page]
+          pickedElementIds: [2]
+          attachPage: true
+      - event: { type: remove_capture, id: 2 }
+        expect:
+          step: compose
+          captures: [element]
+          pickedElementIds: [2]
+          attachPage: false
 
   - name: reopen-picker-from-compose
     steps:
@@ -158,6 +171,10 @@ cases:
           step: picking
           attachElement: true
           description: "Need to pick button"
+      - event: { type: pick_cancelled }
+        expect:
+          step: compose
+          description: "Need to pick button"
 
   - name: back-to-attach-preserves-draft-and-toggles
     steps:
@@ -165,7 +182,7 @@ cases:
       - event: { type: select_kind, kind: feature }
       - event: { type: toggle_attach_page }
       - event: { type: proceed_from_attach }
-      - event: { type: capture_succeeded, captures: [page] }
+      - event: { type: capture_succeeded, captures: [{ kind: page }] }
       - event: { type: update_draft, title: "Keep me", description: "Keep body" }
       - event: { type: back_to_attach }
         expect:
@@ -175,6 +192,110 @@ cases:
           title: "Keep me"
           description: "Keep body"
           captures: [page]
+
+  - name: append-second-pick
+    steps:
+      - event: { type: open_menu }
+      - event: { type: select_kind, kind: problem }
+      - event: { type: toggle_attach_element }
+      - event: { type: proceed_from_attach }
+      - event: { type: pick_confirmed }
+        expect:
+          step: capturing
+          pickedElementIds: [1]
+          pendingCaptureKind: element
+          pendingElementId: 1
+      - event: { type: capture_succeeded, captures: [{ kind: element, elementId: 1 }] }
+      - event: { type: reopen_picker }
+      - event: { type: pick_confirmed }
+        expect:
+          step: capturing
+          pickedElementIds: [1, 2]
+          pendingCaptureKind: element
+          pendingElementId: 2
+      - event: { type: capture_succeeded, captures: [{ kind: element, elementId: 2 }] }
+        expect:
+          step: compose
+          pickedElementIds: [1, 2]
+          captures: [element, element]
+
+  - name: merge-keeps-existing-captures
+    steps:
+      - event: { type: open_menu }
+      - event: { type: select_kind, kind: problem }
+      - event: { type: toggle_attach_element }
+      - event: { type: toggle_attach_page }
+      - event: { type: proceed_from_attach }
+      - event: { type: pick_confirmed }
+      - event: { type: capture_succeeded, captures: [{ kind: element, elementId: 1 }, { kind: page }] }
+      - event: { type: reopen_picker }
+      - event: { type: pick_confirmed }
+      - event: { type: capture_succeeded, captures: [{ kind: element, elementId: 2 }] }
+        expect:
+          step: compose
+          captures: [element, element, page]
+          captureElementIds: [1, 2, null]
+      - event: { type: reopen_picker }
+      - event: { type: pick_confirmed }
+      - event: { type: capture_failed, error: "element capture failed", partialCaptures: [] }
+        expect:
+          step: compose
+          captureError: "element capture failed"
+          captures: [element, element, page]
+
+  - name: mask-change-recaptures-all
+    steps:
+      - event: { type: open_menu }
+      - event: { type: select_kind, kind: problem }
+      - event: { type: toggle_attach_element }
+      - event: { type: toggle_attach_page }
+      - event: { type: proceed_from_attach }
+      - event: { type: pick_confirmed }
+      - event: { type: capture_succeeded, captures: [{ kind: element, elementId: 1 }, { kind: page }] }
+      - event: { type: reopen_picker }
+      - event: { type: pick_confirmed }
+      - event: { type: capture_succeeded, captures: [{ kind: element, elementId: 2 }] }
+      - event: { type: set_mask_mode, maskMode: unmasked }
+        expect:
+          step: capturing
+          maskMode: unmasked
+          pendingCaptureKind: all
+      - event: { type: capture_succeeded, captures: [{ kind: element, elementId: 1 }, { kind: element, elementId: 2 }, { kind: page }] }
+        expect:
+          step: compose
+          maskMode: unmasked
+          captures: [element, element, page]
+          captureElementIds: [1, 2, null]
+
+  - name: pick-limit-reached
+    steps:
+      - event: { type: open_menu }
+      - event: { type: select_kind, kind: problem }
+      - event: { type: toggle_attach_element }
+      - event: { type: proceed_from_attach }
+      - event: { type: pick_confirmed }
+      - event: { type: capture_succeeded, captures: [{ kind: element, elementId: 1 }] }
+      - event: { type: reopen_picker }
+      - event: { type: pick_confirmed }
+      - event: { type: capture_succeeded, captures: [{ kind: element, elementId: 2 }] }
+      - event: { type: reopen_picker }
+      - event: { type: pick_confirmed }
+      - event: { type: capture_succeeded, captures: [{ kind: element, elementId: 3 }] }
+      - event: { type: reopen_picker }
+      - event: { type: pick_confirmed }
+      - event: { type: capture_succeeded, captures: [{ kind: element, elementId: 4 }] }
+      - event: { type: reopen_picker }
+      - event: { type: pick_confirmed }
+      - event: { type: capture_succeeded, captures: [{ kind: element, elementId: 5 }] }
+        expect:
+          step: compose
+          pickedElementsCount: 5
+          pickedElementIds: [1, 2, 3, 4, 5]
+      - event: { type: reopen_picker }
+        sameState: true
+        expect:
+          step: compose
+          pickedElementsCount: 5
 
   - name: invalid-event-in-closed-is-noop
     steps:

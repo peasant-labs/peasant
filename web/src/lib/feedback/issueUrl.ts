@@ -41,12 +41,13 @@ export function formatEnvironmentBlock(ctx: FeedbackContextInfo): string {
   ].join('\n');
 }
 
-export function formatElementBlock(target: PickedElementInfo | null): string {
+export function formatElementBlock(target: PickedElementInfo | null, index = 0): string {
   if (!target) {
     return '';
   }
+  const n = index + 1;
   const lines = [
-    `label: ${target.label}`,
+    `element ${n} (image ${n}): ${target.label}`,
     `section: ${target.section}`,
     `selector: ${target.selector}`,
     `box: ${Math.round(target.box.width)}x${Math.round(target.box.height)} at (${Math.round(target.box.left)}, ${Math.round(target.box.top)})`,
@@ -55,6 +56,27 @@ export function formatElementBlock(target: PickedElementInfo | null): string {
     lines.push(`text: ${target.textSnippet}`);
   }
   return lines.join('\n');
+}
+
+function formatOmittedNote(omittedCount: number): string {
+  return `${omittedCount} more ${omittedCount === 1 ? 'element' : 'elements'} omitted`;
+}
+
+export function formatElementsBlock(
+  elements: readonly PickedElementInfo[],
+  keptCount: number = elements.length,
+  includeOmittedNote = true,
+): string {
+  if (elements.length === 0) {
+    return '';
+  }
+  const clamped = Math.max(0, Math.min(keptCount, elements.length));
+  const blocks = elements.slice(0, clamped).map((el, index) => formatElementBlock(el, index));
+  const omittedCount = elements.length - clamped;
+  if (omittedCount > 0 && includeOmittedNote) {
+    blocks.push(formatOmittedNote(omittedCount));
+  }
+  return blocks.join('\n\n');
 }
 
 function fenceTextBlock(content: string): string {
@@ -66,14 +88,24 @@ function fenceTextBlock(content: string): string {
 function formatIssueBody(
   kind: FeedbackKind,
   descriptionText: string,
-  elementText: string,
+  elements: readonly PickedElementInfo[],
+  keptCount: number,
   environmentText: string,
+  includeOmittedNote = true,
 ): string {
   const sections: string[] = [
     `### ${DESCRIPTION_HEADING_BY_KIND[kind.wire]}\n\n${descriptionText}`,
   ];
-  if (elementText !== '') {
-    sections.push(`### Picked elements\n\n${fenceTextBlock(elementText)}`);
+  if (elements.length > 0) {
+    const clamped = Math.max(0, Math.min(keptCount, elements.length));
+    const elementParts = elements.slice(0, clamped).map((el, index) => fenceTextBlock(formatElementBlock(el, index)));
+    const omittedCount = elements.length - clamped;
+    if (omittedCount > 0 && includeOmittedNote) {
+      elementParts.push(formatOmittedNote(omittedCount));
+    }
+    if (elementParts.length > 0) {
+      sections.push(`### Picked elements\n\n${elementParts.join('\n\n')}`);
+    }
   }
   sections.push(`### Screenshots\n\n${SCREENSHOTS_BODY_LINE}`);
   sections.push(`### App context\n\n${fenceTextBlock(environmentText)}`);
@@ -135,60 +167,71 @@ export function buildGitHubIssueUrl(
   const template = templateForKind(input.kind);
   const title = input.title.trim() || input.kind.label;
   const environmentText = formatEnvironmentBlock(input.context);
-  const initialElementText = formatElementBlock(input.element);
+  const fullElementCount = input.elements.length;
   const separator = baseUrl.includes('?') ? '&' : '?';
 
-  const encodeUrl = (descriptionText: string, elementText: string, titleText: string): string => {
+  const encodeUrl = (
+    descriptionText: string,
+    keptCount: number,
+    titleText: string,
+    includeOmittedNote = true,
+  ): string => {
+    const elementFieldText = formatElementsBlock(input.elements, keptCount, includeOmittedNote);
+    const bodyText = formatIssueBody(
+      input.kind,
+      descriptionText,
+      input.elements,
+      keptCount,
+      environmentText,
+      includeOmittedNote,
+    );
     const params = new URLSearchParams();
     params.set('template', template);
     params.set('title', titleText);
     params.set(IssueFormFieldId.Description.wire, descriptionText);
-    if (elementText !== '') {
-      params.set(IssueFormFieldId.Element.wire, elementText);
+    if (elementFieldText !== '') {
+      params.set(IssueFormFieldId.Element.wire, elementFieldText);
     }
     params.set(IssueFormFieldId.Environment.wire, environmentText);
-    params.set('body', formatIssueBody(input.kind, descriptionText, elementText, environmentText));
+    params.set('body', bodyText);
     return `${baseUrl}${separator}${params.toString()}`;
   };
 
-  const initialUrl = encodeUrl(input.description, initialElementText, title);
+  const initialUrl = encodeUrl(input.description, fullElementCount, title);
   if (initialUrl.length <= maxLength) {
     return { url: initialUrl, template, truncated: false };
   }
 
-  // Shrink description first while keeping element and environment intact.
+  // Shrink description first in both the field param and body while keeping elements and environment intact.
   const shrunkDesc = shrinkFieldToFit(
     input.description,
-    (candidateDesc) => encodeUrl(candidateDesc, initialElementText, title),
+    (candidateDesc) => encodeUrl(candidateDesc, fullElementCount, title),
     maxLength,
   );
   if (shrunkDesc.fits) {
     return { url: shrunkDesc.url, template, truncated: true };
   }
 
-  // Description is already at its minimum marker; shrink element next.
-  const shrunkElem = shrinkFieldToFit(
-    initialElementText,
-    (candidateElem) => encodeUrl(shrunkDesc.value, candidateElem, title),
-    maxLength,
-  );
-  if (shrunkElem.fits) {
-    return { url: shrunkElem.url, template, truncated: true };
+  // Drop element blocks from the end with an omission note before dropping description/title.
+  for (let kept = fullElementCount - 1; kept >= 0; kept -= 1) {
+    const candidateUrl = encodeUrl(shrunkDesc.value, kept, title, true);
+    if (candidateUrl.length <= maxLength) {
+      return { url: candidateUrl, template, truncated: true };
+    }
   }
 
-  // If even minimal markers on description/element exceed maxLength, drop them before touching title;
+  // If even minimal markers exceed a tiny maxLength, drop the omission note and description before touching title;
   // template and environment are never cut.
   let finalDesc = shrunkDesc.value;
-  let finalElem = '';
-  let fallbackUrl = encodeUrl(finalDesc, finalElem, title);
+  let fallbackUrl = encodeUrl(finalDesc, 0, title, false);
   if (fallbackUrl.length > maxLength && finalDesc !== '') {
     finalDesc = '';
-    fallbackUrl = encodeUrl(finalDesc, finalElem, title);
+    fallbackUrl = encodeUrl(finalDesc, 0, title, false);
   }
   if (fallbackUrl.length > maxLength) {
     const shrunkTitle = shrinkFieldToFit(
       title,
-      (candidateTitle) => encodeUrl(finalDesc, finalElem, candidateTitle),
+      (candidateTitle) => encodeUrl(finalDesc, 0, candidateTitle, false),
       maxLength,
     );
     fallbackUrl = shrunkTitle.url;

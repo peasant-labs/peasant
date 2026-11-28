@@ -83,11 +83,12 @@ export async function captureFeedbackArtifacts(
   request: CaptureRequest,
   deps: CaptureDeps = {},
 ): Promise<CaptureBatchResult> {
-  if (!request.element && !request.capturePage) {
+  if (request.elements.length === 0 && !request.capturePage) {
     return { captures: [], errors: [] };
   }
 
-  const doc = deps.doc ?? request.element?.ownerDocument ?? (typeof document !== 'undefined' ? document : undefined);
+  const doc =
+    deps.doc ?? request.elements[0]?.el.ownerDocument ?? (typeof document !== 'undefined' ? document : undefined);
   if (!doc) {
     return { captures: [], errors: ['Document is unavailable for capture'] };
   }
@@ -115,18 +116,21 @@ export async function captureFeedbackArtifacts(
     const captures: CaptureArtifact[] = [];
     const errors: string[] = [];
     const exclude = [...FEEDBACK_EXCLUDE_SELECTORS];
+    let nextId = request.nextCaptureId ?? 1;
 
-    if (request.element) {
+    for (const target of request.elements) {
       try {
-        const result = await snapdomFn(request.element, {
+        const result = await snapdomFn(target.el, {
           exclude,
           excludeMode: 'remove',
           format: 'png',
         });
         const blob = await result.toBlob({ format: 'png' });
-        const rect = request.element.getBoundingClientRect();
+        const rect = target.el.getBoundingClientRect();
         captures.push({
+          id: nextId++,
           kind: CaptureKind.Element,
+          elementId: target.id,
           blob,
           width: resolveDimension(result.meta?.targetW ?? result.meta?.w0, rect.width),
           height: resolveDimension(result.meta?.targetH ?? result.meta?.h0, rect.height),
@@ -153,7 +157,9 @@ export async function captureFeedbackArtifacts(
           const fallbackWidth = win?.innerWidth ?? pageRoot.clientWidth;
           const fallbackHeight = win?.innerHeight ?? pageRoot.clientHeight;
           captures.push({
+            id: nextId++,
             kind: CaptureKind.Page,
+            elementId: null,
             blob,
             width: resolveDimension(result.meta?.targetW ?? result.meta?.w0, fallbackWidth),
             height: resolveDimension(result.meta?.targetH ?? result.meta?.h0, fallbackHeight),

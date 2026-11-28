@@ -6,7 +6,7 @@ import {
   PickerDirection,
   type ElementBox,
   type ElementPickerAdapter,
-  type PickedElementInfo,
+  type PickedElementDraft,
   type ViewportSize,
 } from '@/lib/feedback/types';
 import './feedback-widget.css';
@@ -14,7 +14,7 @@ import './feedback-widget.css';
 export interface ElementPickerOverlayProps {
   active: boolean;
   adapter: ElementPickerAdapter;
-  onConfirm: (el: Element, info: PickedElementInfo) => void;
+  onConfirm: (el: Element, info: PickedElementDraft) => void;
   onCancel: () => void;
 }
 

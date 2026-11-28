@@ -34,6 +34,7 @@ const REQUIRED_CASES = [
   'never-emits-labels',
   'body-fallback-contains-description',
   'truncates-deterministically-under-cap',
+  'drops-trailing-elements-when-description-and-elements-exceed-cap',
 ] as const;
 
 function findKindByWire(wire: unknown, path: string): FeedbackKind {
@@ -43,24 +44,30 @@ function findKindByWire(wire: unknown, path: string): FeedbackKind {
   return match;
 }
 
-function parseElement(raw: unknown, path: string): PickedElementInfo | null {
-  if (raw === null) return null;
-  const row = requireRecord(raw, path);
-  requireExactRequiredFields(row, ['selector', 'label', 'section', 'textSnippet', 'box'], path);
-  const box = requireRecord(row.box, `${path}.box`);
-  requireExactRequiredFields(box, ['top', 'left', 'width', 'height'], `${path}.box`);
-  return {
-    selector: String(row.selector),
-    label: String(row.label),
-    section: String(row.section),
-    textSnippet: String(row.textSnippet),
-    box: {
-      top: Number(box.top),
-      left: Number(box.left),
-      width: Number(box.width),
-      height: Number(box.height),
-    },
-  };
+function parseElements(raw: unknown, path: string): PickedElementInfo[] {
+  if (!Array.isArray(raw)) {
+    throw new Error(`${path} must be an array`);
+  }
+  return raw.map((item, idx) => {
+    const itemPath = `${path}[${idx}]`;
+    const row = requireRecord(item, itemPath);
+    requireExactRequiredFields(row, ['id', 'selector', 'label', 'section', 'textSnippet', 'box'], itemPath);
+    const box = requireRecord(row.box, `${itemPath}.box`);
+    requireExactRequiredFields(box, ['top', 'left', 'width', 'height'], `${itemPath}.box`);
+    return {
+      id: Number(row.id),
+      selector: String(row.selector),
+      label: String(row.label),
+      section: String(row.section),
+      textSnippet: String(row.textSnippet),
+      box: {
+        top: Number(box.top),
+        left: Number(box.left),
+        width: Number(box.width),
+        height: Number(box.height),
+      },
+    };
+  });
 }
 
 function parseContext(raw: unknown, path: string): FeedbackContextInfo {
@@ -89,8 +96,8 @@ interface ParsedUrlCase {
     readonly forbiddenParams?: readonly string[];
     readonly maxUrlLength?: number;
     readonly descriptionEndsWith?: string;
-    readonly elementEndsWith?: string;
     readonly elementContains?: readonly string[];
+    readonly elementExcludes?: readonly string[];
     readonly bodyContains?: readonly string[];
     readonly environmentContains?: readonly string[];
     readonly environmentExcludes?: readonly string[];
@@ -136,7 +143,7 @@ function loadFixture(): ParsedUrlCase[] {
     const rawInput = requireRecord(row.input, `${casePath}.input`);
     requireExactFields(
       rawInput,
-      ['kind', 'title', 'description', 'descriptionRepeat', 'element', 'context'],
+      ['kind', 'title', 'description', 'descriptionRepeat', 'elements', 'context'],
       `${casePath}.input`,
     );
     let description = typeof rawInput.description === 'string' ? rawInput.description : '';
@@ -160,8 +167,8 @@ function loadFixture(): ParsedUrlCase[] {
         'forbiddenParams',
         'maxUrlLength',
         'descriptionEndsWith',
-        'elementEndsWith',
         'elementContains',
+        'elementExcludes',
         'bodyContains',
         'environmentContains',
         'environmentExcludes',
@@ -179,7 +186,7 @@ function loadFixture(): ParsedUrlCase[] {
         kind: findKindByWire(rawInput.kind, `${casePath}.input.kind`),
         title: String(rawInput.title ?? ''),
         description,
-        element: parseElement(rawInput.element, `${casePath}.input.element`),
+        elements: parseElements(rawInput.elements, `${casePath}.input.elements`),
         context: parseContext(rawInput.context, `${casePath}.input.context`),
       },
       expect: {
@@ -197,10 +204,13 @@ function loadFixture(): ParsedUrlCase[] {
         maxUrlLength: typeof rawExpect.maxUrlLength === 'number' ? rawExpect.maxUrlLength : undefined,
         descriptionEndsWith:
           typeof rawExpect.descriptionEndsWith === 'string' ? rawExpect.descriptionEndsWith : undefined,
-        elementEndsWith: typeof rawExpect.elementEndsWith === 'string' ? rawExpect.elementEndsWith : undefined,
         elementContains:
           rawExpect.elementContains !== undefined
             ? parseStringList(rawExpect.elementContains, `${casePath}.expect.elementContains`)
+            : undefined,
+        elementExcludes:
+          rawExpect.elementExcludes !== undefined
+            ? parseStringList(rawExpect.elementExcludes, `${casePath}.expect.elementExcludes`)
             : undefined,
         bodyContains:
           rawExpect.bodyContains !== undefined
@@ -251,14 +261,16 @@ describe('feedback issueUrl', () => {
       expect(desc.endsWith(testCase.expect.descriptionEndsWith)).toBe(true);
       expect(parsed.searchParams.get('body') ?? '').toContain(desc);
     }
-    if (testCase.expect.elementEndsWith) {
-      const elem = parsed.searchParams.get(IssueFormFieldId.Element.wire) ?? '';
-      expect(elem.endsWith(testCase.expect.elementEndsWith)).toBe(true);
-    }
     if (testCase.expect.elementContains) {
       const elem = parsed.searchParams.get(IssueFormFieldId.Element.wire) ?? '';
       for (const fragment of testCase.expect.elementContains) {
         expect(elem).toContain(fragment);
+      }
+    }
+    if (testCase.expect.elementExcludes) {
+      const elem = parsed.searchParams.get(IssueFormFieldId.Element.wire) ?? '';
+      for (const fragment of testCase.expect.elementExcludes) {
+        expect(elem).not.toContain(fragment);
       }
     }
     if (testCase.expect.bodyContains) {
@@ -305,7 +317,7 @@ describe('feedback issueUrl', () => {
       kind: ALL_FEEDBACK_KINDS[0],
       title: 'Deterministic test',
       description: '😀'.repeat(2500),
-      element: null,
+      elements: [],
       context: {
         route: '/',
         viewport: { width: 1440, height: 900 },

@@ -98,6 +98,12 @@
   color: var(--ink-2);
 }
 
+.fbw-capture-index {
+  color: var(--ink);
+  font-weight: 600;
+  text-transform: lowercase;
+}
+
 .fbw-capture-label {
   text-transform: lowercase;
 }
@@ -234,6 +240,12 @@
   color: var(--ink);
   overflow-wrap: anywhere;
   min-width: 0;
+}
+
+.fbw-context-elements {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
 }
 
 .fbw-context-element {

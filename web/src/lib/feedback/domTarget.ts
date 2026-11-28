@@ -2,7 +2,7 @@ import {
   PickerDirection,
   type ElementPickerAdapter,
   type LegacyDomTarget,
-  type PickedElementInfo,
+  type PickedElementDraft,
   type ViewportSize,
 } from './types';
 
@@ -140,7 +140,7 @@ export function safeTextSnippetFor(
 }
 
 /** Builds the sanitized picked-element summary for the in-app feedback widget. */
-export function describePickedElement(el: Element, masked: boolean): PickedElementInfo {
+export function describePickedElement(el: Element, masked: boolean): PickedElementDraft {
   const rect = el.getBoundingClientRect();
   return {
     selector: feedbackSelectorFor(el),

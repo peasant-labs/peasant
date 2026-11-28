@@ -6,6 +6,7 @@ import {
   FeedbackKind,
   MaskMode,
   type CaptureArtifact,
+  type CaptureRequest,
 } from '@/lib/feedback/types';
 
 const captureMocks = vi.hoisted(() => ({
@@ -109,6 +110,7 @@ describe('FeedbackWidget', () => {
     expect(parsed.searchParams.has('labels[]')).toBe(false);
     expect(parsed.searchParams.get('title')).toBe('Sidebar button clipped');
     expect(parsed.searchParams.get('description')).toBe('The bottom control clips at 800px height.');
+    expect(parsed.searchParams.get('body')).toContain('The bottom control clips at 800px height.');
     expect(parsed.searchParams.get('environment')).toContain('route: /sessions/test-123');
     expect(parsed.searchParams.get('environment')).toContain('peasant: 0.12.3');
 
@@ -125,7 +127,9 @@ describe('FeedbackWidget', () => {
   it('captures whole page, renders preview, copies synchronously before window.open, and supports submitted recovery actions', async () => {
     const pageBlob = new Blob(['page-png'], { type: 'image/png' });
     const pageArtifact: CaptureArtifact = {
+      id: 1,
       kind: CaptureKind.Page,
+      elementId: null,
       blob: pageBlob,
       width: 1280,
       height: 720,
@@ -162,15 +166,16 @@ describe('FeedbackWidget', () => {
 
     await waitFor(() => {
       expect(captureMocks.captureFeedbackArtifacts).toHaveBeenCalledWith({
-        element: null,
+        elements: [],
         capturePage: true,
         maskMode: MaskMode.Masked,
+        nextCaptureId: 1,
       });
     });
 
     expect(dialogsOpenAtCapture).toEqual([0]);
 
-    const preview = await screen.findByRole('img', { name: /whole page capture/i });
+    const preview = await screen.findByRole('img', { name: /image 1: whole page capture/i });
     expect(preview).toHaveAttribute('src', 'blob:feedback-preview-1');
 
     fireEvent.change(screen.getByLabelText('description (required)'), {
@@ -192,6 +197,89 @@ describe('FeedbackWidget', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /download/i }));
     expect(captureMocks.downloadPngBlob).toHaveBeenCalledWith(pageBlob, 'peasant-feedback-feature-page.png');
+  });
+
+  it('picks multiple elements in order, captures only new pick, re-captures all on unmask, and keeps numbers consistent after removal', async () => {
+    const firstEl = document.createElement('button');
+    firstEl.id = 'first-btn';
+    firstEl.textContent = 'First';
+    const secondEl = document.createElement('button');
+    secondEl.id = 'second-btn';
+    secondEl.textContent = 'Second';
+    document.body.append(firstEl, secondEl);
+
+    const el1Blob = new Blob(['el1'], { type: 'image/png' });
+    const el2Blob = new Blob(['el2'], { type: 'image/png' });
+    const pageBlob = new Blob(['page'], { type: 'image/png' });
+
+    const requests: CaptureRequest[] = [];
+    captureMocks.captureFeedbackArtifacts.mockImplementation(async (req: CaptureRequest) => {
+      requests.push(req);
+      let nextId = req.nextCaptureId ?? 1;
+      const captures: CaptureArtifact[] = req.elements.map((target) => ({
+        id: nextId++,
+        kind: CaptureKind.Element,
+        elementId: target.id,
+        blob: target.el === firstEl ? el1Blob : el2Blob,
+        width: 100,
+        height: 40,
+        maskMode: req.maskMode,
+      }));
+      if (req.capturePage) {
+        captures.push({
+          id: nextId++,
+          kind: CaptureKind.Page,
+          elementId: null,
+          blob: pageBlob,
+          width: 1280,
+          height: 720,
+          maskMode: req.maskMode,
+        });
+      }
+      return { captures, errors: [] };
+    });
+
+    render(<FeedbackWidget />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'feedback' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: FeedbackKind.Problem.label }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'pick an element on the page' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'capture the visible page' }));
+    fireEvent.click(screen.getByRole('button', { name: 'continue' }));
+
+    fireEvent.click(firstEl);
+    await screen.findByRole('img', { name: /image 1: picked element capture/i });
+    expect(screen.getByRole('img', { name: /image 2: whole page capture/i })).toBeInTheDocument();
+    expect(requests[0].elements).toEqual([{ id: 1, el: firstEl }]);
+    expect(requests[0].capturePage).toBe(true);
+
+    // Pick a second element: captures ONLY element 2 and inserts it before page.
+    fireEvent.click(screen.getByRole('button', { name: 'pick another element' }));
+    fireEvent.click(secondEl);
+
+    await screen.findByRole('img', { name: /image 2: picked element capture/i });
+    expect(screen.getByRole('img', { name: /image 3: whole page capture/i })).toBeInTheDocument();
+    expect(requests[1].elements).toEqual([{ id: 2, el: secondEl }]);
+    expect(requests[1].capturePage).toBe(false);
+
+    // Unmask triggers re-capture of ALL remaining elements + page.
+    fireEvent.click(screen.getByRole('button', { name: 'unmask transcript' }));
+    fireEvent.click(screen.getByRole('button', { name: 'confirm unmask' }));
+    await waitFor(() => expect(requests).toHaveLength(3));
+    expect(requests[2].elements).toEqual([
+      { id: 1, el: firstEl },
+      { id: 2, el: secondEl },
+    ]);
+    expect(requests[2].capturePage).toBe(true);
+    expect(requests[2].maskMode).toBe(MaskMode.Unmasked);
+
+    // Removing image 1 removes element 1 and shifts remaining images to 1 & 2.
+    const removeFirstBtn = await screen.findByRole('button', { name: /remove picked element capture \(image 1\)/i });
+    fireEvent.click(removeFirstBtn);
+    expect(screen.queryByText('element 1 (image 1): button#first-btn')).toBeNull();
+    expect(screen.getByText('element 1 (image 1): button#second-btn')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: /image 1: picked element capture/i })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: /image 2: whole page capture/i })).toBeInTheDocument();
   });
 
   it('renders nothing when ?fb=off is present in the query string', () => {

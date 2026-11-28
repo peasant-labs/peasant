@@ -48,7 +48,7 @@ describe('capture', () => {
   it('lazy-snapdom-not-imported-until-capture', async () => {
     const loadSnapdom = vi.fn<() => Promise<SnapdomFn>>();
     const result = await captureFeedbackArtifacts(
-      { element: null, capturePage: false, maskMode: MaskMode.Masked },
+      { elements: [], capturePage: false, maskMode: MaskMode.Masked },
       { loadSnapdom, waitForPaint: async () => {} },
     );
 
@@ -57,13 +57,17 @@ describe('capture', () => {
     expect(document.querySelector('style[data-feedback-widget="mask-style"]')).toBeNull();
   });
 
-  it('captures element and viewport-clipped page under mask style then cleans up', async () => {
-    const target = document.createElement('div');
-    target.className = 'card';
-    target.getBoundingClientRect = () => makeBox(320, 180);
-    document.body.appendChild(target);
+  it('captures elements and viewport-clipped page under mask style with monotonic ids then cleans up', async () => {
+    const target1 = document.createElement('div');
+    target1.className = 'card';
+    target1.getBoundingClientRect = () => makeBox(320, 180);
+    const target2 = document.createElement('button');
+    target2.className = 'action';
+    target2.getBoundingClientRect = () => makeBox(120, 40);
+    document.body.append(target1, target2);
 
-    const elementBlob = new Blob(['el-png'], { type: 'image/png' });
+    const el1Blob = new Blob(['el1-png'], { type: 'image/png' });
+    const el2Blob = new Blob(['el2-png'], { type: 'image/png' });
     const pageBlob = new Blob(['page-png'], { type: 'image/png' });
     const calls: Array<{ el: Element; options: SnapdomCaptureOptions | undefined; stylePresent: boolean; styleText: string }> = [];
 
@@ -75,38 +79,59 @@ describe('capture', () => {
         stylePresent: styleEl !== null,
         styleText: styleEl?.textContent ?? '',
       });
-      const isPage = el === document.documentElement;
+      if (el === document.documentElement) {
+        return {
+          meta: { w0: 1280, h0: 720, targetW: 1280, targetH: 720 },
+          toBlob: async () => pageBlob,
+        };
+      }
+      if (el === target2) {
+        return {
+          meta: { w0: 120, h0: 40, targetW: 120, targetH: 40 },
+          toBlob: async () => el2Blob,
+        };
+      }
       return {
-        meta: isPage
-          ? { w0: 1280, h0: 720, targetW: 1280, targetH: 720 }
-          : { w0: 320, h0: 180, targetW: 320, targetH: 180 },
-        toBlob: async () => (isPage ? pageBlob : elementBlob),
+        meta: { w0: 320, h0: 180, targetW: 320, targetH: 180 },
+        toBlob: async () => el1Blob,
       };
     });
 
     const result = await captureFeedbackArtifacts(
-      { element: target, capturePage: true, maskMode: MaskMode.Masked },
+      {
+        elements: [
+          { id: 1, el: target1 },
+          { id: 2, el: target2 },
+        ],
+        capturePage: true,
+        maskMode: MaskMode.Masked,
+        nextCaptureId: 10,
+      },
       { loadSnapdom: async () => snapdomMock, waitForPaint: async () => {} },
     );
 
     expect(document.querySelector('style[data-feedback-widget="mask-style"]')).toBeNull();
     expect(result.errors).toEqual([]);
     expect(result.captures).toEqual([
-      { kind: CaptureKind.Element, blob: elementBlob, width: 320, height: 180, maskMode: MaskMode.Masked },
-      { kind: CaptureKind.Page, blob: pageBlob, width: 1280, height: 720, maskMode: MaskMode.Masked },
+      { id: 10, kind: CaptureKind.Element, elementId: 1, blob: el1Blob, width: 320, height: 180, maskMode: MaskMode.Masked },
+      { id: 11, kind: CaptureKind.Element, elementId: 2, blob: el2Blob, width: 120, height: 40, maskMode: MaskMode.Masked },
+      { id: 12, kind: CaptureKind.Page, elementId: null, blob: pageBlob, width: 1280, height: 720, maskMode: MaskMode.Masked },
     ]);
 
-    expect(calls).toHaveLength(2);
-    expect(calls[0].el).toBe(target);
+    expect(calls).toHaveLength(3);
+    expect(calls[0].el).toBe(target1);
     expect(calls[0].stylePresent).toBe(true);
     expect(calls[0].styleText).toContain('[data-turn]');
     expect(calls[0].options?.exclude).toEqual([...FEEDBACK_EXCLUDE_SELECTORS]);
     expect(calls[0].options?.clip).toBeUndefined();
 
-    expect(calls[1].el).toBe(document.documentElement);
-    expect(calls[1].stylePresent).toBe(true);
-    expect(calls[1].options?.exclude).toEqual([...FEEDBACK_EXCLUDE_SELECTORS]);
-    expect(calls[1].options?.clip).toBe('viewport');
+    expect(calls[1].el).toBe(target2);
+    expect(calls[1].options?.clip).toBeUndefined();
+
+    expect(calls[2].el).toBe(document.documentElement);
+    expect(calls[2].stylePresent).toBe(true);
+    expect(calls[2].options?.exclude).toEqual([...FEEDBACK_EXCLUDE_SELECTORS]);
+    expect(calls[2].options?.clip).toBe('viewport');
   });
 
   it('mask-style-removed-even-on-capture-throw', async () => {
@@ -119,7 +144,7 @@ describe('capture', () => {
     });
 
     const loadFailure = await captureFeedbackArtifacts(
-      { element: target, capturePage: false, maskMode: MaskMode.Masked },
+      { elements: [{ id: 1, el: target }], capturePage: false, maskMode: MaskMode.Masked },
       { loadSnapdom: loadRejecting, waitForPaint: async () => {} },
     );
 
@@ -144,13 +169,13 @@ describe('capture', () => {
     });
 
     const result = await captureFeedbackArtifacts(
-      { element: target, capturePage: true, maskMode: MaskMode.Unmasked },
+      { elements: [{ id: 1, el: target }], capturePage: true, maskMode: MaskMode.Unmasked },
       { loadSnapdom: async () => snapdomMock, waitForPaint: async () => {} },
     );
 
     expect(document.querySelector('style[data-feedback-widget="mask-style"]')).toBeNull();
     expect(result.captures).toEqual([
-      { kind: CaptureKind.Page, blob: pageBlob, width: 1024, height: 768, maskMode: MaskMode.Unmasked },
+      { id: 1, kind: CaptureKind.Page, elementId: null, blob: pageBlob, width: 1024, height: 768, maskMode: MaskMode.Unmasked },
     ]);
     expect(result.errors).toEqual(['Element capture failed: element tainted']);
   });

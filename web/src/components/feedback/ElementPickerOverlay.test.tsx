@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { PickerDirection, type ElementPickerAdapter, type PickedElementInfo } from '@/lib/feedback/types';
+import { PickerDirection, type ElementPickerAdapter, type PickedElementDraft } from '@/lib/feedback/types';
 import { ElementPickerOverlay } from './ElementPickerOverlay';
 
 interface FakeAdapterHarness {
@@ -32,7 +32,7 @@ function createFakeAdapter(options?: {
   });
   const labelForMock = vi.fn((el: Element) => `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ''}`);
   const sectionOfMock = vi.fn((el: Element) => el.closest('section')?.getAttribute('aria-label') ?? '');
-  const describeMock = vi.fn((el: Element): PickedElementInfo => {
+  const describeMock = vi.fn((el: Element): PickedElementDraft => {
     const r = el.getBoundingClientRect();
     return {
       selector: el.id ? `#${el.id}` : el.tagName.toLowerCase(),

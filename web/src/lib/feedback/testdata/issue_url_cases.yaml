@@ -4,7 +4,7 @@ cases:
       kind: problem
       title: "Button clipped on narrow viewport"
       description: "The submit button clips at 390px."
-      element: null
+      elements: []
       context:
         route: "/sessions/abc"
         viewport: { width: 390, height: 844 }
@@ -30,7 +30,7 @@ cases:
       kind: feature
       title: "Add keyboard shortcut hint"
       description: "Show shortcut tooltip on hover."
-      element: null
+      elements: []
       context:
         route: "/"
         viewport: { width: 1440, height: 900 }
@@ -53,12 +53,19 @@ cases:
       kind: problem
       title: "Nav icon misaligned"
       description: "Settings gear shifts 2px down."
-      element:
-        selector: "aside.asb > button[aria-label='settings']"
-        label: "button settings"
-        section: "sidebar"
-        textSnippet: "settings"
-        box: { top: 820, left: 12, width: 36, height: 36 }
+      elements:
+        - id: 1
+          selector: "aside.asb > button[aria-label='settings']"
+          label: "button settings"
+          section: "sidebar"
+          textSnippet: "settings"
+          box: { top: 820, left: 12, width: 36, height: 36 }
+        - id: 2
+          selector: "main > div.toolbar"
+          label: "div.toolbar"
+          section: "main"
+          textSnippet: "filters"
+          box: { top: 40, left: 240, width: 480, height: 40 }
       context:
         route: "/settings"
         viewport: { width: 1280, height: 800 }
@@ -73,11 +80,17 @@ cases:
         title: "Nav icon misaligned"
         description: "Settings gear shifts 2px down."
       elementContains:
-        - "label: button settings"
+        - "element 1 (image 1): button settings"
         - "section: sidebar"
         - "selector: aside.asb > button[aria-label='settings']"
         - "36x36"
         - "text: settings"
+        - "element 2 (image 2): div.toolbar"
+        - "selector: main > div.toolbar"
+      bodyContains:
+        - "### Picked elements"
+        - "element 1 (image 1): button settings"
+        - "element 2 (image 2): div.toolbar"
       environmentContains:
         - "route: /settings"
         - "viewport: 1280x800"
@@ -90,7 +103,7 @@ cases:
       kind: problem
       title: "Scroll jumps on load"
       description: "Opening transcript jumps to bottom."
-      element: null
+      elements: []
       context:
         route: "/sessions/xyz"
         viewport: { width: 1440, height: 900 }
@@ -107,12 +120,13 @@ cases:
       kind: feature
       title: "Export transcript summary"
       description: "Allow copying markdown summary."
-      element:
-        selector: "main > header"
-        label: "session header"
-        section: "main"
-        textSnippet: "session-1"
-        box: { top: 0, left: 200, width: 1000, height: 64 }
+      elements:
+        - id: 1
+          selector: "main > header"
+          label: "session header"
+          section: "main"
+          textSnippet: "session-1"
+          box: { top: 0, left: 200, width: 1000, height: 64 }
       context:
         route: "/sessions/1"
         viewport: { width: 1440, height: 900 }
@@ -129,12 +143,13 @@ cases:
       kind: problem
       title: "Description missing in fallback"
       description: "Writing details here must appear in the fallback body."
-      element:
-        selector: "main > button.submit"
-        label: "button.submit"
-        section: "Composer"
-        textSnippet: "Submit"
-        box: { top: 40, left: 80, width: 110, height: 36 }
+      elements:
+        - id: 1
+          selector: "main > button.submit"
+          label: "button.submit"
+          section: "Composer"
+          textSnippet: "Submit"
+          box: { top: 40, left: 80, width: 110, height: 36 }
       context:
         route: "/sessions/42"
         viewport: { width: 1280, height: 800 }
@@ -150,6 +165,7 @@ cases:
         - "Writing details here must appear in the fallback body."
         - "### Picked elements"
         - "```text"
+        - "element 1 (image 1): button.submit"
         - "selector: main > button.submit"
         - "### Screenshots"
         - "Paste the copied images here."
@@ -163,12 +179,13 @@ cases:
       title: "Huge description"
       description: ""
       descriptionRepeat: { unit: "a", count: 12000 }
-      element:
-        selector: "main > div.card"
-        label: "session card"
-        section: "home"
-        textSnippet: "Session title"
-        box: { top: 100, left: 260, width: 400, height: 120 }
+      elements:
+        - id: 1
+          selector: "main > div.card"
+          label: "session card"
+          section: "home"
+          textSnippet: "Session title"
+          box: { top: 100, left: 260, width: 400, height: 120 }
       context:
         route: "/"
         viewport: { width: 1440, height: 900 }
@@ -181,6 +198,7 @@ cases:
       maxUrlLength: 7500
       descriptionEndsWith: "… [truncated]"
       elementContains:
+        - "element 1 (image 1): session card"
         - "selector: main > div.card"
         - "text: Session title"
       environmentContains:
@@ -195,7 +213,7 @@ cases:
       kind: feature
       title: "   "
       description: "Need compact view toggle."
-      element: null
+      elements: []
       context:
         route: "/"
         viewport: { width: 1280, height: 720 }
@@ -208,18 +226,31 @@ cases:
       params:
         title: "request a feature"
 
-  - name: truncates-element-when-description-and-element-exceed-cap
-    maxLength: 850
+  - name: drops-trailing-elements-when-description-and-elements-exceed-cap
+    maxLength: 1200
     input:
       kind: problem
       title: "Overflow"
-      description: "This description is long enough that even after shrinking, the element block also has to be shrunk to fit."
-      element:
-        selector: "div.very-deep-container > ul > li:nth-child(42) > button.action-trigger"
-        label: "button action trigger"
-        section: "transcript"
-        textSnippet: "A long snippet of visible UI text inside the selected element that exceeds the tight URL cap."
-        box: { top: 200, left: 300, width: 120, height: 40 }
+      description: "This description is long enough that even after shrinking, trailing element blocks must be dropped to fit."
+      elements:
+        - id: 1
+          selector: "main > button.first"
+          label: "button.first"
+          section: "toolbar"
+          textSnippet: "First element fits under the cap."
+          box: { top: 20, left: 30, width: 100, height: 32 }
+        - id: 2
+          selector: "div.very-deep-container > ul > li:nth-child(42) > button.action-trigger"
+          label: "button.second"
+          section: "transcript"
+          textSnippet: "Second element gets dropped when the tight URL cap is reached."
+          box: { top: 200, left: 300, width: 120, height: 40 }
+        - id: 3
+          selector: "div.very-deep-container > ul > li:nth-child(43) > button.action-other"
+          label: "button.third"
+          section: "transcript"
+          textSnippet: "Third element also gets dropped when the tight URL cap is reached."
+          box: { top: 260, left: 300, width: 120, height: 40 }
       context:
         route: "/s"
         viewport: { width: 800, height: 600 }
@@ -229,9 +260,17 @@ cases:
     expect:
       template: "in-app-problem.yml"
       truncated: true
-      maxUrlLength: 850
+      maxUrlLength: 1200
       descriptionEndsWith: "… [truncated]"
-      elementEndsWith: "… [truncated]"
+      elementContains:
+        - "element 1 (image 1): button.first"
+        - "2 more elements omitted"
+      elementExcludes:
+        - "button.second"
+        - "button.third"
+      bodyContains:
+        - "element 1 (image 1): button.first"
+        - "2 more elements omitted"
       environmentContains:
         - "route: /s"
         - "viewport: 800x600"
@@ -244,7 +283,7 @@ cases:
       kind: problem
       title: "Route leak check"
       description: "Check route sanitization."
-      element: null
+      elements: []
       context:
         route: "/sessions/abc?secret=token#frag"
         viewport: { width: 1024, height: 768 }

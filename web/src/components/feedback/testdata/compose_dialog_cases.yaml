@@ -63,3 +63,23 @@ submittedOutcomeCases:
       expectedLabel: "the image could not be copied or downloaded"
       submittedUrl: "https://github.com/peasant-labs/peasant/issues/new?template=in-app-problem.yml"
       hasCapture: true
+
+pickLimitCases:
+  requiredNames:
+    - zero-elements-shows-pick-an-element
+    - below-limit-allows-another-pick
+    - pick-limit-reached
+  cases:
+    - name: zero-elements-shows-pick-an-element
+      pickedCount: 0
+      expectedLabel: "pick an element"
+      expectedDisabled: false
+    - name: below-limit-allows-another-pick
+      pickedCount: 2
+      expectedLabel: "pick another element"
+      expectedDisabled: false
+    - name: pick-limit-reached
+      pickedCount: 5
+      expectedLabel: "pick another element"
+      expectedDisabled: true
+      expectedReason: "maximum 5 elements reached"

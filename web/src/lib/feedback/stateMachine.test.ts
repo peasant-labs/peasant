@@ -12,10 +12,11 @@ import {
   FeedbackKind,
   FeedbackStep,
   MaskMode,
+  PendingCaptureKind,
   type CaptureArtifact,
   type FeedbackEvent,
   type FeedbackState,
-  type PickedElementInfo,
+  type PickedElementDraft,
 } from '@/lib/feedback/types';
 import {
   canSubmitFeedback,
@@ -41,9 +42,14 @@ const REQUIRED_CASES = [
   'unmask-triggers-recapture',
   'change-kind-preserves-draft',
   'close-resets-state',
+  'remove-element-capture-removes-element',
+  'append-second-pick',
+  'merge-keeps-existing-captures',
+  'mask-change-recaptures-all',
+  'pick-limit-reached',
 ] as const;
 
-const SAMPLE_ELEMENT: PickedElementInfo = {
+const SAMPLE_ELEMENT: PickedElementDraft = {
   selector: 'main > button.primary',
   label: 'button submit',
   section: 'main',
@@ -66,9 +72,25 @@ function findByWire<T extends { readonly wire: string }>(
   return found;
 }
 
-function makeCapture(kind: CaptureKind, maskMode: MaskMode = MaskMode.Masked): CaptureArtifact {
+function makeCapture(
+  raw: unknown,
+  path: string,
+  maskMode: MaskMode,
+  nextId: number,
+): CaptureArtifact {
+  const row = requireRecord(raw, path);
+  requireExactFields(row, ['kind', 'elementId'], path);
+  const kind = findByWire(ALL_CAPTURE_KINDS, row.kind, `${path}.kind`);
+  const elementId =
+    kind === CaptureKind.Page
+      ? null
+      : typeof row.elementId === 'number'
+        ? row.elementId
+        : 1;
   return {
+    id: nextId,
     kind,
+    elementId,
     blob: new Blob(['png'], { type: 'image/png' }),
     width: 100,
     height: 80,
@@ -76,7 +98,7 @@ function makeCapture(kind: CaptureKind, maskMode: MaskMode = MaskMode.Masked): C
   };
 }
 
-function parseEvent(raw: unknown, path: string, maskMode: MaskMode): FeedbackEvent {
+function parseEvent(raw: unknown, path: string, state: FeedbackState): FeedbackEvent {
   const row = requireRecord(raw, path);
   if (typeof row.type !== 'string') {
     throw new Error(`${path}.type must be a string`);
@@ -121,8 +143,9 @@ function parseEvent(raw: unknown, path: string, maskMode: MaskMode): FeedbackEve
     case FeedbackEventType.CaptureSucceeded: {
       requireExactRequiredFields(row, ['type', 'captures'], path);
       if (!Array.isArray(row.captures)) throw new Error(`${path}.captures must be an array`);
+      let nextId = state.nextCaptureId;
       const captures = row.captures.map((item, idx) =>
-        makeCapture(findByWire(ALL_CAPTURE_KINDS, item, `${path}.captures[${idx}]`), maskMode),
+        makeCapture(item, `${path}.captures[${idx}]`, state.maskMode, nextId++),
       );
       return { type: FeedbackEventType.CaptureSucceeded, captures };
     }
@@ -132,17 +155,19 @@ function parseEvent(raw: unknown, path: string, maskMode: MaskMode): FeedbackEve
       let partialCaptures: CaptureArtifact[] | undefined;
       if (row.partialCaptures !== undefined) {
         if (!Array.isArray(row.partialCaptures)) throw new Error(`${path}.partialCaptures must be an array`);
+        let nextId = state.nextCaptureId;
         partialCaptures = row.partialCaptures.map((item, idx) =>
-          makeCapture(findByWire(ALL_CAPTURE_KINDS, item, `${path}.partialCaptures[${idx}]`), maskMode),
+          makeCapture(item, `${path}.partialCaptures[${idx}]`, state.maskMode, nextId++),
         );
       }
       return { type: FeedbackEventType.CaptureFailed, error: row.error, partialCaptures };
     }
     case FeedbackEventType.RemoveCapture:
-      requireExactRequiredFields(row, ['type', 'kind'], path);
+      requireExactRequiredFields(row, ['type', 'id'], path);
+      if (typeof row.id !== 'number') throw new Error(`${path}.id must be a number`);
       return {
         type: FeedbackEventType.RemoveCapture,
-        kind: findByWire(ALL_CAPTURE_KINDS, row.kind, `${path}.kind`),
+        id: row.id,
       };
     case FeedbackEventType.SetMaskMode:
       requireExactRequiredFields(row, ['type', 'maskMode'], path);
@@ -178,9 +203,13 @@ interface StateAssertion {
   readonly kind?: FeedbackKind;
   readonly attachElement?: boolean;
   readonly attachPage?: boolean;
-  readonly pickedElement?: null;
+  readonly pickedElementsCount?: number;
+  readonly pickedElementIds?: readonly number[];
+  readonly pendingCaptureKind?: PendingCaptureKind;
+  readonly pendingElementId?: number;
   readonly maskMode?: MaskMode;
   readonly captures?: readonly CaptureKind[];
+  readonly captureElementIds?: readonly (number | null)[];
   readonly captureError?: string | null;
   readonly title?: string;
   readonly description?: string;
@@ -197,9 +226,13 @@ function parseExpectation(raw: unknown, path: string): StateAssertion {
       'kind',
       'attachElement',
       'attachPage',
-      'pickedElement',
+      'pickedElementsCount',
+      'pickedElementIds',
+      'pendingCaptureKind',
+      'pendingElementId',
       'maskMode',
       'captures',
+      'captureElementIds',
       'captureError',
       'title',
       'description',
@@ -213,14 +246,45 @@ function parseExpectation(raw: unknown, path: string): StateAssertion {
     if (!Array.isArray(row.captures)) throw new Error(`${path}.captures must be an array`);
     captures = row.captures.map((item, idx) => findByWire(ALL_CAPTURE_KINDS, item, `${path}.captures[${idx}]`));
   }
+  let pickedElementIds: number[] | undefined;
+  if (row.pickedElementIds !== undefined) {
+    if (!Array.isArray(row.pickedElementIds) || row.pickedElementIds.some((n) => typeof n !== 'number')) {
+      throw new Error(`${path}.pickedElementIds must be a number array`);
+    }
+    pickedElementIds = row.pickedElementIds as number[];
+  }
+  let captureElementIds: (number | null)[] | undefined;
+  if (row.captureElementIds !== undefined) {
+    if (
+      !Array.isArray(row.captureElementIds) ||
+      row.captureElementIds.some((n) => n !== null && typeof n !== 'number')
+    ) {
+      throw new Error(`${path}.captureElementIds must be a (number | null) array`);
+    }
+    captureElementIds = row.captureElementIds as (number | null)[];
+  }
+  let pendingCaptureKind: PendingCaptureKind | undefined;
+  if (row.pendingCaptureKind !== undefined) {
+    if (
+      row.pendingCaptureKind !== PendingCaptureKind.Element &&
+      row.pendingCaptureKind !== PendingCaptureKind.All
+    ) {
+      throw new Error(`${path}.pendingCaptureKind is invalid`);
+    }
+    pendingCaptureKind = row.pendingCaptureKind;
+  }
   return {
     step: typeof row.step === 'string' ? row.step : undefined,
     kind: row.kind !== undefined ? findByWire(ALL_FEEDBACK_KINDS, row.kind, `${path}.kind`) : undefined,
     attachElement: typeof row.attachElement === 'boolean' ? row.attachElement : undefined,
     attachPage: typeof row.attachPage === 'boolean' ? row.attachPage : undefined,
-    pickedElement: row.pickedElement === null ? null : undefined,
+    pickedElementsCount: typeof row.pickedElementsCount === 'number' ? row.pickedElementsCount : undefined,
+    pickedElementIds,
+    pendingCaptureKind,
+    pendingElementId: typeof row.pendingElementId === 'number' ? row.pendingElementId : undefined,
     maskMode: row.maskMode !== undefined ? findByWire(ALL_MASK_MODES, row.maskMode, `${path}.maskMode`) : undefined,
     captures,
+    captureElementIds,
     captureError: row.captureError === null || typeof row.captureError === 'string' ? row.captureError : undefined,
     title: typeof row.title === 'string' ? row.title : undefined,
     description: typeof row.description === 'string' ? row.description : undefined,
@@ -275,10 +339,28 @@ function assertStateMatches(state: FeedbackState, expected: StateAssertion) {
   if (expected.kind !== undefined) expect(state.kind).toBe(expected.kind);
   if (expected.attachElement !== undefined) expect(state.attachElement).toBe(expected.attachElement);
   if (expected.attachPage !== undefined) expect(state.attachPage).toBe(expected.attachPage);
-  if (expected.pickedElement === null) expect(state.pickedElement).toBeNull();
+  if (expected.pickedElementsCount !== undefined) {
+    expect(state.pickedElements).toHaveLength(expected.pickedElementsCount);
+  }
+  if (expected.pickedElementIds !== undefined) {
+    expect(state.pickedElements.map((el) => el.id)).toEqual(expected.pickedElementIds);
+  }
+  if (expected.pendingCaptureKind !== undefined) {
+    expect(state.pendingCapture?.kind).toBe(expected.pendingCaptureKind);
+  }
+  if (expected.pendingElementId !== undefined) {
+    expect(state.pendingCapture).toEqual({
+      kind: PendingCaptureKind.Element,
+      elementId: expected.pendingElementId,
+      includePage: state.attachPage && !state.captures.some((c) => c.kind === CaptureKind.Page),
+    });
+  }
   if (expected.maskMode !== undefined) expect(state.maskMode).toBe(expected.maskMode);
   if (expected.captures !== undefined) {
     expect(state.captures.map((c) => c.kind)).toEqual(expected.captures);
+  }
+  if (expected.captureElementIds !== undefined) {
+    expect(state.captures.map((c) => c.elementId)).toEqual(expected.captureElementIds);
   }
   if (expected.captureError !== undefined) expect(state.captureError).toBe(expected.captureError);
   if (expected.title !== undefined) expect(state.title).toBe(expected.title);
@@ -293,7 +375,7 @@ describe('feedback stateMachine', () => {
   it.each(fixtureCases.map((c) => [c.name, c.steps] as const))('%s', (_name, steps) => {
     let state = createInitialFeedbackState();
     for (const step of steps) {
-      const event = parseEvent(step.rawEvent, `${step.stepPath}.event`, state.maskMode);
+      const event = parseEvent(step.rawEvent, `${step.stepPath}.event`, state);
       const next = feedbackReducer(state, event);
       if (step.sameState) {
         expect(next).toBe(state);

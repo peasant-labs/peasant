@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import {
   parseStrictYAML,
+  requireExactFields,
   requireExactRequiredFields,
   requireRecord,
   requireUniqueNames,
@@ -45,6 +46,14 @@ interface SubmittedOutcomeCase {
   hasCapture: boolean;
 }
 
+interface PickLimitCase {
+  name: string;
+  pickedCount: number;
+  expectedLabel: string;
+  expectedDisabled: boolean;
+  expectedReason?: string;
+}
+
 function assertRequiredInventory(
   section: Record<string, unknown>,
   label: string,
@@ -78,7 +87,11 @@ function assertRequiredInventory(
 function loadFixture() {
   const path = resolve(process.cwd(), 'src/components/feedback/testdata/compose_dialog_cases.yaml');
   const root = requireRecord(parseStrictYAML(readFileSync(path, 'utf8'), 'compose dialog fixture'), 'compose dialog fixture');
-  requireExactRequiredFields(root, ['submitCases', 'kindCases', 'submittedOutcomeCases'], 'compose dialog fixture');
+  requireExactRequiredFields(
+    root,
+    ['submitCases', 'kindCases', 'submittedOutcomeCases', 'pickLimitCases'],
+    'compose dialog fixture',
+  );
 
   const submitRows = assertRequiredInventory(requireRecord(root.submitCases, 'submitCases'), 'submitCases');
   const submitCases: SubmitCase[] = submitRows.map((row, idx) => {
@@ -142,7 +155,33 @@ function loadFixture() {
     };
   });
 
-  return { submitCases, kindCases, submittedOutcomeCases };
+  const pickLimitRows = assertRequiredInventory(
+    requireRecord(root.pickLimitCases, 'pickLimitCases'),
+    'pickLimitCases',
+  );
+  const pickLimitCases: PickLimitCase[] = pickLimitRows.map((row, idx) => {
+    requireExactFields(
+      row,
+      ['name', 'pickedCount', 'expectedLabel', 'expectedDisabled', 'expectedReason'],
+      `pickLimitCases[${idx}]`,
+    );
+    if (
+      typeof row.pickedCount !== 'number' ||
+      typeof row.expectedLabel !== 'string' ||
+      typeof row.expectedDisabled !== 'boolean'
+    ) {
+      throw new Error(`pickLimitCases[${idx}] has invalid field types`);
+    }
+    return {
+      name: row.name as string,
+      pickedCount: row.pickedCount,
+      expectedLabel: row.expectedLabel,
+      expectedDisabled: row.expectedDisabled,
+      expectedReason: typeof row.expectedReason === 'string' ? row.expectedReason : undefined,
+    };
+  });
+
+  return { submitCases, kindCases, submittedOutcomeCases, pickLimitCases };
 }
 
 const FIXTURE = loadFixture();
@@ -155,17 +194,27 @@ const SAMPLE_CONTEXT: FeedbackContextInfo = {
   userAgent: 'Mozilla/5.0 TestBrowser',
 };
 
-const SAMPLE_ELEMENT: PickedElementInfo = {
-  selector: 'button.primary-action',
-  label: 'button.primary-action',
-  section: 'Toolbar',
-  textSnippet: 'publish transcript',
-  box: { top: 10, left: 20, width: 140, height: 36 },
-};
-
-function makeCapture(kind: CaptureKind = CaptureKind.Element, maskMode: MaskMode = MaskMode.Masked): CaptureArtifact {
+function makeElement(id: number): PickedElementInfo {
   return {
+    id,
+    selector: `button.primary-action-${id}`,
+    label: `button.primary-action-${id}`,
+    section: 'Toolbar',
+    textSnippet: `publish transcript ${id}`,
+    box: { top: 10 * id, left: 20, width: 140, height: 36 },
+  };
+}
+
+function makeCapture(
+  id = 1,
+  kind: CaptureKind = CaptureKind.Element,
+  elementId: number | null = kind === CaptureKind.Element ? 1 : null,
+  maskMode: MaskMode = MaskMode.Masked,
+): CaptureArtifact {
+  return {
+    id,
     kind,
+    elementId,
     blob: new Blob(['png-bytes'], { type: 'image/png' }),
     width: 320,
     height: 180,
@@ -179,7 +228,11 @@ function makeState(overrides: Partial<FeedbackState> = {}): FeedbackState {
     kind: FeedbackKind.Problem,
     attachElement: false,
     attachPage: false,
-    pickedElement: null,
+    pickedElements: [],
+    nextElementId: 1,
+    nextCaptureId: 1,
+    pendingCapture: null,
+    pickReturnStep: FeedbackStep.AttachOptions,
     maskMode: MaskMode.Masked,
     captures: [],
     captureError: null,
@@ -267,7 +320,7 @@ describe('ComposeFeedbackDialog', () => {
 
   describe('submitted state', () => {
     it.each(FIXTURE.submittedOutcomeCases)('$name', (c) => {
-      const captures = c.hasCapture ? [makeCapture(CaptureKind.Element)] : [];
+      const captures = c.hasCapture ? [makeCapture(1, CaptureKind.Element, 1)] : [];
       const props = makeProps({
         state: makeState({
           step: FeedbackStep.Submitted,
@@ -285,12 +338,12 @@ describe('ComposeFeedbackDialog', () => {
       expect(fallbackLink).toHaveAttribute('href', c.submittedUrl);
 
       if (c.hasCapture) {
-        const copyBtn = screen.getByRole('button', { name: /copy image/i });
-        const downloadBtn = screen.getByRole('button', { name: /download/i });
+        const copyBtn = screen.getByRole('button', { name: /copy image 1/i });
+        const downloadBtn = screen.getByRole('button', { name: /download image 1/i });
         fireEvent.click(copyBtn);
         fireEvent.click(downloadBtn);
-        expect(props.onCopyCapture).toHaveBeenCalledWith(CaptureKind.Element);
-        expect(props.onDownloadCapture).toHaveBeenCalledWith(CaptureKind.Element);
+        expect(props.onCopyCapture).toHaveBeenCalledWith(1);
+        expect(props.onDownloadCapture).toHaveBeenCalledWith(1);
       } else {
         expect(screen.queryByRole('button', { name: /copy image/i })).toBeNull();
         expect(screen.queryByRole('button', { name: /download/i })).toBeNull();
@@ -301,11 +354,31 @@ describe('ComposeFeedbackDialog', () => {
     });
   });
 
+  describe('pick limit gating', () => {
+    it.each(FIXTURE.pickLimitCases)('$name', (c) => {
+      const pickedElements = Array.from({ length: c.pickedCount }, (_, i) => makeElement(i + 1));
+      const props = makeProps({
+        state: makeState({ pickedElements }),
+      });
+      render(<ComposeFeedbackDialog {...props} />);
+
+      const button = screen.getByRole('button', { name: c.expectedLabel });
+      if (c.expectedDisabled) {
+        expect(button).toBeDisabled();
+        expect(screen.getByText(c.expectedReason!)).toBeInTheDocument();
+      } else {
+        expect(button).toBeEnabled();
+        fireEvent.click(button);
+        expect(props.onReopenPicker).toHaveBeenCalledTimes(1);
+      }
+    });
+  });
+
   it('unmask-requires-warning-confirmation', () => {
     const props = makeProps({
       state: makeState({
         maskMode: MaskMode.Masked,
-        captures: [makeCapture(CaptureKind.Element, MaskMode.Masked)],
+        captures: [makeCapture(1, CaptureKind.Element, 1, MaskMode.Masked)],
       }),
     });
     const { rerender } = render(<ComposeFeedbackDialog {...props} />);
@@ -336,7 +409,7 @@ describe('ComposeFeedbackDialog', () => {
           ...props,
           state: makeState({
             maskMode: MaskMode.Unmasked,
-            captures: [makeCapture(CaptureKind.Element, MaskMode.Unmasked)],
+            captures: [makeCapture(2, CaptureKind.Element, 1, MaskMode.Unmasked)],
           }),
         })}
       />,
@@ -345,9 +418,9 @@ describe('ComposeFeedbackDialog', () => {
     expect(props.onRemask).toHaveBeenCalledTimes(1);
   });
 
-  it('creates preview object URLs and revokes them on capture change and unmount', () => {
-    const firstCapture = makeCapture(CaptureKind.Element);
-    const secondCapture = makeCapture(CaptureKind.Page);
+  it('creates preview object URLs, numbers captures, and revokes URLs on capture change and unmount', () => {
+    const firstCapture = makeCapture(10, CaptureKind.Element, 1);
+    const secondCapture = makeCapture(11, CaptureKind.Page, null);
     const props = makeProps({
       state: makeState({ captures: [firstCapture] }),
     });
@@ -355,12 +428,13 @@ describe('ComposeFeedbackDialog', () => {
     const { rerender, unmount } = render(<ComposeFeedbackDialog {...props} />);
     expect(createObjectURLSpy).toHaveBeenCalledTimes(1);
     expect(createObjectURLSpy).toHaveBeenCalledWith(firstCapture.blob);
-    const img = screen.getByRole('img', { name: /picked element capture/i });
+    const img = screen.getByRole('img', { name: /image 1: picked element capture/i });
     expect(img).toHaveAttribute('src', 'blob:test-capture-1');
+    expect(screen.getByText('image 1')).toBeInTheDocument();
     expect(revokeObjectURLSpy).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: /remove picked element capture/i }));
-    expect(props.onRemoveCapture).toHaveBeenCalledWith(CaptureKind.Element);
+    fireEvent.click(screen.getByRole('button', { name: /remove picked element capture \(image 1\)/i }));
+    expect(props.onRemoveCapture).toHaveBeenCalledWith(10);
 
     rerender(
       <ComposeFeedbackDialog
@@ -372,18 +446,20 @@ describe('ComposeFeedbackDialog', () => {
     );
     expect(revokeObjectURLSpy).toHaveBeenCalledWith('blob:test-capture-1');
     expect(createObjectURLSpy).toHaveBeenCalledTimes(2);
-    expect(screen.getByRole('img', { name: /whole page capture/i })).toHaveAttribute('src', 'blob:test-capture-2');
+    expect(screen.getByRole('img', { name: /image 1: whole page capture/i })).toHaveAttribute('src', 'blob:test-capture-2');
 
     unmount();
     expect(revokeObjectURLSpy).toHaveBeenCalledWith('blob:test-capture-2');
   });
 
-  it('renders exact auto-attached context, notices, draft updates, picker reopen, and back action', () => {
+  it('renders exact auto-attached context for multiple elements, notices, draft updates, picker reopen, and back action', () => {
+    const el1 = makeElement(1);
+    const el2 = makeElement(2);
     const props = makeProps({
       state: makeState({
         title: 'Initial title',
         description: 'Initial body',
-        pickedElement: SAMPLE_ELEMENT,
+        pickedElements: [el1, el2],
         captureError: 'SnapDOM timed out for page capture',
       }),
       truncated: true,
@@ -392,9 +468,10 @@ describe('ComposeFeedbackDialog', () => {
     render(<ComposeFeedbackDialog {...props} />);
 
     expect(screen.getByText(SAMPLE_CONTEXT.route)).toBeInTheDocument();
-    expect(screen.getByText(SAMPLE_ELEMENT.selector)).toBeInTheDocument();
-    expect(screen.getByText(SAMPLE_ELEMENT.section)).toBeInTheDocument();
-    expect(screen.getByText(SAMPLE_ELEMENT.textSnippet)).toBeInTheDocument();
+    expect(screen.getByText(`element 1 (image 1): ${el1.label}`)).toBeInTheDocument();
+    expect(screen.getByText(el1.selector)).toBeInTheDocument();
+    expect(screen.getByText(`element 2 (image 2): ${el2.label}`)).toBeInTheDocument();
+    expect(screen.getByText(el2.selector)).toBeInTheDocument();
     expect(screen.getByText(`${SAMPLE_CONTEXT.viewport.width}×${SAMPLE_CONTEXT.viewport.height}`)).toBeInTheDocument();
     expect(screen.getByText(SAMPLE_CONTEXT.theme)).toBeInTheDocument();
     expect(screen.getByText(SAMPLE_CONTEXT.appVersion)).toBeInTheDocument();
@@ -408,7 +485,7 @@ describe('ComposeFeedbackDialog', () => {
     fireEvent.change(screen.getByLabelText('description (required)'), { target: { value: 'Updated body' } });
     expect(props.onUpdateDraft).toHaveBeenCalledWith({ description: 'Updated body' });
 
-    fireEvent.click(screen.getByRole('button', { name: 'pick an element' }));
+    fireEvent.click(screen.getByRole('button', { name: 'pick another element' }));
     expect(props.onReopenPicker).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole('button', { name: 'back' }));

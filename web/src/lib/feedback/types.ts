@@ -8,14 +8,16 @@
  * single list tests and pickers walk; the `Missing*` checks fail to compile when
  * a member is added without it.
  *
- * `FeedbackStep` and `FeedbackEventType` are plain literal discriminants: they
- * drive the reducer's switch narrowing and are never shown or sent.
+ * `FeedbackStep`, `FeedbackEventType`, and `PendingCaptureKind` are plain literal
+ * discriminants: they drive narrowing and are never shown or sent.
  *
  * This module imports nothing from peasant, so it can move to fairtrade when the
  * widget is lifted for village.
  */
 
 import { closed } from '@peasant-labs/fairtrade/closed-value';
+
+export const MAX_PICKED_ELEMENTS = 5;
 
 // -- Closed sets -------------------------------------------------------------
 
@@ -125,6 +127,18 @@ export const FeedbackStep = {
 } as const;
 export type FeedbackStep = (typeof FeedbackStep)[keyof typeof FeedbackStep];
 
+export const PendingCaptureKind = {
+  Element: 'element',
+  All: 'all',
+} as const;
+export type PendingCaptureKind = (typeof PendingCaptureKind)[keyof typeof PendingCaptureKind];
+
+export type PendingCapture =
+  | { readonly kind: typeof PendingCaptureKind.Element; readonly elementId: number; readonly includePage: boolean }
+  | { readonly kind: typeof PendingCaptureKind.All };
+
+export type PickReturnStep = typeof FeedbackStep.AttachOptions | typeof FeedbackStep.Compose;
+
 export const FeedbackEventType = {
   OpenMenu: 'open_menu',
   CloseAll: 'close_all',
@@ -169,6 +183,7 @@ export interface LegacyDomTarget {
 }
 
 export interface PickedElementInfo {
+  readonly id: number;
   readonly selector: string;
   readonly label: string;
   readonly section: string;
@@ -176,6 +191,8 @@ export interface PickedElementInfo {
   readonly textSnippet: string;
   readonly box: ElementBox;
 }
+
+export type PickedElementDraft = Omit<PickedElementInfo, 'id'>;
 
 /** Auto-attached context. The user sees every field before anything leaves the app. */
 export interface FeedbackContextInfo {
@@ -190,7 +207,10 @@ export interface FeedbackContextInfo {
 }
 
 export interface CaptureArtifact {
+  readonly id: number;
   readonly kind: CaptureKind;
+  /** Linked `PickedElementInfo.id` for element captures; `null` for page captures. */
+  readonly elementId: number | null;
   readonly blob: Blob;
   readonly width: number;
   readonly height: number;
@@ -201,7 +221,7 @@ export interface IssueDraftInput {
   readonly kind: FeedbackKind;
   readonly title: string;
   readonly description: string;
-  readonly element: PickedElementInfo | null;
+  readonly elements: readonly PickedElementInfo[];
   readonly context: FeedbackContextInfo;
 }
 
@@ -210,7 +230,11 @@ export interface FeedbackState {
   readonly kind: FeedbackKind;
   readonly attachElement: boolean;
   readonly attachPage: boolean;
-  readonly pickedElement: PickedElementInfo | null;
+  readonly pickedElements: readonly PickedElementInfo[];
+  readonly nextElementId: number;
+  readonly nextCaptureId: number;
+  readonly pendingCapture: PendingCapture | null;
+  readonly pickReturnStep: PickReturnStep;
   readonly maskMode: MaskMode;
   readonly captures: readonly CaptureArtifact[];
   readonly captureError: string | null;
@@ -229,7 +253,7 @@ export type FeedbackEvent =
   | { readonly type: typeof FeedbackEventType.ToggleAttachPage }
   | { readonly type: typeof FeedbackEventType.ProceedFromAttach }
   | { readonly type: typeof FeedbackEventType.BackToAttach }
-  | { readonly type: typeof FeedbackEventType.PickConfirmed; readonly element: PickedElementInfo }
+  | { readonly type: typeof FeedbackEventType.PickConfirmed; readonly element: PickedElementDraft }
   | { readonly type: typeof FeedbackEventType.PickCancelled }
   | { readonly type: typeof FeedbackEventType.CaptureSucceeded; readonly captures: readonly CaptureArtifact[] }
   | {
@@ -237,7 +261,7 @@ export type FeedbackEvent =
       readonly error: string;
       readonly partialCaptures?: readonly CaptureArtifact[];
     }
-  | { readonly type: typeof FeedbackEventType.RemoveCapture; readonly kind: CaptureKind }
+  | { readonly type: typeof FeedbackEventType.RemoveCapture; readonly id: number }
   | { readonly type: typeof FeedbackEventType.SetMaskMode; readonly maskMode: MaskMode }
   | { readonly type: typeof FeedbackEventType.UpdateDraft; readonly title?: string; readonly description?: string }
   | {
@@ -255,14 +279,20 @@ export interface ElementPickerAdapter {
   isTooLargeRect(rect: Pick<DOMRect, 'width' | 'height'>, viewport: ViewportSize): boolean;
   labelFor(el: Element): string;
   sectionOf(el: Element): string;
-  describe(el: Element): PickedElementInfo;
+  describe(el: Element): PickedElementDraft;
   step(current: Element | null, direction: PickerDirection, doc?: Document): Element | null;
 }
 
+export interface CaptureElementTarget {
+  readonly id: number;
+  readonly el: Element;
+}
+
 export interface CaptureRequest {
-  readonly element: Element | null;
+  readonly elements: readonly CaptureElementTarget[];
   readonly capturePage: boolean;
   readonly maskMode: MaskMode;
+  readonly nextCaptureId?: number;
 }
 
 export interface CaptureBatchResult {

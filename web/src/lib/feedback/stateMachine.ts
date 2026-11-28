@@ -1,17 +1,109 @@
 /** Pure state machine for the in-app feedback flow. */
 
 import {
+  CaptureKind,
   ClipboardOutcome,
   FeedbackEventType,
   FeedbackKind,
   FeedbackStep,
+  MAX_PICKED_ELEMENTS,
   MaskMode,
+  PendingCaptureKind,
+  type CaptureArtifact,
   type FeedbackEvent,
   type FeedbackState,
+  type PickedElementInfo,
 } from '@/lib/feedback/types';
 
 function assertNever(value: never): never {
   throw new Error(`Unhandled feedback state: ${String(value)}`);
+}
+
+function orderCaptures(
+  captures: readonly CaptureArtifact[],
+  pickedElements: readonly PickedElementInfo[],
+): readonly CaptureArtifact[] {
+  const elementOrder = new Map<number, number>();
+  pickedElements.forEach((el, index) => elementOrder.set(el.id, index));
+
+  const elementCaptures: CaptureArtifact[] = [];
+  let pageCapture: CaptureArtifact | null = null;
+
+  for (const artifact of captures) {
+    if (artifact.kind === CaptureKind.Page) {
+      pageCapture = artifact;
+    } else {
+      elementCaptures.push(artifact);
+    }
+  }
+
+  elementCaptures.sort((a, b) => {
+    const orderA = a.elementId !== null ? (elementOrder.get(a.elementId) ?? Number.MAX_SAFE_INTEGER) : Number.MAX_SAFE_INTEGER;
+    const orderB = b.elementId !== null ? (elementOrder.get(b.elementId) ?? Number.MAX_SAFE_INTEGER) : Number.MAX_SAFE_INTEGER;
+    return orderA - orderB || a.id - b.id;
+  });
+
+  return pageCapture ? [...elementCaptures, pageCapture] : elementCaptures;
+}
+
+function assignMonotonicIds(
+  incoming: readonly CaptureArtifact[],
+  startingId: number,
+  reservedIds: ReadonlySet<number>,
+): { artifacts: CaptureArtifact[]; nextCaptureId: number } {
+  let nextId = startingId;
+  const used = new Set(reservedIds);
+  const artifacts = incoming.map((artifact) => {
+    let id = artifact.id;
+    if (id < nextId || used.has(id)) {
+      while (used.has(nextId)) {
+        nextId += 1;
+      }
+      id = nextId;
+      nextId += 1;
+    } else {
+      nextId = Math.max(nextId, id + 1);
+    }
+    used.add(id);
+    return id === artifact.id ? artifact : { ...artifact, id };
+  });
+  return { artifacts, nextCaptureId: nextId };
+}
+
+function applyCaptureBatch(state: FeedbackState, rawIncoming: readonly CaptureArtifact[]): {
+  captures: readonly CaptureArtifact[];
+  nextCaptureId: number;
+} {
+  const replaceAll = state.pendingCapture?.kind === PendingCaptureKind.All;
+  const reservedIds = new Set(replaceAll ? [] : state.captures.map((c) => c.id));
+  const { artifacts, nextCaptureId } = assignMonotonicIds(rawIncoming, state.nextCaptureId, reservedIds);
+
+  if (replaceAll) {
+    return {
+      captures: orderCaptures(artifacts, state.pickedElements),
+      nextCaptureId,
+    };
+  }
+
+  const merged = [...state.captures];
+  for (const artifact of artifacts) {
+    const existingIndex =
+      artifact.kind === CaptureKind.Page
+        ? merged.findIndex((item) => item.kind === CaptureKind.Page)
+        : merged.findIndex(
+            (item) => item.kind === CaptureKind.Element && item.elementId === artifact.elementId,
+          );
+    if (existingIndex !== -1) {
+      merged[existingIndex] = artifact;
+    } else {
+      merged.push(artifact);
+    }
+  }
+
+  return {
+    captures: orderCaptures(merged, state.pickedElements),
+    nextCaptureId,
+  };
 }
 
 export function createInitialFeedbackState(): FeedbackState {
@@ -20,7 +112,11 @@ export function createInitialFeedbackState(): FeedbackState {
     kind: FeedbackKind.Problem,
     attachElement: false,
     attachPage: false,
-    pickedElement: null,
+    pickedElements: [],
+    nextElementId: 1,
+    nextCaptureId: 1,
+    pendingCapture: null,
+    pickReturnStep: FeedbackStep.AttachOptions,
     maskMode: MaskMode.Masked,
     captures: [],
     captureError: null,
@@ -68,26 +164,28 @@ export function feedbackReducer(state: FeedbackState, event: FeedbackEvent): Fee
         case FeedbackEventType.ToggleAttachPage:
           return { ...state, attachPage: !state.attachPage };
         case FeedbackEventType.ProceedFromAttach: {
-          if (state.attachElement) {
+          if (state.attachElement && state.pickedElements.length < MAX_PICKED_ELEMENTS) {
             return {
               ...state,
               step: FeedbackStep.Picking,
+              pickReturnStep: FeedbackStep.AttachOptions,
               captureError: null,
             };
           }
-          if (state.attachPage) {
+          if (state.attachPage || state.pickedElements.length > 0) {
             return {
               ...state,
               step: FeedbackStep.Capturing,
-              pickedElement: null,
+              pendingCapture: { kind: PendingCaptureKind.All },
               captureError: null,
             };
           }
           return {
             ...state,
             step: FeedbackStep.Compose,
-            pickedElement: null,
+            pickedElements: [],
             captures: [],
+            pendingCapture: null,
             captureError: null,
           };
         }
@@ -99,14 +197,30 @@ export function feedbackReducer(state: FeedbackState, event: FeedbackEvent): Fee
     case FeedbackStep.Picking: {
       switch (event.type) {
         case FeedbackEventType.PickCancelled:
-          return { ...state, step: FeedbackStep.AttachOptions };
-        case FeedbackEventType.PickConfirmed:
+          return { ...state, step: state.pickReturnStep };
+        case FeedbackEventType.PickConfirmed: {
+          if (state.pickedElements.length >= MAX_PICKED_ELEMENTS) {
+            return { ...state, step: state.pickReturnStep };
+          }
+          const assignedElement: PickedElementInfo = {
+            ...event.element,
+            id: state.nextElementId,
+          };
+          const hasPageCapture = state.captures.some((c) => c.kind === CaptureKind.Page);
+          const includePage = state.attachPage && !hasPageCapture;
           return {
             ...state,
             step: FeedbackStep.Capturing,
-            pickedElement: event.element,
+            pickedElements: [...state.pickedElements, assignedElement],
+            nextElementId: state.nextElementId + 1,
+            pendingCapture: {
+              kind: PendingCaptureKind.Element,
+              elementId: assignedElement.id,
+              includePage,
+            },
             captureError: null,
           };
+        }
         default:
           return state;
       }
@@ -114,20 +228,28 @@ export function feedbackReducer(state: FeedbackState, event: FeedbackEvent): Fee
 
     case FeedbackStep.Capturing: {
       switch (event.type) {
-        case FeedbackEventType.CaptureSucceeded:
+        case FeedbackEventType.CaptureSucceeded: {
+          const { captures, nextCaptureId } = applyCaptureBatch(state, event.captures);
           return {
             ...state,
             step: FeedbackStep.Compose,
-            captures: event.captures,
+            captures,
+            nextCaptureId,
+            pendingCapture: null,
             captureError: null,
           };
-        case FeedbackEventType.CaptureFailed:
+        }
+        case FeedbackEventType.CaptureFailed: {
+          const { captures, nextCaptureId } = applyCaptureBatch(state, event.partialCaptures ?? []);
           return {
             ...state,
             step: FeedbackStep.Compose,
-            captures: event.partialCaptures ?? [],
+            captures,
+            nextCaptureId,
+            pendingCapture: null,
             captureError: event.error,
           };
+        }
         default:
           return state;
       }
@@ -146,11 +268,22 @@ export function feedbackReducer(state: FeedbackState, event: FeedbackEvent): Fee
             description: event.description !== undefined ? event.description : state.description,
           };
         case FeedbackEventType.RemoveCapture: {
-          const remaining = state.captures.filter((artifact) => artifact.kind !== event.kind);
-          if (remaining.length === state.captures.length) {
+          const target = state.captures.find((artifact) => artifact.id === event.id);
+          if (!target) {
             return state;
           }
-          return { ...state, captures: remaining };
+          const remainingCaptures = state.captures.filter((artifact) => artifact.id !== event.id);
+          const remainingElements =
+            target.kind === CaptureKind.Element && target.elementId !== null
+              ? state.pickedElements.filter((el) => el.id !== target.elementId)
+              : state.pickedElements;
+          const nextAttachPage = target.kind === CaptureKind.Page ? false : state.attachPage;
+          return {
+            ...state,
+            captures: remainingCaptures,
+            pickedElements: remainingElements,
+            attachPage: nextAttachPage,
+          };
         }
         case FeedbackEventType.SetMaskMode: {
           if (state.captures.length === 0) {
@@ -160,14 +293,19 @@ export function feedbackReducer(state: FeedbackState, event: FeedbackEvent): Fee
             ...state,
             step: FeedbackStep.Capturing,
             maskMode: event.maskMode,
+            pendingCapture: { kind: PendingCaptureKind.All },
             captureError: null,
           };
         }
         case FeedbackEventType.ReopenPicker:
+          if (state.pickedElements.length >= MAX_PICKED_ELEMENTS) {
+            return state;
+          }
           return {
             ...state,
             step: FeedbackStep.Picking,
             attachElement: true,
+            pickReturnStep: FeedbackStep.Compose,
             captureError: null,
           };
         case FeedbackEventType.BackToAttach:
