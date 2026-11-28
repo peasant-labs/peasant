@@ -316,7 +316,16 @@ func TestKickstartPreviewStream(t *testing.T) {
 					return newPreviewCaptureID()
 				}
 			}
-			go hub.Run(ctx)
+			hubDone := make(chan struct{})
+			go func() {
+				defer close(hubDone)
+				hub.Run(ctx)
+			}()
+			t.Cleanup(func() {
+				cancel()
+				<-hubDone
+				hub.previews.wg.Wait()
+			})
 			server := httptest.NewServer(http.HandlerFunc(hub.HandleUpgrade))
 			defer server.Close()
 			conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
