@@ -2,7 +2,7 @@ name: "Feature request (in-app)"
 description: "Suggest a UI or workflow improvement from inside the peasant web app"
 title: "feature(ui): "
 type: Feature
-labels: ["enhancement", "ui/ux"]
+labels: ["enhancement", "ui/ux", "feedback"]
 body:
   - type: markdown
     attributes:
