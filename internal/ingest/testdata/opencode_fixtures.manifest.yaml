@@ -60,6 +60,8 @@ nonCorpusDocuments:
     reason: history projection test fixture
   - path: internal/ingest/testdata/opencode_index_completion.yaml
     reason: index completion test fixture
+  - path: internal/ingest/testdata/opencode_managed_refresh_routes.yaml
+    reason: real-store pipeline route test cases for OpenCode managed refresh
   - path: internal/ingest/testdata/opencode_metadata_half_mutations.yaml
     reason: mutation definitions for the OpenCode metadata-half tests
   - path: internal/ingest/testdata/opencode_model_observations.yaml
@@ -108,6 +110,8 @@ nonCorpusDocuments:
     reason: unknown part vocabulary test fixture
   - path: internal/ingest/testdata/opencode_unknown.yaml
     reason: unknown record test fixture
+  - path: internal/ingest/testdata/opencode_validation_oracle.yaml
+    reason: validation oracle cases for OpenCode metadata half
   - path: internal/ingest/testdata/opencode_v2_rows.yaml
     reason: v2 row decoding test fixture
   - path: internal/ingest/testfixture/testdata/opencode_native_mutations.yaml

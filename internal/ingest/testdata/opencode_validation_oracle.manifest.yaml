@@ -1,0 +1,9 @@
+requiredNames:
+  - ordinary-unchanged
+  - native-fork-present
+  - subagent-plus-native-fork
+  - fork-parent-deleted-retained-prefix
+  - candidate-stats-differ-from-recorded
+  - native-db-message-appended
+  - native-db-removed-before-validation
+  - incomplete-over-complete-refusal

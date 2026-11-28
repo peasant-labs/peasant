@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -915,12 +916,20 @@ func loadGenerationChildrenOnConn(conn *sqlite.Conn, sessionID schema.SessionID,
 // incomplete_new candidate never equals a complete active generation,
 // because completeness participates. Only a harmonized active generation
 // can compare equal: a file-backed active generation always takes the
-// write path so harvest converts it.
-func refreshEqualsActive(prepared *preparedHarmonized, active activeHarmonizedView) bool {
+// write path so harvest converts it. The prepared record carries no prior
+// evidence (the commit attaches it), so priorEvidence is the candidate's
+// document and must equal the active generation's byte for byte: a skip
+// keeps the active document, so a changed one takes the write path.
+func refreshEqualsActive(prepared *preparedHarmonized, priorEvidence []byte, active activeHarmonizedView) bool {
 	if !active.found {
 		return false
 	}
-	if !generationRecordsEqual(prepared.record, active.record) {
+	if !bytes.Equal(priorEvidence, active.record.PriorEvidence) {
+		return false
+	}
+	activeRecord := active.record
+	activeRecord.PriorEvidence = nil
+	if !generationRecordsEqual(prepared.record, activeRecord) {
 		return false
 	}
 	if !reflect.DeepEqual(capturedGenerationChildren(prepared.children), capturedGenerationChildren(active.children)) {

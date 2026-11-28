@@ -615,6 +615,7 @@ type openCodeCandidateMetadataResult struct {
 //  6. snapshot.SessionID != session.SessionID.String()
 //  7. openCodeAttemptMetadata(in.RecordedMetadata, session)
 //  8. prepareOpenCodeProvenanceMetadata(snapshot, metadata, prior)
+//
 // Every failure exits through the exact same sanitizeOpenCodeRefusal boundary.
 func (idx *OpenCodeIndexer) openCodeCandidateMetadata(
 	ctx context.Context,

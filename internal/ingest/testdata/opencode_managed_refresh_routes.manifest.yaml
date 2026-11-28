@@ -1,0 +1,19 @@
+requiredNames:
+  - stamp-only-validated-settles
+  - stale-hash-validated-settles
+  - native-fork-validated-settles
+  - live-db-mutated-after-extract-parses
+  - context-change-references
+  - relocated-host-slug-parses
+  - redacted-unchanged-config-preserves-redacted-at-and-settles
+  - redacted-changed-config-updates-redacted-at-and-references
+  - validator-error-parses
+  - native-source-changed-parses
+  - legacy-sqlite-stays-format-1
+  - json-tree-stays-format-1
+  - control-only-current-falls-back-to-legacy-format-1
+  - undeclared-opencode-adapter-parses
+  - incomplete-over-complete-refuses-and-preserves-active
+  - disable-refresh-skips-parses
+  - force-parses
+  - reindex-parses

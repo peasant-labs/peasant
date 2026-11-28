@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -111,6 +112,9 @@ type oracleDocument struct {
 type metadataInventoryRow struct {
 	Field    string `yaml:"field"`
 	Mutation string `yaml:"mutation"`
+	// OpenCodeMutation replaces Mutation in the OpenCode oracle when the
+	// shared value equals the OpenCode corpus value.
+	OpenCodeMutation string `yaml:"opencode_mutation"`
 }
 
 func loadOracleDocument(t *testing.T) oracleDocument {
@@ -212,18 +216,27 @@ func metadataLeaf(metadata *schema.UnifiedMetadata, path string) (reflect.Value,
 // nothing.
 func applyInventoryMutation(t *testing.T, row metadataInventoryRow, sid string, metadata *schema.UnifiedMetadata) {
 	t.Helper()
+	if err := setInventoryMutation(row, sid, metadata); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// setInventoryMutation is applyInventoryMutation without the test failure, for
+// callers that run on a pipeline goroutine where t.Fatal must not be called.
+func setInventoryMutation(row metadataInventoryRow, sid string, metadata *schema.UnifiedMetadata) error {
 	leaf, err := metadataLeaf(metadata, row.Field)
 	if err != nil {
-		t.Fatal(err)
+		return err
 	}
 	mutated := reflect.New(leaf.Type())
 	if err := json.Unmarshal([]byte(row.Mutation), mutated.Interface()); err != nil {
-		t.Fatalf("inventory row %s: decode the mutation %s: %v", row.Field, row.Mutation, err)
+		return fmt.Errorf("inventory row %s: decode the mutation %s: %w", row.Field, row.Mutation, err)
 	}
 	if reflect.DeepEqual(leaf.Interface(), mutated.Elem().Interface()) {
-		t.Fatalf("inventory row %s: the mutation equals the corpus value of session %s", row.Field, sid)
+		return fmt.Errorf("inventory row %s: the mutation equals the corpus value of session %s", row.Field, sid)
 	}
 	leaf.Set(mutated.Elem())
+	return nil
 }
 
 // seamClaudeIndexer runs a seam before each managed build, the point in a

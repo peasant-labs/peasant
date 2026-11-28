@@ -46,3 +46,20 @@ cases:
     operation: metadata-hash-stats-excluded
     turnCount: 1000
     wantDisposition: skipped
+  - name: prior-evidence-identical-skips
+    operation: prior-evidence
+    basePrior: '{"version":2,"entries":[{"nativeKey":"native-0","ref":"e_prior0"}]}'
+    refreshPrior: '{"version":2,"entries":[{"nativeKey":"native-0","ref":"e_prior0"}]}'
+    wantDisposition: skipped
+  - name: prior-evidence-changed-commits
+    operation: prior-evidence
+    basePrior: '{"version":2,"entries":[{"nativeKey":"native-0","ref":"e_prior0"}]}'
+    refreshPrior: '{"version":2,"entries":[{"nativeKey":"native-0","ref":"e_prior1"}]}'
+    wantDisposition: committed
+  - name: prior-evidence-absent-skips
+    operation: prior-evidence
+    wantDisposition: skipped
+  - name: prior-evidence-absent-equals-empty
+    operation: prior-evidence
+    refreshPrior: ''
+    wantDisposition: skipped
