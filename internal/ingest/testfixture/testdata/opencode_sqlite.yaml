@@ -6,6 +6,7 @@ required_cases:
   - empty-valid
   - legacy-message-part
   - current-session-message
+  - opencode-24-session-parts
   - legacy-reader-pages
   - legacy-reader-wal
   - hybrid-catalog
@@ -236,6 +237,73 @@ cases:
         time_updated: 2001
         data: '{"agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"text","text":"synthetic answer"}],"rawFinish":"stop","time":{"created":2001,"streamed":2001,"completed":2001}}'
         seq: 1
+    ignored_history: []
+
+  - name: opencode-24-session-parts
+    logical_path: current/opencode.db
+    format: sqlite
+    schema: current
+    journal_mode: delete
+    corruption: ""
+    declared_rows:
+      legacy_messages: 0
+      legacy_parts: 0
+      current_messages: 3
+      current_parts: 3
+      ignored_history: 0
+    expected_catalog:
+      tables: [session, session_message, session_part]
+      indexes: [session_message_seq_idx, session_message_session_seq_idx, session_part_session_message_idx]
+      seq: not_null
+    legacy_messages: []
+    legacy_parts: []
+    current_messages:
+      - id: msg_24_user
+        session_id: ses_opencode24parts0000000001
+        type: user
+        time_created: 2400
+        time_updated: 2400
+        data: '{"text":"run the synthetic command","time":{"created":2400}}'
+        seq: 0
+      - id: msg_24_split_assistant
+        session_id: ses_opencode24parts0000000001
+        type: assistant
+        time_created: 2401
+        time_updated: 2402
+        data: '{"agent":"build","model":{"id":"synthetic-2.4","providerID":"synthetic-provider"},"content":[],"finish":"stop","time":{"created":2401,"streamed":2402,"completed":2402}}'
+        seq: 1
+      - id: msg_24_legacy_assistant
+        session_id: ses_opencode24parts0000000001
+        type: assistant
+        time_created: 2403
+        time_updated: 2403
+        data: '{"agent":"build","model":{"id":"synthetic-2.4","providerID":"synthetic-provider"},"content":[{"type":"text","text":"legacy inline answer"}],"finish":"stop","time":{"created":2403,"streamed":2403,"completed":2403}}'
+        seq: 2
+    current_parts:
+      - message_id: msg_24_split_assistant
+        session_id: ses_opencode24parts0000000001
+        ordinal: 0
+        type: reasoning
+        call_id: ""
+        time_created: 2401
+        time_updated: 2401
+        data: '{"type":"reasoning","text":"weigh the synthetic options","time":{"created":2401,"completed":2401}}'
+      - message_id: msg_24_split_assistant
+        session_id: ses_opencode24parts0000000001
+        ordinal: 1
+        type: text
+        call_id: ""
+        time_created: 2401
+        time_updated: 2401
+        data: '{"type":"text","text":"running the synthetic command"}'
+      - message_id: msg_24_split_assistant
+        session_id: ses_opencode24parts0000000001
+        ordinal: 2
+        type: tool
+        call_id: call_synthetic_24
+        time_created: 2401
+        time_updated: 2404
+        data: '{"type":"tool","id":"call_synthetic_24","name":"shell","executed":false,"state":{"status":"completed","input":{"command":"echo synthetic"},"content":[{"type":"text","text":"synthetic"}],"metadata":{"status":"completed","exit":0}},"time":{"created":2401,"completed":2402}}'
     ignored_history: []
 
   - name: legacy-reader-pages

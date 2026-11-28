@@ -117,6 +117,7 @@ type caseSpec struct {
 	LegacyMessages  []legacyMessage     `yaml:"legacy_messages"`
 	LegacyParts     []legacyPart        `yaml:"legacy_parts"`
 	CurrentMessages []currentMessage    `yaml:"current_messages"`
+	CurrentParts    []currentPart       `yaml:"current_parts"`
 	IgnoredHistory  []historyRow        `yaml:"ignored_history"`
 	// DeletedSessionRows names sessions whose session-table row is removed after
 	// materialization while their message or session_message rows remain. This
@@ -170,6 +171,7 @@ type declaredRowCounts struct {
 	LegacyMessages  int `yaml:"legacy_messages"`
 	LegacyParts     int `yaml:"legacy_parts"`
 	CurrentMessages int `yaml:"current_messages"`
+	CurrentParts    int `yaml:"current_parts"`
 	IgnoredHistory  int `yaml:"ignored_history"`
 }
 
@@ -228,6 +230,20 @@ type currentMessage struct {
 	TimeUpdated int64  `yaml:"time_updated"`
 	Data        string `yaml:"data"`
 	Seq         int64  `yaml:"seq"`
+}
+
+// currentPart is one split session_part row, as OpenCode 2.4.x writes assistant
+// content. The type column is authoritative and must agree with the type field
+// inside data.
+type currentPart struct {
+	MessageID   string `yaml:"message_id"`
+	SessionID   string `yaml:"session_id"`
+	Ordinal     int64  `yaml:"ordinal"`
+	Type        string `yaml:"type"`
+	CallID      string `yaml:"call_id"`
+	TimeCreated int64  `yaml:"time_created"`
+	TimeUpdated int64  `yaml:"time_updated"`
+	Data        string `yaml:"data"`
 }
 
 type historyRow struct {
@@ -481,20 +497,22 @@ func (c expectedCatalogSpec) validate() error {
 
 func (c caseSpec) validateRowCounts() error {
 	counts := c.DeclaredRows
-	if counts.LegacyMessages < 0 || counts.LegacyParts < 0 || counts.CurrentMessages < 0 || counts.IgnoredHistory < 0 {
+	if counts.LegacyMessages < 0 || counts.LegacyParts < 0 || counts.CurrentMessages < 0 || counts.CurrentParts < 0 || counts.IgnoredHistory < 0 {
 		return fmt.Errorf("validate synthetic OpenCode source fixture %q: declared row counts cannot be negative", c.Name)
 	}
-	if counts.LegacyMessages != len(c.LegacyMessages) || counts.LegacyParts != len(c.LegacyParts) || counts.CurrentMessages != len(c.CurrentMessages) || counts.IgnoredHistory != len(c.IgnoredHistory) {
+	if counts.LegacyMessages != len(c.LegacyMessages) || counts.LegacyParts != len(c.LegacyParts) || counts.CurrentMessages != len(c.CurrentMessages) || counts.CurrentParts != len(c.CurrentParts) || counts.IgnoredHistory != len(c.IgnoredHistory) {
 		return fmt.Errorf(
-			"validate synthetic OpenCode source fixture %q row guard: declared legacy_messages=%d legacy_parts=%d current_messages=%d ignored_history=%d; actual=%d/%d/%d/%d",
+			"validate synthetic OpenCode source fixture %q row guard: declared legacy_messages=%d legacy_parts=%d current_messages=%d current_parts=%d ignored_history=%d; actual=%d/%d/%d/%d/%d",
 			c.Name,
 			counts.LegacyMessages,
 			counts.LegacyParts,
 			counts.CurrentMessages,
+			counts.CurrentParts,
 			counts.IgnoredHistory,
 			len(c.LegacyMessages),
 			len(c.LegacyParts),
 			len(c.CurrentMessages),
+			len(c.CurrentParts),
 			len(c.IgnoredHistory),
 		)
 	}
@@ -545,6 +563,20 @@ func (c caseSpec) validateRows() error {
 	if c.Schema == schemaCurrentPartialSeq && !hasDuplicateCurrentSeq {
 		return fmt.Errorf("validate synthetic OpenCode source fixture %q: partial current ordering schema must contain a duplicate current sequence that proves the cursor-loss hazard", c.Name)
 	}
+	currentPartKeys := make(map[string]struct{}, len(c.CurrentParts))
+	for index, row := range c.CurrentParts {
+		if err := validateCurrentPart(row); err != nil {
+			return fmt.Errorf("validate synthetic OpenCode source fixture %q current part %d: %w", c.Name, index, err)
+		}
+		if _, present := currentIDs[row.MessageID]; !present {
+			return fmt.Errorf("validate synthetic OpenCode source fixture %q current part %d: message_id %q is not one of the declared current_messages", c.Name, index, row.MessageID)
+		}
+		key := fmt.Sprintf("%s\x00%d", row.MessageID, row.Ordinal)
+		if _, duplicate := currentPartKeys[key]; duplicate {
+			return fmt.Errorf("validate synthetic OpenCode source fixture %q: duplicate current part (%q, %d)", c.Name, row.MessageID, row.Ordinal)
+		}
+		currentPartKeys[key] = struct{}{}
+	}
 	historyIDs := make(map[string]struct{}, len(c.IgnoredHistory))
 	for index, row := range c.IgnoredHistory {
 		if err := validateHistoryRow(row); err != nil {
@@ -560,7 +592,10 @@ func (c caseSpec) validateRows() error {
 
 func (c caseSpec) validateSchemaRows() error {
 	hasLegacy := len(c.LegacyMessages) != 0 || len(c.LegacyParts) != 0
-	hasCurrent := len(c.CurrentMessages) != 0
+	hasCurrent := len(c.CurrentMessages) != 0 || len(c.CurrentParts) != 0
+	if len(c.CurrentParts) > 0 && c.Schema != schemaCurrent && c.Schema != schemaHybrid {
+		return fmt.Errorf("validate synthetic OpenCode source fixture %q: current parts require the current or hybrid schema, got %q", c.Name, c.Schema)
+	}
 	switch c.Schema {
 	case schemaLegacy:
 		if hasCurrent {
@@ -624,6 +659,25 @@ func validateCurrentMessage(row currentMessage) error {
 	}
 	if row.Seq < 0 {
 		return errors.New("seq cannot be negative")
+	}
+	return validateJSON(row.Data)
+}
+
+func validateCurrentPart(row currentPart) error {
+	if err := requiredToken("message_id", row.MessageID); err != nil {
+		return err
+	}
+	if err := requiredToken("session_id", row.SessionID); err != nil {
+		return err
+	}
+	if err := requiredToken("type", row.Type); err != nil {
+		return err
+	}
+	if row.Ordinal < 0 {
+		return errors.New("ordinal cannot be negative")
+	}
+	if err := requiredToken("data", row.Data); err != nil {
+		return err
 	}
 	return validateJSON(row.Data)
 }

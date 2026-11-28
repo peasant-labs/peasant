@@ -44,9 +44,29 @@ const (
 	openCodeCurrentMessageLengthsBoundedStatement = "SELECT seq, LENGTH(data) FROM session_message WHERE session_id = ?1 AND seq > ?2 AND seq < ?3 ORDER BY seq LIMIT ?4"
 	// The change marker summarizes the rows a preview already read: their
 	// count, latest update time and summed payload length.
-	openCodeCurrentMessagesMarkerStatement   = "SELECT COUNT(*), COALESCE(MAX(time_updated), 0), COALESCE(SUM(LENGTH(data)), 0) FROM session_message WHERE session_id = ?1 AND seq <= ?2"
-	openCodeSessionV2ForkEvidenceStatement   = "SELECT fork_session_id, fork_boundary FROM session_v2 WHERE id = ?1 LIMIT 2"
-	openCodeCurrentSubstantiveProbeStatement = "SELECT 1 FROM session_message WHERE session_id = ?1 AND type NOT IN ('agent-switched', 'model-switched') LIMIT 1"
+	openCodeCurrentMessagesMarkerStatement = "SELECT COUNT(*), COALESCE(MAX(time_updated), 0), COALESCE(SUM(LENGTH(data)), 0) FROM session_message WHERE session_id = ?1 AND seq <= ?2"
+	// The split 2.4.x part rows for one assistant message, in OpenCode's
+	// ordinal order. The read walks the message page in seq order and reads each
+	// message's own parts through the (session_id, message_id, ordinal) index, so
+	// no page sorts the session's whole part table and a message page never pulls
+	// parts for a message it did not take.
+	openCodeCurrentMessagePartsFirstStatement = "SELECT ordinal, type, time_created, time_updated, data FROM session_part WHERE session_id = ?1 AND message_id = ?2 ORDER BY ordinal LIMIT ?3"
+	openCodeCurrentMessagePartsAfterStatement = "SELECT ordinal, type, time_created, time_updated, data FROM session_part WHERE session_id = ?1 AND message_id = ?2 AND ordinal > ?3 ORDER BY ordinal LIMIT ?4"
+	// The part-side aggregates mirror the message-side probes and count only the
+	// parts an assistant message page reads. A session without session_part
+	// leaves them unrun.
+	openCodeCurrentPartFreshnessBySessionStatement = "SELECT p.session_id, MAX(MAX(p.time_created, p.time_updated)) FROM session_part p JOIN session_message m ON m.id = p.message_id WHERE m.type = 'assistant' GROUP BY p.session_id"
+	openCodeCurrentPartPayloadSizeStatement        = "SELECT COUNT(*), COALESCE(SUM(LENGTH(p.data)), 0) FROM session_part p JOIN session_message m ON m.id = p.message_id WHERE p.session_id = ?1 AND m.type = 'assistant'"
+	openCodeCurrentPartsMarkerStatement            = "SELECT COUNT(*), COALESCE(MAX(p.time_updated), 0), COALESCE(SUM(LENGTH(p.data)), 0) FROM session_part p JOIN session_message m ON m.id = p.message_id WHERE p.session_id = ?1 AND m.seq <= ?2 AND m.type = 'assistant'"
+	// The part-aware length probe reports the bytes a page read would load for one
+	// message row: the envelope plus every split part. LENGTH() reads record
+	// headers, so probing never loads the payloads it measures.
+	openCodeCurrentMessageLengthsWithPartsFirstStatement   = "SELECT m.seq, LENGTH(m.data) + CASE WHEN m.type = 'assistant' THEN COALESCE((SELECT SUM(LENGTH(p.data)) FROM session_part p WHERE p.message_id = m.id), 0) ELSE 0 END FROM session_message m WHERE m.session_id = ?1 ORDER BY m.seq LIMIT ?2"
+	openCodeCurrentMessageLengthsWithPartsBeforeStatement  = "SELECT m.seq, LENGTH(m.data) + CASE WHEN m.type = 'assistant' THEN COALESCE((SELECT SUM(LENGTH(p.data)) FROM session_part p WHERE p.message_id = m.id), 0) ELSE 0 END FROM session_message m WHERE m.session_id = ?1 AND m.seq < ?2 ORDER BY m.seq LIMIT ?3"
+	openCodeCurrentMessageLengthsWithPartsAfterStatement   = "SELECT m.seq, LENGTH(m.data) + CASE WHEN m.type = 'assistant' THEN COALESCE((SELECT SUM(LENGTH(p.data)) FROM session_part p WHERE p.message_id = m.id), 0) ELSE 0 END FROM session_message m WHERE m.session_id = ?1 AND m.seq > ?2 ORDER BY m.seq LIMIT ?3"
+	openCodeCurrentMessageLengthsWithPartsBoundedStatement = "SELECT m.seq, LENGTH(m.data) + CASE WHEN m.type = 'assistant' THEN COALESCE((SELECT SUM(LENGTH(p.data)) FROM session_part p WHERE p.message_id = m.id), 0) ELSE 0 END FROM session_message m WHERE m.session_id = ?1 AND m.seq > ?2 AND m.seq < ?3 ORDER BY m.seq LIMIT ?4"
+	openCodeSessionV2ForkEvidenceStatement                 = "SELECT fork_session_id, fork_boundary FROM session_v2 WHERE id = ?1 LIMIT 2"
+	openCodeCurrentSubstantiveProbeStatement               = "SELECT 1 FROM session_message WHERE session_id = ?1 AND type NOT IN ('agent-switched', 'model-switched') LIMIT 1"
 	// The payload-size probes count one session's payload-bearing rows and sum
 	// their data length. LENGTH() computes from the record header, so a probe
 	// never reads the payloads it measures; the session_id index keeps the read
@@ -150,6 +170,12 @@ type zombiezenOpenCodeSQLiteSource struct {
 	// lifetime. An upstream schema change fails its read without switching tables.
 	sessionColumnsChecked bool
 	sessionColumns        openCodeSessionColumnSupport
+
+	// partsColumnsChecked caches whether this source carries the 2.4.x
+	// session_part table with every column the assistant part read needs. An
+	// older current store without the table keeps reading inline content.
+	partsColumnsChecked bool
+	partsTablePresent   bool
 }
 
 // openCodeSessionColumnSupport records which session-record columns the session
@@ -542,6 +568,19 @@ func (s *zombiezenOpenCodeSQLiteSource) CurrentFreshnessBySession(ctx context.Co
 	decode := newFreshnessBySessionDecoder(result)
 	if err := s.executeRowsLocked(lease.ctx, openCodeCurrentFreshnessBySessionStatement, nil, decode); err != nil || lease.ctx.Err() != nil {
 		return nil, s.sourceReadError(lease.ctx, "read current freshness by session", err, "session_message(session_id,time_created,time_updated)", "supported current session_message")
+	}
+	partsPresent, err := s.currentPartTableLocked(lease.ctx)
+	if err != nil {
+		return nil, s.sourceReadError(lease.ctx, "read current part table support", err, "pragma_table_info(session_part)", "supported OpenCode session_part")
+	}
+	if partsPresent {
+		// A split 2.4.x message keeps an empty content envelope, so its part rows
+		// carry the newest transcript mutation. Merge their times into the same
+		// map so a clockless session's freshness sees a part written after its
+		// message row.
+		if err := s.executeRowsLocked(lease.ctx, openCodeCurrentPartFreshnessBySessionStatement, nil, decode); err != nil || lease.ctx.Err() != nil {
+			return nil, s.sourceReadError(lease.ctx, "read current part freshness by session", err, "session_part(session_id,time_created,time_updated)", "supported OpenCode session_part")
+		}
 	}
 	return result, nil
 }
@@ -1449,6 +1488,11 @@ func (s *zombiezenOpenCodeSQLiteSource) LegacyMessages(ctx context.Context, requ
 }
 
 // CurrentMessages returns one session's materialized current rows in seq order.
+// A 2.4.x store keeps an assistant message's content in session_part rows and
+// leaves the message envelope's content empty; this read attaches those parts
+// to the row in ordinal order, so every caller sees one complete message shape.
+// Each message's parts are read in bounded pages, so a session's whole part
+// table is never loaded at once and a message boundary stays the slice boundary.
 func (s *zombiezenOpenCodeSQLiteSource) CurrentMessages(ctx context.Context, request OpenCodeCurrentPageRequest) (OpenCodeCurrentPage, error) {
 	if err := validateCurrentPageRequest(request); err != nil {
 		return OpenCodeCurrentPage{}, err
@@ -1493,12 +1537,232 @@ func (s *zombiezenOpenCodeSQLiteSource) CurrentMessages(ctx context.Context, req
 		rows = rows[:request.PageSize.value]
 	}
 	rows = rows[:len(rows):len(rows)]
-	page := OpenCodeCurrentPage{Messages: rows}
+
+	var droppedParts []OpenCodeCurrentPartDrop
+	if len(rows) > 0 {
+		partDrops, trimBeforeSeq, partsErr := s.attachCurrentMessagePartsLocked(lease.ctx, request.SessionID.value, rows)
+		if partsErr != nil || lease.ctx.Err() != nil {
+			return OpenCodeCurrentPage{}, s.sourceReadError(lease.ctx, "read bounded current session_part page", partsErr, "session_part(message_id, ordinal, type, data)", "supported OpenCode session_part")
+		}
+		droppedParts = partDrops
+		if trimBeforeSeq > 0 {
+			// The part budget stopped inside a message. The message is the slice
+			// boundary, so drop it and every later row and resume after the last
+			// complete message. The dropped rows are re-read on the next page.
+			keep := 0
+			for keep < len(rows) && rows[keep].Seq.value < trimBeforeSeq {
+				keep++
+			}
+			if keep == 0 {
+				return OpenCodeCurrentPage{}, fmt.Errorf("read bounded current session_message page for %q stopped at sequence %d without keeping a complete message; the next page cannot advance; reduce the source's part rows or repair the session", request.SessionID.String(), trimBeforeSeq)
+			}
+			rows = rows[:keep]
+			hasNext = true
+		}
+	}
+
+	page := OpenCodeCurrentPage{Messages: rows, DroppedParts: droppedParts}
 	if hasNext {
 		cursor := OpenCodeCurrentCursor{sequence: page.Messages[len(page.Messages)-1].Seq}
 		page.Next = &cursor
 	}
 	return page, nil
+}
+
+// attachCurrentMessagePartsLocked reads each assistant message's session_part
+// rows and attaches them in ordinal order. A message's parts are paged through
+// the (session_id, message_id, ordinal) index, so no read sorts the session's
+// whole part table. The page total is capped: when a completed message reaches
+// the cap, that message is kept whole and the page stops before the next row;
+// when the cap is already spent before an assistant message, that message and
+// every later one are dropped. Either way trimBeforeSeq names the boundary and
+// the caller resumes there. One message's own parts are always admitted because
+// a message is the slice unit. A part row that cannot be decoded is returned as
+// a drop, never as a failed read.
+func (s *zombiezenOpenCodeSQLiteSource) attachCurrentMessagePartsLocked(ctx context.Context, sessionID string, rows []OpenCodeCurrentMessageRow) ([]OpenCodeCurrentPartDrop, int64, error) {
+	present, err := s.currentPartTableLocked(ctx)
+	if err != nil || !present {
+		return nil, 0, err
+	}
+	drops := make([]OpenCodeCurrentPartDrop, 0)
+	rowsRead := 0
+	admitted := false
+	for index := range rows {
+		if rows[index].Type.String() != openCodeCurrentAssistantMessageType {
+			continue
+		}
+		if admitted && rowsRead+len(drops) >= openCodeCurrentPartRowsPerMessagePage {
+			// The page's part budget is already spent and this is not the first
+			// assistant message. The caller drops this message and every later
+			// one and resumes here.
+			return drops, rows[index].Seq.value, nil
+		}
+		admitted = true
+		parts, partDrops, readErr := s.readCurrentMessagePartsLocked(ctx, sessionID, rows[index].ID)
+		if readErr != nil {
+			return nil, 0, readErr
+		}
+		rows[index].Parts = parts
+		drops = append(drops, partDrops...)
+		rowsRead += len(parts)
+		if rowsRead+len(drops) >= openCodeCurrentPartRowsPerMessagePage && index+1 < len(rows) {
+			// This message is complete and its parts are admitted whole. Stop
+			// before the next row so the page keeps a message boundary and the
+			// next page starts here.
+			return drops, rows[index+1].Seq.value, nil
+		}
+	}
+	return drops, 0, nil
+}
+
+// readCurrentMessagePartsLocked reads one message's session_part rows in
+// ordinal order in bounded pages. The caller holds the source lease.
+func (s *zombiezenOpenCodeSQLiteSource) readCurrentMessagePartsLocked(ctx context.Context, sessionID string, messageID OpenCodeCurrentMessageID) ([]OpenCodeCurrentPartRow, []OpenCodeCurrentPartDrop, error) {
+	parts := make([]OpenCodeCurrentPartRow, 0)
+	drops := make([]OpenCodeCurrentPartDrop, 0)
+	var afterOrdinal int64
+	hasCursor := false
+	for {
+		fetched := 0
+		decode := func(stmt *sqlite.Stmt) error {
+			fetched++
+			if stmt.ColumnType(0) != sqlite.TypeInteger {
+				return fmt.Errorf("decode current session_part row: ordinal has SQLite type %s instead of integer", stmt.ColumnType(0))
+			}
+			afterOrdinal = stmt.ColumnInt64(0)
+			part, drop, decodeErr := decodeCurrentPartRow(stmt, messageID, afterOrdinal)
+			if decodeErr != nil {
+				return decodeErr
+			}
+			if drop != nil {
+				drops = append(drops, *drop)
+				return nil
+			}
+			parts = append(parts, part)
+			return nil
+		}
+		if !hasCursor {
+			err := s.executeRowsLocked(ctx, openCodeCurrentMessagePartsFirstStatement, []any{sessionID, messageID.value, openCodeCurrentPartPageSize}, decode)
+			if err != nil {
+				return nil, nil, err
+			}
+		} else {
+			err := s.executeRowsLocked(ctx, openCodeCurrentMessagePartsAfterStatement, []any{sessionID, messageID.value, afterOrdinal, openCodeCurrentPartPageSize}, decode)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+		if fetched < openCodeCurrentPartPageSize {
+			return parts, drops, nil
+		}
+		hasCursor = true
+	}
+}
+
+// currentPartTableLocked reports whether this source carries the 2.4.x
+// session_part table with the columns the part read needs. The answer is cached
+// per source. An absent table keeps the inline-content path unchanged; a table
+// with a partial shape is a schema fault rather than a silent content loss.
+func (s *zombiezenOpenCodeSQLiteSource) currentPartTableLocked(ctx context.Context) (bool, error) {
+	s.stateMu.Lock()
+	if s.partsColumnsChecked {
+		present := s.partsTablePresent
+		s.stateMu.Unlock()
+		return present, nil
+	}
+	s.stateMu.Unlock()
+
+	columns, err := s.columnsLocked(ctx, "session_part")
+	if err != nil {
+		return false, err
+	}
+	present := false
+	switch {
+	case len(columns) == 0:
+		// The table is absent, as it is on every pre-2.4 current store.
+	case !projectColumnsPresent(columns, "message_id", "session_id", "ordinal", "type", "call_id", "time_created", "time_updated", "data"):
+		return false, fmt.Errorf("session_part table is present but missing a column the assistant part read requires (message_id, session_id, ordinal, type, call_id, time_created, time_updated, data)")
+	default:
+		present = true
+	}
+
+	s.stateMu.Lock()
+	s.partsColumnsChecked = true
+	s.partsTablePresent = present
+	s.stateMu.Unlock()
+	return present, nil
+}
+
+// decodeCurrentPartRow decodes one session_part row for the message the read
+// named. It returns a drop for a row the projection cannot safely carry, so one
+// malformed row never fails the session. A disagreement between the type column
+// and the type field inside data is malformed rather than something to guess
+// at; a missing data.type is filled from the authoritative column.
+func decodeCurrentPartRow(stmt *sqlite.Stmt, messageID OpenCodeCurrentMessageID, ordinal int64) (OpenCodeCurrentPartRow, *OpenCodeCurrentPartDrop, error) {
+	drop := func(reason string) (OpenCodeCurrentPartRow, *OpenCodeCurrentPartDrop, error) {
+		return OpenCodeCurrentPartRow{}, &OpenCodeCurrentPartDrop{
+			MessageID: NewOpenCodeRawRowIdentifier(messageID.String()),
+			Ordinal:   ordinal,
+			Reason:    reason,
+		}, nil
+	}
+	if stmt.ColumnType(1) != sqlite.TypeText {
+		return drop(fmt.Sprintf("type has SQLite type %s instead of text", stmt.ColumnType(1)))
+	}
+	if stmt.ColumnType(2) != sqlite.TypeInteger {
+		return drop(fmt.Sprintf("time_created has SQLite type %s instead of integer", stmt.ColumnType(2)))
+	}
+	if stmt.ColumnType(3) != sqlite.TypeInteger {
+		return drop(fmt.Sprintf("time_updated has SQLite type %s instead of integer", stmt.ColumnType(3)))
+	}
+	if stmt.ColumnType(4) != sqlite.TypeText {
+		return drop(fmt.Sprintf("data has SQLite type %s instead of text", stmt.ColumnType(4)))
+	}
+	partType, err := NewOpenCodeCurrentPartType(stmt.ColumnText(1))
+	if err != nil {
+		return drop(fmt.Sprintf("type is not a valid part type: %v", err))
+	}
+	switch partType.String() {
+	case openCodeCurrentPartTextType, openCodeCurrentPartReasoningType, openCodeCurrentPartToolType:
+	default:
+		return drop(fmt.Sprintf("type %q is outside the supported text/reasoning/tool part set", partType.String()))
+	}
+	data := stmt.ColumnText(4)
+	if !json.Valid([]byte(data)) {
+		return drop("data is not valid JSON")
+	}
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(data), &envelope); err != nil || envelope == nil {
+		return drop("data is not a JSON object")
+	}
+	if rawType, present := envelope["type"]; present {
+		var dataType string
+		if err := json.Unmarshal(rawType, &dataType); err != nil {
+			return drop("data.type is not a string")
+		}
+		if dataType != partType.String() {
+			return drop(fmt.Sprintf("type column %q disagrees with data.type %q", partType.String(), dataType))
+		}
+	} else {
+		encodedType, err := json.Marshal(partType.String())
+		if err != nil {
+			return OpenCodeCurrentPartRow{}, nil, fmt.Errorf("encode current session_part type %q: %w", partType.String(), err)
+		}
+		envelope["type"] = encodedType
+		merged, err := json.Marshal(envelope)
+		if err != nil {
+			return OpenCodeCurrentPartRow{}, nil, fmt.Errorf("encode current session_part row with its column type: %w", err)
+		}
+		data = string(merged)
+	}
+	return OpenCodeCurrentPartRow{
+		MessageID:   messageID,
+		Ordinal:     ordinal,
+		Type:        partType,
+		TimeCreated: stmt.ColumnInt64(2),
+		TimeUpdated: stmt.ColumnInt64(3),
+		Data:        data,
+	}, nil, nil
 }
 
 // CurrentMessageLengths returns the sequence and payload length of the rows the
@@ -1513,6 +1777,10 @@ func (s *zombiezenOpenCodeSQLiteSource) CurrentMessageLengths(ctx context.Contex
 		return nil, err
 	}
 	defer lease.release()
+	partsPresent, err := s.currentPartTableLocked(lease.ctx)
+	if err != nil {
+		return nil, s.sourceReadError(lease.ctx, "read current part table support", err, "pragma_table_info(session_part)", "supported OpenCode session_part")
+	}
 	lengths := make([]OpenCodeCurrentRowLength, 0, request.PageSize.value)
 	decode := func(stmt *sqlite.Stmt) error {
 		if stmt.ColumnType(0) != sqlite.TypeInteger || stmt.ColumnType(1) != sqlite.TypeInteger {
@@ -1527,13 +1795,29 @@ func (s *zombiezenOpenCodeSQLiteSource) CurrentMessageLengths(ctx context.Contex
 	}
 	switch {
 	case request.After == nil && request.Before == nil:
-		err = s.executeRowsLocked(lease.ctx, openCodeCurrentMessageLengthsFirstStatement, []any{request.SessionID.value, request.PageSize.value}, decode)
+		if partsPresent {
+			err = s.executeRowsLocked(lease.ctx, openCodeCurrentMessageLengthsWithPartsFirstStatement, []any{request.SessionID.value, request.PageSize.value}, decode)
+		} else {
+			err = s.executeRowsLocked(lease.ctx, openCodeCurrentMessageLengthsFirstStatement, []any{request.SessionID.value, request.PageSize.value}, decode)
+		}
 	case request.After == nil:
-		err = s.executeRowsLocked(lease.ctx, openCodeCurrentMessageLengthsBeforeStatement, []any{request.SessionID.value, request.Before.value, request.PageSize.value}, decode)
+		if partsPresent {
+			err = s.executeRowsLocked(lease.ctx, openCodeCurrentMessageLengthsWithPartsBeforeStatement, []any{request.SessionID.value, request.Before.value, request.PageSize.value}, decode)
+		} else {
+			err = s.executeRowsLocked(lease.ctx, openCodeCurrentMessageLengthsBeforeStatement, []any{request.SessionID.value, request.Before.value, request.PageSize.value}, decode)
+		}
 	case request.Before == nil:
-		err = s.executeRowsLocked(lease.ctx, openCodeCurrentMessageLengthsAfterStatement, []any{request.SessionID.value, request.After.sequence.value, request.PageSize.value}, decode)
+		if partsPresent {
+			err = s.executeRowsLocked(lease.ctx, openCodeCurrentMessageLengthsWithPartsAfterStatement, []any{request.SessionID.value, request.After.sequence.value, request.PageSize.value}, decode)
+		} else {
+			err = s.executeRowsLocked(lease.ctx, openCodeCurrentMessageLengthsAfterStatement, []any{request.SessionID.value, request.After.sequence.value, request.PageSize.value}, decode)
+		}
 	default:
-		err = s.executeRowsLocked(lease.ctx, openCodeCurrentMessageLengthsBoundedStatement, []any{request.SessionID.value, request.After.sequence.value, request.Before.value, request.PageSize.value}, decode)
+		if partsPresent {
+			err = s.executeRowsLocked(lease.ctx, openCodeCurrentMessageLengthsWithPartsBoundedStatement, []any{request.SessionID.value, request.After.sequence.value, request.Before.value, request.PageSize.value}, decode)
+		} else {
+			err = s.executeRowsLocked(lease.ctx, openCodeCurrentMessageLengthsBoundedStatement, []any{request.SessionID.value, request.After.sequence.value, request.Before.value, request.PageSize.value}, decode)
+		}
 	}
 	if err != nil || lease.ctx.Err() != nil {
 		return nil, s.sourceReadError(lease.ctx, "read bounded current session_message row lengths", err, "session_message(session_id, seq, length(data))", "supported current session_message")
@@ -1564,6 +1848,34 @@ func (s *zombiezenOpenCodeSQLiteSource) CurrentMessagesMarker(ctx context.Contex
 	}
 	if err := s.executeRowsLocked(lease.ctx, openCodeCurrentMessagesMarkerStatement, []any{sessionID.value, through.value}, decode); err != nil || lease.ctx.Err() != nil {
 		return OpenCodeCurrentChangeMarker{}, s.sourceReadError(lease.ctx, "read current session change marker", err, "session_message(session_id, seq, time_updated, length(data))", "supported current session_message")
+	}
+	partsPresent, err := s.currentPartTableLocked(lease.ctx)
+	if err != nil {
+		return OpenCodeCurrentChangeMarker{}, s.sourceReadError(lease.ctx, "read current part table support", err, "pragma_table_info(session_part)", "supported OpenCode session_part")
+	}
+	if partsPresent {
+		// A preview that read through this sequence also read every split part of
+		// the assistant messages below it. Include those rows so a part added,
+		// edited, removed, or resized after the preview was taken changes the
+		// marker instead of leaving a stale continuation trusted.
+		var parts OpenCodeCurrentChangeMarker
+		partDecode := func(stmt *sqlite.Stmt) error {
+			for column := 0; column < 3; column++ {
+				if stmt.ColumnType(column) != sqlite.TypeInteger {
+					return fmt.Errorf("decode current part change marker: column %d has SQLite type %s instead of integer", column, stmt.ColumnType(column))
+				}
+			}
+			parts = OpenCodeCurrentChangeMarker{Rows: stmt.ColumnInt64(0), MaxUpdated: stmt.ColumnInt64(1), Bytes: stmt.ColumnInt64(2)}
+			return nil
+		}
+		if err := s.executeRowsLocked(lease.ctx, openCodeCurrentPartsMarkerStatement, []any{sessionID.value, through.value}, partDecode); err != nil || lease.ctx.Err() != nil {
+			return OpenCodeCurrentChangeMarker{}, s.sourceReadError(lease.ctx, "read current part change marker", err, "session_part(session_id, time_updated, length(data)) joined to session_message(seq)", "supported OpenCode session_part")
+		}
+		marker.Rows += parts.Rows
+		marker.Bytes += parts.Bytes
+		if parts.MaxUpdated > marker.MaxUpdated {
+			marker.MaxUpdated = parts.MaxUpdated
+		}
 	}
 	return marker, nil
 }
@@ -1652,6 +1964,11 @@ func decodeOpenCodeForkBoundary(raw string) (OpenCodeForkBoundaryType, string, b
 // substantive row, so it never scans the whole table. A session that holds only
 // control rows returns false, which lets canonical selection prefer a legacy
 // sibling that still carries the conversation.
+//
+// A split 2.4.x assistant message is still a substantive session_message row
+// even when its content lives in session_part: the row keeps type "assistant",
+// and a part row cannot exist without its assistant message row. The type-only
+// probe therefore needs no part read to answer this question.
 func (s *zombiezenOpenCodeSQLiteSource) CurrentSessionHasSubstantive(ctx context.Context, sessionID OpenCodeCurrentSessionID) (bool, error) {
 	lease, err := s.beginSourceRead(ctx, "probe current session for a substantive row")
 	if err != nil {
@@ -1711,6 +2028,24 @@ func (s *zombiezenOpenCodeSQLiteSource) CurrentSessionPayloadSize(ctx context.Co
 	decode := newOpenCodePayloadSizeDecoder(&size)
 	if err := s.executeRowsLocked(lease.ctx, openCodeCurrentSessionPayloadSizeStatement, []any{sessionID.value}, decode); err != nil || lease.ctx.Err() != nil {
 		return OpenCodePayloadSize{}, s.sourceReadError(lease.ctx, "read current session payload size", err, "session_message(session_id, length(data))", "supported current session_message")
+	}
+	partsPresent, err := s.currentPartTableLocked(lease.ctx)
+	if err != nil {
+		return OpenCodePayloadSize{}, s.sourceReadError(lease.ctx, "read current part table support", err, "pragma_table_info(session_part)", "supported OpenCode session_part")
+	}
+	if partsPresent {
+		// A 2.4.x assistant message keeps its payload in session_part rows. The
+		// preview bounds itself on the bytes a read loads, so the probe must count
+		// those parts too; byte totals from a message-only probe would let a long
+		// split session through unchecked.
+		var parts OpenCodePayloadSize
+		partDecode := newOpenCodePayloadSizeDecoder(&parts)
+		if err := s.executeRowsLocked(lease.ctx, openCodeCurrentPartPayloadSizeStatement, []any{sessionID.value}, partDecode); err != nil || lease.ctx.Err() != nil {
+			return OpenCodePayloadSize{}, s.sourceReadError(lease.ctx, "read current session part payload size", err, "session_part(message_id, length(data)) joined to session_message", "supported OpenCode session_part")
+		}
+		// Rows stays the number of message rows, the unit a resumable current
+		// slice advances by. Bytes includes the part payloads the read loads.
+		size.Bytes += parts.Bytes
 	}
 	return size, nil
 }

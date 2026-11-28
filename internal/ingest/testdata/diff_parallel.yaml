@@ -53,7 +53,7 @@ sessions:
     ingestedMs: 2000
     modTimeMs: 2000
     schemaVersion: 9
-    adapterVersion: 4
+    adapterVersion: 5
     sourceEvidenceSupported: true
     publicationReadiness: ready
     expected_status: unchanged

@@ -1175,6 +1175,12 @@ func canonicalOpenCodeCandidatePrecedes(candidate, incumbent openCodeSessionCand
 // and falls back to the database and WAL mtime as a floor, so a row deletion is
 // still seen. The active (staleness) time is always the database and WAL mtime.
 //
+// A 2.4.x split assistant part is one of the per-table rows: the clockless
+// aggregate reads session_part as well as session_message, so a part written
+// after its message envelope moves that session. A clock-bearing session is
+// settled by its own clock at the step boundary, after the parts that step
+// wrote, so it needs no part aggregate.
+//
 // The row aggregate is read only for the clockless sessions of a database, so a
 // database whose sessions all carry a clock reads no freshness aggregate at all
 // and a very large legacy table is never scanned for a session that already has

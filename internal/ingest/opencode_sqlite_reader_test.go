@@ -30,7 +30,7 @@ const (
 	expectedCurrentPageCases       = 1
 	expectedCurrentMalformedCases  = 8
 	expectedCurrentValidationCases = 4
-	expectedCurrentQueryPlanCases  = 2
+	expectedCurrentQueryPlanCases  = 3
 	expectedCurrentPagingHazards   = 1
 	expectedCurrentLoaderMutations = 4
 )
@@ -121,6 +121,7 @@ type currentQueryPlanCase struct {
 	Name              string   `yaml:"name"`
 	Fixture           string   `yaml:"fixture"`
 	SessionID         string   `yaml:"session_id"`
+	MessageID         string   `yaml:"message_id"`
 	AfterSeq          *int64   `yaml:"after_seq"`
 	PageSize          int      `yaml:"page_size"`
 	Statement         string   `yaml:"statement"`
@@ -288,9 +289,14 @@ func TestSupportedCurrentQueryUsesFixturePinnedOrderingPlan(t *testing.T) {
 				t.Fatalf("open synthetic source for query-plan proof: %v", err)
 			}
 			var details []string
-			args := []any{fixtureCase.SessionID, fixtureCase.PageSize + 1}
-			if fixtureCase.AfterSeq != nil {
+			var args []any
+			switch {
+			case fixtureCase.MessageID != "":
+				args = []any{fixtureCase.SessionID, fixtureCase.MessageID, fixtureCase.PageSize}
+			case fixtureCase.AfterSeq != nil:
 				args = []any{fixtureCase.SessionID, *fixtureCase.AfterSeq, fixtureCase.PageSize + 1}
+			default:
+				args = []any{fixtureCase.SessionID, fixtureCase.PageSize + 1}
 			}
 			planErr := sqlitex.ExecuteTransient(conn, fixtureCase.Statement, &sqlitex.ExecOptions{
 				Args: args,

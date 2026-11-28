@@ -158,10 +158,19 @@ func readOpenCodeCurrentRows(ctx context.Context, source OpenCodeSQLiteSource, c
 		if err != nil {
 			return nil, &OpenCodeSnapshotError{SessionID: scope.SessionID, Step: "read message rows", Reason: "the message page read failed against the native store", Recovery: "verify the source remains a supported session_message store and retry"}
 		}
+		if len(page.DroppedParts) > 0 {
+			// A snapshot that cannot carry every split assistant part must not be
+			// certified: the copy would inherit an empty assistant message.
+			return nil, &OpenCodeSnapshotError{SessionID: scope.SessionID, Step: "decode message rows", Reason: fmt.Sprintf("%d split assistant part row(s) could not be decoded: %s", len(page.DroppedParts), page.DroppedParts[0].Reason), Recovery: "verify the session_part rows and retry; no partial capture is certified"}
+		}
 		for _, row := range page.Messages {
+			data, mergeErr := openCodeCurrentMessageDataWithSplitParts(row)
+			if mergeErr != nil {
+				return nil, &OpenCodeSnapshotError{SessionID: scope.SessionID, Step: "decode message row", Reason: mergeErr.Error(), Recovery: "verify the source row and retry; no partial capture is certified"}
+			}
 			position := openCodeUnknownPosition(scope.SessionID, "current", row.ID.String(), int64(len(rows)), traversalPosition, "")
 			scope.UnknownPosition = position.Public
-			traversal := decodeOpenCodeCurrentTraversal([]byte(row.Data), true)
+			traversal := decodeOpenCodeCurrentTraversal([]byte(data), true)
 			traversalPosition += traversal.size
 			decoded, settled, err := decodeOpenCodeProvenanceRow(OpenCodeProvenanceRow{
 				ID:          row.ID.String(),
@@ -171,7 +180,7 @@ func readOpenCodeCurrentRows(ctx context.Context, source OpenCodeSQLiteSource, c
 				TimeUpdated: row.TimeUpdated,
 				Seq:         row.Seq.Value(),
 				HasSeq:      true,
-				Data:        row.Data,
+				Data:        data,
 			}, scope, &traversal)
 			if err != nil {
 				if errors.Is(err, errOpenCodeSkipControlRow) || errors.Is(err, errOpenCodeIgnoredControlRow) {

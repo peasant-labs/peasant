@@ -153,6 +153,9 @@ func currentPayloadSizeAndPagedRows(t *testing.T, source ingest.OpenCodeSQLiteSo
 		for _, message := range page.Messages {
 			rows++
 			payloadBytes += int64(len(message.Data))
+			for _, part := range message.Parts {
+				payloadBytes += int64(len(part.Data))
+			}
 		}
 		if page.Next == nil {
 			return probed, rows, payloadBytes

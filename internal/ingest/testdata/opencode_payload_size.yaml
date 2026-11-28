@@ -11,6 +11,7 @@ required_cases:
   - legacy-session-payload-size-matches-its-paged-parts
   - legacy-unknown-session-reports-no-payload
   - current-session-payload-size-matches-its-paged-messages
+  - current-split-parts-payload-size-matches-its-paged-parts
   - current-unknown-session-reports-no-payload
 cases:
   - name: legacy-session-payload-size-matches-its-paged-parts
@@ -29,6 +30,12 @@ cases:
     origin: current
     fixture: current-reader-pages
     session_id: ses_current_reader_a
+    expect_payload: true
+
+  - name: current-split-parts-payload-size-matches-its-paged-parts
+    origin: current
+    fixture: opencode-24-session-parts
+    session_id: ses_opencode24parts0000000001
     expect_payload: true
 
   - name: current-unknown-session-reports-no-payload
