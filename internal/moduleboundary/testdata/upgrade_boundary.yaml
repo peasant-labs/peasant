@@ -1,0 +1,44 @@
+# Each case builds a module tree in a temporary directory and runs the upgrade
+# import walk over it. The root always gets a go.mod and a .git directory, like
+# a real checkout. An empty violation means the walk must pass; otherwise the
+# walk must fail and its error must name that file.
+requiredNames:
+  - forbidden-import-in-current-module-is-reported
+  - nested-worktree-with-git-file-is-skipped
+  - nested-repository-with-git-directory-is-skipped
+  - nested-module-without-git-is-skipped
+  - command-entry-point-may-import-planner
+cases:
+  - name: forbidden-import-in-current-module-is-reported
+    files:
+      - path: internal/store/planner.go
+        content: "package store\n\nimport _ \"github.com/peasant-labs/peasant/internal/upgrade\"\n"
+    violation: internal/store/planner.go
+  - name: nested-worktree-with-git-file-is-skipped
+    files:
+      - path: worktree/feature/.git
+        content: "gitdir: ../../.git/worktrees/feature\n"
+      - path: worktree/feature/go.mod
+        content: "module github.com/peasant-labs/peasant\n"
+      - path: worktree/feature/internal/store/planner.go
+        content: "package store\n\nimport _ \"github.com/peasant-labs/peasant/internal/upgrade\"\n"
+    violation: ""
+  - name: nested-repository-with-git-directory-is-skipped
+    files:
+      - path: checkouts/peasant/.git/HEAD
+        content: "ref: refs/heads/develop\n"
+      - path: checkouts/peasant/internal/store/planner.go
+        content: "package store\n\nimport _ \"github.com/peasant-labs/peasant/internal/upgrade/plan\"\n"
+    violation: ""
+  - name: nested-module-without-git-is-skipped
+    files:
+      - path: tools/probe/go.mod
+        content: "module example.com/probe\n"
+      - path: tools/probe/probe.go
+        content: "package probe\n\nimport _ \"github.com/peasant-labs/peasant/internal/upgrade\"\n"
+    violation: ""
+  - name: command-entry-point-may-import-planner
+    files:
+      - path: cmd/peasant/cmd_migrate.go
+        content: "package main\n\nimport _ \"github.com/peasant-labs/peasant/internal/upgrade\"\n"
+    violation: ""
