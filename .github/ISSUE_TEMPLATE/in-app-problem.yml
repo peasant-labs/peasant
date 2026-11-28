@@ -2,7 +2,7 @@ name: "Bug report (in-app)"
 description: "Report a visual, layout, or interaction problem from inside the peasant web app"
 title: "bug(ui): "
 type: Bug
-labels: ["bug", "ui/ux"]
+labels: ["bug", "ui/ux", "feedback"]
 body:
   - type: markdown
     attributes:

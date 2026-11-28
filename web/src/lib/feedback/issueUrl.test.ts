@@ -389,7 +389,7 @@ describe('feedback issueUrl', () => {
         {
           name: 'Bug report (in-app)',
           type: 'Bug',
-          labels: ['bug', 'ui/ux'],
+          labels: ['bug', 'ui/ux', 'feedback'],
           problemPrompt: '<!-- what happened -->',
           expectationsPrompt: '<!-- what was the expected behaviour, bullet points. -->',
         },
@@ -399,7 +399,7 @@ describe('feedback issueUrl', () => {
         {
           name: 'Feature request (in-app)',
           type: 'Feature',
-          labels: ['enhancement', 'ui/ux'],
+          labels: ['enhancement', 'ui/ux', 'feedback'],
           problemPrompt: '<!-- what is the problem or need? -->',
           expectationsPrompt: '<!-- what should peasant do instead? bullet points. -->',
         },
