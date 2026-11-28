@@ -221,7 +221,6 @@ export interface CaptureArtifact {
 export interface IssueDraftInput {
   readonly kind: FeedbackKind;
   readonly title: string;
-  readonly description: string;
   readonly elements: readonly PickedElementInfo[];
   readonly context: FeedbackContextInfo;
 }
@@ -240,7 +239,6 @@ export interface FeedbackState {
   readonly captures: readonly CaptureArtifact[];
   readonly captureError: string | null;
   readonly title: string;
-  readonly description: string;
   readonly submittedUrl: string | null;
   readonly clipboardOutcome: ClipboardOutcome;
   readonly copiedCaptureId: number | null;
@@ -265,7 +263,7 @@ export type FeedbackEvent =
     }
   | { readonly type: typeof FeedbackEventType.RemoveCapture; readonly id: number }
   | { readonly type: typeof FeedbackEventType.SetMaskMode; readonly maskMode: MaskMode }
-  | { readonly type: typeof FeedbackEventType.UpdateDraft; readonly title?: string; readonly description?: string }
+  | { readonly type: typeof FeedbackEventType.UpdateDraft; readonly title: string }
   | {
       readonly type: typeof FeedbackEventType.SubmitSucceeded;
       readonly url: string;

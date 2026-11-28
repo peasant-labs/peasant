@@ -218,7 +218,6 @@ export function FeedbackWidget(): ReactElement | null {
     const { url } = buildGitHubIssueUrl({
       kind: state.kind,
       title: state.title,
-      description: state.description,
       elements: state.pickedElements,
       context: readFeedbackContext(theme, serverVersion),
     });
@@ -310,7 +309,6 @@ export function FeedbackWidget(): ReactElement | null {
     ? buildGitHubIssueUrl({
         kind: state.kind,
         title: state.title,
-        description: state.description,
         elements: state.pickedElements,
         context,
       })
@@ -354,7 +352,7 @@ export function FeedbackWidget(): ReactElement | null {
       <ComposeFeedbackDialog
         open={composeOpen}
         state={state}
-        context={context}
+        issueBodyPreview={issuePreview?.body ?? ''}
         issuePreviewUrl={issuePreview?.url ?? ''}
         truncated={issuePreview?.truncated ?? false}
         onChangeKind={(kind) => dispatch({ type: FeedbackEventType.ChangeKind, kind })}

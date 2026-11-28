@@ -3,7 +3,6 @@ cases:
     input:
       kind: problem
       title: "Button clipped on narrow viewport"
-      description: "The submit button clips at 390px."
       elements: []
       context:
         route: "/sessions/abc"
@@ -17,19 +16,19 @@ cases:
       params:
         template: "in-app-problem.yml"
         title: "Button clipped on narrow viewport"
-      forbiddenParams: [labels, "labels[]", screenshot]
+      forbiddenParams: [labels, "labels[]", screenshot, description]
       bodyContains:
         - "### What happened?"
-        - "The submit button clips at 390px."
+        - "<!-- Describe it here. -->"
+        - "### App context"
+        - "peasant version: 0.9.1"
         - "### Screenshots"
         - "Paste the copied images here."
-        - "### App context"
 
   - name: feature-selects-feature-template
     input:
       kind: feature
       title: "Add keyboard shortcut hint"
-      description: "Show shortcut tooltip on hover."
       elements: []
       context:
         route: "/"
@@ -43,16 +42,15 @@ cases:
       params:
         template: "in-app-feature.yml"
         title: "Add keyboard shortcut hint"
-      forbiddenParams: [labels, "labels[]", screenshot]
+      forbiddenParams: [labels, "labels[]", screenshot, description]
       bodyContains:
         - "### What would you like to see?"
-        - "Show shortcut tooltip on hover."
+        - "<!-- Describe it here. -->"
 
   - name: prefills-all-field-ids
     input:
       kind: problem
       title: "Nav icon misaligned"
-      description: "Settings gear shifts 2px down."
       elements:
         - id: 1
           selector: "aside.asb > button[aria-label='settings']"
@@ -78,7 +76,7 @@ cases:
       params:
         template: "in-app-problem.yml"
         title: "Nav icon misaligned"
-        description: "Settings gear shifts 2px down."
+      forbiddenParams: [labels, "labels[]", screenshot, description]
       elementContains:
         - "element 1 (image 1): button settings"
         - "section: sidebar"
@@ -92,17 +90,16 @@ cases:
         - "element 1 (image 1): button settings"
         - "element 2 (image 2): div.toolbar"
       environmentContains:
+        - "peasant version: 0.9.2"
         - "route: /settings"
         - "viewport: 1280x800"
         - "theme: dark"
-        - "peasant: 0.9.2"
         - "browser: Firefox/130.0"
 
   - name: omits-empty-element-field
     input:
       kind: problem
       title: "Scroll jumps on load"
-      description: "Opening transcript jumps to bottom."
       elements: []
       context:
         route: "/sessions/xyz"
@@ -113,13 +110,12 @@ cases:
     expect:
       template: "in-app-problem.yml"
       truncated: false
-      absentParams: [element, screenshot]
+      absentParams: [element, screenshot, description]
 
   - name: never-emits-labels
     input:
       kind: feature
       title: "Export transcript summary"
-      description: "Allow copying markdown summary."
       elements:
         - id: 1
           selector: "main > header"
@@ -136,13 +132,12 @@ cases:
     expect:
       template: "in-app-feature.yml"
       truncated: false
-      forbiddenParams: [labels, "labels[]", screenshot]
+      forbiddenParams: [labels, "labels[]", screenshot, description]
 
-  - name: body-fallback-contains-description
+  - name: body-has-empty-description-prompt
     input:
       kind: problem
-      title: "Description missing in fallback"
-      description: "Writing details here must appear in the fallback body."
+      title: "Empty prompt check"
       elements:
         - id: 1
           selector: "main > button.submit"
@@ -159,60 +154,48 @@ cases:
     expect:
       template: "in-app-problem.yml"
       truncated: false
-      forbiddenParams: [labels, "labels[]", screenshot]
+      forbiddenParams: [labels, "labels[]", screenshot, description]
       bodyContains:
-        - "### What happened?"
-        - "Writing details here must appear in the fallback body."
+        - "### What happened?\n\n<!-- Describe it here. -->\n\n\n### App context"
         - "### Picked elements"
         - "```text"
         - "element 1 (image 1): button.submit"
-        - "selector: main > button.submit"
-        - "### Screenshots"
-        - "Paste the copied images here."
-        - "### App context"
-        - "route: /sessions/42"
-        - "peasant: 0.9.5"
+        - "### Screenshots\n\nPaste the copied images here."
 
-  - name: truncates-deterministically-under-cap
+  - name: body-starts-context-with-version
     input:
-      kind: problem
-      title: "Huge description"
-      description: ""
-      descriptionRepeat: { unit: "a", count: 12000 }
+      kind: feature
+      title: "Version first check"
       elements:
         - id: 1
-          selector: "main > div.card"
-          label: "session card"
-          section: "home"
-          textSnippet: "Session title"
-          box: { top: 100, left: 260, width: 400, height: 120 }
+          selector: "main > nav"
+          label: "nav"
+          section: "shell"
+          textSnippet: "home"
+          box: { top: 0, left: 0, width: 200, height: 800 }
       context:
-        route: "/"
-        viewport: { width: 1440, height: 900 }
+        route: "/sessions/42"
+        viewport: { width: 1280, height: 800 }
         theme: dark
-        appVersion: "0.9.1"
-        userAgent: "Chrome/130.0"
+        appVersion: "0.14.0"
+        userAgent: "TestBrowser/2.0"
     expect:
-      template: "in-app-problem.yml"
-      truncated: true
-      maxUrlLength: 7500
-      descriptionEndsWith: "… [truncated]"
-      elementContains:
-        - "element 1 (image 1): session card"
-        - "selector: main > div.card"
-        - "text: Session title"
-      environmentContains:
-        - "route: /"
-        - "viewport: 1440x900"
-        - "theme: dark"
-        - "peasant: 0.9.1"
-        - "browser: Chrome/130.0"
+      template: "in-app-feature.yml"
+      truncated: false
+      environmentStartsWith: "peasant version: 0.14.0\n"
+      bodyContains:
+        - "### What would you like to see?\n\n<!-- Describe it here. -->"
+        - "### App context\n\n```text\npeasant version: 0.14.0\n"
+      bodyOrder:
+        - "### What would you like to see?"
+        - "### App context"
+        - "### Picked elements"
+        - "### Screenshots"
 
   - name: empty-title-falls-back-to-kind-label
     input:
       kind: feature
       title: "   "
-      description: "Need compact view toggle."
       elements: []
       context:
         route: "/"
@@ -226,12 +209,11 @@ cases:
       params:
         title: "request a feature"
 
-  - name: drops-trailing-elements-when-description-and-elements-exceed-cap
-    maxLength: 1200
+  - name: drops-trailing-elements-when-elements-exceed-cap
+    maxLength: 1050
     input:
       kind: problem
       title: "Overflow"
-      description: "This description is long enough that even after shrinking, trailing element blocks must be dropped to fit."
       elements:
         - id: 1
           selector: "main > button.first"
@@ -260,8 +242,7 @@ cases:
     expect:
       template: "in-app-problem.yml"
       truncated: true
-      maxUrlLength: 1200
-      descriptionEndsWith: "… [truncated]"
+      maxUrlLength: 1050
       elementContains:
         - "element 1 (image 1): button.first"
         - "2 more elements omitted"
@@ -272,17 +253,48 @@ cases:
         - "element 1 (image 1): button.first"
         - "2 more elements omitted"
       environmentContains:
+        - "peasant version: 1.0.0"
         - "route: /s"
         - "viewport: 800x600"
         - "theme: dark"
-        - "peasant: 1.0.0"
         - "browser: UA"
+
+  - name: shortens-element-snippet-when-single-element-exceeds-cap
+    maxLength: 940
+    input:
+      kind: problem
+      title: "Snippet trim"
+      elements:
+        - id: 1
+          selector: "main > button.long"
+          label: "button.long"
+          section: "toolbar"
+          textSnippet: "A very long text snippet inside the picked element that will be shortened once trailing elements are already gone."
+          box: { top: 20, left: 30, width: 100, height: 32 }
+      context:
+        route: "/s"
+        viewport: { width: 800, height: 600 }
+        theme: dark
+        appVersion: "1.0.0"
+        userAgent: "UA"
+    expect:
+      template: "in-app-problem.yml"
+      truncated: true
+      maxUrlLength: 940
+      elementContains:
+        - "element 1 (image 1): button.long"
+        - "… [truncated]"
+      bodyContains:
+        - "element 1 (image 1): button.long"
+        - "… [truncated]"
+      environmentContains:
+        - "peasant version: 1.0.0"
+        - "route: /s"
 
   - name: strips-query-and-hash-from-route
     input:
       kind: problem
       title: "Route leak check"
-      description: "Check route sanitization."
       elements: []
       context:
         route: "/sessions/abc?secret=token#frag"

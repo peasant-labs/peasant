@@ -22,7 +22,6 @@ import {
   MAX_PICKED_ELEMENTS,
   MaskMode,
   type CaptureArtifact,
-  type FeedbackContextInfo,
   type FeedbackState,
 } from '@/lib/feedback/types';
 import './feedback-dialogs.css';
@@ -30,11 +29,11 @@ import './feedback-dialogs.css';
 export interface ComposeFeedbackDialogProps {
   open: boolean;
   state: FeedbackState;
-  context: FeedbackContextInfo;
+  issueBodyPreview: string;
   issuePreviewUrl: string;
   truncated: boolean;
   onChangeKind(kind: FeedbackKind): void;
-  onUpdateDraft(patch: { title?: string; description?: string }): void;
+  onUpdateDraft(patch: { title: string }): void;
   onRemoveCapture(id: number): void;
   onRequestUnmask(): void;
   onRemask(): void;
@@ -57,11 +56,6 @@ const TITLE_PLACEHOLDERS: Readonly<Record<FeedbackKind['wire'], string>> = Objec
   [FeedbackKind.Feature.wire]: 'Short summary of the improvement',
 });
 
-const DESCRIPTION_PLACEHOLDERS: Readonly<Record<FeedbackKind['wire'], string>> = Object.freeze({
-  [FeedbackKind.Problem.wire]: 'Describe what happened and what you expected to see.',
-  [FeedbackKind.Feature.wire]: 'Describe the outcome you want and the current friction.',
-});
-
 const OUTCOME_TONES: Readonly<Record<ClipboardOutcome['wire'], { readonly cls: string; readonly icon: typeof Info }>> =
   Object.freeze({
     [ClipboardOutcome.Copied.wire]: { cls: 'is-ok', icon: CheckCircle2 },
@@ -80,7 +74,7 @@ const UNMASK_WARNING_TEXT =
 export function ComposeFeedbackDialog({
   open,
   state,
-  context,
+  issueBodyPreview,
   issuePreviewUrl,
   truncated,
   onChangeKind,
@@ -97,7 +91,6 @@ export function ComposeFeedbackDialog({
   returnFocusRef,
 }: ComposeFeedbackDialogProps): ReactElement {
   const labelId = useId();
-  const descriptionId = useId();
   const pickLimitReasonId = useId();
   const [confirmingUnmask, setConfirmingUnmask] = useState(false);
   const [previews, setPreviews] = useState<readonly CapturePreviewEntry[]>([]);
@@ -131,7 +124,7 @@ export function ComposeFeedbackDialog({
   const atPickLimit = state.pickedElements.length >= MAX_PICKED_ELEMENTS;
   const pickButtonLabel = state.pickedElements.length > 0 ? 'pick another element' : 'pick an element';
   const pickLimitReason = `maximum ${MAX_PICKED_ELEMENTS} elements reached`;
-  const canSubmit = !isCapturing && state.description.trim().length > 0;
+  const canSubmit = !isCapturing;
   const dialogTitle = isSubmitted ? 'github issue opened' : state.kind.label;
 
   const outcomeDisplay = OUTCOME_TONES[state.clipboardOutcome.wire];
@@ -303,20 +296,19 @@ export function ComposeFeedbackDialog({
             placeholder={TITLE_PLACEHOLDERS[state.kind.wire]}
           />
 
-          <div className="is-field">
-            <label className="label" htmlFor={descriptionId}>
-              description (required)
-            </label>
-            <textarea
-              id={descriptionId}
-              className="input is-input fbw-textarea"
-              rows={4}
-              required
-              disabled={isCapturing}
-              value={state.description}
-              onChange={(event) => onUpdateDraft({ description: event.target.value })}
-              placeholder={DESCRIPTION_PLACEHOLDERS[state.kind.wire]}
-            />
+          <div className="fbw-section">
+            <p className="fbw-dlg-prose">
+              You will write the description on GitHub. The issue opens with this template filled in:
+            </p>
+            <pre className="fbw-template-preview" tabIndex={0} aria-label="issue template preview">
+              {issueBodyPreview}
+            </pre>
+            {issuePreviewUrl && (
+              <details className="fbw-url-details">
+                <summary>preview github issue url</summary>
+                <code>{issuePreviewUrl}</code>
+              </details>
+            )}
           </div>
 
           {isCapturing && (
@@ -467,49 +459,6 @@ export function ComposeFeedbackDialog({
               </span>
             </div>
           )}
-
-          <div className="fbw-section">
-            <span className="label">auto-attached context</span>
-            <dl className="fbw-context-dl" aria-label="auto-attached context">
-              <dt>route</dt>
-              <dd>{context.route}</dd>
-              <dt>{state.pickedElements.length === 1 ? 'element' : 'elements'}</dt>
-              <dd>
-                {state.pickedElements.length > 0 ? (
-                  <div className="fbw-context-elements">
-                    {state.pickedElements.map((el, index) => (
-                      <div key={el.id} className="fbw-context-element">
-                        <div>
-                          element {index + 1} (image {index + 1}): {el.label}
-                        </div>
-                        <div>{el.selector}</div>
-                        {el.section && <div>{el.section}</div>}
-                        {el.textSnippet && <div>{el.textSnippet}</div>}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  'none'
-                )}
-              </dd>
-              <dt>viewport</dt>
-              <dd className="tnum">
-                {context.viewport.width}×{context.viewport.height}
-              </dd>
-              <dt>theme</dt>
-              <dd>{context.theme}</dd>
-              <dt>peasant</dt>
-              <dd>{context.appVersion}</dd>
-              <dt>browser</dt>
-              <dd>{context.userAgent}</dd>
-            </dl>
-            {issuePreviewUrl && (
-              <details className="fbw-url-details">
-                <summary>preview github issue url</summary>
-                <code>{issuePreviewUrl}</code>
-              </details>
-            )}
-          </div>
         </>
       )}
     </Dialog>

@@ -33,5 +33,5 @@ body:
     id: environment
     attributes:
       label: App context
-      description: Auto-filled from the page (route, viewport, theme, peasant version, browser).
+      description: Auto-filled from the page (peasant version, route, viewport, theme, browser).
       render: text

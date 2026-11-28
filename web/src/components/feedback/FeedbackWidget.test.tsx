@@ -69,7 +69,7 @@ describe('FeedbackWidget', () => {
     vi.restoreAllMocks();
   });
 
-  it('completes keyboard and click flow without captures and opens prefilled problem issue URL without labels', async () => {
+  it('completes keyboard and click flow without captures and opens prefilled problem issue URL with version and template preview', async () => {
     const openSpy = vi.fn(() => null);
     window.open = openSpy as unknown as typeof window.open;
 
@@ -91,11 +91,14 @@ describe('FeedbackWidget', () => {
     fireEvent.click(screen.getByRole('button', { name: 'continue' }));
     expect(captureMocks.captureFeedbackArtifacts).not.toHaveBeenCalled();
 
-    fireEvent.change(screen.getByLabelText('title'), { target: { value: 'Sidebar button clipped' } });
-    fireEvent.change(screen.getByLabelText('description (required)'), {
-      target: { value: 'The bottom control clips at 800px height.' },
-    });
+    expect(
+      screen.getByText('You will write the description on GitHub. The issue opens with this template filled in:'),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText(/description/i)).toBeNull();
+    const preview = screen.getByLabelText('issue template preview');
+    expect(preview.textContent).toContain('peasant version: 0.12.3');
 
+    fireEvent.change(screen.getByLabelText('title'), { target: { value: 'Sidebar button clipped' } });
     fireEvent.click(screen.getByRole('button', { name: 'open github issue' }));
 
     expect(captureMocks.copyPngToClipboard).not.toHaveBeenCalled();
@@ -108,11 +111,12 @@ describe('FeedbackWidget', () => {
     expect(parsed.searchParams.get('template')).toBe('in-app-problem.yml');
     expect(parsed.searchParams.has('labels')).toBe(false);
     expect(parsed.searchParams.has('labels[]')).toBe(false);
+    expect(parsed.searchParams.has('description')).toBe(false);
     expect(parsed.searchParams.get('title')).toBe('Sidebar button clipped');
-    expect(parsed.searchParams.get('description')).toBe('The bottom control clips at 800px height.');
-    expect(parsed.searchParams.get('body')).toContain('The bottom control clips at 800px height.');
+    expect(parsed.searchParams.get('environment')?.startsWith('peasant version: 0.12.3\n')).toBe(true);
     expect(parsed.searchParams.get('environment')).toContain('route: /sessions/test-123');
-    expect(parsed.searchParams.get('environment')).toContain('peasant: 0.12.3');
+    expect(parsed.searchParams.get('body')).toContain('### What happened?\n\n<!-- Describe it here. -->');
+    expect(parsed.searchParams.get('body')).toContain('peasant version: 0.12.3');
 
     // Still transitions to Submitted even when window.open returns null (popup blocked).
     expect(screen.getByRole('dialog', { name: 'github issue opened' })).toBeInTheDocument();
@@ -178,9 +182,6 @@ describe('FeedbackWidget', () => {
     const preview = await screen.findByRole('img', { name: /image 1: whole page capture/i });
     expect(preview).toHaveAttribute('src', 'blob:feedback-preview-1');
 
-    fireEvent.change(screen.getByLabelText('description (required)'), {
-      target: { value: 'Add keyboard shortcut hint on page.' },
-    });
     fireEvent.click(screen.getByRole('button', { name: 'open github issue' }));
 
     // copyPngToClipboard starts and window.open runs synchronously before clipboard settles.
@@ -276,8 +277,9 @@ describe('FeedbackWidget', () => {
     // Removing image 1 removes element 1 and shifts remaining images to 1 & 2.
     const removeFirstBtn = await screen.findByRole('button', { name: /remove picked element capture \(image 1\)/i });
     fireEvent.click(removeFirstBtn);
-    expect(screen.queryByText('element 1 (image 1): button#first-btn')).toBeNull();
-    expect(screen.getByText('element 1 (image 1): button#second-btn')).toBeInTheDocument();
+    const templatePreview = screen.getByLabelText('issue template preview');
+    expect(templatePreview.textContent).not.toContain('button#first-btn');
+    expect(templatePreview.textContent).toContain('element 1 (image 1): button#second-btn');
     expect(screen.getByRole('img', { name: /image 1: picked element capture/i })).toBeInTheDocument();
     expect(screen.getByRole('img', { name: /image 2: whole page capture/i })).toBeInTheDocument();
 
@@ -286,9 +288,6 @@ describe('FeedbackWidget', () => {
     const openSpy = vi.fn(() => ({}) as Window);
     window.open = openSpy as unknown as typeof window.open;
 
-    fireEvent.change(screen.getByLabelText('description (required)'), {
-      target: { value: 'Multiple captures submitted.' },
-    });
     fireEvent.click(screen.getByRole('button', { name: 'open github issue' }));
 
     expect(captureMocks.copyPngToClipboard).toHaveBeenCalledWith(el2Blob);

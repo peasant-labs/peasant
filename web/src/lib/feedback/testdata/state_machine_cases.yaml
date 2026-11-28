@@ -100,13 +100,12 @@ cases:
       - event: { type: open_menu }
       - event: { type: select_kind, kind: problem }
       - event: { type: proceed_from_attach }
-      - event: { type: update_draft, title: "Sidebar clips label", description: "Long label overflows container." }
+      - event: { type: update_draft, title: "Sidebar clips label" }
       - event: { type: change_kind, kind: feature }
         expect:
           step: compose
           kind: feature
           title: "Sidebar clips label"
-          description: "Long label overflows container."
 
   - name: close-resets-state
     steps:
@@ -118,7 +117,7 @@ cases:
       - event: { type: capture_succeeded, captures: [{ kind: element, elementId: 1 }, { kind: page }] }
       - event: { type: set_mask_mode, maskMode: unmasked }
       - event: { type: capture_succeeded, captures: [{ kind: element, elementId: 1 }, { kind: page }] }
-      - event: { type: update_draft, title: "Add filter", description: "Filter by status" }
+      - event: { type: update_draft, title: "Add filter" }
       - event: { type: submit_succeeded, url: "https://github.com/peasant-labs/peasant/issues/new?template=in-app-feature.yml", clipboardOutcome: copied }
       - event: { type: close_all }
         expect:
@@ -131,7 +130,6 @@ cases:
           captures: []
           captureError: null
           title: ""
-          description: ""
           submittedUrl: null
           clipboardOutcome: not-needed
           copiedCaptureId: null
@@ -166,16 +164,16 @@ cases:
       - event: { type: open_menu }
       - event: { type: select_kind, kind: problem }
       - event: { type: proceed_from_attach }
-      - event: { type: update_draft, description: "Need to pick button" }
+      - event: { type: update_draft, title: "Need to pick button" }
       - event: { type: reopen_picker }
         expect:
           step: picking
           attachElement: true
-          description: "Need to pick button"
+          title: "Need to pick button"
       - event: { type: pick_cancelled }
         expect:
           step: compose
-          description: "Need to pick button"
+          title: "Need to pick button"
 
   - name: back-to-attach-preserves-draft-and-toggles
     steps:
@@ -184,14 +182,13 @@ cases:
       - event: { type: toggle_attach_page }
       - event: { type: proceed_from_attach }
       - event: { type: capture_succeeded, captures: [{ kind: page }] }
-      - event: { type: update_draft, title: "Keep me", description: "Keep body" }
+      - event: { type: update_draft, title: "Keep me" }
       - event: { type: back_to_attach }
         expect:
           step: attach_options
           kind: feature
           attachPage: true
           title: "Keep me"
-          description: "Keep body"
           captures: [page]
 
   - name: append-second-pick
@@ -325,7 +322,7 @@ cases:
       - event: { type: proceed_from_attach }
       - event: { type: pick_confirmed }
       - event: { type: capture_succeeded, captures: [{ kind: element, elementId: 1 }, { kind: page }] }
-      - event: { type: update_draft, description: "Button overlaps" }
+      - event: { type: update_draft, title: "Button overlaps" }
       - event: { type: submit_succeeded, url: "https://github.com/peasant-labs/peasant/issues/new?template=in-app-problem.yml", clipboardOutcome: copied }
         expect:
           step: submitted

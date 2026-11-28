@@ -30,11 +30,20 @@
   gap: var(--sp-2);
 }
 
-.fbw-textarea {
-  min-height: calc(var(--control-h) * 3);
-  font-family: var(--font-body);
-  font-size: var(--fs-body);
-  line-height: var(--lh-body);
+.fbw-template-preview {
+  margin: 0;
+  padding: var(--sp-3);
+  border: var(--bd);
+  border-radius: 0;
+  background: var(--surface-2);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  line-height: var(--lh-mono);
+  max-height: 16rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .fbw-section {
@@ -206,52 +215,6 @@
   font-size: var(--fs-label);
   text-transform: lowercase;
   color: var(--ink-2);
-}
-
-.fbw-context-dl {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: var(--sp-2) var(--sp-4);
-  margin: 0;
-  padding: var(--sp-3);
-  border: var(--bd);
-  border-radius: 0;
-  background: var(--surface-2);
-}
-
-@media (max-width: 479px) {
-  .fbw-context-dl {
-    grid-template-columns: 1fr;
-  }
-}
-
-.fbw-context-dl dt {
-  font-family: var(--font-mono);
-  font-size: var(--fs-label);
-  color: var(--ink-3);
-  text-transform: lowercase;
-}
-
-.fbw-context-dl dd {
-  margin: 0;
-  font-family: var(--font-mono);
-  font-size: var(--fs-body);
-  line-height: var(--lh-mono);
-  color: var(--ink);
-  overflow-wrap: anywhere;
-  min-width: 0;
-}
-
-.fbw-context-elements {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
-}
-
-.fbw-context-element {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
 }
 
 .fbw-url-details {

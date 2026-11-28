@@ -12,6 +12,7 @@ export const MAX_ISSUE_URL_LENGTH = 7500;
 export const DEFAULT_REPO_ISSUES_URL = 'https://github.com/peasant-labs/peasant/issues/new';
 
 const TRUNCATION_SUFFIX = '… [truncated]';
+const DESCRIPTION_PLACEHOLDER_COMMENT = '<!-- Describe it here. -->';
 const SCREENSHOTS_BODY_LINE = 'Paste the copied images here.';
 
 const DESCRIPTION_HEADING_BY_KIND: Readonly<Record<FeedbackKind['wire'], string>> = Object.freeze({
@@ -21,6 +22,7 @@ const DESCRIPTION_HEADING_BY_KIND: Readonly<Record<FeedbackKind['wire'], string>
 
 export interface IssueUrlResult {
   readonly url: string;
+  readonly body: string;
   readonly template: string;
   readonly truncated: boolean;
 }
@@ -33,10 +35,10 @@ export function formatEnvironmentBlock(ctx: FeedbackContextInfo): string {
   // Defensively strip query/hash in case a caller passed a full location path.
   const route = (ctx.route.split('?')[0] ?? '').split('#')[0] ?? '';
   return [
+    `peasant version: ${ctx.appVersion}`,
     `route: ${route}`,
     `viewport: ${ctx.viewport.width}x${ctx.viewport.height}`,
     `theme: ${ctx.theme}`,
-    `peasant: ${ctx.appVersion}`,
     `browser: ${ctx.userAgent}`,
   ].join('\n');
 }
@@ -87,14 +89,14 @@ function fenceTextBlock(content: string): string {
 
 function formatIssueBody(
   kind: FeedbackKind,
-  descriptionText: string,
   elements: readonly PickedElementInfo[],
   keptCount: number,
   environmentText: string,
   includeOmittedNote = true,
 ): string {
   const sections: string[] = [
-    `### ${DESCRIPTION_HEADING_BY_KIND[kind.wire]}\n\n${descriptionText}`,
+    `### ${DESCRIPTION_HEADING_BY_KIND[kind.wire]}\n\n${DESCRIPTION_PLACEHOLDER_COMMENT}\n`,
+    `### App context\n\n${fenceTextBlock(environmentText)}`,
   ];
   if (elements.length > 0) {
     const clamped = Math.max(0, Math.min(keptCount, elements.length));
@@ -108,7 +110,6 @@ function formatIssueBody(
     }
   }
   sections.push(`### Screenshots\n\n${SCREENSHOTS_BODY_LINE}`);
-  sections.push(`### App context\n\n${fenceTextBlock(environmentText)}`);
   return sections.join('\n\n');
 }
 
@@ -123,40 +124,40 @@ function sliceCodeUnitSafe(text: string, maxUnits: number): string {
   return text.slice(0, maxUnits);
 }
 
-function shrinkFieldToFit(
+function shrinkFieldToFit<T>(
   raw: string,
-  buildUrl: (candidate: string) => string,
+  buildCandidate: (candidate: string) => { url: string; payload: T },
   maxLength: number,
-): { value: string; url: string; fits: boolean } {
+): { value: string; url: string; payload: T; fits: boolean } {
   if (raw === '') {
-    const url = buildUrl('');
-    return { value: '', url, fits: url.length <= maxLength };
+    const built = buildCandidate('');
+    return { value: '', url: built.url, payload: built.payload, fits: built.url.length <= maxLength };
   }
 
-  const minUrl = buildUrl(TRUNCATION_SUFFIX);
-  if (minUrl.length > maxLength) {
-    return { value: TRUNCATION_SUFFIX, url: minUrl, fits: false };
+  const minBuilt = buildCandidate(TRUNCATION_SUFFIX);
+  if (minBuilt.url.length > maxLength) {
+    return { value: TRUNCATION_SUFFIX, url: minBuilt.url, payload: minBuilt.payload, fits: false };
   }
 
   let low = 0;
   let high = raw.length;
   let bestValue = TRUNCATION_SUFFIX;
-  let bestUrl = minUrl;
+  let bestBuilt = minBuilt;
 
   while (low <= high) {
     const mid = Math.floor((low + high) / 2);
     const candidate = `${sliceCodeUnitSafe(raw, mid)}${TRUNCATION_SUFFIX}`;
-    const candidateUrl = buildUrl(candidate);
-    if (candidateUrl.length <= maxLength) {
+    const candidateBuilt = buildCandidate(candidate);
+    if (candidateBuilt.url.length <= maxLength) {
       bestValue = candidate;
-      bestUrl = candidateUrl;
+      bestBuilt = candidateBuilt;
       low = mid + 1;
     } else {
       high = mid - 1;
     }
   }
 
-  return { value: bestValue, url: bestUrl, fits: true };
+  return { value: bestValue, url: bestBuilt.url, payload: bestBuilt.payload, fits: true };
 }
 
 export function buildGitHubIssueUrl(
@@ -171,71 +172,83 @@ export function buildGitHubIssueUrl(
   const separator = baseUrl.includes('?') ? '&' : '?';
 
   const encodeUrl = (
-    descriptionText: string,
+    elements: readonly PickedElementInfo[],
     keptCount: number,
     titleText: string,
     includeOmittedNote = true,
-  ): string => {
-    const elementFieldText = formatElementsBlock(input.elements, keptCount, includeOmittedNote);
-    const bodyText = formatIssueBody(
-      input.kind,
-      descriptionText,
-      input.elements,
-      keptCount,
-      environmentText,
-      includeOmittedNote,
-    );
+  ): { url: string; payload: string } => {
+    const elementFieldText = formatElementsBlock(elements, keptCount, includeOmittedNote);
+    const bodyText = formatIssueBody(input.kind, elements, keptCount, environmentText, includeOmittedNote);
     const params = new URLSearchParams();
     params.set('template', template);
     params.set('title', titleText);
-    params.set(IssueFormFieldId.Description.wire, descriptionText);
     if (elementFieldText !== '') {
       params.set(IssueFormFieldId.Element.wire, elementFieldText);
     }
     params.set(IssueFormFieldId.Environment.wire, environmentText);
     params.set('body', bodyText);
-    return `${baseUrl}${separator}${params.toString()}`;
+    return {
+      url: `${baseUrl}${separator}${params.toString()}`,
+      payload: bodyText,
+    };
   };
 
-  const initialUrl = encodeUrl(input.description, fullElementCount, title);
-  if (initialUrl.length <= maxLength) {
-    return { url: initialUrl, template, truncated: false };
+  const initial = encodeUrl(input.elements, fullElementCount, title);
+  if (initial.url.length <= maxLength) {
+    return { url: initial.url, body: initial.payload, template, truncated: false };
   }
 
-  // Shrink description first in both the field param and body while keeping elements and environment intact.
-  const shrunkDesc = shrinkFieldToFit(
-    input.description,
-    (candidateDesc) => encodeUrl(candidateDesc, fullElementCount, title),
-    maxLength,
-  );
-  if (shrunkDesc.fits) {
-    return { url: shrunkDesc.url, template, truncated: true };
-  }
+  if (fullElementCount >= 1) {
+    // Drop trailing element blocks first (keeping at least element 1 so its snippet can shrink next).
+    for (let kept = fullElementCount - 1; kept >= 1; kept -= 1) {
+      const candidate = encodeUrl(input.elements, kept, title, true);
+      if (candidate.url.length <= maxLength) {
+        return { url: candidate.url, body: candidate.payload, template, truncated: true };
+      }
+    }
 
-  // Drop element blocks from the end with an omission note before dropping description/title.
-  for (let kept = fullElementCount - 1; kept >= 0; kept -= 1) {
-    const candidateUrl = encodeUrl(shrunkDesc.value, kept, title, true);
-    if (candidateUrl.length <= maxLength) {
-      return { url: candidateUrl, template, truncated: true };
+    // Shorten the remaining element's textSnippet before dropping the last element block.
+    const firstEl = input.elements[0];
+    if (firstEl.textSnippet !== '') {
+      const shrunkSnippet = shrinkFieldToFit(
+        firstEl.textSnippet,
+        (candidateSnippet) =>
+          encodeUrl([{ ...firstEl, textSnippet: candidateSnippet }, ...input.elements.slice(1)], 1, title, true),
+        maxLength,
+      );
+      if (shrunkSnippet.fits) {
+        return { url: shrunkSnippet.url, body: shrunkSnippet.payload, template, truncated: true };
+      }
+
+      const emptySnippet = encodeUrl(
+        [{ ...firstEl, textSnippet: '' }, ...input.elements.slice(1)],
+        1,
+        title,
+        true,
+      );
+      if (emptySnippet.url.length <= maxLength) {
+        return { url: emptySnippet.url, body: emptySnippet.payload, template, truncated: true };
+      }
+    }
+
+    // Drop the last element as well, keeping the omission note.
+    const omittedAll = encodeUrl(input.elements, 0, title, true);
+    if (omittedAll.url.length <= maxLength) {
+      return { url: omittedAll.url, body: omittedAll.payload, template, truncated: true };
     }
   }
 
-  // If even minimal markers exceed a tiny maxLength, drop the omission note and description before touching title;
+  // Last-resort cap fallback for tiny custom maxLength: drop omission note, then shrink title;
   // template and environment are never cut.
-  let finalDesc = shrunkDesc.value;
-  let fallbackUrl = encodeUrl(finalDesc, 0, title, false);
-  if (fallbackUrl.length > maxLength && finalDesc !== '') {
-    finalDesc = '';
-    fallbackUrl = encodeUrl(finalDesc, 0, title, false);
-  }
-  if (fallbackUrl.length > maxLength) {
+  let fallback = encodeUrl(input.elements, 0, title, false);
+  if (fallback.url.length > maxLength) {
     const shrunkTitle = shrinkFieldToFit(
       title,
-      (candidateTitle) => encodeUrl(finalDesc, 0, candidateTitle, false),
+      (candidateTitle) => encodeUrl(input.elements, 0, candidateTitle, false),
       maxLength,
     );
-    fallbackUrl = shrunkTitle.url;
+    fallback = { url: shrunkTitle.url, payload: shrunkTitle.payload };
   }
 
-  return { url: fallbackUrl, template, truncated: true };
+  return { url: fallback.url, body: fallback.payload, template, truncated: true };
 }

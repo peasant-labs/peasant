@@ -121,7 +121,6 @@ export function createInitialFeedbackState(): FeedbackState {
     captures: [],
     captureError: null,
     title: '',
-    description: '',
     submittedUrl: null,
     clipboardOutcome: ClipboardOutcome.NotNeeded,
     copiedCaptureId: null,
@@ -129,7 +128,7 @@ export function createInitialFeedbackState(): FeedbackState {
 }
 
 export function canSubmitFeedback(state: FeedbackState): boolean {
-  return state.step === FeedbackStep.Compose && state.description.trim().length > 0;
+  return state.step === FeedbackStep.Compose;
 }
 
 export function feedbackReducer(state: FeedbackState, event: FeedbackEvent): FeedbackState {
@@ -265,8 +264,7 @@ export function feedbackReducer(state: FeedbackState, event: FeedbackEvent): Fee
         case FeedbackEventType.UpdateDraft:
           return {
             ...state,
-            title: event.title !== undefined ? event.title : state.title,
-            description: event.description !== undefined ? event.description : state.description,
+            title: event.title,
           };
         case FeedbackEventType.RemoveCapture: {
           const target = state.captures.find((artifact) => artifact.id === event.id);

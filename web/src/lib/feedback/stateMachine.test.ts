@@ -176,11 +176,11 @@ function parseEvent(raw: unknown, path: string, state: FeedbackState): FeedbackE
         maskMode: findByWire(ALL_MASK_MODES, row.maskMode, `${path}.maskMode`),
       };
     case FeedbackEventType.UpdateDraft:
-      requireExactFields(row, ['type', 'title', 'description'], path);
+      requireExactRequiredFields(row, ['type', 'title'], path);
+      if (typeof row.title !== 'string') throw new Error(`${path}.title must be a string`);
       return {
         type: FeedbackEventType.UpdateDraft,
-        title: typeof row.title === 'string' ? row.title : undefined,
-        description: typeof row.description === 'string' ? row.description : undefined,
+        title: row.title,
       };
     case FeedbackEventType.SubmitSucceeded:
       requireExactRequiredFields(row, ['type', 'url', 'clipboardOutcome'], path);
@@ -220,7 +220,6 @@ interface StateAssertion {
   readonly captureElementIds?: readonly (number | null)[];
   readonly captureError?: string | null;
   readonly title?: string;
-  readonly description?: string;
   readonly submittedUrl?: string | null;
   readonly clipboardOutcome?: ClipboardOutcome;
   readonly copiedCaptureId?: number | null;
@@ -244,7 +243,6 @@ function parseExpectation(raw: unknown, path: string): StateAssertion {
       'captureElementIds',
       'captureError',
       'title',
-      'description',
       'submittedUrl',
       'clipboardOutcome',
       'copiedCaptureId',
@@ -297,7 +295,6 @@ function parseExpectation(raw: unknown, path: string): StateAssertion {
     captureElementIds,
     captureError: row.captureError === null || typeof row.captureError === 'string' ? row.captureError : undefined,
     title: typeof row.title === 'string' ? row.title : undefined,
-    description: typeof row.description === 'string' ? row.description : undefined,
     submittedUrl: row.submittedUrl === null || typeof row.submittedUrl === 'string' ? row.submittedUrl : undefined,
     clipboardOutcome:
       row.clipboardOutcome !== undefined
@@ -375,7 +372,6 @@ function assertStateMatches(state: FeedbackState, expected: StateAssertion) {
   }
   if (expected.captureError !== undefined) expect(state.captureError).toBe(expected.captureError);
   if (expected.title !== undefined) expect(state.title).toBe(expected.title);
-  if (expected.description !== undefined) expect(state.description).toBe(expected.description);
   if (expected.submittedUrl !== undefined) expect(state.submittedUrl).toBe(expected.submittedUrl);
   if (expected.clipboardOutcome !== undefined) expect(state.clipboardOutcome).toBe(expected.clipboardOutcome);
   if (expected.copiedCaptureId !== undefined) expect(state.copiedCaptureId).toBe(expected.copiedCaptureId);
@@ -399,7 +395,7 @@ describe('feedback stateMachine', () => {
     }
   });
 
-  it('canSubmitFeedback requires compose step and non-whitespace description', () => {
+  it('canSubmitFeedback requires compose step with optional title', () => {
     let state = createInitialFeedbackState();
     expect(canSubmitFeedback(state)).toBe(false);
 
@@ -407,12 +403,6 @@ describe('feedback stateMachine', () => {
     state = feedbackReducer(state, { type: FeedbackEventType.SelectKind, kind: FeedbackKind.Problem });
     state = feedbackReducer(state, { type: FeedbackEventType.ProceedFromAttach });
     expect(state.step).toBe(FeedbackStep.Compose);
-    expect(canSubmitFeedback(state)).toBe(false);
-
-    state = feedbackReducer(state, { type: FeedbackEventType.UpdateDraft, description: '   \n\t  ' });
-    expect(canSubmitFeedback(state)).toBe(false);
-
-    state = feedbackReducer(state, { type: FeedbackEventType.UpdateDraft, description: 'Button overlaps label' });
     expect(canSubmitFeedback(state)).toBe(true);
 
     state = feedbackReducer(state, {

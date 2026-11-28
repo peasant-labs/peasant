@@ -18,7 +18,6 @@ import {
   FeedbackStep,
   MaskMode,
   type CaptureArtifact,
-  type FeedbackContextInfo,
   type FeedbackState,
   type PickedElementInfo,
 } from '@/lib/feedback/types';
@@ -27,7 +26,6 @@ import { ComposeFeedbackDialog, type ComposeFeedbackDialogProps } from './Compos
 interface SubmitCase {
   name: string;
   step: typeof FeedbackStep.Compose | typeof FeedbackStep.Capturing;
-  description: string;
   expectedEnabled: boolean;
 }
 
@@ -52,6 +50,13 @@ interface PickLimitCase {
   expectedLabel: string;
   expectedDisabled: boolean;
   expectedReason?: string;
+}
+
+interface TemplatePreviewCase {
+  name: string;
+  instruction: string;
+  bodyPreview: string;
+  expectedFragments: readonly string[];
 }
 
 interface SubmittedPreviewCase {
@@ -98,16 +103,15 @@ function loadFixture() {
   const root = requireRecord(parseStrictYAML(readFileSync(path, 'utf8'), 'compose dialog fixture'), 'compose dialog fixture');
   requireExactRequiredFields(
     root,
-    ['submitCases', 'kindCases', 'submittedOutcomeCases', 'pickLimitCases', 'submittedPreviewCases'],
+    ['submitCases', 'kindCases', 'submittedOutcomeCases', 'pickLimitCases', 'templatePreviewCases', 'submittedPreviewCases'],
     'compose dialog fixture',
   );
 
   const submitRows = assertRequiredInventory(requireRecord(root.submitCases, 'submitCases'), 'submitCases');
   const submitCases: SubmitCase[] = submitRows.map((row, idx) => {
-    requireExactRequiredFields(row, ['name', 'step', 'description', 'expectedEnabled'], `submitCases[${idx}]`);
+    requireExactRequiredFields(row, ['name', 'step', 'expectedEnabled'], `submitCases[${idx}]`);
     if (
       (row.step !== FeedbackStep.Compose && row.step !== FeedbackStep.Capturing) ||
-      typeof row.description !== 'string' ||
       typeof row.expectedEnabled !== 'boolean'
     ) {
       throw new Error(`submitCases[${idx}] has invalid field types`);
@@ -115,7 +119,6 @@ function loadFixture() {
     return {
       name: row.name as string,
       step: row.step,
-      description: row.description,
       expectedEnabled: row.expectedEnabled,
     };
   });
@@ -190,6 +193,32 @@ function loadFixture() {
     };
   });
 
+  const templatePreviewRows = assertRequiredInventory(
+    requireRecord(root.templatePreviewCases, 'templatePreviewCases'),
+    'templatePreviewCases',
+  );
+  const templatePreviewCases: TemplatePreviewCase[] = templatePreviewRows.map((row, idx) => {
+    requireExactRequiredFields(
+      row,
+      ['name', 'instruction', 'bodyPreview', 'expectedFragments'],
+      `templatePreviewCases[${idx}]`,
+    );
+    if (
+      typeof row.instruction !== 'string' ||
+      typeof row.bodyPreview !== 'string' ||
+      !Array.isArray(row.expectedFragments) ||
+      row.expectedFragments.some((item) => typeof item !== 'string')
+    ) {
+      throw new Error(`templatePreviewCases[${idx}] has invalid field types`);
+    }
+    return {
+      name: row.name as string,
+      instruction: row.instruction,
+      bodyPreview: row.bodyPreview,
+      expectedFragments: row.expectedFragments as string[],
+    };
+  });
+
   const submittedPreviewRows = assertRequiredInventory(
     requireRecord(root.submittedPreviewCases, 'submittedPreviewCases'),
     'submittedPreviewCases',
@@ -219,18 +248,10 @@ function loadFixture() {
     };
   });
 
-  return { submitCases, kindCases, submittedOutcomeCases, pickLimitCases, submittedPreviewCases };
+  return { submitCases, kindCases, submittedOutcomeCases, pickLimitCases, templatePreviewCases, submittedPreviewCases };
 }
 
 const FIXTURE = loadFixture();
-
-const SAMPLE_CONTEXT: FeedbackContextInfo = {
-  route: '/projects/abc123/sess-1',
-  viewport: { width: 1280, height: 800 },
-  theme: 'dark',
-  appVersion: '0.9.4',
-  userAgent: 'Mozilla/5.0 TestBrowser',
-};
 
 function makeElement(id: number): PickedElementInfo {
   return {
@@ -275,7 +296,6 @@ function makeState(overrides: Partial<FeedbackState> = {}): FeedbackState {
     captures: [],
     captureError: null,
     title: '',
-    description: '',
     submittedUrl: null,
     clipboardOutcome: ClipboardOutcome.NotNeeded,
     copiedCaptureId: null,
@@ -287,7 +307,7 @@ function makeProps(overrides: Partial<ComposeFeedbackDialogProps> = {}): Compose
   return {
     open: true,
     state: makeState(),
-    context: SAMPLE_CONTEXT,
+    issueBodyPreview: '### What happened?\n\n<!-- Describe it here. -->\n\n### App context\n\n```text\npeasant version: 0.9.4\n```',
     issuePreviewUrl: 'https://github.com/peasant-labs/peasant/issues/new?template=in-app-problem.yml',
     truncated: false,
     onChangeKind: vi.fn(),
@@ -329,7 +349,7 @@ describe('ComposeFeedbackDialog', () => {
   describe('submit gating', () => {
     it.each(FIXTURE.submitCases)('$name', (c) => {
       const props = makeProps({
-        state: makeState({ step: c.step, description: c.description }),
+        state: makeState({ step: c.step }),
       });
       render(<ComposeFeedbackDialog {...props} />);
       const button = screen.getByRole('button', { name: 'open github issue' });
@@ -354,6 +374,22 @@ describe('ComposeFeedbackDialog', () => {
       expect(screen.getByRole('dialog', { name: c.expectedTitle })).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: c.targetKind.label }));
       expect(props.onChangeKind).toHaveBeenCalledWith(c.targetKind);
+    });
+  });
+
+  describe('template preview', () => {
+    it.each(FIXTURE.templatePreviewCases)('$name', (c) => {
+      const props = makeProps({
+        issueBodyPreview: c.bodyPreview,
+      });
+      render(<ComposeFeedbackDialog {...props} />);
+      expect(screen.getByText(c.instruction)).toBeInTheDocument();
+      expect(screen.queryByLabelText(/description/i)).toBeNull();
+      const preview = screen.getByLabelText('issue template preview');
+      expect(preview.tagName).toBe('PRE');
+      for (const fragment of c.expectedFragments) {
+        expect(preview.textContent).toContain(fragment);
+      }
     });
   });
 
@@ -403,7 +439,6 @@ describe('ComposeFeedbackDialog', () => {
       const baseProps = makeProps({
         state: makeState({
           step: FeedbackStep.Compose,
-          description: 'Layout overlap',
           captures,
         }),
       });
@@ -575,13 +610,12 @@ describe('ComposeFeedbackDialog', () => {
     expect(revokeObjectURLSpy).toHaveBeenCalledWith('blob:test-capture-2');
   });
 
-  it('renders exact auto-attached context for multiple elements, notices, draft updates, picker reopen, and back action', () => {
+  it('renders notices, title updates, picker reopen, and back action', () => {
     const el1 = makeElement(1);
     const el2 = makeElement(2);
     const props = makeProps({
       state: makeState({
         title: 'Initial title',
-        description: 'Initial body',
         pickedElements: [el1, el2],
         captureError: 'SnapDOM timed out for page capture',
       }),
@@ -590,23 +624,11 @@ describe('ComposeFeedbackDialog', () => {
 
     render(<ComposeFeedbackDialog {...props} />);
 
-    expect(screen.getByText(SAMPLE_CONTEXT.route)).toBeInTheDocument();
-    expect(screen.getByText(`element 1 (image 1): ${el1.label}`)).toBeInTheDocument();
-    expect(screen.getByText(el1.selector)).toBeInTheDocument();
-    expect(screen.getByText(`element 2 (image 2): ${el2.label}`)).toBeInTheDocument();
-    expect(screen.getByText(el2.selector)).toBeInTheDocument();
-    expect(screen.getByText(`${SAMPLE_CONTEXT.viewport.width}×${SAMPLE_CONTEXT.viewport.height}`)).toBeInTheDocument();
-    expect(screen.getByText(SAMPLE_CONTEXT.theme)).toBeInTheDocument();
-    expect(screen.getByText(SAMPLE_CONTEXT.appVersion)).toBeInTheDocument();
-    expect(screen.getByText(SAMPLE_CONTEXT.userAgent)).toBeInTheDocument();
     expect(screen.getByText('SnapDOM timed out for page capture')).toBeInTheDocument();
     expect(screen.getByText(/length limit and was truncated/i)).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('title'), { target: { value: 'Updated title' } });
     expect(props.onUpdateDraft).toHaveBeenCalledWith({ title: 'Updated title' });
-
-    fireEvent.change(screen.getByLabelText('description (required)'), { target: { value: 'Updated body' } });
-    expect(props.onUpdateDraft).toHaveBeenCalledWith({ description: 'Updated body' });
 
     fireEvent.click(screen.getByRole('button', { name: 'pick another element' }));
     expect(props.onReopenPicker).toHaveBeenCalledTimes(1);

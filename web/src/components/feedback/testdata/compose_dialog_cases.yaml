@@ -1,25 +1,13 @@
 submitCases:
   requiredNames:
-    - empty-description-disables-submit
-    - whitespace-description-disables-submit
-    - nonempty-description-enables-submit
+    - compose-enables-submit
     - capturing-step-disables-submit
   cases:
-    - name: empty-description-disables-submit
+    - name: compose-enables-submit
       step: compose
-      description: ""
-      expectedEnabled: false
-    - name: whitespace-description-disables-submit
-      step: compose
-      description: "   \n\t  "
-      expectedEnabled: false
-    - name: nonempty-description-enables-submit
-      step: compose
-      description: "Sidebar button clips on narrow viewport"
       expectedEnabled: true
     - name: capturing-step-disables-submit
       step: capturing
-      description: "Sidebar button clips on narrow viewport"
       expectedEnabled: false
 
 kindCases:
@@ -83,6 +71,18 @@ pickLimitCases:
       expectedLabel: "pick another element"
       expectedDisabled: true
       expectedReason: "maximum 5 elements reached"
+
+templatePreviewCases:
+  requiredNames:
+    - compose-shows-template-preview
+  cases:
+    - name: compose-shows-template-preview
+      instruction: "You will write the description on GitHub. The issue opens with this template filled in:"
+      bodyPreview: "### What happened?\n\n<!-- Describe it here. -->\n\n### App context\n\n```text\npeasant version: 0.9.4\nroute: /sessions/abc123\n```\n"
+      expectedFragments:
+        - "### What happened?"
+        - "<!-- Describe it here. -->"
+        - "peasant version: 0.9.4"
 
 submittedPreviewCases:
   requiredNames:

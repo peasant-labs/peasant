@@ -32,9 +32,10 @@ const REQUIRED_CASES = [
   'prefills-all-field-ids',
   'omits-empty-element-field',
   'never-emits-labels',
-  'body-fallback-contains-description',
-  'truncates-deterministically-under-cap',
-  'drops-trailing-elements-when-description-and-elements-exceed-cap',
+  'body-has-empty-description-prompt',
+  'body-starts-context-with-version',
+  'drops-trailing-elements-when-elements-exceed-cap',
+  'shortens-element-snippet-when-single-element-exceeds-cap',
 ] as const;
 
 function findKindByWire(wire: unknown, path: string): FeedbackKind {
@@ -95,10 +96,11 @@ interface ParsedUrlCase {
     readonly absentParams?: readonly string[];
     readonly forbiddenParams?: readonly string[];
     readonly maxUrlLength?: number;
-    readonly descriptionEndsWith?: string;
     readonly elementContains?: readonly string[];
     readonly elementExcludes?: readonly string[];
     readonly bodyContains?: readonly string[];
+    readonly bodyOrder?: readonly string[];
+    readonly environmentStartsWith?: string;
     readonly environmentContains?: readonly string[];
     readonly environmentExcludes?: readonly string[];
   };
@@ -141,20 +143,11 @@ function loadFixture(): ParsedUrlCase[] {
       throw new Error(`${casePath} requires name, input, and expect`);
     }
     const rawInput = requireRecord(row.input, `${casePath}.input`);
-    requireExactFields(
+    requireExactRequiredFields(
       rawInput,
-      ['kind', 'title', 'description', 'descriptionRepeat', 'elements', 'context'],
+      ['kind', 'title', 'elements', 'context'],
       `${casePath}.input`,
     );
-    let description = typeof rawInput.description === 'string' ? rawInput.description : '';
-    if (rawInput.descriptionRepeat !== undefined) {
-      const repeat = requireRecord(rawInput.descriptionRepeat, `${casePath}.input.descriptionRepeat`);
-      requireExactRequiredFields(repeat, ['unit', 'count'], `${casePath}.input.descriptionRepeat`);
-      if (typeof repeat.unit !== 'string' || typeof repeat.count !== 'number') {
-        throw new Error(`${casePath}.input.descriptionRepeat requires string unit and number count`);
-      }
-      description = repeat.unit.repeat(repeat.count);
-    }
 
     const rawExpect = requireRecord(row.expect, `${casePath}.expect`);
     requireExactFields(
@@ -166,10 +159,11 @@ function loadFixture(): ParsedUrlCase[] {
         'absentParams',
         'forbiddenParams',
         'maxUrlLength',
-        'descriptionEndsWith',
         'elementContains',
         'elementExcludes',
         'bodyContains',
+        'bodyOrder',
+        'environmentStartsWith',
         'environmentContains',
         'environmentExcludes',
       ],
@@ -185,7 +179,6 @@ function loadFixture(): ParsedUrlCase[] {
       input: {
         kind: findKindByWire(rawInput.kind, `${casePath}.input.kind`),
         title: String(rawInput.title ?? ''),
-        description,
         elements: parseElements(rawInput.elements, `${casePath}.input.elements`),
         context: parseContext(rawInput.context, `${casePath}.input.context`),
       },
@@ -202,8 +195,6 @@ function loadFixture(): ParsedUrlCase[] {
             ? parseStringList(rawExpect.forbiddenParams, `${casePath}.expect.forbiddenParams`)
             : undefined,
         maxUrlLength: typeof rawExpect.maxUrlLength === 'number' ? rawExpect.maxUrlLength : undefined,
-        descriptionEndsWith:
-          typeof rawExpect.descriptionEndsWith === 'string' ? rawExpect.descriptionEndsWith : undefined,
         elementContains:
           rawExpect.elementContains !== undefined
             ? parseStringList(rawExpect.elementContains, `${casePath}.expect.elementContains`)
@@ -216,6 +207,12 @@ function loadFixture(): ParsedUrlCase[] {
           rawExpect.bodyContains !== undefined
             ? parseStringList(rawExpect.bodyContains, `${casePath}.expect.bodyContains`)
             : undefined,
+        bodyOrder:
+          rawExpect.bodyOrder !== undefined
+            ? parseStringList(rawExpect.bodyOrder, `${casePath}.expect.bodyOrder`)
+            : undefined,
+        environmentStartsWith:
+          typeof rawExpect.environmentStartsWith === 'string' ? rawExpect.environmentStartsWith : undefined,
         environmentContains:
           rawExpect.environmentContains !== undefined
             ? parseStringList(rawExpect.environmentContains, `${casePath}.expect.environmentContains`)
@@ -240,6 +237,7 @@ describe('feedback issueUrl', () => {
     const parsed = new URL(result.url);
     expect(`${parsed.origin}${parsed.pathname}`).toBe(DEFAULT_REPO_ISSUES_URL);
     expect(result.url.length).toBeLessThanOrEqual(testCase.expect.maxUrlLength ?? MAX_ISSUE_URL_LENGTH);
+    expect(parsed.searchParams.get('body')).toBe(result.body);
 
     if (testCase.expect.params) {
       for (const [key, value] of Object.entries(testCase.expect.params)) {
@@ -255,11 +253,6 @@ describe('feedback issueUrl', () => {
       for (const key of testCase.expect.forbiddenParams) {
         expect(parsed.searchParams.has(key)).toBe(false);
       }
-    }
-    if (testCase.expect.descriptionEndsWith) {
-      const desc = parsed.searchParams.get(IssueFormFieldId.Description.wire) ?? '';
-      expect(desc.endsWith(testCase.expect.descriptionEndsWith)).toBe(true);
-      expect(parsed.searchParams.get('body') ?? '').toContain(desc);
     }
     if (testCase.expect.elementContains) {
       const elem = parsed.searchParams.get(IssueFormFieldId.Element.wire) ?? '';
@@ -279,6 +272,19 @@ describe('feedback issueUrl', () => {
         expect(body).toContain(fragment);
       }
     }
+    if (testCase.expect.bodyOrder) {
+      const body = parsed.searchParams.get('body') ?? '';
+      let lastIndex = -1;
+      for (const heading of testCase.expect.bodyOrder) {
+        const idx = body.indexOf(heading);
+        expect(idx).toBeGreaterThan(lastIndex);
+        lastIndex = idx;
+      }
+    }
+    if (testCase.expect.environmentStartsWith) {
+      const env = parsed.searchParams.get(IssueFormFieldId.Environment.wire) ?? '';
+      expect(env.startsWith(testCase.expect.environmentStartsWith)).toBe(true);
+    }
     if (testCase.expect.environmentContains) {
       const env = parsed.searchParams.get(IssueFormFieldId.Environment.wire) ?? '';
       for (const fragment of testCase.expect.environmentContains) {
@@ -292,8 +298,9 @@ describe('feedback issueUrl', () => {
       }
     }
 
-    // Never prefill screenshot.
+    // Never prefill screenshot or description.
     expect(parsed.searchParams.has(IssueFormFieldId.Screenshot.wire)).toBe(false);
+    expect(parsed.searchParams.has(IssueFormFieldId.Description.wire)).toBe(false);
   });
 
   it('formatElementBlock returns empty string for null and templateForKind matches kind.template', () => {
@@ -309,15 +316,21 @@ describe('feedback issueUrl', () => {
         appVersion: '0.1.0',
         userAgent: 'TestUA',
       }),
-    ).toBe('route: /review\nviewport: 1024x768\ntheme: dark\npeasant: 0.1.0\nbrowser: TestUA');
+    ).toBe('peasant version: 0.1.0\nroute: /review\nviewport: 1024x768\ntheme: dark\nbrowser: TestUA');
   });
 
   it('produces identical URLs on repeated calls (deterministic truncation)', () => {
     const input: IssueDraftInput = {
       kind: ALL_FEEDBACK_KINDS[0],
       title: 'Deterministic test',
-      description: '😀'.repeat(2500),
-      elements: [],
+      elements: Array.from({ length: 5 }, (_, idx) => ({
+        id: idx + 1,
+        selector: `main > section:nth-child(${idx + 1}) > div.very-long-container > button.primary`,
+        label: `button.primary-${idx + 1}`,
+        section: 'Transcript',
+        textSnippet: '😀'.repeat(600),
+        box: { top: idx * 40, left: 20, width: 300, height: 40 },
+      })),
       context: {
         route: '/',
         viewport: { width: 1440, height: 900 },
@@ -369,6 +382,9 @@ describe('feedback issueUrl', () => {
           seenIds.add(id);
           const attrs = requireRecord(block.attributes, `${kind.template}.body[${idx}].attributes`);
           expect(typeof attrs.label).toBe('string');
+          if (id === IssueFormFieldId.Environment.wire) {
+            expect(String(attrs.description)).toContain('peasant version');
+          }
         }
       }
       expect(seenIds).toEqual(expectedFieldIds);
