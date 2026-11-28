@@ -127,7 +127,7 @@ func (s *Store) ActivateGeneration(ctx context.Context, activation GenerationAct
 		}
 		if active, err := s.readActiveView(ctx, sessionID); err != nil {
 			return notCommitted(err)
-		} else if active.found && refreshEqualsActive(prepared, active.view) {
+		} else if active.found && refreshEqualsActive(prepared, activation.PriorEvidence, active.view) {
 			stamps := activationStamps(activation, prepared)
 			if err := s.lockedSkip(ctx, prepared, active.generationID, stamps); err != nil {
 				if errors.Is(err, errSkipPointerMoved) {
