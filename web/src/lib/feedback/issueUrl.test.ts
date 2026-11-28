@@ -127,6 +127,48 @@ function parseStringList(raw: unknown, path: string): string[] {
   return raw as string[];
 }
 
+interface IssueFormExpectation {
+  readonly name: string;
+  readonly type: string;
+  readonly labels: readonly string[];
+  readonly problemPrompt: string;
+  readonly expectationsPrompt: string;
+}
+
+const ISSUE_FORM_FIELDS = ['kind', 'name', 'type', 'labels', 'problemPrompt', 'expectationsPrompt'] as const;
+
+function requireString(value: unknown, path: string): string {
+  if (typeof value !== 'string' || value.length === 0) throw new Error(`${path} must be a non-empty string`);
+  return value;
+}
+
+/** Per-kind form expectations from testdata/issue_forms.yaml; every feedback kind must have exactly one row. */
+function loadIssueFormExpectations(): Map<FeedbackKind, IssueFormExpectation> {
+  const path = resolve(process.cwd(), 'src/lib/feedback/testdata/issue_forms.yaml');
+  const root = requireRecord(parseStrictYAML(readFileSync(path, 'utf8'), 'issue forms'), 'issue forms');
+  requireExactFields(root, ['forms'], 'issue forms');
+  if (!Array.isArray(root.forms)) throw new Error('issue forms.forms must be an array');
+  const byKind = new Map<FeedbackKind, IssueFormExpectation>();
+  root.forms.forEach((raw, idx) => {
+    const rowPath = `issue forms.forms[${idx}]`;
+    const row = requireRecord(raw, rowPath);
+    requireExactRequiredFields(row, ISSUE_FORM_FIELDS, rowPath);
+    const kind = findKindByWire(row.kind, `${rowPath}.kind`);
+    if (byKind.has(kind)) throw new Error(`${rowPath} repeats kind ${kind.wire}`);
+    if (!Array.isArray(row.labels)) throw new Error(`${rowPath}.labels must be an array`);
+    byKind.set(kind, {
+      name: requireString(row.name, `${rowPath}.name`),
+      type: requireString(row.type, `${rowPath}.type`),
+      labels: row.labels.map((label, i) => requireString(label, `${rowPath}.labels[${i}]`)),
+      problemPrompt: requireString(row.problemPrompt, `${rowPath}.problemPrompt`),
+      expectationsPrompt: requireString(row.expectationsPrompt, `${rowPath}.expectationsPrompt`),
+    });
+  });
+  const missing = ALL_FEEDBACK_KINDS.filter((kind) => !byKind.has(kind)).map((kind) => kind.wire);
+  if (missing.length > 0) throw new Error(`issue forms has no row for kind(s): ${missing.join(', ')}`);
+  return byKind;
+}
+
 function loadFixture(): ParsedUrlCase[] {
   const path = resolve(process.cwd(), 'src/lib/feedback/testdata/issue_url_cases.yaml');
   const root = requireRecord(parseStrictYAML(readFileSync(path, 'utf8'), 'issue url cases'), 'issue url cases');
@@ -380,31 +422,7 @@ describe('feedback issueUrl', () => {
   it('form-ids-and-labels-match', () => {
     const expectedIds = ALL_ISSUE_FORM_FIELD_IDS.map((field) => field.wire);
     const expectedLabels = ALL_ISSUE_FORM_FIELD_IDS.map((field) => field.label);
-    const expectedMeta = new Map<
-      FeedbackKind,
-      { readonly name: string; readonly type: string; readonly labels: readonly string[]; readonly problemPrompt: string; readonly expectationsPrompt: string }
-    >([
-      [
-        FeedbackKind.Problem,
-        {
-          name: 'Bug report (in-app)',
-          type: 'Bug',
-          labels: ['bug', 'ui/ux', 'feedback'],
-          problemPrompt: '<!-- what happened -->',
-          expectationsPrompt: '<!-- what was the expected behaviour, bullet points. -->',
-        },
-      ],
-      [
-        FeedbackKind.Feature,
-        {
-          name: 'Feature request (in-app)',
-          type: 'Feature',
-          labels: ['enhancement', 'ui/ux', 'feedback'],
-          problemPrompt: '<!-- what is the problem or need? -->',
-          expectationsPrompt: '<!-- what should peasant do instead? bullet points. -->',
-        },
-      ],
-    ]);
+    const expectedMeta = loadIssueFormExpectations();
 
     for (const kind of ALL_FEEDBACK_KINDS) {
       const templatePath = resolve(process.cwd(), '../.github/ISSUE_TEMPLATE', kind.template);

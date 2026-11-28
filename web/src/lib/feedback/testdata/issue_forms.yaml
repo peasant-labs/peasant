@@ -1,0 +1,16 @@
+# What each in-app issue form in .github/ISSUE_TEMPLATE must declare.
+# One row per feedback kind, keyed by the kind's wire value. The test fails
+# when a kind has no row or a row names an unknown kind.
+forms:
+  - kind: problem
+    name: "Bug report (in-app)"
+    type: Bug
+    labels: [bug, ui/ux, feedback]
+    problemPrompt: "<!-- what happened -->"
+    expectationsPrompt: "<!-- what was the expected behaviour, bullet points. -->"
+  - kind: feature
+    name: "Feature request (in-app)"
+    type: Feature
+    labels: [enhancement, ui/ux, feedback]
+    problemPrompt: "<!-- what is the problem or need? -->"
+    expectationsPrompt: "<!-- what should peasant do instead? bullet points. -->"
